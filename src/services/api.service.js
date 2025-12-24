@@ -53,6 +53,7 @@ function create(entity, data) {
     Action: "Create",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
+    IsDeleted: false,
   };
   return request("POST", `/api/${entity}`, payload);
 }
@@ -63,6 +64,7 @@ function update(entity, id, data) {
     Action: "Update",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
+    IsDeleted: false,
   };
   return request("PUT", `/api/${entity}/${id}`, payload);
 }

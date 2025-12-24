@@ -64,8 +64,9 @@ export default function App() {
     transparentSidenav,
     whiteSidenav,
     darkMode,
+    hasUserManuallyToggledSidenav,
   } = controller;
-  const [onMouseEnter, setOnMouseEnter] = useState(false);
+
   const [rtlCache, setRtlCache] = useState(null);
   const { pathname } = useLocation();
 
@@ -78,22 +79,6 @@ export default function App() {
 
     setRtlCache(cacheRtl);
   }, []);
-
-  // Open sidenav when mouse enter on mini sidenav
-  const handleOnMouseEnter = () => {
-    if (miniSidenav && !onMouseEnter) {
-      setMiniSidenav(dispatch, false);
-      setOnMouseEnter(true);
-    }
-  };
-
-  // Close sidenav when mouse leave mini sidenav
-  const handleOnMouseLeave = () => {
-    if (onMouseEnter) {
-      setMiniSidenav(dispatch, true);
-      setOnMouseEnter(false);
-    }
-  };
 
   // Change the openConfigurator state
   const handleConfiguratorOpen = () => setOpenConfigurator(dispatch, !openConfigurator);
@@ -141,7 +126,7 @@ export default function App() {
       onClick={handleConfiguratorOpen}
     >
       <Icon fontSize="small" color="inherit">
-        settings
+        settings2
       </Icon>
     </MDBox>
   );
@@ -157,8 +142,6 @@ export default function App() {
               brand={(transparentSidenav && !darkMode) || whiteSidenav ? brandDark : brandWhite}
               brandName="A1 Lands - 360"
               routes={routes}
-              onMouseEnter={handleOnMouseEnter}
-              onMouseLeave={handleOnMouseLeave}
             />
             <Configurator />
             {configsButton}
@@ -181,11 +164,8 @@ export default function App() {
             brand={(transparentSidenav && !darkMode) || whiteSidenav ? brandDark : brandWhite}
             brandName="A1 Lands - 360"
             routes={routes}
-            onMouseEnter={handleOnMouseEnter}
-            onMouseLeave={handleOnMouseLeave}
           />
           <Configurator />
-          {configsButton}
         </>
       )}
       {layout === "vr" && <Configurator />}

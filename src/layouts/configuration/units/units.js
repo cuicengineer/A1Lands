@@ -1,94 +1,174 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Card from "@mui/material/Card";
+import api from "../../../services/api.service"; // Assuming api service is available
 
 function UnitsConfig() {
-  const [tableRows, setTableRows] = useState([
-    {
-      sno: "1",
-      command: "North",
-      base: "Alpha",
-      unitName: "Unit 1",
-      status: "Active",
-      createdDate: "15/01/2024",
-    },
-    {
-      sno: "2",
-      command: "South",
-      base: "Bravo",
-      unitName: "Unit 2",
-      status: "Inactive",
-      createdDate: "02/02/2024",
-    },
-    {
-      sno: "3",
-      command: "East",
-      base: "Charlie",
-      unitName: "Unit 3",
-      status: "Active",
-      createdDate: "20/02/2024",
-    },
-    {
-      sno: "4",
-      command: "West",
-      base: "Delta",
-      unitName: "Unit 4",
-      status: "Active",
-      createdDate: "03/03/2024",
-    },
-    {
-      sno: "5",
-      command: "HQ",
-      base: "Echo",
-      unitName: "Unit 5",
-      status: "Inactive",
-      createdDate: "20/03/2024",
-    },
-  ]);
-
+  const [tableRows, setTableRows] = useState([]);
+  const [commandOptions, setCommandOptions] = useState([]);
+  const [allBaseOptions, setAllBaseOptions] = useState([]);
+  const [filteredBaseOptions, setFilteredBaseOptions] = useState([]);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [unitData, commandData, baseData] = await Promise.all([
+          api.list("Units"),
+          api.list("Command"),
+          api.list("Base"),
+        ]);
+        if (!mounted) return;
+
+        const unitArr = Array.isArray(unitData) ? unitData : unitData?.items || [];
+        const commandArr = Array.isArray(commandData) ? commandData : commandData?.items || [];
+        const baseArr = Array.isArray(baseData) ? baseData : baseData?.items || [];
+
+        setTableRows(unitArr);
+        const mappedCommandOptions = commandArr.map((cmd) => ({ id: cmd.id, name: cmd.name }));
+        setCommandOptions(mappedCommandOptions);
+        console.log("commandArr fetched:", commandArr); // Log the raw data
+        console.log("mappedCommandOptions set:", mappedCommandOptions); // Log the mapped options
+        setAllBaseOptions(
+          baseArr.map((base) => ({ id: base.id, name: base.name, cmdId: base.cmd }))
+        );
+        if (commandArr.length > 0) {
+          setFilteredBaseOptions(
+            baseArr
+              .filter((base) => base.cmd === commandArr[0]?.id)
+              .map((base) => ({ id: base.id, name: base.name, cmdId: base.cmd }))
+          );
+        } else {
+          setFilteredBaseOptions([]);
+        }
+      } catch (e) {
+        console.error("Failed to load data", e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshTrigger]);
+
+  // Add a separate useEffect to log commandOptions after it's updated
+  useEffect(() => {
+    console.log("commandOptions state updated:", commandOptions);
+  }, [commandOptions]);
+
+  const validateNew = () => {
+    const errs = {};
+    if (!newRowDraft?.name || !String(newRowDraft.name).trim()) errs.name = "Name is required";
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   const handleAddUnit = () => {
     if (editingRowId) return;
     setEditingRowId("__new__");
-    setNewRowDraft({ sno: "", command: "", base: "", unitName: "", status: "", createdDate: "" });
+    setNewRowDraft({
+      id: 0,
+      name: "",
+      cmd: commandOptions.length > 0 ? commandOptions[0]?.id : "",
+      base:
+        commandOptions.length > 0 && commandOptions[0]?.id
+          ? allBaseOptions.filter((base) => base.cmdId === commandOptions[0]?.id)[0]?.id || ""
+          : "",
+      status: 0,
+    });
+    setErrors({});
   };
 
-  const handleEditUnit = (sno) => {
+  const handleEditUnit = (id) => {
     if (editingRowId) return;
-    const row = tableRows.find((r) => r.sno === sno);
+    const row = tableRows.find((r) => r.id === id);
     if (!row) return;
-    setEditingRowId(sno);
+    setEditingRowId(id);
     setEditDraft({ ...row });
+    setFilteredBaseOptions(allBaseOptions.filter((base) => base.cmdId === row.cmd));
   };
 
   const handleChange = (field, value) => {
+    const nextValue = field === "status" ? Number(value) : value;
+    let finalValue = nextValue;
+    if (field === "cmd") {
+      const basesForCmd = allBaseOptions.filter((base) => base.cmdId === value);
+      setFilteredBaseOptions(basesForCmd);
+      if (editingRowId === "__new__") {
+        setNewRowDraft((draft) => ({
+          ...draft,
+          cmd: value,
+          base: basesForCmd.length > 0 ? basesForCmd[0].id : "",
+        }));
+      } else if (editingRowId) {
+        setEditDraft((draft) => ({
+          ...draft,
+          cmd: value,
+          base: basesForCmd.length > 0 ? basesForCmd[0].id : "",
+        }));
+      }
+      return;
+    } else if (field === "base") {
+      finalValue = value;
+    }
+
     if (editingRowId === "__new__") {
-      setNewRowDraft((draft) => ({ ...draft, [field]: value }));
+      setNewRowDraft((draft) => ({ ...draft, [field]: finalValue }));
+      if (field === "name") {
+        const msg = finalValue && String(finalValue).trim() ? null : "Name is required";
+        setErrors((prev) => ({ ...prev, name: msg }));
+      }
     } else if (editingRowId) {
-      setEditDraft((draft) => ({ ...draft, [field]: value }));
+      setEditDraft((draft) => ({ ...draft, [field]: finalValue }));
     }
   };
 
-  const handleSave = () => {
-    if (editingRowId === "__new__" && newRowDraft) {
-      setTableRows((prev) => [newRowDraft, ...prev]);
-      setEditingRowId(null);
-      setNewRowDraft(null);
-    } else if (editingRowId && editDraft) {
-      setTableRows((prev) => prev.map((r) => (r.sno === editingRowId ? editDraft : r)));
-      setEditingRowId(null);
-      setEditDraft(null);
+  const handleSave = async () => {
+    try {
+      if (editingRowId === "__new__" && newRowDraft) {
+        if (!validateNew()) return;
+        const payload = {
+          Id: newRowDraft.id,
+          Name: newRowDraft.name,
+          Cmd: newRowDraft.cmd,
+          Base: newRowDraft.base,
+          Status: newRowDraft.status,
+        };
+        const created = await api.create("Units", payload);
+        setTableRows((prev) => [created || payload, ...prev]);
+        setEditingRowId(null);
+        setNewRowDraft(null);
+        setRefreshTrigger((prev) => prev + 1);
+      } else if (editingRowId && editDraft) {
+        const payload = {
+          Id: editDraft.id,
+          Name: editDraft.name,
+          Cmd: editDraft.cmd,
+          Base: editDraft.base,
+          Status: editDraft.status,
+        };
+        const updated = await api.update("Units", editDraft.id, payload);
+        setTableRows((prev) => prev.map((r) => (r.id === editDraft.id ? updated || payload : r)));
+        setEditingRowId(null);
+        setEditDraft(null);
+        setRefreshTrigger((prev) => prev + 1);
+      }
+    } catch (e) {
+      console.error("Save failed", e);
     }
   };
 
@@ -96,32 +176,52 @@ function UnitsConfig() {
     setEditingRowId(null);
     setNewRowDraft(null);
     setEditDraft(null);
+    setErrors({});
   };
 
-  const handleDeleteUnit = (sno) => {
-    setTableRows((prev) => prev.filter((r) => r.sno !== sno));
+  const handleDeleteUnit = async (id) => {
+    try {
+      await api.remove("Units", id);
+      setTableRows((prev) => prev.filter((row) => row.id !== id));
+      setRefreshTrigger((prev) => prev + 1);
+    } catch (e) {
+      console.error("Delete failed", e);
+    }
+  };
+
+  const confirmDelete = async (id) => {
+    const ok = window.confirm("Are you sure you want to delete this unit?");
+    if (!ok) return;
+    await handleDeleteUnit(id);
   };
 
   const columns = [
-    { Header: "Sno", accessor: "sno", align: "left", width: "5%" },
-    { Header: "Command", accessor: "command", align: "left" },
+    { Header: "Id", accessor: "id", align: "left", width: "10%" },
+    { Header: "Name", accessor: "name", align: "left" },
+    { Header: "Cmd", accessor: "cmd", align: "left" },
     { Header: "Base", accessor: "base", align: "left" },
-    { Header: "Unit Name", accessor: "unitName", align: "left" },
-    { Header: "Status", accessor: "status", align: "center" },
-    { Header: "Created Date", accessor: "createdDate", align: "center" },
+    { Header: "Status", accessor: "status", align: "left" },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
 
-  const renderStatusBadge = (status) => (
-    <MDBox ml={-1}>
-      <MDBadge
-        badgeContent={status}
-        color={status === "Active" ? "success" : "dark"}
-        variant="gradient"
-        size="sm"
-      />
-    </MDBox>
-  );
+  const renderStatusBadge = (status) => {
+    const label =
+      status === 1 ||
+      status === "1" ||
+      (typeof status === "string" && status.toLowerCase() === "active")
+        ? "Active"
+        : "Not Active";
+    return (
+      <MDBox ml={-1}>
+        <MDBadge
+          badgeContent={label}
+          color={label === "Active" ? "success" : "dark"}
+          variant="gradient"
+          size="sm"
+        />
+      </MDBox>
+    );
+  };
 
   const renderInput = (field, value) => (
     <MDInput
@@ -129,7 +229,62 @@ function UnitsConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      required={editingRowId === "__new__" && field === "name"}
+      error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
+      helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
+      inputProps={field === "id" ? { readOnly: true } : {}}
+      sx={field === "id" ? { width: "50%" } : {}}
     />
+  );
+
+  const renderCommandSelect = (value) => {
+    console.log("renderCommandSelect - commandOptions:", commandOptions); // Log options here
+    console.log("renderCommandSelect - current value:", value); // Log current value
+    return (
+      <Select
+        value={value === null || value === undefined ? "" : value}
+        onChange={(e) => handleChange("cmd", e.target.value)}
+        size="small"
+        fullWidth
+      >
+        {commandOptions.map((opt) => (
+          <MenuItem key={opt.id} value={opt.id}>
+            {opt.name}
+          </MenuItem>
+        ))}
+      </Select>
+    );
+  };
+
+  const renderStatusSelect = (field, value) => (
+    <Select
+      value={value}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+    >
+      <MenuItem value={1}>Active</MenuItem>
+      <MenuItem value={0}>Not Active</MenuItem>
+    </Select>
+  );
+
+  const renderBaseSelect = (value) => (
+    <Select
+      value={value === null ? "" : value}
+      onChange={(e) => handleChange("base", e.target.value)}
+      size="small"
+      fullWidth
+    >
+      {filteredBaseOptions.length > 0 ? (
+        filteredBaseOptions.map((opt) => (
+          <MenuItem key={opt.id} value={opt.id}>
+            {opt.name}
+          </MenuItem>
+        ))
+      ) : (
+        <MenuItem value="">No Base Options</MenuItem>
+      )}
+    </Select>
   );
 
   const computedRows = (() => {
@@ -137,12 +292,11 @@ function UnitsConfig() {
 
     if (editingRowId === "__new__" && newRowDraft) {
       rows.push({
-        sno: renderInput("sno", newRowDraft.sno),
-        command: renderInput("command", newRowDraft.command),
-        base: renderInput("base", newRowDraft.base),
-        unitName: renderInput("unitName", newRowDraft.unitName),
-        status: renderInput("status", newRowDraft.status),
-        createdDate: renderInput("createdDate", newRowDraft.createdDate),
+        id: newRowDraft.id,
+        name: renderInput("name", newRowDraft.name),
+        cmd: renderCommandSelect(newRowDraft.cmd),
+        base: renderBaseSelect(newRowDraft.base),
+        status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
             <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
@@ -157,15 +311,20 @@ function UnitsConfig() {
     }
 
     tableRows.forEach((r) => {
-      const isEditing = editingRowId === r.sno;
+      const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
       rows.push({
-        sno: isEditing ? renderInput("sno", draft.sno) : r.sno,
-        command: isEditing ? renderInput("command", draft.command) : r.command,
-        base: isEditing ? renderInput("base", draft.base) : r.base,
-        unitName: isEditing ? renderInput("unitName", draft.unitName) : r.unitName,
-        status: isEditing ? renderInput("status", draft.status) : renderStatusBadge(r.status),
-        createdDate: isEditing ? renderInput("createdDate", draft.createdDate) : r.createdDate,
+        id: r.id,
+        name: isEditing ? renderInput("name", draft.name) : r.name,
+        cmd: isEditing
+          ? renderCommandSelect(draft.cmd)
+          : commandOptions.find((opt) => opt.id === r.cmd)?.name || r.cmd,
+        base: isEditing
+          ? renderBaseSelect(draft.base)
+          : allBaseOptions.find((opt) => opt.id === r.base)?.name || r.base,
+        status: isEditing
+          ? renderStatusSelect("status", draft.status)
+          : renderStatusBadge(r.status),
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
             <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
@@ -181,7 +340,7 @@ function UnitsConfig() {
               variant="outlined"
               color="info"
               size="small"
-              onClick={() => handleEditUnit(r.sno)}
+              onClick={() => handleEditUnit(r.id)}
             >
               Edit
             </MDButton>
@@ -189,7 +348,7 @@ function UnitsConfig() {
               variant="outlined"
               color="error"
               size="small"
-              onClick={() => handleDeleteUnit(r.sno)}
+              onClick={() => confirmDelete(r.id)}
             >
               Delete
             </MDButton>
@@ -221,7 +380,7 @@ function UnitsConfig() {
             <MDTypography variant="h6" color="white">
               Units
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddUnit}>
+            <MDButton variant="gradient" bgColor="dark" onClick={handleAddUnit}>
               Add Unit
             </MDButton>
           </MDBox>

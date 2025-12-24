@@ -120,6 +120,7 @@ function collapseText(theme, ownerState) {
       fontWeight: active ? fontWeightRegular : fontWeightLight,
       fontSize: size.sm,
       lineHeight: 0,
+      opacity: miniSidenav ? 0 : 1, // Add this line to hide text when miniSidenav is true
     },
   };
 }

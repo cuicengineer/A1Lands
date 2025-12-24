@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import PropTypes from "prop-types";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -9,232 +10,204 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Card from "@mui/material/Card";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Grid from "@mui/material/Grid";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import RentalPropertyForm from "./RentalPropertyForm";
+import api from "services/api.service";
+
+const StatusBadge = ({ value }) => (
+  <MDBadge
+    badgeContent={value ? "Active" : "Disabled"}
+    color={value ? "success" : "error"}
+    variant="gradient"
+    size="sm"
+  />
+);
+
+StatusBadge.propTypes = {
+  value: PropTypes.bool.isRequired,
+};
 
 function RentalProperties() {
-  const [tableRows, setTableRows] = useState([
-    {
-      sno: "1",
-      command: "North",
-      base: "Alpha",
-      class: "A",
-      propertyId: "RP-001",
-      uom: "sqft",
-      area: "1200",
-      location: "Block A",
-      description: "Corner shop",
-      createdBy: "Admin",
-      createdDate: "2024-01-15",
-      isActive: "Yes",
-    },
-    {
-      sno: "2",
-      command: "South",
-      base: "Bravo",
-      class: "B",
-      propertyId: "RP-002",
-      uom: "sqm",
-      area: "90",
-      location: "Main Road",
-      description: "Kiosk",
-      createdBy: "Admin",
-      createdDate: "2024-02-02",
-      isActive: "No",
-    },
-    {
-      sno: "3",
-      command: "East",
-      base: "Charlie",
-      class: "C",
-      propertyId: "RP-003",
-      uom: "sqft",
-      area: "600",
-      location: "Bazaar",
-      description: "Shop lot",
-      createdBy: "Manager",
-      createdDate: "2024-02-20",
-      isActive: "Yes",
-    },
-  ]);
+  const [tableRows, setTableRows] = useState([]);
+  const [commands, setCommands] = useState([]);
+  const [bases, setBases] = useState([]);
+  const [classes, setClasses] = useState([]);
 
-  const [editingRowId, setEditingRowId] = useState(null);
-  const [newRowDraft, setNewRowDraft] = useState(null);
-  const [editDraft, setEditDraft] = useState(null);
+  const fetchRentalProperties = async () => {
+    try {
+      const response = await api.list("rentalproperty");
+      setTableRows(response);
+    } catch (error) {
+      console.error("Error fetching rental properties:", error);
+    }
+  };
+
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const [rentalPropertiesResponse, commandsResponse, basesResponse, classesResponse] =
+          await Promise.all([
+            api.list("rentalproperty"),
+            api.list("command"),
+            api.list("base"),
+            api.list("class"),
+          ]);
+        setTableRows(rentalPropertiesResponse);
+        setCommands(commandsResponse);
+        setBases(basesResponse);
+        setClasses(classesResponse);
+      } catch (error) {
+        console.error("Error fetching initial data:", error);
+      }
+    };
+    fetchInitialData();
+  }, []);
+  const [formOpen, setFormOpen] = useState(false);
+  const [currentProperty, setCurrentProperty] = useState(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [propertyToDelete, setPropertyToDelete] = useState(null);
 
   const handleAddProperty = () => {
-    if (editingRowId) return;
-    setEditingRowId("__new__");
-    setNewRowDraft({
-      sno: "",
-      command: "",
-      base: "",
-      class: "",
-      propertyId: "",
-      uom: "",
-      area: "",
-      location: "",
-      description: "",
-      createdBy: "",
-      createdDate: "",
-      isActive: "Yes",
+    setCurrentProperty(null);
+    setFormOpen(true);
+  };
+
+  const handleEditProperty = (id) => {
+    const property = tableRows.find((row) => row.id === id);
+    setCurrentProperty({
+      id: property.id,
+      cmdId: property.cmdId,
+      baseId: property.baseId,
+      classId: property.classId,
+      pId: property.pId,
+      uoM: property.uoM,
+      area: property.area,
+      location: property.location,
+      remarks: property.remarks,
+      status: property.status,
     });
+    setFormOpen(true);
   };
 
-  const handleEditProperty = (sno) => {
-    if (editingRowId) return;
-    const row = tableRows.find((r) => r.sno === sno);
-    if (!row) return;
-    setEditingRowId(sno);
-    setEditDraft({ ...row });
-  };
+  const handleFormSubmit = async (formData) => {
+    try {
+      const formattedData = {
+        cmdId: formData.cmdId,
+        baseId: formData.baseId,
+        classId: formData.classId,
+        pId: formData.pId,
+        uoM: formData.uoM,
+        area: formData.area,
+        location: formData.location,
+        remarks: formData.remarks,
+        status: formData.status,
+      };
 
-  const handleChange = (field, value) => {
-    if (editingRowId === "__new__") {
-      setNewRowDraft((draft) => ({ ...draft, [field]: value }));
-    } else if (editingRowId) {
-      setEditDraft((draft) => ({ ...draft, [field]: value }));
+      if (currentProperty) {
+        // Edit existing property
+        await api.update("rentalproperty", currentProperty.id, formattedData);
+        await fetchRentalProperties();
+      } else {
+        // Add new property
+        await api.create("rentalproperty", formattedData);
+        await fetchRentalProperties();
+      }
+      setFormOpen(false);
+    } catch (error) {
+      console.error("Error saving rental property:", error);
+      // Optionally, show an error message to the user
     }
   };
 
-  const handleSave = () => {
-    if (editingRowId === "__new__" && newRowDraft) {
-      setTableRows((prev) => [newRowDraft, ...prev]);
-      setEditingRowId(null);
-      setNewRowDraft(null);
-    } else if (editingRowId && editDraft) {
-      setTableRows((prev) => prev.map((r) => (r.sno === editingRowId ? editDraft : r)));
-      setEditingRowId(null);
-      setEditDraft(null);
+  const handleFormClose = () => {
+    setFormOpen(false);
+  };
+
+  const handleDeleteProperty = (id) => {
+    setPropertyToDelete(id);
+    setShowDeleteDialog(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    try {
+      await api.remove("rentalproperty", propertyToDelete);
+      await fetchRentalProperties();
+      setShowDeleteDialog(false);
+      setPropertyToDelete(null);
+    } catch (error) {
+      console.error("Error deleting rental property:", error);
+      // Optionally, show an error message to the user
     }
   };
 
-  const handleCancel = () => {
-    setEditingRowId(null);
-    setNewRowDraft(null);
-    setEditDraft(null);
+  const handleCancelDelete = () => {
+    setShowDeleteDialog(false);
+    setPropertyToDelete(null);
   };
 
-  const handleDeleteProperty = (sno) => {
-    setTableRows((prev) => prev.filter((r) => r.sno !== sno));
+  const getCommandName = (cmdId) => {
+    const command = commands.find((cmd) => cmd.id === cmdId);
+    return command ? command.name : cmdId;
+  };
+
+  const getBaseName = (baseId) => {
+    const base = bases.find((b) => b.id === baseId);
+    return base ? base.name : baseId;
+  };
+
+  const getClassName = (classId) => {
+    const classItem = classes.find((c) => c.id === classId);
+    return classItem ? classItem.name : classId;
   };
 
   const columns = [
-    { Header: "Sno", accessor: "sno", align: "left", width: "5%" },
-    { Header: "Command", accessor: "command", align: "left" },
-    { Header: "Base", accessor: "base", align: "left" },
-    { Header: "Class", accessor: "class", align: "left" },
-    { Header: "PropertyID", accessor: "propertyId", align: "left" },
-    { Header: "UoM", accessor: "uom", align: "left" },
+    { Header: "Id", accessor: "id", align: "left" },
+    { Header: "Command", accessor: "cmdId", align: "left" },
+    { Header: "Base", accessor: "baseId", align: "left" },
+    { Header: "Class", accessor: "classId", align: "left" },
+    { Header: "Property ID", accessor: "pId", align: "left" },
+    { Header: "UoM", accessor: "uoM", align: "left" },
     { Header: "Area", accessor: "area", align: "left" },
     { Header: "Location", accessor: "location", align: "left" },
-    { Header: "Decsription", accessor: "description", align: "left" },
-    { Header: "CreatedBy", accessor: "createdBy", align: "left" },
-    { Header: "CreatedDate", accessor: "createdDate", align: "center" },
-    { Header: "IsActive", accessor: "isActive", align: "center" },
+    { Header: "Remarks", accessor: "remarks", align: "left" },
+    { Header: "Is Active", accessor: "status", align: "center", Cell: StatusBadge },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
 
-  const renderActiveBadge = (value) => (
-    <MDBox ml={-1}>
-      <MDBadge
-        badgeContent={value}
-        color={value === "Yes" ? "success" : "dark"}
-        variant="gradient"
-        size="sm"
-      />
-    </MDBox>
-  );
-
-  const renderInput = (field, value) => (
-    <MDInput
-      type={field === "createdDate" ? "date" : "text"}
-      value={value}
-      onChange={(e) => handleChange(field, e.target.value)}
-      size="small"
-      fullWidth
-    />
-  );
-
-  const computedRows = (() => {
-    const rows = [];
-
-    if (editingRowId === "__new__" && newRowDraft) {
-      rows.push({
-        sno: renderInput("sno", newRowDraft.sno),
-        command: renderInput("command", newRowDraft.command),
-        base: renderInput("base", newRowDraft.base),
-        class: renderInput("class", newRowDraft.class),
-        propertyId: renderInput("propertyId", newRowDraft.propertyId),
-        uom: renderInput("uom", newRowDraft.uom),
-        area: renderInput("area", newRowDraft.area),
-        location: renderInput("location", newRowDraft.location),
-        description: renderInput("description", newRowDraft.description),
-        createdBy: renderInput("createdBy", newRowDraft.createdBy),
-        createdDate: renderInput("createdDate", newRowDraft.createdDate),
-        isActive: renderInput("isActive", newRowDraft.isActive),
-        actions: (
-          <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
-          </MDBox>
-        ),
-      });
-    }
-
-    tableRows.forEach((r) => {
-      const isEditing = editingRowId === r.sno;
-      const draft = isEditing ? editDraft : r;
-      rows.push({
-        sno: isEditing ? renderInput("sno", draft.sno) : r.sno,
-        command: isEditing ? renderInput("command", draft.command) : r.command,
-        base: isEditing ? renderInput("base", draft.base) : r.base,
-        class: isEditing ? renderInput("class", draft.class) : r.class,
-        propertyId: isEditing ? renderInput("propertyId", draft.propertyId) : r.propertyId,
-        uom: isEditing ? renderInput("uom", draft.uom) : r.uom,
-        area: isEditing ? renderInput("area", draft.area) : r.area,
-        location: isEditing ? renderInput("location", draft.location) : r.location,
-        description: isEditing ? renderInput("description", draft.description) : r.description,
-        createdBy: isEditing ? renderInput("createdBy", draft.createdBy) : r.createdBy,
-        createdDate: isEditing ? renderInput("createdDate", draft.createdDate) : r.createdDate,
-        isActive: isEditing
-          ? renderInput("isActive", draft.isActive)
-          : renderActiveBadge(r.isActive),
-        actions: isEditing ? (
-          <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
-          </MDBox>
-        ) : (
-          <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
-              color="info"
-              size="small"
-              onClick={() => handleEditProperty(r.sno)}
-            >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
-              size="small"
-              onClick={() => handleDeleteProperty(r.sno)}
-            >
-              Delete
-            </MDButton>
-          </MDBox>
-        ),
-      });
-    });
-    return rows;
-  })();
+  const computedRows = tableRows.map((row) => ({
+    ...row,
+    cmdId: getCommandName(row.cmdId),
+    baseId: getBaseName(row.baseId),
+    classId: getClassName(row.classId),
+    actions: (
+      <MDBox display="flex" gap={1}>
+        <MDButton
+          variant="outlined"
+          color="info"
+          size="small"
+          onClick={() => handleEditProperty(row.id)}
+        >
+          Edit
+        </MDButton>
+        <MDButton
+          variant="outlined"
+          color="error"
+          size="small"
+          onClick={() => handleDeleteProperty(row.id)}
+        >
+          Delete
+        </MDButton>
+      </MDBox>
+    ),
+  }));
 
   return (
     <DashboardLayout>
@@ -274,6 +247,30 @@ function RentalProperties() {
         </Card>
       </MDBox>
       <Footer />
+
+      <RentalPropertyForm
+        open={formOpen}
+        onClose={handleFormClose}
+        onSubmit={handleFormSubmit}
+        initialData={currentProperty}
+      />
+
+      <Dialog open={showDeleteDialog} onClose={handleCancelDelete}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="body1">
+            Are you sure you want to delete this rental property?
+          </MDTypography>
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={handleCancelDelete} color="secondary">
+            Cancel
+          </MDButton>
+          <MDButton onClick={handleConfirmDelete} color="error">
+            Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
     </DashboardLayout>
   );
 }

@@ -66,17 +66,19 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
           )}
         </ListItemIcon>
 
-        <ListItemText
-          primary={name}
-          sx={(theme) =>
-            collapseText(theme, {
-              miniSidenav,
-              transparentSidenav,
-              whiteSidenav,
-              active,
-            })
-          }
-        />
+        {!miniSidenav && (
+          <ListItemText
+            primary={name}
+            sx={(theme) =>
+              collapseText(theme, {
+                miniSidenav,
+                transparentSidenav,
+                whiteSidenav,
+                active,
+              })
+            }
+          />
+        )}
       </MDBox>
     </ListItem>
   );

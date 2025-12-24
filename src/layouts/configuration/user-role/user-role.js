@@ -32,7 +32,7 @@ function UserRole() {
     let mounted = true;
     (async () => {
       try {
-        const data = await api.list("Roles");
+        const data = await api.list("Role");
         if (!mounted) return;
         const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
         setTableRows(arr);
@@ -89,7 +89,7 @@ function UserRole() {
               ? Number(newRowDraft.status)
               : newRowDraft.status,
         };
-        const created = await api.create("Roles", payload);
+        const created = await api.create("Role", payload);
         setTableRows((prev) => [created || payload, ...prev]);
         setEditingRowId(null);
         setNewRowDraft(null);
@@ -99,7 +99,7 @@ function UserRole() {
           status:
             typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
         };
-        const updated = await api.update("Roles", editDraft.id, payload);
+        const updated = await api.update("Role", editDraft.id, payload);
         setTableRows((prev) => prev.map((r) => (r.id === editDraft.id ? updated || payload : r)));
         setEditingRowId(null);
         setEditDraft(null);
@@ -111,7 +111,7 @@ function UserRole() {
 
   const handleDeleteRole = async (id) => {
     try {
-      await api.remove("Roles", id);
+      await api.remove("Role", id);
       setTableRows((prev) => prev.filter((row) => row.id !== id));
     } catch (e) {
       console.error("Delete failed", e);

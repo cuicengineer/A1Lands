@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -8,58 +8,115 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
+import api from "../../../services/api.service";
+import MenuItem from "@mui/material/MenuItem";
 import Card from "@mui/material/Card";
 
 function ClassConfig() {
-  const [tableRows, setTableRows] = useState([
-    { sno: "1", name: "A", status: "Active", createdDate: "10/01/2024" },
-    { sno: "2", name: "B", status: "Active", createdDate: "15/01/2024" },
-    { sno: "3", name: "C", status: "Inactive", createdDate: "20/01/2024" },
-    { sno: "4", name: "BTS", status: "Active", createdDate: "25/01/2024" },
-    { sno: "5", name: "HB", status: "Inactive", createdDate: "30/01/2024" },
-    { sno: "6", name: "A1", status: "Active", createdDate: "05/02/2024" },
-  ]);
+  const [tableRows, setTableRows] = useState([]);
+  const [errors, setErrors] = useState({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await api.list("Class");
+        if (!mounted) return;
+        const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
+        setTableRows(arr);
+      } catch (e) {
+        console.error("Failed to load classes", e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshTrigger]);
 
   const handleAddClass = () => {
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({
-      sno: "",
+      id: 0,
       name: "",
-      status: "",
-      createdDate: "",
+      desc: "",
+      status: 0,
     });
+    setErrors({});
   };
 
-  const handleEditClass = (sno) => {
+  const handleEditClass = (id) => {
     if (editingRowId) return;
-    const row = tableRows.find((r) => r.sno === sno);
+    const row = tableRows.find((r) => r.id === id);
     if (!row) return;
-    setEditingRowId(sno);
+    setEditingRowId(id);
     setEditDraft({ ...row });
   };
 
   const handleChange = (field, value) => {
+    const nextValue = field === "status" ? Number(value) : value;
     if (editingRowId === "__new__") {
-      setNewRowDraft((draft) => ({ ...draft, [field]: value }));
+      setNewRowDraft((draft) => ({ ...draft, [field]: nextValue }));
+      if (field === "name") {
+        const msg = nextValue && String(nextValue).trim() ? null : "Name is required";
+        setErrors((prev) => ({ ...prev, name: msg }));
+      }
     } else if (editingRowId) {
-      setEditDraft((draft) => ({ ...draft, [field]: value }));
+      setEditDraft((draft) => ({ ...draft, [field]: nextValue }));
     }
   };
 
-  const handleSave = () => {
-    if (editingRowId === "__new__" && newRowDraft) {
-      setTableRows((prev) => [newRowDraft, ...prev]);
-      setEditingRowId(null);
-      setNewRowDraft(null);
-    } else if (editingRowId && editDraft) {
-      setTableRows((prev) => prev.map((r) => (r.sno === editingRowId ? editDraft : r)));
-      setEditingRowId(null);
-      setEditDraft(null);
+  const validateNew = () => {
+    const errs = {};
+    if (!newRowDraft?.name || !newRowDraft.name.trim()) {
+      errs.name = "Name is required";
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSave = async () => {
+    try {
+      if (editingRowId === "__new__" && newRowDraft) {
+        if (!validateNew()) return;
+        const payload = {
+          id: newRowDraft.id,
+          name: newRowDraft.name,
+          desc: newRowDraft.desc,
+          status:
+            typeof newRowDraft.status === "string"
+              ? Number(newRowDraft.status)
+              : newRowDraft.status,
+        };
+        const created = await api.create("Class", payload);
+        setTableRows((prev) => [created || payload, ...prev]);
+        setEditingRowId(null);
+        setNewRowDraft(null);
+        setRefreshTrigger((prev) => prev + 1);
+      } else if (editingRowId && editDraft) {
+        const payload = {
+          id: editDraft.id,
+          name: editDraft.name,
+          desc: editDraft.desc,
+          status:
+            typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
+        };
+        const updated = await api.update("Class", editDraft.id, payload);
+        setTableRows((prev) => prev.map((r) => (r.id === editDraft.id ? updated || payload : r)));
+        setEditingRowId(null);
+        setEditDraft(null);
+        setRefreshTrigger((prev) => prev + 1);
+      }
+    } catch (e) {
+      console.error("Save failed", e);
     }
   };
 
@@ -69,29 +126,48 @@ function ClassConfig() {
     setEditDraft(null);
   };
 
-  const handleDeleteClass = (sno) => {
-    setTableRows((prev) => prev.filter((row) => row.sno !== sno));
+  const handleDeleteClass = async (id) => {
+    try {
+      await api.remove("Class", id);
+      setTableRows((prev) => prev.filter((row) => row.id !== id));
+      setRefreshTrigger((prev) => prev + 1);
+    } catch (e) {
+      console.error("Delete failed", e);
+    }
+  };
+
+  const confirmDelete = async (id) => {
+    const ok = window.confirm("Are you sure you want to delete this class?");
+    if (!ok) return;
+    await handleDeleteClass(id);
   };
 
   const columns = [
-    { Header: "Sno", accessor: "sno", align: "left", width: "5%" },
+    { Header: "Id", accessor: "id", align: "left", width: "5%" },
     { Header: "Class Name", accessor: "name", align: "left" },
-    { Header: "Description", accessor: "description", align: "left" },
+    { Header: "Description", accessor: "desc", align: "left" },
     { Header: "Status", accessor: "status", align: "center" },
-    { Header: "Created Date", accessor: "createdDate", align: "center" },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
 
-  const renderStatusBadge = (status) => (
-    <MDBox ml={-1}>
-      <MDBadge
-        badgeContent={status}
-        color={status === "Active" ? "success" : "dark"}
-        variant="gradient"
-        size="sm"
-      />
-    </MDBox>
-  );
+  const renderStatusBadge = (status) => {
+    const label =
+      status === 1 ||
+      status === "1" ||
+      (typeof status === "string" && status.toLowerCase() === "active")
+        ? "Active"
+        : "DeActive";
+    return (
+      <MDBox ml={-1}>
+        <MDBadge
+          badgeContent={label}
+          color={label === "Active" ? "success" : "dark"}
+          variant="gradient"
+          size="sm"
+        />
+      </MDBox>
+    );
+  };
 
   const renderInput = (field, value) => (
     <MDInput
@@ -99,18 +175,45 @@ function ClassConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      required={editingRowId === "__new__" && field === "name"}
+      error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
+      helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
     />
   );
 
+  const renderStatusSelect = (field, value) => (
+    <MDInput
+      select
+      value={value}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+    >
+      <MenuItem value={1}>Active</MenuItem>
+      <MenuItem value={0}>Not Active</MenuItem>
+    </MDInput>
+  );
+
   const computedRows = (() => {
+    const filteredRows = tableRows.filter((row) =>
+      Object.values(row).some(
+        (value) =>
+          value !== null &&
+          value !== undefined &&
+          String(value).toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    );
+
+    const paginatedRows = filteredRows.slice(page * pageSize, (page + 1) * pageSize);
+
     const rows = [];
 
     if (editingRowId === "__new__" && newRowDraft) {
       rows.push({
-        sno: renderInput("sno", newRowDraft.sno),
+        id: newRowDraft.id,
         name: renderInput("name", newRowDraft.name),
-        status: renderInput("status", newRowDraft.status),
-        createdDate: renderInput("createdDate", newRowDraft.createdDate),
+        desc: renderInput("desc", newRowDraft.desc),
+        status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
             <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
@@ -124,19 +227,17 @@ function ClassConfig() {
       });
     }
 
-    tableRows.forEach((row) => {
-      const isEditing = editingRowId === row.sno;
+    paginatedRows.forEach((row) => {
+      const isEditing = editingRowId === row.id;
       const currentRow = isEditing ? editDraft : row;
 
       rows.push({
-        sno: isEditing ? renderInput("sno", currentRow.sno) : currentRow.sno,
+        id: isEditing ? renderInput("id", currentRow.id) : currentRow.id,
         name: isEditing ? renderInput("name", currentRow.name) : currentRow.name,
+        desc: isEditing ? renderInput("desc", currentRow.desc) : currentRow.desc,
         status: isEditing
-          ? renderInput("status", currentRow.status)
+          ? renderStatusSelect("status", currentRow.status)
           : renderStatusBadge(currentRow.status),
-        createdDate: isEditing
-          ? renderInput("createdDate", currentRow.createdDate)
-          : currentRow.createdDate,
         actions: (
           <MDBox display="flex" gap={1}>
             {isEditing ? (
@@ -154,7 +255,7 @@ function ClassConfig() {
                   variant="outlined"
                   color="info"
                   size="small"
-                  onClick={() => handleEditClass(row.sno)}
+                  onClick={() => handleEditClass(row.id)}
                 >
                   Edit
                 </MDButton>
@@ -162,7 +263,7 @@ function ClassConfig() {
                   variant="outlined"
                   color="error"
                   size="small"
-                  onClick={() => handleDeleteClass(row.sno)}
+                  onClick={() => confirmDelete(row.id)}
                 >
                   Delete
                 </MDButton>
@@ -197,18 +298,29 @@ function ClassConfig() {
             <MDTypography variant="h6" color="white">
               Class
             </MDTypography>
-            <MDButton variant="gradient" bgColor="dark" onClick={handleAddClass}>
-              Add Class
-            </MDButton>
+            <MDBox display="flex" alignItems="center" gap={2}>
+              <MDInput
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                size="small"
+              />
+              <MDButton variant="gradient" bgColor="dark" onClick={handleAddClass}>
+                Add Class
+              </MDButton>
+            </MDBox>
           </MDBox>
           <MDBox pt={3}>
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              entriesPerPage={false}
-              showTotalEntries={false}
-              noEndBorder
-            />
+            <MDBox sx={{ overflowX: "scroll" }}>
+              <DataTable
+                table={{ columns, rows: computedRows }}
+                isSorted={false}
+                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
+                showTotalEntries={true}
+                noEndBorder
+                canSearch={true}
+              />
+            </MDBox>
           </MDBox>
         </Card>
       </MDBox>

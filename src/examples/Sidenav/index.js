@@ -4,7 +4,7 @@
 =========================================================
 */
 
-import { useEffect, useState } from "react"; // 🔧 FIX: added useState
+import { useState, useEffect } from "react";
 
 // react-router-dom components
 import { useLocation, NavLink } from "react-router-dom";
@@ -36,14 +36,21 @@ import {
   setMiniSidenav,
   setTransparentSidenav,
   setWhiteSidenav,
+  setHasUserManuallyToggledSidenav,
 } from "context";
 
 function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const [controller, dispatch] = useMaterialUIController();
-  const { miniSidenav, transparentSidenav, whiteSidenav, darkMode, sidenavColor } = controller;
+  const {
+    miniSidenav,
+    transparentSidenav,
+    whiteSidenav,
+    darkMode,
+    sidenavColor,
+    hasUserManuallyToggledSidenav,
+  } = controller;
   const location = useLocation();
 
-  // 🔧 FIX: click-controlled collapse state
   const [openCollapse, setOpenCollapse] = useState(null);
 
   let textColor = "white";
@@ -54,20 +61,43 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     textColor = "inherit";
   }
 
-  const closeSidenav = () => setMiniSidenav(dispatch, true);
+  const closeSidenav = (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    setMiniSidenav(dispatch, true);
+    setHasUserManuallyToggledSidenav(dispatch, true);
+  };
+  const toggleSidenavCollapse = (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    setMiniSidenav(dispatch, !miniSidenav);
+    setHasUserManuallyToggledSidenav(dispatch, true);
+  };
 
   useEffect(() => {
     function handleMiniSidenav() {
-      setMiniSidenav(dispatch, window.innerWidth < 1200);
-      setTransparentSidenav(dispatch, window.innerWidth < 1200 ? false : transparentSidenav);
-      setWhiteSidenav(dispatch, window.innerWidth < 1200 ? false : whiteSidenav);
+      if (!hasUserManuallyToggledSidenav) {
+        if (window.innerWidth < 1200) {
+          setMiniSidenav(dispatch, true);
+          setTransparentSidenav(dispatch, false);
+          setWhiteSidenav(dispatch, false);
+        } else {
+          setMiniSidenav(dispatch, false);
+          setTransparentSidenav(dispatch, transparentSidenav);
+          setWhiteSidenav(dispatch, whiteSidenav);
+        }
+      }
     }
 
     window.addEventListener("resize", handleMiniSidenav);
     handleMiniSidenav();
 
     return () => window.removeEventListener("resize", handleMiniSidenav);
-  }, [dispatch, location]);
+  }, [dispatch, location, transparentSidenav, whiteSidenav, hasUserManuallyToggledSidenav]);
 
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
@@ -175,10 +205,23 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           right={0}
           p={1.625}
           onClick={closeSidenav}
-          sx={{ cursor: "pointer" }}
+          sx={{ cursor: "pointer", zIndex: 1 }}
         >
           <MDTypography variant="h6" color="secondary">
             <Icon sx={{ fontWeight: "bold" }}>close</Icon>
+          </MDTypography>
+        </MDBox>
+        <MDBox
+          display={{ xs: "block", xl: "none" }}
+          position="absolute"
+          top={0}
+          right={50}
+          p={1.625}
+          onClick={toggleSidenavCollapse}
+          sx={{ cursor: "pointer", zIndex: 1 }}
+        >
+          <MDTypography variant="h6" color="secondary">
+            <Icon sx={{ fontWeight: "bold" }}>{miniSidenav ? "menu_open" : "menu"}</Icon>
           </MDTypography>
         </MDBox>
         <MDBox component={NavLink} to="/" display="flex" alignItems="center">
@@ -189,6 +232,15 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           >
             <MDTypography component="h6" variant="button" fontWeight="medium" color={textColor}>
               {brandName}
+            </MDTypography>
+          </MDBox>
+          <MDBox
+            display={{ xs: "none", xl: "block" }}
+            onClick={toggleSidenavCollapse}
+            sx={{ cursor: "pointer", ml: "auto", zIndex: 1 }}
+          >
+            <MDTypography variant="h6" color="secondary">
+              <Icon sx={{ fontWeight: "bold" }}>{miniSidenav ? "menu_open" : "menu"}</Icon>
             </MDTypography>
           </MDBox>
         </MDBox>
