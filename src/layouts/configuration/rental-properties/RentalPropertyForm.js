@@ -15,7 +15,42 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import api from "../../../../src/services/api.service";
 
+const UOM_OPTIONS = [
+  { key: "Marla", value: "Marla" },
+  { key: "Sq Ft", value: "Sq Ft" },
+  { key: "Acre", value: "Acre" },
+];
+
 function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
+  // Match "New Property Grouping" form styling (compact, simple, consistent)
+  const MENU_PROPS = {
+    PaperProps: {
+      style: { maxHeight: 300 },
+    },
+  };
+  const labelSx = { fontSize: "1rem" };
+  const formControlSx = { minWidth: "140px" };
+  const selectSx = {
+    fontSize: "1rem",
+    "& .MuiSelect-select": {
+      fontSize: "1rem",
+      padding: "8px 32px 8px 14px",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      minHeight: "45px",
+    },
+    "& .MuiSelect-icon": {
+      display: "block !important",
+      right: "8px",
+    },
+  };
+  const menuItemSx = { fontSize: "1rem", padding: "8px 14px" };
+  const inputSx = {
+    "& .MuiInputBase-input": { fontSize: "1rem" },
+    "& .MuiInputLabel-root": { fontSize: "1rem" },
+  };
+
   const [form, setForm] = useState({
     cmdId: "",
     baseId: "",
@@ -37,7 +72,6 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     const fetchCommands = async () => {
       try {
         const response = await api.list("command");
-        console.log("Fetched commands:", response); // Log commands
         setCommands(response);
       } catch (error) {
         console.error("Error fetching commands:", error);
@@ -47,7 +81,6 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     const fetchClasses = async () => {
       try {
         const response = await api.list("class");
-        console.log("Fetched classes:", response); // Log classes
         setClasses(response);
       } catch (error) {
         console.error("Error fetching classes:", error);
@@ -57,17 +90,20 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     const fetchAllBases = async () => {
       try {
         const response = await api.list("base");
-        console.log("Fetched all bases:", response); // Log all bases
         setAllBases(response);
       } catch (error) {
         console.error("Error fetching all bases:", error);
       }
     };
 
-    fetchCommands();
-    fetchClasses();
-    fetchAllBases(); // Fetch all bases on mount
-  }, []);
+    // Only fetch dropdown lists when the dialog is opened (Add/Edit)
+    if (!open) return;
+
+    // Avoid refetching if already loaded
+    if (commands.length === 0) fetchCommands();
+    if (classes.length === 0) fetchClasses();
+    if (allBases.length === 0) fetchAllBases();
+  }, [open, commands.length, classes.length, allBases.length]);
 
   useEffect(() => {
     if (form.cmdId && allBases.length > 0) {
@@ -138,21 +174,21 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
   };
 
   const fields = [
-    { label: "Command ID", key: "cmdId", type: "select", options: commands, mandatory: true },
-    { label: "Base ID", key: "baseId", type: "select", options: bases, mandatory: true },
-    { label: "Class ID", key: "classId", type: "select", options: classes, mandatory: true },
+    { label: "Command", key: "cmdId", type: "select", options: commands, mandatory: true },
+    { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
+    { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
     { label: "Property ID", key: "pId" },
-    { label: "UoM", key: "uoM" },
+    { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS },
     { label: "Area", key: "area", type: "number" },
     { label: "Location", key: "location" },
-    { label: "Remarks", key: "remarks" },
+    { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 } },
     {
-      label: "Is Active",
+      label: "Status",
       key: "status",
       type: "select",
       options: [
-        { id: true, name: "Yes" },
-        { id: false, name: "No" },
+        { id: true, name: "Active" },
+        { id: false, name: "Disabled" },
       ],
     },
   ];
@@ -163,20 +199,27 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
       <DialogContent>
         <Grid container spacing={2} mt={0.5}>
           {fields.map((f) => (
-            <Grid item xs={12} sm={6} key={f.key}>
+            <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
               {f.type === "select" ? (
-                <FormControl fullWidth size="small" required={f.mandatory}>
-                  <InputLabel>{f.label}</InputLabel>
+                <FormControl fullWidth size="small" required={f.mandatory} sx={formControlSx}>
+                  <InputLabel sx={labelSx}>{f.label}</InputLabel>
                   <Select
                     value={form[f.key]}
                     label={f.label}
                     onChange={(e) => handleChange(f.key, e.target.value)}
+                    MenuProps={MENU_PROPS}
+                    sx={selectSx}
                   >
-                    {f.options.map((option) => (
-                      <MenuItem key={option.id} value={option.id}>
-                        {option.name}
-                      </MenuItem>
-                    ))}
+                    {f.options.map((option) => {
+                      const optionValue = option.value ?? option.id;
+                      const optionLabel = option.label ?? option.name ?? String(optionValue ?? "");
+                      const optionKey = option.key ?? option.id ?? option.value ?? optionLabel;
+                      return (
+                        <MenuItem key={optionKey} value={optionValue} sx={menuItemSx}>
+                          {optionLabel}
+                        </MenuItem>
+                      );
+                    })}
                   </Select>
                 </FormControl>
               ) : (
@@ -187,6 +230,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
                   onChange={(e) => handleChange(f.key, e.target.value)}
                   fullWidth
                   size="small"
+                  sx={inputSx}
                 />
               )}
             </Grid>

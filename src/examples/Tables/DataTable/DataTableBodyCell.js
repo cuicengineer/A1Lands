@@ -30,14 +30,24 @@ function DataTableBodyCell({ noBorder, align, children, isEvenRow }) {
         fontSize: "0.875rem",
         borderBottom: noBorder ? "none" : `${borderWidth[1]} solid ${light.main}`,
         backgroundColor: isEvenRow ? "#f0f0f0" : "#ffffff",
-        whiteSpace: "nowrap",
+        // Allow multi-line cells and prevent overflow into adjacent columns
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+        verticalAlign: "top",
       })}
     >
       <MDBox
-        display="inline-block"
-        width="max-content"
+        display="block"
+        width="100%"
         color="text"
-        sx={{ verticalAlign: "middle" }}
+        sx={{
+          verticalAlign: "top",
+          maxWidth: "100%",
+          whiteSpace: "normal",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+        }}
       >
         {children}
       </MDBox>

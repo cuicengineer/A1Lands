@@ -1,4 +1,11 @@
 import { useEffect, useState } from "react";
+
+// @mui material components
+import Card from "@mui/material/Card";
+import Icon from "@mui/material/Icon";
+import IconButton from "@mui/material/IconButton";
+import MenuItem from "@mui/material/MenuItem";
+
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -9,37 +16,28 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import api from "../../../services/api.service";
-import MenuItem from "@mui/material/MenuItem";
-import Card from "@mui/material/Card";
 
 function ClassConfig() {
   const [tableRows, setTableRows] = useState([]);
   const [errors, setErrors] = useState({});
-  const [searchQuery, setSearchQuery] = useState("");
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const data = await api.list("Class");
-        if (!mounted) return;
-        const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
-        setTableRows(arr);
-      } catch (e) {
-        console.error("Failed to load classes", e);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [refreshTrigger]);
+    fetchClasses();
+  }, []);
+
+  const fetchClasses = async () => {
+    try {
+      const data = await api.list("Class");
+      const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
+      setTableRows(arr);
+    } catch (e) {
+      console.error("Failed to load classes", e);
+    }
+  };
 
   const handleAddClass = () => {
     if (editingRowId) return;
@@ -96,11 +94,10 @@ function ClassConfig() {
               ? Number(newRowDraft.status)
               : newRowDraft.status,
         };
-        const created = await api.create("Class", payload);
-        setTableRows((prev) => [created || payload, ...prev]);
+        await api.create("Class", payload);
+        await fetchClasses();
         setEditingRowId(null);
         setNewRowDraft(null);
-        setRefreshTrigger((prev) => prev + 1);
       } else if (editingRowId && editDraft) {
         const payload = {
           id: editDraft.id,
@@ -109,11 +106,10 @@ function ClassConfig() {
           status:
             typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
         };
-        const updated = await api.update("Class", editDraft.id, payload);
-        setTableRows((prev) => prev.map((r) => (r.id === editDraft.id ? updated || payload : r)));
+        await api.update("Class", editDraft.id, payload);
+        await fetchClasses();
         setEditingRowId(null);
         setEditDraft(null);
-        setRefreshTrigger((prev) => prev + 1);
       }
     } catch (e) {
       console.error("Save failed", e);
@@ -129,8 +125,7 @@ function ClassConfig() {
   const handleDeleteClass = async (id) => {
     try {
       await api.remove("Class", id);
-      setTableRows((prev) => prev.filter((row) => row.id !== id));
-      setRefreshTrigger((prev) => prev + 1);
+      await fetchClasses();
     } catch (e) {
       console.error("Delete failed", e);
     }
@@ -143,11 +138,11 @@ function ClassConfig() {
   };
 
   const columns = [
-    { Header: "Id", accessor: "id", align: "left", width: "5%" },
-    { Header: "Class Name", accessor: "name", align: "left" },
-    { Header: "Description", accessor: "desc", align: "left" },
-    { Header: "Status", accessor: "status", align: "center" },
-    { Header: "Actions", accessor: "actions", align: "center" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
+    { Header: "Id", accessor: "id", align: "left", width: "6%" },
+    { Header: "Class Name", accessor: "name", align: "left", width: "20%" },
+    { Header: "Description", accessor: "desc", align: "left", width: "28%" },
+    { Header: "Status", accessor: "status", align: "center", width: "10%" },
   ];
 
   const renderStatusBadge = (status) => {
@@ -195,17 +190,6 @@ function ClassConfig() {
   );
 
   const computedRows = (() => {
-    const filteredRows = tableRows.filter((row) =>
-      Object.values(row).some(
-        (value) =>
-          value !== null &&
-          value !== undefined &&
-          String(value).toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    );
-
-    const paginatedRows = filteredRows.slice(page * pageSize, (page + 1) * pageSize);
-
     const rows = [];
 
     if (editingRowId === "__new__" && newRowDraft) {
@@ -227,48 +211,85 @@ function ClassConfig() {
       });
     }
 
-    paginatedRows.forEach((row) => {
+    tableRows.forEach((row) => {
       const isEditing = editingRowId === row.id;
       const currentRow = isEditing ? editDraft : row;
 
       rows.push({
-        id: isEditing ? renderInput("id", currentRow.id) : currentRow.id,
-        name: isEditing ? renderInput("name", currentRow.name) : currentRow.name,
-        desc: isEditing ? renderInput("desc", currentRow.desc) : currentRow.desc,
+        id: currentRow.id,
+        name: isEditing ? (
+          renderInput("name", currentRow.name)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {row.name}
+          </MDBox>
+        ),
+        desc: isEditing ? (
+          renderInput("desc", currentRow.desc)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {row.desc}
+          </MDBox>
+        ),
         status: isEditing
           ? renderStatusSelect("status", currentRow.status)
           : renderStatusBadge(currentRow.status),
-        actions: (
-          <MDBox display="flex" gap={1}>
-            {isEditing ? (
-              <>
-                <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-                  Save
-                </MDButton>
-                <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-                  Cancel
-                </MDButton>
-              </>
-            ) : (
-              <>
-                <MDButton
-                  variant="outlined"
-                  color="info"
-                  size="small"
-                  onClick={() => handleEditClass(row.id)}
-                >
-                  Edit
-                </MDButton>
-                <MDButton
-                  variant="outlined"
-                  color="error"
-                  size="small"
-                  onClick={() => confirmDelete(row.id)}
-                >
-                  Delete
-                </MDButton>
-              </>
-            )}
+        actions: isEditing ? (
+          <MDBox>
+            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
+              Save
+            </MDButton>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
+              Cancel
+            </MDButton>
+          </MDBox>
+        ) : (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditClass(row.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => confirmDelete(row.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
@@ -299,26 +320,93 @@ function ClassConfig() {
               Class
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={2}>
-              <MDInput
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                size="small"
-              />
-              <MDButton variant="gradient" bgColor="dark" onClick={handleAddClass}>
+              <MDButton variant="gradient" color="info" onClick={handleAddClass}>
                 Add Class
               </MDButton>
             </MDBox>
           </MDBox>
           <MDBox pt={3}>
-            <MDBox sx={{ overflowX: "scroll" }}>
+            <MDBox
+              sx={{
+                overflowX: "auto",
+                "& .MuiTable-root": {
+                  tableLayout: "fixed",
+                  width: "100%",
+                },
+                "& .MuiTableCell-root": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                  maxWidth: "100%",
+                  verticalAlign: "top",
+                },
+                "& .MuiTableCell-root *": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th": {
+                  fontSize: "1.15rem !important",
+                  fontWeight: "700 !important",
+                  padding: "12px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                  borderBottom: "1px solid #d0d0d0",
+                },
+                "& .MuiTable-root td": {
+                  padding: "10px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                  hyphens: "auto",
+                  maxWidth: "100%",
+                  borderBottom: "1px solid #e0e0e0",
+                },
+                "& .MuiTable-root td > div": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root td *": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+                "& .MuiTable-root td:nth-of-type(3) > *": {
+                  display: "block",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+              }}
+            >
               <DataTable
                 table={{ columns, rows: computedRows }}
                 isSorted={false}
-                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
-                showTotalEntries={true}
+                entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
+                showTotalEntries
                 noEndBorder
-                canSearch={true}
+                canSearch
               />
             </MDBox>
           </MDBox>

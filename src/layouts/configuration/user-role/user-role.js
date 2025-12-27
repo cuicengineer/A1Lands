@@ -1,4 +1,6 @@
 import Card from "@mui/material/Card";
+import Icon from "@mui/material/Icon";
+import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 import { useEffect, useState } from "react";
 import MDBox from "components/MDBox";
@@ -19,6 +21,17 @@ function UserRole() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+
+  const fetchRoles = async () => {
+    try {
+      const data = await api.list("Role");
+      const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
+      setTableRows(arr);
+    } catch (e) {
+      console.error("Failed to load roles", e);
+    }
+  };
+
   const validateNew = () => {
     const errs = {};
     if (!newRowDraft?.roleName || !newRowDraft.roleName.trim()) {
@@ -29,20 +42,7 @@ function UserRole() {
   };
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const data = await api.list("Role");
-        if (!mounted) return;
-        const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
-        setTableRows(arr);
-      } catch (e) {
-        console.error("Failed to load roles", e);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    fetchRoles();
   }, []);
 
   const handleAddUser = () => {
@@ -89,8 +89,8 @@ function UserRole() {
               ? Number(newRowDraft.status)
               : newRowDraft.status,
         };
-        const created = await api.create("Role", payload);
-        setTableRows((prev) => [created || payload, ...prev]);
+        await api.create("Role", payload);
+        await fetchRoles();
         setEditingRowId(null);
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
@@ -99,8 +99,8 @@ function UserRole() {
           status:
             typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
         };
-        const updated = await api.update("Role", editDraft.id, payload);
-        setTableRows((prev) => prev.map((r) => (r.id === editDraft.id ? updated || payload : r)));
+        await api.update("Role", editDraft.id, payload);
+        await fetchRoles();
         setEditingRowId(null);
         setEditDraft(null);
       }
@@ -112,7 +112,7 @@ function UserRole() {
   const handleDeleteRole = async (id) => {
     try {
       await api.remove("Role", id);
-      setTableRows((prev) => prev.filter((row) => row.id !== id));
+      await fetchRoles();
     } catch (e) {
       console.error("Delete failed", e);
     }
@@ -131,11 +131,11 @@ function UserRole() {
   };
 
   const columns = [
-    { Header: "Id", accessor: "id", align: "left", width: "8%" },
-    { Header: "Role Name", accessor: "roleName", align: "left", width: "18%" },
-    { Header: "Description", accessor: "description", align: "left" },
-    { Header: "Status", accessor: "status", align: "left" },
-    { Header: "Actions", accessor: "actions", align: "center" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
+    { Header: "Id", accessor: "id", align: "left", width: "6%" },
+    { Header: "Role Name", accessor: "roleName", align: "left", width: "20%" },
+    { Header: "Description", accessor: "description", align: "left", width: "28%" },
+    { Header: "Status", accessor: "status", align: "center", width: "10%" },
   ];
 
   const renderStatusBadge = (status) => {
@@ -209,13 +209,43 @@ function UserRole() {
       const draft = isEditing ? editDraft : r;
       rows.push({
         id: r.id,
-        roleName: isEditing ? renderInput("roleName", draft.roleName) : r.roleName,
-        description: isEditing ? renderInput("description", draft.description) : r.description,
+        roleName: isEditing ? (
+          renderInput("roleName", draft.roleName)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {r.roleName}
+          </MDBox>
+        ),
+        description: isEditing ? (
+          renderInput("description", draft.description)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {r.description}
+          </MDBox>
+        ),
         status: isEditing
           ? renderStatusSelect("status", draft.status)
           : renderStatusBadge(r.status),
         actions: isEditing ? (
-          <MDBox display="flex" gap={1}>
+          <MDBox>
             <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
               Save
             </MDButton>
@@ -224,23 +254,34 @@ function UserRole() {
             </MDButton>
           </MDBox>
         ) : (
-          <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
               color="info"
-              size="small"
               onClick={() => handleEditRole(r.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
             >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
               size="small"
+              color="error"
               onClick={() => confirmDelete(r.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
             >
-              Delete
-            </MDButton>
+              <Icon>delete</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
@@ -274,15 +315,90 @@ function UserRole() {
               Add Roles
             </MDButton>
           </MDBox>
-          <MDBox pt={1} sx={{ "& .MuiTableCell-root": { padding: "6px 8px" } }}>
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-            />
+          <MDBox pt={3}>
+            <MDBox
+              sx={{
+                overflowX: "auto",
+                "& .MuiTable-root": {
+                  tableLayout: "fixed",
+                  width: "100%",
+                },
+                "& .MuiTableCell-root": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                  maxWidth: "100%",
+                  verticalAlign: "top",
+                },
+                "& .MuiTableCell-root *": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th": {
+                  fontSize: "1.15rem !important",
+                  fontWeight: "700 !important",
+                  padding: "12px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                  borderBottom: "1px solid #d0d0d0",
+                },
+                "& .MuiTable-root td": {
+                  padding: "10px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                  hyphens: "auto",
+                  maxWidth: "100%",
+                  borderBottom: "1px solid #e0e0e0",
+                },
+                "& .MuiTable-root td > div": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root td *": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+                "& .MuiTable-root td:nth-of-type(3) > *": {
+                  display: "block",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+              }}
+            >
+              <DataTable
+                table={{ columns, rows: computedRows }}
+                isSorted={false}
+                canSearch
+                entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
+                showTotalEntries
+                noEndBorder
+              />
+            </MDBox>
           </MDBox>
         </Card>
       </MDBox>

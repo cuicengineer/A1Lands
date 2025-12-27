@@ -38,7 +38,11 @@ function DataTableHeadCell({ width, children, sorted, align, ...rest }) {
       sx={({ palette: { light }, borders: { borderWidth }, functions: { rgba } }) => ({
         borderBottom: `${borderWidth[1]} solid ${light.main}`,
         backgroundColor: rgba(light.main, 0.2),
-        whiteSpace: "nowrap",
+        // Allow multi-line headers and prevent overflow into adjacent columns
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+        verticalAlign: "top",
       })}
     >
       <MDBox
