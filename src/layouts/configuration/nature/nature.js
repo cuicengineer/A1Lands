@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 // @mui material components
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
+import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 
@@ -19,6 +20,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 
 import api from "services/api.service";
+import StatusBadge from "components/StatusBadge";
 
 function NatureConfig() {
   const statusOptions = [
@@ -27,10 +29,12 @@ function NatureConfig() {
   ];
 
   const [tableRows, setTableRows] = useState([]);
-
+  const [searchQuery, setSearchQuery] = useState("");
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(5);
 
   useEffect(() => {
     fetchNatures();
@@ -138,16 +142,16 @@ function NatureConfig() {
   };
 
   const columns = [
-    { Header: "Id", accessor: "id", align: "left", minWidth: 1 },
-    { Header: "Name", accessor: "name", align: "left", minWidth: 60 },
-    { Header: "Description", accessor: "description", align: "left" },
-    { Header: "Status", accessor: "status", align: "center" },
-    { Header: "Rental Value (Mil)", accessor: "rentalVal", align: "right" },
-    { Header: "Annual Rent (Mil)", accessor: "annualRent", align: "right" },
-    { Header: "Govt Share", accessor: "govtShare", align: "right" },
-    { Header: "PAF Share", accessor: "pafShare", align: "right" },
-    { Header: "Property Number", accessor: "propNumber", align: "left" },
-    { Header: "Actions", accessor: "actions", align: "center" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
+    { Header: "Id", accessor: "id", align: "left", width: "6%" },
+    { Header: "Name", accessor: "name", align: "left", width: "18%" },
+    { Header: "Description", accessor: "description", align: "left", width: "24%" },
+    { Header: "Status", accessor: "status", align: "center", width: "8%" },
+    { Header: "Rental Value (Mil)", accessor: "rentalVal", align: "right", width: "10%" },
+    { Header: "Annual Rent (Mil)", accessor: "annualRent", align: "right", width: "10%" },
+    { Header: "Govt Share", accessor: "govtShare", align: "right", width: "8%" },
+    { Header: "PAF Share", accessor: "pafShare", align: "right", width: "8%" },
+    { Header: "Property Number", accessor: "propNumber", align: "left", width: "10%" },
   ];
 
   const renderInput = (field, value, type = "text", mandatory = false) => (
@@ -181,7 +185,16 @@ function NatureConfig() {
     </Select>
   );
 
-  const computedRows = (() => {
+  const computedRows = useMemo(() => {
+    const filteredRows = tableRows.filter((row) =>
+      Object.values(row || {}).some(
+        (value) =>
+          value !== null &&
+          value !== undefined &&
+          String(value).toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    );
+
     const rows = [];
     if (editingRowId === "__new__" && newRowDraft) {
       rows.push({
@@ -196,27 +209,59 @@ function NatureConfig() {
         propNumber: renderInput("propNumber", newRowDraft.propNumber),
         actions: (
           <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
     }
 
-    tableRows.forEach((r) => {
+    filteredRows.forEach((r) => {
       const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
       rows.push({
         id: r.id,
-        name: isEditing ? renderInput("name", draft.name, "text", true) : r.name,
-        description: isEditing ? renderInput("description", draft.description) : r.description,
-        status: isEditing
-          ? renderStatusSelect(draft.status)
-          : statusOptions.find((opt) => opt.value === r.status)?.label,
+        name: isEditing ? (
+          renderInput("name", draft.name, "text", true)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {r.name}
+          </MDBox>
+        ),
+        description: isEditing ? (
+          renderInput("description", draft.description)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {r.description}
+          </MDBox>
+        ),
+        status: isEditing ? (
+          renderStatusSelect(draft.status)
+        ) : (
+          <StatusBadge value={r.status} inactiveLabel="Not Active" inactiveColor="error" />
+        ),
         rentalVal: isEditing ? renderInput("rentalVal", draft.rentalVal, "number") : r.rentalVal,
         annualRent: isEditing
           ? renderInput("annualRent", draft.annualRent, "number")
@@ -226,38 +271,61 @@ function NatureConfig() {
         propNumber: isEditing ? renderInput("propNumber", draft.propNumber) : r.propNumber,
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ) : (
-          <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa", // Light grey background
+              gap: "2px", // Manually set small gap between icons
+              padding: "2px 2px", // Adds some internal padding
+              borderRadius: "2px", // Optional: softens the box edges
+            }}
+          >
+            <IconButton
+              size="small"
               color="info"
-              size="small"
               onClick={() => handleEditNature(r.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
             >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
               size="small"
+              color="error"
               onClick={() => handleDeleteNature(r.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
             >
-              Delete
-            </MDButton>
+              <Icon>delete</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
     });
 
     return rows;
-  })();
+  }, [tableRows, searchQuery, editingRowId, editDraft, newRowDraft]);
+
+  // Memoize the table object to prevent DataTable from resetting pagination
+  // This is lightweight - just stores a reference to columns and computedRows
+  const tableData = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
+
+  // Create a stable key based on the actual data (not editing state)
+  // This prevents DataTable remounting when only editing state changes
+  // Very lightweight - just a string concatenation
+  const tableKey = useMemo(
+    () => `nature-table-${tableRows.length}-${tableRows.map((r) => r.id).join("-")}`,
+    [tableRows]
+  );
 
   return (
     <DashboardLayout>
@@ -280,19 +348,105 @@ function NatureConfig() {
             <MDTypography variant="h6" color="white">
               Nature
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddNature}>
-              Add Nature
-            </MDButton>
+            <MDBox display="flex" alignItems="center" gap={2}>
+              <MDButton variant="gradient" color="info" onClick={handleAddNature}>
+                Add Nature
+              </MDButton>
+            </MDBox>
           </MDBox>
           <MDBox pt={3}>
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-            />
+            <MDBox
+              sx={{
+                overflowX: "auto",
+                "& .MuiTable-root": {
+                  tableLayout: "fixed",
+                  width: "100%",
+                },
+                "& .MuiTableCell-root": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                  maxWidth: "100%",
+                  verticalAlign: "top",
+                },
+                "& .MuiTableCell-root *": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th": {
+                  fontSize: "1.15rem !important",
+                  fontWeight: "700 !important",
+                  padding: "12px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                  borderBottom: "1px solid #d0d0d0",
+                },
+                "& .MuiTable-root td": {
+                  padding: "10px 10px !important",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                  hyphens: "auto",
+                  maxWidth: "100%",
+                  borderBottom: "1px solid #e0e0e0",
+                },
+                "& .MuiTable-root td > div": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root td *": {
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  overflowWrap: "anywhere",
+                },
+                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+                "& .MuiTable-root td:nth-of-type(3) > *": {
+                  display: "block",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  maxWidth: "100%",
+                },
+                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
+                  maxWidth: "240px",
+                  width: "20%",
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "anywhere !important",
+                  lineHeight: 1.4,
+                },
+              }}
+            >
+              <DataTable
+                table={tableData}
+                isSorted={false}
+                canSearch={true}
+                page={pageIndex}
+                entriesPerPage={{
+                  defaultValue: pageSize,
+                  entries: [5, 10, 15, 20, 25],
+                }}
+                onPageChange={(page) => setPageIndex(page)}
+                onEntriesPerPageChange={(value) => {
+                  setPageSize(value);
+                  setPageIndex(0); // Reset to first page when page size changes
+                }}
+                showTotalEntries
+                noEndBorder
+              />
+            </MDBox>
           </MDBox>
         </Card>
       </MDBox>

@@ -13,7 +13,7 @@ Coded by www.creative-tim.com
 * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 */
 
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useCallback, isValidElement } from "react";
 
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
@@ -39,6 +39,30 @@ import MDPagination from "components/MDPagination";
 import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
 
+function extractText(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return String(value);
+
+  // Arrays of nodes/values
+  if (Array.isArray(value)) return value.map(extractText).join(" ");
+
+  // React elements (e.g., MDBox wrapping strings, MDInput with value prop)
+  if (isValidElement(value)) {
+    const props = value.props || {};
+    if (props.value !== undefined) return extractText(props.value);
+    if (props.children !== undefined) return extractText(props.children);
+    return "";
+  }
+
+  // Plain objects (best-effort)
+  try {
+    return String(value);
+  } catch (e) {
+    return "";
+  }
+}
+
 function DataTable({
   entriesPerPage,
   canSearch,
@@ -47,6 +71,9 @@ function DataTable({
   pagination,
   isSorted,
   noEndBorder,
+  page: controlledPageIndex,
+  onPageChange,
+  onEntriesPerPageChange,
 }) {
   const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 10;
   const entries = entriesPerPage.entries
@@ -55,8 +82,37 @@ function DataTable({
   const columns = useMemo(() => table.columns, [table]);
   const data = useMemo(() => table.rows, [table]);
 
+  // Use controlled state if provided, otherwise use internal state
+  const isControlled = controlledPageIndex !== undefined;
+  const [internalPageIndex, setInternalPageIndex] = useState(0);
+  const [internalPageSize, setInternalPageSize] = useState(defaultValue || 10);
+
+  const currentPageIndex = isControlled ? controlledPageIndex : internalPageIndex;
+  const currentPageSize =
+    isControlled && onEntriesPerPageChange
+      ? entriesPerPage.defaultValue || defaultValue || 10
+      : internalPageSize;
+
   const tableInstance = useTable(
-    { columns, data, initialState: { pageIndex: 0 } },
+    {
+      columns,
+      data,
+      initialState: { pageIndex: currentPageIndex, pageSize: currentPageSize },
+      state: isControlled
+        ? {
+            pageIndex: currentPageIndex,
+            pageSize: currentPageSize,
+          }
+        : undefined,
+      globalFilter: (rows, columnIds, filterValue) => {
+        const searchValue = extractText(filterValue).trim().toLowerCase();
+        if (!searchValue) return rows;
+
+        return rows.filter((row) =>
+          columnIds.some((id) => extractText(row.values?.[id]).toLowerCase().includes(searchValue))
+        );
+      },
+    },
     useGlobalFilter,
     useSortBy,
     usePagination
@@ -80,18 +136,70 @@ function DataTable({
     state: { pageIndex, pageSize, globalFilter },
   } = tableInstance;
 
-  // Set the default value for the entries per page when component mounts
-  useEffect(() => setPageSize(defaultValue || 10), [defaultValue]);
+  // Sync controlled state with table instance when it changes externally
+  useEffect(() => {
+    if (isControlled) {
+      if (pageIndex !== currentPageIndex) {
+        gotoPage(currentPageIndex);
+      }
+      if (pageSize !== currentPageSize && onEntriesPerPageChange) {
+        setPageSize(currentPageSize);
+      }
+    }
+  }, [
+    isControlled,
+    currentPageIndex,
+    currentPageSize,
+    pageIndex,
+    pageSize,
+    gotoPage,
+    setPageSize,
+    onEntriesPerPageChange,
+  ]);
+
+  // Set default page size on mount if not controlled
+  useEffect(() => {
+    if (!isControlled) {
+      setPageSize(defaultValue || 10);
+    }
+  }, [defaultValue, isControlled, setPageSize]);
+
+  // Override gotoPage to call onPageChange if controlled
+  const handleGotoPage = useCallback(
+    (page) => {
+      if (isControlled && onPageChange) {
+        onPageChange(page);
+      } else {
+        gotoPage(page);
+        setInternalPageIndex(page);
+      }
+    },
+    [isControlled, onPageChange, gotoPage]
+  );
+
+  // Override setPageSize to call onEntriesPerPageChange if controlled
+  const handleSetPageSize = useCallback(
+    (size) => {
+      const numSize = Number(size);
+      if (isControlled && onEntriesPerPageChange) {
+        onEntriesPerPageChange(numSize);
+      } else {
+        setPageSize(numSize);
+        setInternalPageSize(numSize);
+      }
+    },
+    [isControlled, onEntriesPerPageChange, setPageSize]
+  );
 
   // Set the entries per page value based on the select value
-  const setEntriesPerPage = (value) => setPageSize(value);
+  const setEntriesPerPage = (value) => handleSetPageSize(Number(value));
 
   // Render the paginations
   const renderPagination = pageOptions.map((option) => (
     <MDPagination
       item
       key={option}
-      onClick={() => gotoPage(Number(option))}
+      onClick={() => handleGotoPage(Number(option))}
       active={pageIndex === option}
     >
       {option + 1}
@@ -100,16 +208,16 @@ function DataTable({
 
   // Handler for the input to set the pagination index
   const handleInputPagination = ({ target: { value } }) =>
-    value > pageOptions.length || value < 0 ? gotoPage(0) : gotoPage(Number(value));
+    value > pageOptions.length || value < 0 ? handleGotoPage(0) : handleGotoPage(Number(value));
 
   // Customized page options starting from 1
   const customizedPageOptions = pageOptions.map((option) => option + 1);
 
   // Setting value for the pagination input
-  const handleInputPaginationValue = ({ target: value }) => gotoPage(Number(value.value - 1));
+  const handleInputPaginationValue = ({ target: value }) => handleGotoPage(Number(value.value - 1));
 
   // Search input value state
-  const [search, setSearch] = useState(globalFilter);
+  const [search, setSearch] = useState(globalFilter ?? "");
 
   // Search input state handle
   const onSearchChange = useAsyncDebounce((value) => {
@@ -184,7 +292,7 @@ function DataTable({
                 size="small"
                 fullWidth
                 onChange={({ currentTarget }) => {
-                  setSearch(search);
+                  setSearch(currentTarget.value);
                   onSearchChange(currentTarget.value);
                 }}
               />
@@ -266,7 +374,7 @@ function DataTable({
             color={pagination.color ? pagination.color : "info"}
           >
             {canPreviousPage && (
-              <MDPagination item onClick={() => previousPage()}>
+              <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
                 <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
               </MDPagination>
             )}
@@ -282,7 +390,7 @@ function DataTable({
               renderPagination
             )}
             {canNextPage && (
-              <MDPagination item onClick={() => nextPage()}>
+              <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
                 <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
               </MDPagination>
             )}
@@ -330,6 +438,9 @@ DataTable.propTypes = {
   }),
   isSorted: PropTypes.bool,
   noEndBorder: PropTypes.bool,
+  page: PropTypes.number,
+  onPageChange: PropTypes.func,
+  onEntriesPerPageChange: PropTypes.func,
 };
 
 export default DataTable;

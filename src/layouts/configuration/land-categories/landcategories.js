@@ -10,6 +10,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
+import StatusBadge from "components/StatusBadge";
 
 function LandCategories() {
   const statusOptions = ["Active", "Deactive"];
@@ -127,7 +128,11 @@ function LandCategories() {
       rows.push({
         sno: isEditing ? renderInput("sno", draft.sno) : r.sno,
         class: isEditing ? renderInput("class", draft.class) : r.class,
-        status: isEditing ? renderStatusSelect(draft.status) : r.status,
+        status: isEditing ? (
+          renderStatusSelect(draft.status)
+        ) : (
+          <StatusBadge value={r.status} inactiveLabel="Deactive" inactiveColor="error" />
+        ),
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
             <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>

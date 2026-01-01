@@ -15,6 +15,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import { useState } from "react";
 import ProfitSharingForm from "layouts/configuration/profit-sharing/components/ProfitSharingForm";
+import StatusBadge from "components/StatusBadge";
 
 function ProfitSharing() {
   const [openForm, setOpenForm] = useState(false);
@@ -53,7 +54,7 @@ function ProfitSharing() {
       remarks: "Sample remarks 1",
       updatedBy: "Admin",
       updatedDate: "2023-01-01",
-      status: "Active",
+      status: <StatusBadge value="Active" inactiveLabel="Inactive" inactiveColor="error" />,
       actions: (
         <MDBox display="flex" alignItems="center" mt={{ xs: 2, sm: 0 }} ml={{ xs: -1.5, sm: 0 }}>
           <MDButton variant="text" color="dark">
@@ -77,7 +78,7 @@ function ProfitSharing() {
       remarks: "Sample remarks 2",
       updatedBy: "Admin",
       updatedDate: "2023-02-01",
-      status: "Inactive",
+      status: <StatusBadge value={false} inactiveLabel="Inactive" inactiveColor="error" />,
       actions: (
         <MDBox display="flex" alignItems="center" mt={{ xs: 2, sm: 0 }} ml={{ xs: -1.5, sm: 0 }}>
           <MDButton variant="text" color="dark">

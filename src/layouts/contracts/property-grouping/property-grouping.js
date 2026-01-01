@@ -32,6 +32,7 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
+import StatusBadge from "components/StatusBadge";
 
 function PropertyGroupingForm({
   open,
@@ -891,7 +892,7 @@ export default function PropertyGrouping() {
       align: "center",
       width: "8%",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? "Active" : "Inactive"),
+      Cell: ({ value }) => <StatusBadge value={value} />,
     },
     {
       Header: "Linked Properties",

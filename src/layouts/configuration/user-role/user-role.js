@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
-import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
+import StatusBadge from "components/StatusBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -21,6 +21,8 @@ function UserRole() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(5);
 
   const fetchRoles = async () => {
     try {
@@ -139,20 +141,9 @@ function UserRole() {
   ];
 
   const renderStatusBadge = (status) => {
-    const label =
-      status === 1 ||
-      status === "1" ||
-      (typeof status === "string" && status.toLowerCase() === "active")
-        ? "Active"
-        : "DeActive";
     return (
       <MDBox ml={-1}>
-        <MDBadge
-          badgeContent={label}
-          color={label === "Active" ? "success" : "dark"}
-          variant="gradient"
-          size="sm"
-        />
+        <StatusBadge value={status} inactiveLabel="DeActive" inactiveColor="error" />
       </MDBox>
     );
   };
@@ -193,12 +184,12 @@ function UserRole() {
         status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
@@ -245,13 +236,13 @@ function UserRole() {
           ? renderStatusSelect("status", draft.status)
           : renderStatusBadge(r.status),
         actions: isEditing ? (
-          <MDBox>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+          <MDBox display="flex" gap={1}>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ) : (
           <MDBox
@@ -394,7 +385,13 @@ function UserRole() {
                 table={{ columns, rows: computedRows }}
                 isSorted={false}
                 canSearch
-                entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
+                page={pageIndex}
+                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
+                onPageChange={(page) => setPageIndex(page)}
+                onEntriesPerPageChange={(value) => {
+                  setPageSize(value);
+                  setPageIndex(0);
+                }}
                 showTotalEntries
                 noEndBorder
               />

@@ -59,6 +59,9 @@ import RentalProperties from "layouts/configuration/rental-properties/rental-pro
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
+import RevenueRates from "layouts/contracts/revenue-rates/revenue-rates";
+import Tenants from "layouts/contracts/tenants/tenants";
+import ContractsNew from "layouts/contracts/contracts/contracts";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -181,7 +184,7 @@ const routes = [
         key: "contracts",
         icon: <Icon fontSize="small">article</Icon>,
         route: "/contracts",
-        component: <Contracts />,
+        component: <ContractsNew />,
       },
       {
         type: "collapse",
@@ -190,6 +193,22 @@ const routes = [
         icon: <Icon fontSize="small">assessment</Icon>,
         route: "/contracts/report",
         component: <ContractsReport />,
+      },
+      {
+        type: "collapse",
+        name: "Revenue Rates",
+        key: "revenue-rates",
+        icon: <Icon fontSize="small">attach_money</Icon>,
+        route: "/contracts/revenue-rates",
+        component: <RevenueRates />,
+      },
+      {
+        type: "collapse",
+        name: "Tenants",
+        key: "tenants",
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/contracts/tenants",
+        component: <Tenants />,
       },
     ],
   },

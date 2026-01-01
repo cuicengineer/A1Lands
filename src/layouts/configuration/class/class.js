@@ -200,12 +200,12 @@ function ClassConfig() {
         status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
@@ -253,13 +253,13 @@ function ClassConfig() {
           ? renderStatusSelect("status", currentRow.status)
           : renderStatusBadge(currentRow.status),
         actions: isEditing ? (
-          <MDBox>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleSave}>
-              Save
-            </MDButton>
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+          <MDBox display="flex" gap={1}>
+            <IconButton size="small" color="success" onClick={handleSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ) : (
           <MDBox

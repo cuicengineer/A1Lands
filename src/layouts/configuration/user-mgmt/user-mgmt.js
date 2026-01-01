@@ -12,11 +12,13 @@ import DataTable from "examples/Tables/DataTable";
 
 import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
+import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Select from "@mui/material/Select";
 import api from "../../../services/api.service";
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
+import StatusBadge from "components/StatusBadge";
 
 function UserMgmt() {
   const [tableRows, setTableRows] = useState([]);
@@ -30,6 +32,8 @@ function UserMgmt() {
 
   const [errors, setErrors] = useState({});
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(5);
 
   useEffect(() => {
     let mounted = true;
@@ -190,7 +194,8 @@ function UserMgmt() {
   };
 
   const columns = [
-    { Header: "Id", accessor: "id", align: "left" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
+    { Header: "Id", accessor: "id", align: "center", width: "56px" },
     { Header: "Username", accessor: "username", align: "left" },
     { Header: "PakNo", accessor: "pakNo", align: "left" },
     { Header: "Name", accessor: "name", align: "left" },
@@ -223,19 +228,12 @@ function UserMgmt() {
     },
     { Header: "Unit", accessor: "unitId", align: "left" },
     { Header: "Status", accessor: "status", align: "center" },
-    { Header: "Actions", accessor: "actions", align: "center" },
   ];
 
   const renderStatusBadge = (status) => {
-    const label = status === 1 ? "Active" : "Inactive";
     return (
       <MDBox ml={-1}>
-        <MDBadge
-          badgeContent={label}
-          color={label === "Active" ? "success" : "dark"}
-          variant="gradient"
-          size="sm"
-        />
+        <StatusBadge value={status} inactiveLabel="Inactive" inactiveColor="error" />
       </MDBox>
     );
   };
@@ -336,32 +334,42 @@ function UserMgmt() {
           : renderStatusBadge(r.status),
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
-            <MDButton variant="gradient" color="success" size="small" onClick={handleEditSave}>
-              Save
-            </MDButton>
-
-            <MDButton variant="outlined" color="secondary" size="small" onClick={handleCancel}>
-              Cancel
-            </MDButton>
+            <IconButton size="small" color="success" onClick={handleEditSave} title="Save">
+              <Icon>check</Icon>
+            </IconButton>
+            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+              <Icon>close</Icon>
+            </IconButton>
           </MDBox>
         ) : (
-          <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
               color="info"
-              size="small"
               onClick={() => handleEditUser(r.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
             >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
               size="small"
+              color="error"
               onClick={() => handleDeleteUser(r.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
             >
-              Delete
-            </MDButton>
+              <Icon>delete</Icon>
+            </IconButton>
           </MDBox>
         ),
       });
@@ -396,14 +404,47 @@ function UserMgmt() {
             </MDButton>
           </MDBox>
           <MDBox pt={3}>
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-            />
+            <MDBox
+              sx={{
+                overflowX: "auto",
+                "& .MuiTable-root": {
+                  tableLayout: "fixed",
+                  width: "100%",
+                },
+                "& .MuiTable-root th": {
+                  fontSize: "1.05rem !important",
+                  fontWeight: "700 !important",
+                  padding: "10px 10px !important",
+                  borderBottom: "1px solid #d0d0d0",
+                },
+                "& .MuiTable-root td": {
+                  padding: "8px 10px !important",
+                  borderBottom: "1px solid #e0e0e0",
+                },
+                // Tighten spacing for numeric-ish columns after reordering:
+                // 2 = Id, 11 = Unit
+                "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(11), & .MuiTable-root td:nth-of-type(11)":
+                  {
+                    paddingLeft: "6px !important",
+                    paddingRight: "6px !important",
+                  },
+              }}
+            >
+              <DataTable
+                table={{ columns, rows: computedRows }}
+                isSorted={false}
+                canSearch
+                page={pageIndex}
+                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
+                onPageChange={(page) => setPageIndex(page)}
+                onEntriesPerPageChange={(value) => {
+                  setPageSize(value);
+                  setPageIndex(0);
+                }}
+                showTotalEntries
+                noEndBorder
+              />
+            </MDBox>
           </MDBox>
         </Card>
       </MDBox>

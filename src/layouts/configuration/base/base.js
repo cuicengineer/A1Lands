@@ -4,8 +4,8 @@ import api from "../../../services/api.service";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
-import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
+import StatusBadge from "components/StatusBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -186,20 +186,9 @@ function Base() {
   );
 
   const renderStatusBadge = (status) => {
-    const label =
-      status === 1 ||
-      status === "1" ||
-      (typeof status === "string" && status.toLowerCase() === "active")
-        ? "Active"
-        : "Not Active";
     return (
       <MDBox ml={-1}>
-        <MDBadge
-          badgeContent={label}
-          color={label === "Active" ? "success" : "dark"}
-          variant="gradient"
-          size="sm"
-        />
+        <StatusBadge value={status} inactiveLabel="Not Active" inactiveColor="error" />
       </MDBox>
     );
   };

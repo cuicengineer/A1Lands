@@ -16,6 +16,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import NewContractForm from "layouts/contracts/components/NewContractForm";
 import { useState } from "react";
+import StatusBadge from "components/StatusBadge";
 
 function Contracts() {
   const [openForm, setOpenForm] = useState(false);
@@ -102,7 +103,7 @@ function Contracts() {
       dpcPerDay: "1%",
       govtSharePA: "5%",
       pafSharePA: "2%",
-      status: "Active",
+      status: <StatusBadge value="Active" inactiveLabel="Inactive" inactiveColor="error" />,
       feasible: "Yes",
       caStatus: "Approved",
       approvingAuthority: "Authority A",
