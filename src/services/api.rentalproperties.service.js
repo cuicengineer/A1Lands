@@ -98,5 +98,3 @@ function remove(id) {
 
 const rentalPropertiesApi = { getAll, create, update, remove };
 export default rentalPropertiesApi;
-
-

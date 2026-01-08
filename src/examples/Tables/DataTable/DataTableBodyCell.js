@@ -30,6 +30,8 @@ function DataTableBodyCell({ noBorder, align, children, isEvenRow }) {
         fontSize: "0.875rem",
         borderBottom: noBorder ? "none" : `${borderWidth[1]} solid ${light.main}`,
         backgroundColor: isEvenRow ? "#f0f0f0" : "#ffffff",
+        // Force readable row text even when dark theme is enabled
+        color: "#111111 !important",
         // Allow multi-line cells and prevent overflow into adjacent columns
         whiteSpace: "normal",
         overflowWrap: "anywhere",
@@ -40,7 +42,7 @@ function DataTableBodyCell({ noBorder, align, children, isEvenRow }) {
       <MDBox
         display="block"
         width="100%"
-        color="text"
+        color="inherit"
         sx={{
           verticalAlign: "top",
           maxWidth: "100%",

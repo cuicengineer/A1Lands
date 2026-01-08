@@ -2,6 +2,10 @@ import { useEffect, useState, useMemo } from "react";
 
 // @mui material components
 import Card from "@mui/material/Card";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
@@ -35,6 +39,8 @@ function NatureConfig() {
   const [editDraft, setEditDraft] = useState(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(5);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState(null);
 
   useEffect(() => {
     fetchNatures();
@@ -132,12 +138,27 @@ function NatureConfig() {
     setEditDraft(null);
   };
 
-  const handleDeleteNature = async (id) => {
+  const handleDeleteNature = (id) => {
+    if (editingRowId) return;
+    setRecordToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setRecordToDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!recordToDelete) return;
     try {
-      await api.remove("Nature", id);
+      await api.remove("Nature", recordToDelete);
       fetchNatures();
     } catch (error) {
       console.error("Error deleting nature:", error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setRecordToDelete(null);
     }
   };
 
@@ -451,6 +472,22 @@ function NatureConfig() {
         </Card>
       </MDBox>
       <Footer />
+      <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="body1" sx={{ fontSize: "1.1rem" }}>
+            Are you sure you want to delete this nature? This action cannot be undone.
+          </MDTypography>
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+            <Icon>delete</Icon>&nbsp;Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
     </DashboardLayout>
   );
 }

@@ -108,6 +108,18 @@ function removePropertyFromGroup(linkingId) {
   return request("DELETE", `/api/PropertyGroup/Linking/${linkingId}`, payload);
 }
 
+function createPropertyGroupLinking(data) {
+  // Backend: [HttpPost("Linking")] CreatePropertyGroupLinking([FromBody] PropertyGroupLinking request)
+  const payload = {
+    ...(data || {}),
+    Action: "Create",
+    ActionBy: "admin",
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  return request("POST", `/api/PropertyGroup/Linking`, payload);
+}
+
 const propertyGroupingApi = {
   list,
   get,
@@ -116,5 +128,6 @@ const propertyGroupingApi = {
   remove,
   getByGroup,
   removePropertyFromGroup,
+  createPropertyGroupLinking,
 };
 export default propertyGroupingApi;

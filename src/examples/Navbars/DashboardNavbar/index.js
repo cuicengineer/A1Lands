@@ -16,7 +16,7 @@ Coded by www.creative-tim.com
 import { useState, useEffect } from "react";
 
 // react-router components
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 // prop-types is a library for typechecking of props.
 import PropTypes from "prop-types";
@@ -26,6 +26,7 @@ import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
 
 // Material Dashboard 2 React components
@@ -58,10 +59,11 @@ import {
 import adminProfile from "assets/images/bruce-mars.jpg";
 
 function DashboardNavbar({ absolute, light, isMini }) {
+  const navigate = useNavigate();
   const [navbarType, setNavbarType] = useState();
   const [controller, dispatch] = useMaterialUIController();
   const { miniSidenav, transparentNavbar, fixedNavbar, openConfigurator, darkMode } = controller;
-  const [openMenu, setOpenMenu] = useState(false);
+  const [openMenu, setOpenMenu] = useState(null);
 
   useEffect(() => {
     // Setting the navbar type
@@ -101,6 +103,11 @@ function DashboardNavbar({ absolute, light, isMini }) {
   const handleOpenMenu = (event) => setOpenMenu(event.currentTarget);
   const handleCloseMenu = () => setOpenMenu(false);
 
+  const handleLogout = () => {
+    handleCloseMenu();
+    navigate("/");
+  };
+
   // Render the notifications menu
   const renderMenu = () => (
     <Menu
@@ -108,15 +115,16 @@ function DashboardNavbar({ absolute, light, isMini }) {
       anchorReference={null}
       anchorOrigin={{
         vertical: "bottom",
-        horizontal: "left",
+        horizontal: "right",
       }}
       open={Boolean(openMenu)}
       onClose={handleCloseMenu}
       sx={{ mt: 2 }}
     >
-      <NotificationItem icon={<Icon>email</Icon>} title="Check new messages" />
-      <NotificationItem icon={<Icon>podcasts</Icon>} title="Manage Podcast sessions" />
-      <NotificationItem icon={<Icon>shopping_cart</Icon>} title="Payment successfully completed" />
+      <MenuItem onClick={handleLogout} sx={{ minWidth: 180 }}>
+        <Icon sx={{ mr: 1, fontSize: 18 }}>logout</Icon>
+        Logout
+      </MenuItem>
     </Menu>
   );
 
@@ -151,6 +159,7 @@ function DashboardNavbar({ absolute, light, isMini }) {
                 size="sm"
                 shadow="sm"
                 sx={{ cursor: "pointer" }}
+                onClick={handleOpenMenu}
               />
               <MDTypography
                 variant="button"

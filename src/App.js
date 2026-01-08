@@ -50,8 +50,7 @@ import routes from "routes";
 import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "context";
 
 // Images
-import brandWhite from "assets/images/logo-ct.png";
-import brandDark from "assets/images/logo-ct-dark.png";
+import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
 
 export default function App() {
   const [controller, dispatch] = useMaterialUIController();
@@ -137,12 +136,7 @@ export default function App() {
         <CssBaseline />
         {layout === "dashboard" && (
           <>
-            <Sidenav
-              color={sidenavColor}
-              brand={(transparentSidenav && !darkMode) || whiteSidenav ? brandDark : brandWhite}
-              brandName="A1 Lands - 360"
-              routes={routes}
-            />
+            <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 Lands" routes={routes} />
             <Configurator />
             {configsButton}
           </>
@@ -150,7 +144,7 @@ export default function App() {
         {layout === "vr" && <Configurator />}
         <Routes>
           {getRoutes(routes)}
-          <Route path="*" element={<Navigate to="/dashboard" />} />
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </ThemeProvider>
     </CacheProvider>
@@ -159,19 +153,14 @@ export default function App() {
       <CssBaseline />
       {layout === "dashboard" && (
         <>
-          <Sidenav
-            color={sidenavColor}
-            brand={(transparentSidenav && !darkMode) || whiteSidenav ? brandDark : brandWhite}
-            brandName="A1 Lands - 360"
-            routes={routes}
-          />
+          <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 Lands" routes={routes} />
           <Configurator />
         </>
       )}
       {layout === "vr" && <Configurator />}
       <Routes>
         {getRoutes(routes)}
-        <Route path="*" element={<Navigate to="/dashboard" />} />
+        <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </ThemeProvider>
   );

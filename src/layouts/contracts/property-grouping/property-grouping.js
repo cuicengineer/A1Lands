@@ -44,6 +44,48 @@ function PropertyGroupingForm({
   bases,
   classes,
 }) {
+  const isEditMode = Boolean(initialData);
+  const normalizePropertyIds = (data) => {
+    if (!data) return [];
+
+    const fromLinkings = data.PropertyGroupLinkings || data.propertyGroupLinkings;
+    if (Array.isArray(fromLinkings) && fromLinkings.length) {
+      const ids = fromLinkings
+        .map((x) => {
+          if (x === null || x === undefined) return null;
+          if (typeof x === "number" || typeof x === "string") return Number(x);
+          // best-effort for object shapes
+          const candidate =
+            x.propertyId?.id ??
+            x.propertyId ??
+            x.property?.id ??
+            x.property ??
+            x.rentalPropertyId?.id ??
+            x.rentalPropertyId ??
+            x.id;
+          return Number(candidate);
+        })
+        .filter((n) => Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    const raw = data.property;
+    if (Array.isArray(raw)) {
+      const ids = raw.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    if (typeof raw === "string") {
+      const ids = raw
+        .split(",")
+        .map((s) => Number(String(s).trim()))
+        .filter((n) => Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    return [];
+  };
+
   const [form, setForm] = useState({
     cmdid: "",
     baseid: "",
@@ -60,6 +102,15 @@ function PropertyGroupingForm({
   });
 
   const [allBases, setAllBases] = useState([]); // New state to store all bases
+  const [linkedPropertyNameById, setLinkedPropertyNameById] = useState({});
+
+  const getPropertyLabel = (propertyId) => {
+    const idKey = String(propertyId);
+    const fromLinked = linkedPropertyNameById[idKey];
+    if (fromLinked) return String(fromLinked);
+    const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
+    return String(prop?.propertyName || prop?.name || prop?.pId || propertyId);
+  };
 
   useEffect(() => {
     const fetchAllBases = async () => {
@@ -78,15 +129,12 @@ function PropertyGroupingForm({
 
   useEffect(() => {
     if (initialData) {
+      const normalizedPropertyIds = normalizePropertyIds(initialData);
       const newForm = {
         cmdid: initialData.cmdId || "",
         baseid: initialData.baseId || "",
         classid: initialData.classId || "",
-        property: initialData.property
-          ? Array.isArray(initialData.property)
-            ? initialData.property
-            : initialData.property.split(", ")
-          : [],
+        property: normalizedPropertyIds,
         gId: initialData.gId || "",
         uoM: initialData.uoM || "",
         location: initialData.location || "",
@@ -116,6 +164,7 @@ function PropertyGroupingForm({
         newForm.baseid = ""; // Reset if not found in filtered bases
       }
       setForm(newForm);
+      setLinkedPropertyNameById(initialData.linkedPropertyNameById || {});
     } else {
       setForm({
         cmdid: "",
@@ -131,6 +180,7 @@ function PropertyGroupingForm({
         status: true,
         isDeleted: false,
       });
+      setLinkedPropertyNameById({});
     }
   }, [initialData, allBases]);
 
@@ -169,19 +219,55 @@ function PropertyGroupingForm({
     const {
       target: { value },
     } = event;
-    const selectedProperties = typeof value === "string" ? value.split(",") : value;
+    const selectedPropertiesRaw = typeof value === "string" ? value.split(",") : value;
+    const selectedProperties = (selectedPropertiesRaw || [])
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
 
-    // Calculate total area from selected properties
-    const totalArea = selectedProperties.reduce((sum, propertyId) => {
-      const property = rentalProperties.find((p) => p.id === Number(propertyId));
-      return sum + (property && property.area ? Number(property.area) : 0);
-    }, 0);
+    setForm((prevForm) => {
+      const prevIds = Array.isArray(prevForm.property) ? prevForm.property : [];
 
-    setForm((prevForm) => ({
-      ...prevForm,
-      property: selectedProperties,
-      area: totalArea,
-    }));
+      // Allow removals freely; enforce unique labels only when adding new selection(s)
+      const isRemoval = selectedProperties.length < prevIds.length;
+      if (!isRemoval) {
+        const prevLabelSet = new Set(prevIds.map(getPropertyLabel));
+
+        // Detect newly-added ids and block duplicates by label
+        const addedIds = selectedProperties.filter((id) => !prevIds.includes(id));
+        for (let i = 0; i < addedIds.length; i += 1) {
+          const id = addedIds[i];
+          const label = getPropertyLabel(id);
+          if (prevLabelSet.has(label)) {
+            alert(`"${label}" is already selected. Each property name can be added only once.`);
+            return prevForm;
+          }
+          prevLabelSet.add(label);
+        }
+
+        // Also prevent duplicates within the incoming selection itself (edge case)
+        const seen = new Set();
+        for (let i = 0; i < selectedProperties.length; i += 1) {
+          const label = getPropertyLabel(selectedProperties[i]);
+          if (seen.has(label)) {
+            alert(`"${label}" is already selected. Each property name can be added only once.`);
+            return prevForm;
+          }
+          seen.add(label);
+        }
+      }
+
+      // Calculate total area from selected properties
+      const totalArea = selectedProperties.reduce((sum, propertyId) => {
+        const property = rentalProperties.find((p) => p.id === Number(propertyId));
+        return sum + (property && property.area ? Number(property.area) : 0);
+      }, 0);
+
+      return {
+        ...prevForm,
+        property: selectedProperties,
+        area: totalArea,
+      };
+    });
   };
 
   const handleDeleteProperty = (propertyToDelete) => () => {
@@ -399,6 +485,7 @@ function PropertyGroupingForm({
                 multiple
                 value={form.property || []}
                 onChange={handlePropertyChange}
+                disabled={isEditMode}
                 input={<OutlinedInput id="select-multiple-chip" label="Property" />}
                 MenuProps={{
                   PaperProps: {
@@ -418,16 +505,29 @@ function PropertyGroupingForm({
                     display: "block !important",
                     right: "8px",
                   },
+                  // Keep it readable even when disabled (read-only requirement)
+                  "&.Mui-disabled": {
+                    opacity: 1,
+                  },
+                  "& .MuiSelect-select.Mui-disabled": {
+                    WebkitTextFillColor: "inherit",
+                  },
                 }}
                 renderValue={(selected) => (
                   <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                     {selected.map((value) => {
-                      const property = rentalProperties.find((p) => p.id === value);
+                      const property = rentalProperties.find((p) => Number(p.id) === Number(value));
+                      const label =
+                        linkedPropertyNameById[String(value)] ||
+                        property?.propertyName ||
+                        property?.name ||
+                        property?.pId ||
+                        value;
                       return (
                         <Chip
                           key={value}
-                          label={property ? property.pId : value}
-                          onDelete={handleDeleteProperty(value)}
+                          label={label}
+                          {...(!isEditMode && { onDelete: handleDeleteProperty(value) })}
                           sx={{ fontSize: "0.9rem" }}
                           size="small"
                         />
@@ -436,15 +536,24 @@ function PropertyGroupingForm({
                   </Box>
                 )}
               >
-                {rentalProperties.map((option) => (
-                  <MenuItem
-                    key={option.id}
-                    value={option.id}
-                    sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                  >
-                    {option.pId}
-                  </MenuItem>
-                ))}
+                {rentalProperties.map((option) => {
+                  const optionLabel = getPropertyLabel(option.id);
+                  const selectedIds = form.property || [];
+                  const selectedLabelSet = new Set(selectedIds.map(getPropertyLabel));
+                  const isSelected = selectedIds.some((id) => Number(id) === Number(option.id));
+                  const isDuplicateName = selectedLabelSet.has(optionLabel) && !isSelected;
+
+                  return (
+                    <MenuItem
+                      key={option.id}
+                      value={option.id}
+                      disabled={isDuplicateName}
+                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                    >
+                      {optionLabel}
+                    </MenuItem>
+                  );
+                })}
               </Select>
             </FormControl>
           </Grid>
@@ -673,12 +782,16 @@ export default function PropertyGrouping() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState(null);
   const [linkedPropertiesDialogOpen, setLinkedPropertiesDialogOpen] = useState(false);
   const [linkedProperties, setLinkedProperties] = useState([]);
   const [loadingLinkedProperties, setLoadingLinkedProperties] = useState(false);
   const [currentGroupId, setCurrentGroupId] = useState("");
   const [currentGroupRecordId, setCurrentGroupRecordId] = useState(null);
   const [removingPropertyId, setRemovingPropertyId] = useState(null);
+  const [linkingSelection, setLinkingSelection] = useState([]);
+  const [savingLinkings, setSavingLinkings] = useState(false);
 
   // Pagination state for main table
   const [pageNumber, setPageNumber] = useState(1);
@@ -777,6 +890,7 @@ export default function PropertyGrouping() {
     setLinkedPropertiesDialogOpen(true);
     setLoadingLinkedProperties(true);
     setLinkedProperties([]);
+    setLinkingSelection([]);
     setLinkedPropertiesPageNumber(page);
     setLinkedPropertiesPageSize(size);
     try {
@@ -823,9 +937,81 @@ export default function PropertyGrouping() {
     setLinkedProperties([]);
     setCurrentGroupId("");
     setCurrentGroupRecordId(null);
+    setLinkingSelection([]);
+    setSavingLinkings(false);
     setLinkedPropertiesPageNumber(1);
     setLinkedPropertiesPageSize(100);
     setLinkedPropertiesTotalCount(0);
+  };
+
+  const getRentalPropertyLabel = (rp) => String(rp?.propertyName || rp?.name || rp?.pId || "");
+
+  const getLinkedPropertyLabel = (item) =>
+    String(
+      item?.propertyName ||
+        item?.name ||
+        (typeof item?.property === "object"
+          ? item.property.groupName || item.property.name || item.property.pId
+          : "") ||
+        ""
+    );
+
+  const getPropertyLabelById = (propertyId) => {
+    const rp = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
+    return rp ? getRentalPropertyLabel(rp) : `Property ID: ${propertyId}`;
+  };
+
+  const getLinkedPropertyId = (item) =>
+    Number(
+      item?.propertyId?.id ??
+        item?.propertyId ??
+        item?.property?.id ??
+        item?.property?.propertyId ??
+        item?.property ??
+        item?.rentalPropertyId?.id ??
+        item?.rentalPropertyId
+    );
+
+  const getLinkedPropertyNameSet = () => {
+    const set = new Set();
+    linkedProperties.forEach((x) => {
+      const name = getLinkedPropertyLabel(x);
+      if (name) set.add(name);
+    });
+    return set;
+  };
+
+  const handleSaveLinkings = async () => {
+    if (!currentGroupRecordId) return;
+    const ids = Array.from(
+      new Set((linkingSelection || []).map((n) => Number(n)).filter(Number.isFinite))
+    );
+    if (ids.length === 0) return;
+
+    setSavingLinkings(true);
+    try {
+      await Promise.all(
+        ids.map((propertyId) =>
+          propertyGroupingApi.createPropertyGroupLinking({
+            GrpId: Number(currentGroupRecordId),
+            PropId: Number(propertyId),
+          })
+        )
+      );
+      setLinkingSelection([]);
+      await handleViewLinkedProperties(
+        currentGroupRecordId,
+        currentGroupId,
+        linkedPropertiesPageNumber,
+        linkedPropertiesPageSize
+      );
+      fetchPropertyGroupings(pageNumber, pageSize);
+    } catch (e) {
+      console.error("Error creating property group linkings:", e);
+      alert("Failed to add linked properties. Please try again.");
+    } finally {
+      setSavingLinkings(false);
+    }
   };
 
   const handleRemoveProperty = async (linkingId) => {
@@ -930,32 +1116,138 @@ export default function PropertyGrouping() {
 
   const handleEditPropertyGrouping = (id) => {
     const propertyGrouping = rows.find((row) => row.id === id);
-    setCurrentPropertyGrouping({
-      ...propertyGrouping,
-      cmdId: propertyGrouping.cmdId || propertyGrouping.cmdid,
-      baseId: propertyGrouping.baseId || propertyGrouping.baseid,
-      classId: propertyGrouping.classId || propertyGrouping.classid,
-      cmdid: Number(propertyGrouping.cmdId || propertyGrouping.cmdid),
-      baseid: Number(propertyGrouping.baseId || propertyGrouping.baseid),
-      classid: Number(propertyGrouping.classId || propertyGrouping.classid),
-      property: propertyGrouping.property
-        ? Array.isArray(propertyGrouping.property)
-          ? propertyGrouping.property
-          : String(propertyGrouping.property).split(", ")
-        : [],
-      area: Number(propertyGrouping.area),
-      status: Boolean(propertyGrouping.status),
-      isDeleted: Boolean(propertyGrouping.isDeleted),
+    const normalizePropertyIds = (data) => {
+      if (!data) return [];
+      const fromLinkings = data.PropertyGroupLinkings || data.propertyGroupLinkings;
+      if (Array.isArray(fromLinkings) && fromLinkings.length) {
+        const ids = fromLinkings
+          .map((x) => {
+            if (x === null || x === undefined) return null;
+            if (typeof x === "number" || typeof x === "string") return Number(x);
+            const candidate =
+              x.propertyId?.id ??
+              x.propertyId ??
+              x.property?.id ??
+              x.property ??
+              x.rentalPropertyId?.id ??
+              x.rentalPropertyId ??
+              x.id;
+            return Number(candidate);
+          })
+          .filter((n) => Number.isFinite(n));
+        return Array.from(new Set(ids));
+      }
+      const raw = data.property;
+      if (Array.isArray(raw))
+        return Array.from(new Set(raw.map((v) => Number(v)).filter(Number.isFinite)));
+      if (typeof raw === "string")
+        return Array.from(
+          new Set(
+            raw
+              .split(",")
+              .map((s) => Number(String(s).trim()))
+              .filter((n) => Number.isFinite(n))
+          )
+        );
+      return [];
+    };
+
+    const extractLinkedPropertiesMeta = (resp) => {
+      const list = resp && resp.pagination ? resp.data || [] : Array.isArray(resp) ? resp : [];
+      const nameById = {};
+      const ids = [];
+
+      list.forEach((x) => {
+        if (!x) return;
+        const candidate =
+          x.propertyId?.id ??
+          x.propertyId ??
+          x.property?.id ??
+          x.property?.propertyId ??
+          x.property ??
+          x.rentalPropertyId?.id ??
+          x.rentalPropertyId ??
+          x.id;
+        const idNum = Number(candidate);
+        if (!Number.isFinite(idNum)) return;
+        ids.push(idNum);
+
+        const displayName =
+          x.propertyName ||
+          x.name ||
+          (typeof x.property === "object"
+            ? x.property.groupName || x.property.name || x.property.pId
+            : null) ||
+          null;
+        if (displayName) nameById[String(idNum)] = String(displayName);
+      });
+
+      return { ids: Array.from(new Set(ids)), nameById };
+    };
+
+    const mapToFormInitialData = (pg) => ({
+      ...pg,
+      cmdId: pg.cmdId || pg.cmdid,
+      baseId: pg.baseId || pg.baseid,
+      classId: pg.classId || pg.classid,
+      cmdid: Number(pg.cmdId || pg.cmdid),
+      baseid: Number(pg.baseId || pg.baseid),
+      classid: Number(pg.classId || pg.classid),
+      property: normalizePropertyIds(pg),
+      area: Number(pg.area),
+      status: Boolean(pg.status),
+      isDeleted: Boolean(pg.isDeleted),
     });
+
+    // Open immediately using row data (fast), then hydrate using:
+    // - GET /api/PropertyGroup/:id for full record
+    // - GET /api/PropertyGroup/ByGroup/:id for linked properties (same as the eye-icon dialog)
+    setCurrentPropertyGrouping(mapToFormInitialData(propertyGrouping));
     setOpenForm(true);
+
+    (async () => {
+      try {
+        const [full, byGroup] = await Promise.all([
+          propertyGroupingApi.get(id),
+          propertyGroupingApi.getByGroup(id, 1, 1000),
+        ]);
+        const { ids: linkedIds, nameById } = extractLinkedPropertiesMeta(byGroup);
+        const base = full || propertyGrouping || {};
+        const hydrated = {
+          ...base,
+          ...(linkedIds.length ? { property: linkedIds } : {}),
+          linkedPropertyNameById: nameById,
+        };
+        setCurrentPropertyGrouping(mapToFormInitialData(hydrated));
+      } catch (e) {
+        // keep the row-based data if GET fails
+        console.error("Error fetching property grouping details:", e);
+      }
+    })();
+
+    return;
   };
 
-  const handleDeletePropertyGrouping = async (id) => {
+  const handleDeletePropertyGrouping = (id) => {
+    setRecordToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setRecordToDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!recordToDelete) return;
     try {
-      await propertyGroupingApi.remove(id);
+      await propertyGroupingApi.remove(recordToDelete);
       fetchPropertyGroupings();
     } catch (error) {
       console.error("Error deleting property grouping:", error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setRecordToDelete(null);
     }
   };
 
@@ -1120,6 +1412,26 @@ export default function PropertyGrouping() {
                       paddingLeft: "6px !important",
                       paddingRight: "6px !important",
                     },
+                  // ID column: keep integers on a single line (avoid 1006 -> 100 + 6)
+                  "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
+                    whiteSpace: "nowrap !important",
+                    wordBreak: "normal !important",
+                    overflowWrap: "normal !important",
+                    width: "56px !important",
+                    minWidth: "56px !important",
+                    maxWidth: "56px !important",
+                    textAlign: "center !important",
+                  },
+                  "& .MuiTable-root td:nth-of-type(2) > div": {
+                    whiteSpace: "nowrap !important",
+                    wordBreak: "normal !important",
+                    overflowWrap: "normal !important",
+                  },
+                  "& .MuiTable-root td:nth-of-type(2) > div > *": {
+                    whiteSpace: "nowrap !important",
+                    wordBreak: "normal !important",
+                    overflowWrap: "normal !important",
+                  },
                 }}
               >
                 {/* Loading Overlay */}
@@ -1258,6 +1570,22 @@ export default function PropertyGrouping() {
         </Grid>
       </MDBox>
       <Footer />
+      <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="body1" sx={{ fontSize: "1.1rem" }}>
+            Are you sure you want to delete this property grouping? This action cannot be undone.
+          </MDTypography>
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+            <Icon>delete</Icon>&nbsp;Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
       <PropertyGroupingForm
         open={openForm}
         onClose={handleCloseForm}
@@ -1277,6 +1605,103 @@ export default function PropertyGrouping() {
       >
         <DialogTitle>Group ID: {currentGroupId}</DialogTitle>
         <DialogContent>
+          {/* Add Linked Properties */}
+          <MDBox mb={2}>
+            <MDTypography
+              variant="button"
+              color="secondary"
+              fontWeight="regular"
+              sx={{ display: "block", mb: 0.5 }}
+            >
+              Add Properties
+            </MDTypography>
+            <Autocomplete
+              multiple
+              disableCloseOnSelect
+              options={rentalProperties || []}
+              value={(rentalProperties || []).filter((rp) =>
+                (linkingSelection || []).some((id) => Number(id) === Number(rp.id))
+              )}
+              getOptionLabel={(option) =>
+                getRentalPropertyLabel(option) || String(option?.id || "")
+              }
+              isOptionEqualToValue={(option, value) => Number(option?.id) === Number(value?.id)}
+              onChange={(event, newValue) => {
+                const nextIds = (newValue || []).map((v) => Number(v.id)).filter(Number.isFinite);
+
+                // Enforce unique propertyName across already-linked + newly-selected
+                const usedNames = getLinkedPropertyNameSet();
+                const seen = new Set();
+                for (let i = 0; i < nextIds.length; i += 1) {
+                  const label = getPropertyLabelById(nextIds[i]);
+                  if (usedNames.has(label) || seen.has(label)) {
+                    alert(
+                      `"${label}" is already selected. Each property name can be added only once.`
+                    );
+                    return;
+                  }
+                  seen.add(label);
+                }
+                setLinkingSelection(nextIds);
+              }}
+              renderInput={(params) => (
+                <MDInput {...params} placeholder="Select properties..." size="small" fullWidth />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    key={option?.id ?? index}
+                    label={getRentalPropertyLabel(option) || String(option?.id || "")}
+                    size="small"
+                    {...getTagProps({ index })}
+                  />
+                ))
+              }
+              renderOption={(props, option) => {
+                const optionLabel = getRentalPropertyLabel(option) || String(option?.id || "");
+                const linkedNameSet = getLinkedPropertyNameSet();
+                const selectedNameSet = new Set(
+                  (linkingSelection || []).map((id) => getPropertyLabelById(id))
+                );
+                const isAlreadyLinked = linkedNameSet.has(optionLabel);
+                const isDuplicateByName =
+                  selectedNameSet.has(optionLabel) &&
+                  !(linkingSelection || []).includes(Number(option.id));
+
+                return (
+                  <li {...props} aria-disabled={isAlreadyLinked || isDuplicateByName}>
+                    <MDBox
+                      display="flex"
+                      justifyContent="space-between"
+                      width="100%"
+                      alignItems="center"
+                    >
+                      <span>{optionLabel}</span>
+                      {isAlreadyLinked ? (
+                        <MDTypography variant="caption" color="secondary">
+                          linked
+                        </MDTypography>
+                      ) : null}
+                    </MDBox>
+                  </li>
+                );
+              }}
+              sx={{
+                "& .MuiAutocomplete-inputRoot": { paddingTop: "4px", paddingBottom: "4px" },
+              }}
+            />
+            <MDBox display="flex" justifyContent="flex-end" mt={1} gap={1}>
+              <MDButton
+                variant="gradient"
+                color="info"
+                onClick={handleSaveLinkings}
+                disabled={savingLinkings || !linkingSelection.length}
+              >
+                {savingLinkings ? "Saving..." : "Save"}
+              </MDButton>
+            </MDBox>
+          </MDBox>
+
           {loadingLinkedProperties ? (
             <MDBox display="flex" justifyContent="center" py={3}>
               <CurrencyLoading size={40} />
@@ -1324,8 +1749,8 @@ export default function PropertyGrouping() {
                   let propertyName = "Unknown Property";
 
                   // Check if property has a groupName or name field directly
-                  if (property.groupName) {
-                    propertyName = property.groupName;
+                  if (property.propertyName) {
+                    propertyName = property.propertyName;
                   } else if (property.name) {
                     propertyName = property.name;
                   } else if (property.property) {

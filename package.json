@@ -6,20 +6,22 @@
   "license": "See license in https://www.creative-tim.com/license",
   "description": "No 1 SDU",
   "bugs": {
-    "url": "https://.conm/creativetimofficial/material-dashboard-react/issues"
+    "url": "conm/creativetimofficial/material-dashboard-react/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+://github.cokm/creativetimofficial/material-dashboard-react.git"
+    "url": "gi.cokm/creativetimofficial/material-dashboard-react.git"
   },
   "dependencies": {
     "@emotion/cache": "11.10.8",
     "@emotion/react": "11.10.8",
     "@emotion/styled": "11.10.8",
+    "@fontsource/roboto": "^5.0.15",
     "@mui/icons-material": "5.11.16",
     "@mui/material": "5.12.3",
     "chart.js": "4.3.0",
     "chroma-js": "2.4.2",
+    "material-icons": "^1.13.12",
     "prop-types": "15.8.1",
     "react": "18.2.0",
     "react-chartjs-2": "5.2.0",

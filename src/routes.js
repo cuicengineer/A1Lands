@@ -44,6 +44,7 @@ import Notifications from "layouts/notifications";
 import Profile from "layouts/profile";
 import SignIn from "layouts/authentication/sign-in";
 import SignUp from "layouts/authentication/sign-up";
+import A1Login from "layouts/authentication/a1-login";
 import Configuration from "layouts/configuration";
 import UserMgmt from "layouts/configuration/user-mgmt/user-mgmt";
 import UserRole from "layouts/configuration/user-role/user-role";
@@ -66,6 +67,12 @@ import ContractsNew from "layouts/contracts/contracts/contracts";
 import Icon from "@mui/material/Icon";
 
 const routes = [
+  // Default landing page (not shown in Sidenav because it has no `type`)
+  {
+    key: "a1-login",
+    route: "/",
+    component: <A1Login />,
+  },
   {
     type: "collapse",
     name: "Dashboard",
@@ -82,19 +89,19 @@ const routes = [
     collapse: [
       {
         type: "collapse",
-        name: "User Mgmt",
-        key: "configuration-user-mgmt",
-        icon: <Icon fontSize="small">people</Icon>,
-        route: "/configuration/user-mgmt",
-        component: <UserMgmt />,
-      },
-      {
-        type: "collapse",
         name: "User Roles",
         key: "configuration-user-role",
         icon: <Icon fontSize="small">admin_panel_settings</Icon>,
         route: "/configuration/user-role",
         component: <UserRole />,
+      },
+      {
+        type: "collapse",
+        name: "User Mgmt",
+        key: "configuration-user-mgmt",
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/configuration/user-mgmt",
+        component: <UserMgmt />,
       },
       // {
       //   type: "collapse",
@@ -140,6 +147,14 @@ const routes = [
         route: "/configuration/nature",
         component: <NatureConfig />,
       },
+      {
+        type: "collapse",
+        name: "Tenants",
+        key: "tenants",
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/contracts/tenants",
+        component: <Tenants />,
+      },
       // {
       //   type: "collapse",
       //   name: "Profit Sharing",
@@ -172,6 +187,14 @@ const routes = [
       },
       {
         type: "collapse",
+        name: "Revenue Rates",
+        key: "revenue-rates",
+        icon: <Icon fontSize="small">attach_money</Icon>,
+        route: "/contracts/revenue-rates",
+        component: <RevenueRates />,
+      },
+      {
+        type: "collapse",
         name: "Property Grouping",
         key: "configuration-property-grouping",
         icon: <Icon fontSize="small">group_work</Icon>,
@@ -186,39 +209,15 @@ const routes = [
         route: "/contracts",
         component: <ContractsNew />,
       },
-      {
-        type: "collapse",
-        name: "Report",
-        key: "contracts-report",
-        icon: <Icon fontSize="small">assessment</Icon>,
-        route: "/contracts/report",
-        component: <ContractsReport />,
-      },
-      {
-        type: "collapse",
-        name: "Revenue Rates",
-        key: "revenue-rates",
-        icon: <Icon fontSize="small">attach_money</Icon>,
-        route: "/contracts/revenue-rates",
-        component: <RevenueRates />,
-      },
-      {
-        type: "collapse",
-        name: "Tenants",
-        key: "tenants",
-        icon: <Icon fontSize="small">people</Icon>,
-        route: "/contracts/tenants",
-        component: <Tenants />,
-      },
+      // {
+      //   type: "collapse",
+      //   name: "Report",
+      //   key: "contracts-report",
+      //   icon: <Icon fontSize="small">assessment</Icon>,
+      //   route: "/contracts/report",
+      //   component: <ContractsReport />,
+      // },
     ],
-  },
-  {
-    type: "collapse",
-    name: "Publication",
-    key: "publication",
-    icon: <Icon fontSize="small">publish</Icon>,
-    route: "/publication",
-    component: <Profile />,
   },
 ];
 

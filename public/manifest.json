@@ -1,11 +1,11 @@
 {
   "short_name": "Material Dashboard",
-  "name": "A1 Lands - 360",
+  "name": "A1 Lands",
   "icons": [
     {
-      "src": "favicon.png",
+      "src": "PAF-Logo.gif",
       "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/png"
+      "type": "image/gif"
     }
   ],
   "start_url": ".",

@@ -42,16 +42,16 @@ function Dashboard() {
 
   // Dummy "A1 Land Activities" widgets (top)
   const a1AnnualRent = {
-    labels: ["ACD", "FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Annual Rent", data: [7250, 24500, 32500, 73500, 82500, 20500] },
+    labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
+    datasets: { label: "Annual Rent", data: [24500, 32500, 73500, 82500, 20500] },
   };
   const a1GovtShare = {
-    labels: ["ACD", "FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Govt Share", data: [3500, 12500, 52500, 67500, 55000, 9500] },
+    labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
+    datasets: { label: "Govt Share", data: [12500, 52500, 67500, 55000, 9500] },
   };
   const a1PafShare = {
-    labels: ["ACD", "FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "PAF Share", data: [5500, 17500, 0, 75500, 0, 0] },
+    labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
+    datasets: { label: "PAF Share", data: [17500, 0, 75500, 0, 0] },
   };
   const a1ReceiptTrend = {
     labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
@@ -68,18 +68,13 @@ function Dashboard() {
     <DashboardLayout>
       <DashboardNavbar />
       <MDBox py={3}>
-        <MDBox mb={3}>
-          <MDTypography variant="h6" textAlign="center" fontWeight="bold">
-            AHQ DASHBOARD : A1 LAND ACTIVITIES
-          </MDTypography>
-        </MDBox>
-        <Grid container spacing={3} mb={4}>
+        <Grid container spacing={2} mb={4}>
           <Grid item xs={12} md={6}>
-            <MDBox mb={3}>
+            <MDBox mb={1}>
               <ReportsBarChart
                 color="info"
                 title="Annual Rent"
-                description="Dummy data"
+                description="PAF All Commands"
                 date="Updated just now"
                 chart={a1AnnualRent}
               />
@@ -87,33 +82,12 @@ function Dashboard() {
           </Grid>
           <Grid item xs={12} md={6}>
             <MDBox mb={3}>
-              <DefaultLineChart
-                title="Receipt Trend"
-                description="Dummy data"
-                height="16rem"
-                chart={a1ReceiptTrend}
-              />
-            </MDBox>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <MDBox mb={3}>
               <ReportsBarChart
-                color="warning"
+                color="dark"
                 title="Govt Share"
-                description="Dummy data"
+                description="Command Wise"
                 date="Updated just now"
                 chart={a1GovtShare}
-              />
-            </MDBox>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <MDBox mb={3}>
-              <ReportsBarChart
-                color="primary"
-                title="PAF Share"
-                description="Dummy data"
-                date="Updated just now"
-                chart={a1PafShare}
               />
             </MDBox>
           </Grid>
@@ -124,7 +98,7 @@ function Dashboard() {
               <ComplexStatisticsCard
                 color="dark"
                 icon="weekend"
-                title="Bookings"
+                title="Class 'A' Land"
                 count={281}
                 percentage={{
                   color: "success",
@@ -138,7 +112,7 @@ function Dashboard() {
             <MDBox mb={1.5}>
               <ComplexStatisticsCard
                 icon="leaderboard"
-                title="Today's Users"
+                title="Active Contracts"
                 count="2,300"
                 percentage={{
                   color: "success",
@@ -153,12 +127,12 @@ function Dashboard() {
               <ComplexStatisticsCard
                 color="success"
                 icon="store"
-                title="Revenue"
-                count="34k"
+                title="Revenue Last Month"
+                count="3 Million"
                 percentage={{
                   color: "success",
                   amount: "+1%",
-                  label: "than yesterday",
+                  label: "than last month",
                 }}
               />
             </MDBox>
@@ -168,8 +142,8 @@ function Dashboard() {
               <ComplexStatisticsCard
                 color="primary"
                 icon="person_add"
-                title="Followers"
-                count="+91"
+                title="Tenants"
+                count="91"
                 percentage={{
                   color: "success",
                   amount: "",
@@ -185,8 +159,8 @@ function Dashboard() {
               <MDBox mb={3}>
                 <ReportsBarChart
                   color="info"
-                  title="website views"
-                  description="Last Campaign Performance"
+                  title="Daily New Contracts"
+                  description="Directorate of NPF"
                   date="campaign sent 2 days ago"
                   chart={reportsBarChartData}
                 />
@@ -196,10 +170,10 @@ function Dashboard() {
               <MDBox mb={3}>
                 <ReportsLineChart
                   color="success"
-                  title="daily sales"
+                  title="Monthly Revenue Collection"
                   description={
                     <>
-                      (<strong>+15%</strong>) increase in today sales.
+                      (<strong>+15%</strong>) Dir. NPF
                     </>
                   }
                   date="updated 4 min ago"
@@ -211,22 +185,12 @@ function Dashboard() {
               <MDBox mb={3}>
                 <ReportsLineChart
                   color="dark"
-                  title="completed tasks"
-                  description="Last Campaign Performance"
+                  title="Completed Contracts"
+                  description="Completion Trend PAF"
                   date="just updated"
                   chart={tasks}
                 />
               </MDBox>
-            </Grid>
-          </Grid>
-        </MDBox>
-        <MDBox>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6} lg={8}>
-              <Projects />
-            </Grid>
-            <Grid item xs={12} md={6} lg={4}>
-              <OrdersOverview />
             </Grid>
           </Grid>
         </MDBox>
