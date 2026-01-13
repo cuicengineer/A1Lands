@@ -13,6 +13,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import FormHelperText from "@mui/material/FormHelperText";
 import api from "../../../../src/services/api.service";
 
 const UOM_OPTIONS = [
@@ -34,11 +35,13 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     fontSize: "1rem",
     "& .MuiSelect-select": {
       fontSize: "1rem",
-      padding: "8px 32px 8px 14px",
+      padding: "0 32px 0 14px",
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
       minHeight: "45px",
+      display: "flex",
+      alignItems: "center",
     },
     "& .MuiSelect-icon": {
       display: "block !important",
@@ -62,6 +65,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     remarks: "",
     status: false, // Default value
   });
+  const [errors, setErrors] = useState({});
 
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
@@ -115,6 +119,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
   }, [form.cmdId, allBases]);
 
   useEffect(() => {
+    setErrors({});
     if (initialData) {
       const newForm = {
         cmdId: initialData.cmdId || "",
@@ -167,9 +172,47 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
       [field]: field === "area" ? Number(value) : value,
       ...(field === "cmdId" && { baseId: "" }), // Reset baseId when cmdId changes
     }));
+    if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const isAddMode = !initialData;
+
+  const isEmpty = (val) => {
+    if (val === null || val === undefined) return true;
+    if (Array.isArray(val)) return val.length === 0;
+    if (typeof val === "string") return val.trim().length === 0;
+    // numbers (including 0) and booleans are treated as filled
+    return false;
+  };
+
+  const validateAddNew = () => {
+    const next = {};
+    const required = [
+      { key: "cmdId", label: "Command" },
+      { key: "baseId", label: "Base" },
+      { key: "classId", label: "Class" },
+      { key: "pId", label: "Property ID" },
+      { key: "uoM", label: "UoM" },
+      { key: "area", label: "Area" },
+      { key: "location", label: "Location" },
+      { key: "remarks", label: "Remarks" },
+      { key: "status", label: "Status" },
+    ];
+
+    required.forEach(({ key, label }) => {
+      if (isEmpty(form?.[key])) next[key] = `${label} is required`;
+    });
+
+    setErrors(next);
+    return Object.keys(next).length === 0;
   };
 
   const handleSave = () => {
+    // Enforce "all fields mandatory" only for Add New (as requested)
+    if (isAddMode) {
+      const ok = validateAddNew();
+      if (!ok) return;
+    }
     onSubmit(form);
   };
 
@@ -177,11 +220,11 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
     { label: "Command", key: "cmdId", type: "select", options: commands, mandatory: true },
     { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
     { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
-    { label: "Property ID", key: "pId" },
-    { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS },
-    { label: "Area", key: "area", type: "number" },
-    { label: "Location", key: "location" },
-    { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 } },
+    { label: "Property ID", key: "pId", mandatory: isAddMode },
+    { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS, mandatory: isAddMode },
+    { label: "Area", key: "area", type: "number", mandatory: isAddMode },
+    { label: "Location", key: "location", mandatory: isAddMode },
+    { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 }, mandatory: isAddMode },
     {
       label: "Status",
       key: "status",
@@ -190,6 +233,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
         { id: true, name: "Active" },
         { id: false, name: "Disabled" },
       ],
+      mandatory: isAddMode,
     },
   ];
 
@@ -201,7 +245,13 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
           {fields.map((f) => (
             <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
               {f.type === "select" ? (
-                <FormControl fullWidth size="small" required={f.mandatory} sx={formControlSx}>
+                <FormControl
+                  fullWidth
+                  size="small"
+                  required={Boolean(f.mandatory)}
+                  error={Boolean(errors[f.key])}
+                  sx={formControlSx}
+                >
                   <InputLabel sx={labelSx}>{f.label}</InputLabel>
                   <Select
                     value={form[f.key]}
@@ -221,6 +271,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
                       );
                     })}
                   </Select>
+                  {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
                 </FormControl>
               ) : (
                 <MDInput
@@ -230,6 +281,9 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData }) {
                   onChange={(e) => handleChange(f.key, e.target.value)}
                   fullWidth
                   size="small"
+                  required={Boolean(f.mandatory)}
+                  error={Boolean(errors[f.key])}
+                  helperText={errors[f.key]}
                   sx={inputSx}
                 />
               )}

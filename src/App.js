@@ -69,6 +69,20 @@ export default function App() {
   const [rtlCache, setRtlCache] = useState(null);
   const { pathname } = useLocation();
 
+  const hasAccessToken = () => {
+    try {
+      return Boolean(
+        localStorage.getItem("token") ||
+          localStorage.getItem("authToken") ||
+          localStorage.getItem("accessToken")
+      );
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Note: route-level guard is applied in getRoutes(). Keeping this file-level helper removed to avoid unused vars.
+
   // Cache for the rtl
   useMemo(() => {
     const cacheRtl = createCache({
@@ -100,7 +114,21 @@ export default function App() {
       }
 
       if (route.route) {
-        return <Route exact path={route.route} element={route.component} key={route.key} />;
+        const isPublicRoute =
+          route.route === "/" ||
+          route.route.startsWith("/authentication/") ||
+          route.route.startsWith("/login") ||
+          route.route.startsWith("/sign-in");
+
+        const element = isPublicRoute ? (
+          route.component
+        ) : hasAccessToken() ? (
+          route.component
+        ) : (
+          <Navigate to="/" replace />
+        );
+
+        return <Route exact path={route.route} element={element} key={route.key} />;
       }
 
       return null;
@@ -136,7 +164,7 @@ export default function App() {
         <CssBaseline />
         {layout === "dashboard" && (
           <>
-            <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 Lands" routes={routes} />
+            <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
             <Configurator />
             {configsButton}
           </>
@@ -153,7 +181,7 @@ export default function App() {
       <CssBaseline />
       {layout === "dashboard" && (
         <>
-          <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 Lands" routes={routes} />
+          <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
           <Configurator />
         </>
       )}

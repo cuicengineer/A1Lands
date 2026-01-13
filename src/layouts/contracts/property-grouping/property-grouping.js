@@ -22,6 +22,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import FormHelperText from "@mui/material/FormHelperText";
 import Chip from "@mui/material/Chip";
 import Box from "@mui/material/Box";
 import OutlinedInput from "@mui/material/OutlinedInput";
@@ -100,6 +101,7 @@ function PropertyGroupingForm({
     status: true,
     isDeleted: false,
   });
+  const [errors, setErrors] = useState({});
 
   const [allBases, setAllBases] = useState([]); // New state to store all bases
   const [linkedPropertyNameById, setLinkedPropertyNameById] = useState({});
@@ -128,6 +130,8 @@ function PropertyGroupingForm({
   }, [open, allBases.length]);
 
   useEffect(() => {
+    // reset validation errors when opening / switching edit mode
+    setErrors({});
     if (initialData) {
       const normalizedPropertyIds = normalizePropertyIds(initialData);
       const newForm = {
@@ -207,13 +211,50 @@ function PropertyGroupingForm({
     }
   }, [form.property, rentalProperties]);
 
-  const handleChange = (f, v) =>
+  const handleChange = (f, v) => {
     setForm((p) => ({
       ...p,
       [f]: f === "area" ? Number(v) : f === "status" || f === "isDeleted" ? Boolean(v) : v,
       ...(f === "cmdid" && { baseid: "" }),
     }));
-  const handleSave = () => onSubmit(form);
+    // clear field-level error on change
+    if (errors?.[f]) setErrors((prev) => ({ ...prev, [f]: undefined }));
+  };
+
+  const isEmpty = (val) => {
+    if (val === null || val === undefined) return true;
+    if (Array.isArray(val)) return val.length === 0;
+    if (typeof val === "string") return val.trim().length === 0;
+    return false;
+  };
+
+  const validateAddNew = () => {
+    const next = {};
+    const required = [
+      { key: "cmdid", label: "Command" },
+      { key: "baseid", label: "Base" },
+      { key: "classid", label: "Class" },
+      { key: "property", label: "Property" },
+      { key: "gId", label: "GroupID" },
+      { key: "location", label: "Address" },
+      { key: "uoM", label: "UoM" },
+      { key: "remarks", label: "Remarks" },
+    ];
+    required.forEach(({ key, label }) => {
+      if (isEmpty(form?.[key])) next[key] = `${label} is required`;
+    });
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSave = () => {
+    // Apply mandatory check only for "Add New"
+    if (!isEditMode) {
+      const ok = validateAddNew();
+      if (!ok) return;
+    }
+    onSubmit(form);
+  };
 
   const handlePropertyChange = (event) => {
     const {
@@ -268,6 +309,7 @@ function PropertyGroupingForm({
         area: totalArea,
       };
     });
+    if (errors?.property) setErrors((prev) => ({ ...prev, property: undefined }));
   };
 
   const handleDeleteProperty = (propertyToDelete) => () => {
@@ -296,6 +338,8 @@ function PropertyGroupingForm({
             <FormControl
               size="small"
               fullWidth
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.cmdid)}
               sx={{
                 minWidth: "140px",
               }}
@@ -324,11 +368,13 @@ function PropertyGroupingForm({
                   fontSize: "1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1rem",
-                    padding: "8px 32px 8px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                    whiteSpace: "wrap",
+                    whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -346,12 +392,15 @@ function PropertyGroupingForm({
                   </MenuItem>
                 ))}
               </Select>
+              {!isEditMode && errors.cmdid && <FormHelperText>{errors.cmdid}</FormHelperText>}
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={4}>
             <FormControl
               size="small"
               fullWidth
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.baseid)}
               sx={{
                 minWidth: "140px",
               }}
@@ -380,11 +429,13 @@ function PropertyGroupingForm({
                   fontSize: "1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1rem",
-                    padding: "8px 32px 8px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -404,12 +455,15 @@ function PropertyGroupingForm({
                     </MenuItem>
                   ))}
               </Select>
+              {!isEditMode && errors.baseid && <FormHelperText>{errors.baseid}</FormHelperText>}
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={4}>
             <FormControl
               size="small"
               fullWidth
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.classid)}
               sx={{
                 minWidth: "140px",
               }}
@@ -438,11 +492,13 @@ function PropertyGroupingForm({
                   fontSize: "1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1rem",
-                    padding: "8px 32px 8px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -460,6 +516,7 @@ function PropertyGroupingForm({
                   </MenuItem>
                 ))}
               </Select>
+              {!isEditMode && errors.classid && <FormHelperText>{errors.classid}</FormHelperText>}
             </FormControl>
           </Grid>
 
@@ -468,6 +525,8 @@ function PropertyGroupingForm({
             <FormControl
               size="small"
               fullWidth
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.property)}
               sx={{
                 minWidth: "150px",
               }}
@@ -498,8 +557,10 @@ function PropertyGroupingForm({
                   fontSize: "1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1rem",
-                    padding: "8px 32px 8px 14px",
+                    padding: "0 32px 0 14px",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -555,6 +616,7 @@ function PropertyGroupingForm({
                   );
                 })}
               </Select>
+              {!isEditMode && errors.property && <FormHelperText>{errors.property}</FormHelperText>}
             </FormControl>
           </Grid>
 
@@ -566,8 +628,11 @@ function PropertyGroupingForm({
               value={form.gId}
               onChange={(e) => handleChange("gId", e.target.value)}
               size="small"
+              fullWidth
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.gId)}
+              helperText={!isEditMode ? errors.gId : ""}
               sx={{
-                width: "30%",
                 "& .MuiInputBase-input": {
                   fontSize: "1rem",
                 },
@@ -587,6 +652,9 @@ function PropertyGroupingForm({
               onChange={(e) => handleChange("location", e.target.value)}
               fullWidth
               size="small"
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.location)}
+              helperText={!isEditMode ? errors.location : ""}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1rem",
@@ -620,9 +688,12 @@ function PropertyGroupingForm({
               />
               <FormControl
                 size="small"
+                fullWidth
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.uoM)}
                 sx={{
-                  minWidth: "100px",
-                  maxWidth: "120px",
+                  flex: 1,
+                  minWidth: "140px",
                 }}
               >
                 <InputLabel
@@ -649,11 +720,13 @@ function PropertyGroupingForm({
                     fontSize: "1rem",
                     "& .MuiSelect-select": {
                       fontSize: "1rem",
-                      padding: "8px 32px 8px 14px",
+                      padding: "0 32px 0 14px",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                       minHeight: "45px",
+                      display: "flex",
+                      alignItems: "center",
                     },
                     "& .MuiSelect-icon": {
                       display: "block !important",
@@ -671,6 +744,7 @@ function PropertyGroupingForm({
                     Acre
                   </MenuItem>
                 </Select>
+                {!isEditMode && errors.uoM && <FormHelperText>{errors.uoM}</FormHelperText>}
               </FormControl>
             </MDBox>
           </Grid>
@@ -684,6 +758,9 @@ function PropertyGroupingForm({
               onChange={(e) => handleChange("remarks", e.target.value)}
               fullWidth
               size="small"
+              required={!isEditMode}
+              error={!isEditMode && Boolean(errors.remarks)}
+              helperText={!isEditMode ? errors.remarks : ""}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1rem",
@@ -728,11 +805,13 @@ function PropertyGroupingForm({
                   fontSize: "1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1rem",
-                    padding: "8px 32px 8px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -1472,7 +1551,11 @@ export default function PropertyGrouping() {
                         setPageNumber(1);
                       }}
                       size="small"
-                      sx={{ width: "5rem" }}
+                      sx={{
+                        width: "5rem",
+                        "& .MuiInputBase-root": { minHeight: "45px" },
+                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                      }}
                       renderInput={(params) => <MDInput {...params} />}
                     />
                     <MDTypography variant="caption" color="secondary">
@@ -1687,7 +1770,9 @@ export default function PropertyGrouping() {
                 );
               }}
               sx={{
-                "& .MuiAutocomplete-inputRoot": { paddingTop: "4px", paddingBottom: "4px" },
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
               }}
             />
             <MDBox display="flex" justifyContent="flex-end" mt={1} gap={1}>
@@ -1724,7 +1809,11 @@ export default function PropertyGrouping() {
                         handleLinkedPropertiesPageSizeChange(parseInt(newValue, 10));
                       }}
                       size="small"
-                      sx={{ width: "5rem" }}
+                      sx={{
+                        width: "5rem",
+                        "& .MuiInputBase-root": { minHeight: "45px" },
+                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                      }}
                       renderInput={(params) => <MDInput {...params} />}
                     />
                     <MDTypography variant="caption" color="secondary">

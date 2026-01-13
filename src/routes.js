@@ -85,7 +85,7 @@ const routes = [
     type: "collapse",
     name: "Configuration",
     key: "configuration",
-    icon: <Icon fontSize="small">settings</Icon>,
+    icon: <Icon fontSize="small">tune</Icon>,
     collapse: [
       {
         type: "collapse",

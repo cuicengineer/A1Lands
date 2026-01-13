@@ -242,11 +242,13 @@ function RevenueRatesForm({
                   fontSize: "1.1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1.1rem",
-                    padding: "12px 32px 12px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -482,11 +484,13 @@ function RevenueRatesForm({
                   fontSize: "1.1rem",
                   "& .MuiSelect-select": {
                     fontSize: "1.1rem",
-                    padding: "12px 32px 12px 14px",
+                    padding: "0 32px 0 14px",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                     minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -994,7 +998,11 @@ export default function RevenueRates() {
                         setPageNumber(1);
                       }}
                       size="small"
-                      sx={{ width: "5rem" }}
+                      sx={{
+                        width: "5rem",
+                        "& .MuiInputBase-root": { minHeight: "45px" },
+                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                      }}
                       renderInput={(params) => <MDInput {...params} />}
                     />
                     <MDTypography variant="caption" color="secondary">

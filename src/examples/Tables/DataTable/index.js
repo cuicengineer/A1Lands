@@ -13,13 +13,20 @@ Coded by www.creative-tim.com
 * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 */
 
-import { useMemo, useEffect, useState, useCallback, isValidElement } from "react";
+import { useMemo, useEffect, useState, useCallback, isValidElement, useRef } from "react";
 
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
 
 // react-table components
-import { useTable, usePagination, useGlobalFilter, useAsyncDebounce, useSortBy } from "react-table";
+import {
+  useTable,
+  usePagination,
+  useGlobalFilter,
+  useAsyncDebounce,
+  useSortBy,
+  useColumnOrder,
+} from "react-table";
 
 // @mui material components
 import Table from "@mui/material/Table";
@@ -79,7 +86,45 @@ function DataTable({
   const entries = entriesPerPage.entries
     ? entriesPerPage.entries.map((el) => el.toString())
     : ["5", "10", "15", "20", "25"];
-  const columns = useMemo(() => table.columns, [table]);
+  const isOperatorUser = () => {
+    try {
+      const raw = localStorage.getItem("auth");
+      if (!raw) return false;
+      const obj = JSON.parse(raw);
+      const role = String(
+        obj?.role ||
+          obj?.Role ||
+          obj?.roleName ||
+          obj?.RoleName ||
+          obj?.category ||
+          obj?.Category ||
+          obj?.userRole ||
+          obj?.UserRole ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+      return role === "operator";
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const baseColumns = useMemo(() => table.columns, [table]);
+  const columns = useMemo(() => {
+    if (!isOperatorUser()) return baseColumns;
+    // Hide Action(s) column entirely for Operator users
+    return (baseColumns || []).filter((c) => {
+      const header = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
+      const accessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
+      return (
+        header !== "actions" &&
+        header !== "action" &&
+        accessor !== "actions" &&
+        accessor !== "action"
+      );
+    });
+  }, [baseColumns]);
   const data = useMemo(() => table.rows, [table]);
 
   // Use controlled state if provided, otherwise use internal state
@@ -115,6 +160,7 @@ function DataTable({
     },
     useGlobalFilter,
     useSortBy,
+    useColumnOrder,
     usePagination
   );
 
@@ -133,8 +179,34 @@ function DataTable({
     previousPage,
     setPageSize,
     setGlobalFilter,
-    state: { pageIndex, pageSize, globalFilter },
+    setColumnOrder,
+    allColumns,
+    state: { pageIndex, pageSize, globalFilter, columnOrder },
   } = tableInstance;
+
+  // Column drag & drop (native HTML drag events)
+  const dragColumnIdRef = useRef(null);
+
+  const moveColumn = useCallback(
+    (fromId, toId) => {
+      if (!fromId || !toId || fromId === toId) return;
+
+      const currentOrder =
+        Array.isArray(columnOrder) && columnOrder.length > 0
+          ? columnOrder
+          : (allColumns || []).map((c) => c.id);
+
+      const fromIndex = currentOrder.indexOf(fromId);
+      const toIndex = currentOrder.indexOf(toId);
+      if (fromIndex === -1 || toIndex === -1) return;
+
+      const next = [...currentOrder];
+      next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, fromId);
+      setColumnOrder(next);
+    },
+    [allColumns, columnOrder, setColumnOrder]
+  );
 
   // Sync controlled state with table instance when it changes externally
   useEffect(() => {
@@ -228,12 +300,10 @@ function DataTable({
   const setSortedValue = (column) => {
     let sortedValue;
 
-    if (isSorted && column.isSorted) {
+    if (column.isSorted) {
       sortedValue = column.isSortedDesc ? "desc" : "asce";
-    } else if (isSorted) {
-      sortedValue = "none";
     } else {
-      sortedValue = false;
+      sortedValue = "none";
     }
 
     return sortedValue;
@@ -315,12 +385,26 @@ function DataTable({
               {headerGroup.headers.map((column, idx) => (
                 <DataTableHeadCell
                   key={idx}
-                  {...column.getHeaderProps(isSorted && column.getSortByToggleProps())}
+                  {...column.getHeaderProps(column.getSortByToggleProps())}
                   width={column.width ? column.width : "auto"}
                   align={column.align ? column.align : "left"}
                   sorted={setSortedValue(column)}
+                  draggable
+                  onDragStart={() => {
+                    dragColumnIdRef.current = column.id;
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    moveColumn(dragColumnIdRef.current, column.id);
+                    dragColumnIdRef.current = null;
+                  }}
                 >
-                  {column.render("Header")}
+                  {typeof column.Header === "string" && column.Header === "Actions"
+                    ? "Action"
+                    : column.render("Header")}
                 </DataTableHeadCell>
               ))}
             </TableRow>
@@ -337,11 +421,13 @@ function DataTable({
               >
                 {row.cells.map((cell, idx) => {
                   const isEvenRow = key % 2 === 0;
+                  const isDisabledRow = Boolean(row?.original?.__disabledRow);
                   return (
                     <DataTableBodyCell
                       key={idx}
                       noBorder={noEndBorder && rows.length - 1 === key}
                       align={cell.column.align ? cell.column.align : "left"}
+                      disabledRow={isDisabledRow}
                       {...cell.getCellProps()}
                     >
                       {cell.render("Cell")}

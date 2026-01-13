@@ -176,7 +176,6 @@ function Dashboard() {
                       (<strong>+15%</strong>) Dir. NPF
                     </>
                   }
-                  date="updated 4 min ago"
                   chart={sales}
                 />
               </MDBox>
@@ -187,7 +186,6 @@ function Dashboard() {
                   color="dark"
                   title="Completed Contracts"
                   description="Completion Trend PAF"
-                  date="just updated"
                   chart={tasks}
                 />
               </MDBox>

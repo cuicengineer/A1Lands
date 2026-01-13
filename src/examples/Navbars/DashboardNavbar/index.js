@@ -13,10 +13,7 @@ Coded by www.creative-tim.com
 * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 */
 
-import { useState, useEffect } from "react";
-
-// react-router components
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 
 // prop-types is a library for typechecking of props.
 import PropTypes from "prop-types";
@@ -24,46 +21,20 @@ import PropTypes from "prop-types";
 // @material-ui core components
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
-import IconButton from "@mui/material/IconButton";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Icon from "@mui/material/Icon";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
-import MDTypography from "components/MDTypography";
-import MDAvatar from "components/MDAvatar";
-
-// Material Dashboard 2 React example components
-import NotificationItem from "examples/Items/NotificationItem";
 
 // Custom styles for DashboardNavbar
-import {
-  navbar,
-  navbarContainer,
-  navbarRow,
-  navbarIconButton,
-  navbarMobileMenu,
-} from "examples/Navbars/DashboardNavbar/styles";
+import { navbar, navbarContainer } from "examples/Navbars/DashboardNavbar/styles";
 
 // Material Dashboard 2 React context
-import {
-  useMaterialUIController,
-  setTransparentNavbar,
-  setMiniSidenav,
-  setOpenConfigurator,
-  setHasUserManuallyToggledSidenav,
-} from "context";
-
-// Images
-import adminProfile from "assets/images/bruce-mars.jpg";
+import { setTransparentNavbar, useMaterialUIController } from "context";
 
 function DashboardNavbar({ absolute, light, isMini }) {
-  const navigate = useNavigate();
   const [navbarType, setNavbarType] = useState();
   const [controller, dispatch] = useMaterialUIController();
-  const { miniSidenav, transparentNavbar, fixedNavbar, openConfigurator, darkMode } = controller;
-  const [openMenu, setOpenMenu] = useState(null);
+  const { transparentNavbar, fixedNavbar, darkMode } = controller;
 
   useEffect(() => {
     // Setting the navbar type
@@ -91,56 +62,6 @@ function DashboardNavbar({ absolute, light, isMini }) {
     return () => window.removeEventListener("scroll", handleTransparentNavbar);
   }, [dispatch, fixedNavbar]);
 
-  const handleMiniSidenav = (event) => {
-    if (event) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-    setMiniSidenav(dispatch, !miniSidenav);
-    setHasUserManuallyToggledSidenav(dispatch, true);
-  };
-  const handleConfiguratorOpen = () => setOpenConfigurator(dispatch, !openConfigurator);
-  const handleOpenMenu = (event) => setOpenMenu(event.currentTarget);
-  const handleCloseMenu = () => setOpenMenu(false);
-
-  const handleLogout = () => {
-    handleCloseMenu();
-    navigate("/");
-  };
-
-  // Render the notifications menu
-  const renderMenu = () => (
-    <Menu
-      anchorEl={openMenu}
-      anchorReference={null}
-      anchorOrigin={{
-        vertical: "bottom",
-        horizontal: "right",
-      }}
-      open={Boolean(openMenu)}
-      onClose={handleCloseMenu}
-      sx={{ mt: 2 }}
-    >
-      <MenuItem onClick={handleLogout} sx={{ minWidth: 180 }}>
-        <Icon sx={{ mr: 1, fontSize: 18 }}>logout</Icon>
-        Logout
-      </MenuItem>
-    </Menu>
-  );
-
-  // Styles for the navbar icons
-  const iconsStyle = ({ palette: { dark, white, text }, functions: { rgba } }) => ({
-    color: () => {
-      let colorValue = light || darkMode ? white.main : dark.main;
-
-      if (transparentNavbar && !light) {
-        colorValue = darkMode ? rgba(text.main, 0.6) : text.main;
-      }
-
-      return colorValue;
-    },
-  });
-
   return (
     <AppBar
       position={absolute ? "absolute" : navbarType}
@@ -150,40 +71,8 @@ function DashboardNavbar({ absolute, light, isMini }) {
       <Toolbar
         sx={(theme) => ({ ...navbarContainer(theme), justifyContent: "flex-end", width: "100%" })}
       >
-        {isMini ? null : (
-          <MDBox display="flex" alignItems="center" gap={1} ml="auto">
-            <MDBox display="flex" alignItems="center" gap={1} mr={1}>
-              <MDAvatar
-                src={adminProfile}
-                alt="Admin User"
-                size="sm"
-                shadow="sm"
-                sx={{ cursor: "pointer" }}
-                onClick={handleOpenMenu}
-              />
-              <MDTypography
-                variant="button"
-                fontWeight="medium"
-                color={light ? "white" : "dark"}
-                sx={{ display: { xs: "none", sm: "block" } }}
-              >
-                Admin User
-              </MDTypography>
-            </MDBox>
-            <MDBox color={light ? "white" : "inherit"} display="flex" alignItems="center" gap={0.5}>
-              <IconButton
-                size="small"
-                disableRipple
-                color="inherit"
-                sx={navbarIconButton}
-                onClick={handleConfiguratorOpen}
-              >
-                <Icon sx={iconsStyle}>settings</Icon>
-              </IconButton>
-              {renderMenu()}
-            </MDBox>
-          </MDBox>
-        )}
+        {/* Avatar + Settings moved to Sidenav footer (bottom-left) */}
+        {isMini ? null : <MDBox />}
       </Toolbar>
     </AppBar>
   );
@@ -191,7 +80,7 @@ function DashboardNavbar({ absolute, light, isMini }) {
 
 // Setting default values for the props of DashboardNavbar
 DashboardNavbar.defaultProps = {
-  absolute: false,
+  absolute: true,
   light: false,
   isMini: false,
 };

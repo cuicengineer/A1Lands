@@ -23,12 +23,7 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 
 // Material Dashboard 2 React contexts
-import { useMaterialUIController } from "context";
-
 function DataTableHeadCell({ width, children, sorted, align, ...rest }) {
-  const [controller] = useMaterialUIController();
-  const { darkMode } = controller;
-
   return (
     <MDBox
       component="th"
@@ -49,14 +44,17 @@ function DataTableHeadCell({ width, children, sorted, align, ...rest }) {
         {...rest}
         position="relative"
         textAlign={align}
-        color={darkMode ? "white" : "secondary"}
-        opacity={0.7}
+        color="#111111 !important"
+        opacity={1}
         sx={({ typography: { size, fontWeightBold } }) => ({
-          fontSize: size.xxs,
+          fontSize: "16px",
           fontWeight: fontWeightBold,
-          textTransform: "uppercase",
-          cursor: sorted && "pointer",
-          userSelect: sorted && "none",
+          textTransform: "none",
+          cursor: "grab",
+          userSelect: "none",
+          "&:active": {
+            cursor: "grabbing",
+          },
         })}
       >
         {children}

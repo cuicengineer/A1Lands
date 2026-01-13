@@ -5,6 +5,7 @@ import Icon from "@mui/material/Icon";
 
 import MDBox from "components/MDBox";
 import PageLayout from "examples/LayoutContainers/PageLayout";
+import api from "services/api.service";
 
 import pafLogo from "../../../examples/login_page/assets/img/PAF-Logo.gif";
 import bgOne from "../../../examples/login_page/assets/img/one.webp";
@@ -41,6 +42,7 @@ function A1Login() {
   const [password, setPassword] = useState("pakistan@123");
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [bottomImg, setBottomImg] = useState(slides[0].img);
   const [topImg, setTopImg] = useState(slides[0].img);
@@ -76,18 +78,46 @@ function A1Login() {
     };
   }, [slides]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const u = String(username || "").trim();
     const p = String(password || "");
 
-    if (u === "superuser" && p === "pakistan@123") {
-      setAuthError("");
-      navigate("/dashboard");
+    if (!u || !p) {
+      setAuthError("Username and password are required");
       return;
     }
 
-    setAuthError("Invalid username or password");
+    setIsSubmitting(true);
+    setAuthError("");
+    try {
+      // Send both camelCase and PascalCase to be resilient to backend DTO naming
+      const res = await api.login({ username: u, password: p, Username: u, Password: p });
+
+      // Store token if backend returns it
+      const token =
+        res?.token || res?.Token || res?.accessToken || res?.AccessToken || res?.jwt || res?.Jwt;
+      if (token) {
+        try {
+          localStorage.setItem("token", token);
+        } catch (storageErr) {
+          // ignore
+        }
+      }
+
+      // Optional: store full auth response for later use
+      try {
+        localStorage.setItem("auth", JSON.stringify(res || {}));
+      } catch (storageErr) {
+        // ignore
+      }
+
+      navigate("/dashboard");
+    } catch (err) {
+      setAuthError(err?.message ? String(err.message) : "Login failed");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -164,8 +194,8 @@ function A1Login() {
 
               {authError ? <div className="auth-error">{authError}</div> : null}
 
-              <button type="submit" className="btn-login">
-                Sign In
+              <button type="submit" className="btn-login" disabled={isSubmitting}>
+                {isSubmitting ? "Signing In..." : "Sign In"}
                 <Icon sx={{ fontSize: 18 }}>north_east</Icon>
               </button>
             </form>

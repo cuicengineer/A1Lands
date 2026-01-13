@@ -20,11 +20,23 @@ function AddUserForm({
   setNewRowDraft,
   commandOptions,
   baseOptions,
+  roleOptions,
   handleAddSave,
   errors,
   setErrors,
 }) {
   const [showPassword, setShowPassword] = useState(false);
+
+  const PASSWORD_POLICY_TEXT =
+    "Password must be 6-12 characters long and contain at least 1 special character.";
+
+  const validatePasswordPolicy = (value) => {
+    const s = String(value || "");
+    if (!s.trim()) return "Password is required";
+    if (s.length < 6 || s.length > 12) return PASSWORD_POLICY_TEXT;
+    if (!/[^a-zA-Z0-9]/.test(s)) return PASSWORD_POLICY_TEXT;
+    return null;
+  };
 
   useEffect(() => {
     if (!open) {
@@ -54,8 +66,45 @@ function AddUserForm({
       setErrors((prev) => ({ ...prev, name: msg }));
     }
     if (field === "password") {
-      const msg = nextValue && String(nextValue).trim() ? null : "Password is required";
+      const msg = validatePasswordPolicy(nextValue);
       setErrors((prev) => ({ ...prev, password: msg }));
+    }
+    if (field === "pakNo") {
+      const msg = nextValue && String(nextValue).trim() ? null : "PakNo is required";
+      setErrors((prev) => ({ ...prev, pakNo: msg }));
+    }
+    if (field === "rank") {
+      const msg = nextValue && String(nextValue).trim() ? null : "Rank is required";
+      setErrors((prev) => ({ ...prev, rank: msg }));
+    }
+    if (field === "category") {
+      const msg = nextValue && String(nextValue).trim() ? null : "Category is required";
+      setErrors((prev) => ({ ...prev, category: msg }));
+    }
+    if (field === "unitId") {
+      const msg = nextValue && String(nextValue).trim() ? null : "Unit ID is required";
+      setErrors((prev) => ({ ...prev, unitId: msg }));
+    }
+    if (field === "cmdId") {
+      const msg =
+        nextValue !== "" && nextValue !== null && nextValue !== undefined
+          ? null
+          : "Command is required";
+      setErrors((prev) => ({ ...prev, cmdId: msg }));
+    }
+    if (field === "baseId") {
+      const msg =
+        nextValue !== "" && nextValue !== null && nextValue !== undefined
+          ? null
+          : "Base is required";
+      setErrors((prev) => ({ ...prev, baseId: msg }));
+    }
+    if (field === "status") {
+      const msg =
+        nextValue !== "" && nextValue !== null && nextValue !== undefined
+          ? null
+          : "Status is required";
+      setErrors((prev) => ({ ...prev, status: msg }));
     }
   };
 
@@ -65,7 +114,7 @@ function AddUserForm({
       const userInfo = {
         name: "Fetched Name",
         rank: "Fetched Rank",
-        category: "Fetched Category",
+        // category is now bound to user-role dropdown; don't auto-fill unknown role
       };
       setNewRowDraft((prev) => ({ ...prev, ...userInfo }));
     }
@@ -107,9 +156,51 @@ function AddUserForm({
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      required
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Inactive</MenuItem>
+    </MDInput>
+  );
+
+  const renderCategorySelect = (field, value) => (
+    <MDInput
+      select
+      value={value || ""}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+      required
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
+    >
+      {(roleOptions || []).map((opt) => (
+        <MenuItem key={opt.value} value={opt.value}>
+          {opt.value}
+        </MenuItem>
+      ))}
     </MDInput>
   );
 
@@ -120,6 +211,19 @@ function AddUserForm({
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      required
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
     >
       {commandOptions.map((opt) => (
         <MenuItem key={opt.id} value={opt.id}>
@@ -138,6 +242,19 @@ function AddUserForm({
         onChange={(e) => handleChange(field, e.target.value)}
         size="small"
         fullWidth
+        required
+        error={Boolean(errors[field])}
+        helperText={errors[field]}
+        sx={{
+          "& .MuiInputBase-root": { minHeight: "45px" },
+          "& .MuiSelect-select": {
+            minHeight: "45px",
+            display: "flex",
+            alignItems: "center",
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
+        }}
       >
         {filteredBases.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
@@ -170,7 +287,7 @@ function AddUserForm({
               PakNo
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={1}>
-              {renderInput("pakNo", newRowDraft?.pakNo)}
+              {renderInput("pakNo", newRowDraft?.pakNo, true)}
               <MDButton variant="gradient" color="info" size="small" onClick={handleGetInfo}>
                 Get Info
               </MDButton>
@@ -180,19 +297,19 @@ function AddUserForm({
             <MDTypography variant="caption" fontWeight="bold">
               Name
             </MDTypography>
-            {renderInput("name", newRowDraft?.name)}
+            {renderInput("name", newRowDraft?.name, true)}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
               Rank
             </MDTypography>
-            {renderInput("rank", newRowDraft?.rank)}
+            {renderInput("rank", newRowDraft?.rank, true)}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
               Category
             </MDTypography>
-            {renderInput("category", newRowDraft?.category)}
+            {renderCategorySelect("category", newRowDraft?.category)}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
@@ -210,7 +327,7 @@ function AddUserForm({
             <MDTypography variant="caption" fontWeight="bold">
               Unit ID
             </MDTypography>
-            {renderInput("unitId", newRowDraft?.unitId)}
+            {renderInput("unitId", newRowDraft?.unitId, true)}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
@@ -224,7 +341,18 @@ function AddUserForm({
         <MDButton onClick={handleClose} color="secondary">
           Cancel
         </MDButton>
-        <MDButton onClick={handleAddSave} color="info">
+        <MDButton
+          onClick={() => {
+            const msg = validatePasswordPolicy(newRowDraft?.password);
+            if (msg) {
+              alert(PASSWORD_POLICY_TEXT);
+              setErrors((prev) => ({ ...prev, password: msg }));
+              return;
+            }
+            handleAddSave();
+          }}
+          color="info"
+        >
           Save
         </MDButton>
       </DialogActions>
@@ -239,6 +367,7 @@ AddUserForm.propTypes = {
   setNewRowDraft: PropTypes.func.isRequired,
   commandOptions: PropTypes.array.isRequired,
   baseOptions: PropTypes.array.isRequired,
+  roleOptions: PropTypes.array.isRequired,
   handleAddSave: PropTypes.func.isRequired,
   errors: PropTypes.object.isRequired,
   setErrors: PropTypes.func.isRequired,

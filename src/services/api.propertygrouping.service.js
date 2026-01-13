@@ -1,39 +1,12 @@
-const RAW_API_BASE = (process.env.REACT_APP_API_BASE_URL || "").trim();
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
-if (!RAW_API_BASE) {
-  console.warn("REACT_APP_API_BASE_URL is empty or missing; using relative API paths.");
-}
+import api from "services/api.service";
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
-
-async function request(method, path, body, headers = {}) {
-  const pathWithLeadingSlash = path.startsWith("/") ? path : `/${path}`;
-  const url = `${API_BASE}${pathWithLeadingSlash}`;
-  const options = {
-    method,
-    headers: { ...JSON_HEADERS, ...headers },
-  };
-  if (body !== undefined && body !== null) {
-    options.body = JSON.stringify(body);
-  }
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    let errText = "";
-    try {
-      errText = await res.text();
-    } catch (e) {
-      errText = res.statusText;
-    }
-    throw new Error(`HTTP ${res.status} ${res.statusText}: ${errText}`);
-  }
+async function requestWithPagination(method, path, body) {
+  const res = await api.requestRaw(method, path, body);
   if (res.status === 204) return null;
+
   const contentType = res.headers.get("content-type");
-  let data;
-  if (contentType && contentType.includes("application/json")) {
-    data = await res.json();
-  } else {
-    data = await res.text();
-  }
+  const data =
+    contentType && contentType.includes("application/json") ? await res.json() : await res.text();
 
   // Extract pagination headers if present
   const totalCount = res.headers.get("X-Total-Count");
@@ -60,11 +33,11 @@ function list(pageNumber = 1, pageSize = 50) {
     pageSize: pageSize.toString(),
   };
   const qs = new URLSearchParams(params).toString();
-  return request("GET", `/api/PropertyGroup?${qs}`);
+  return requestWithPagination("GET", `/api/PropertyGroup?${qs}`);
 }
 
 function get(id) {
-  return request("GET", `/api/PropertyGroup/${id}`);
+  return requestWithPagination("GET", `/api/PropertyGroup/${id}`);
 }
 
 function create(data) {
@@ -75,7 +48,7 @@ function create(data) {
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return request("POST", `/api/PropertyGroup`, payload);
+  return requestWithPagination("POST", `/api/PropertyGroup`, payload);
 }
 
 function update(id, data) {
@@ -86,12 +59,12 @@ function update(id, data) {
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return request("PUT", `/api/PropertyGroup/${id}`, payload);
+  return requestWithPagination("PUT", `/api/PropertyGroup/${id}`, payload);
 }
 
 function remove(id) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
-  return request("DELETE", `/api/PropertyGroup/${id}`, payload);
+  return requestWithPagination("DELETE", `/api/PropertyGroup/${id}`, payload);
 }
 
 function getByGroup(id, pageNumber = 1, pageSize = 100) {
@@ -100,12 +73,12 @@ function getByGroup(id, pageNumber = 1, pageSize = 100) {
     pageSize: pageSize.toString(),
   };
   const qs = new URLSearchParams(params).toString();
-  return request("GET", `/api/PropertyGroup/ByGroup/${id}?${qs}`);
+  return requestWithPagination("GET", `/api/PropertyGroup/ByGroup/${id}?${qs}`);
 }
 
 function removePropertyFromGroup(linkingId) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
-  return request("DELETE", `/api/PropertyGroup/Linking/${linkingId}`, payload);
+  return requestWithPagination("DELETE", `/api/PropertyGroup/Linking/${linkingId}`, payload);
 }
 
 function createPropertyGroupLinking(data) {
@@ -117,7 +90,7 @@ function createPropertyGroupLinking(data) {
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return request("POST", `/api/PropertyGroup/Linking`, payload);
+  return requestWithPagination("POST", `/api/PropertyGroup/Linking`, payload);
 }
 
 const propertyGroupingApi = {

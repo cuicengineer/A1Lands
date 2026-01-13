@@ -264,7 +264,11 @@ function RentalProperties() {
                     setPageNumber(1);
                   }}
                   size="small"
-                  sx={{ width: "5rem" }}
+                  sx={{
+                    width: "5rem",
+                    "& .MuiInputBase-root": { minHeight: "45px" },
+                    "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                  }}
                   renderInput={(params) => <MDInput {...params} />}
                 />
                 <MDTypography variant="caption" color="secondary">

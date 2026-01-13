@@ -1,8 +1,4 @@
-const RAW_API_BASE = (process.env.REACT_APP_API_BASE_URL || "").trim();
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
-if (!RAW_API_BASE) {
-  console.warn("REACT_APP_API_BASE_URL is empty or missing; using relative API paths.");
-}
+import api from "services/api.service";
 
 /**
  * Upload files to the server
@@ -15,9 +11,6 @@ async function uploadFiles(id, tableName, files) {
   if (!files || files.length === 0) {
     throw new Error("No files provided for upload");
   }
-
-  const pathWithLeadingSlash = "/api/Upload";
-  const url = `${API_BASE}${pathWithLeadingSlash}`;
 
   // Create FormData for multipart/form-data
   const formData = new FormData();
@@ -36,87 +29,29 @@ async function uploadFiles(id, tableName, files) {
     }
   }
 
-  // Make the request without setting Content-Type header
-  // Browser will set it automatically with the correct boundary for multipart/form-data
-  const response = await fetch(url, {
-    method: "POST",
-    body: formData,
-    // Don't set Content-Type header - let browser set it with boundary
-  });
-
-  if (!response.ok) {
-    let errText = "";
-    try {
-      errText = await response.text();
-    } catch (e) {
-      errText = response.statusText;
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${errText}`);
-  }
-
-  // Try to parse JSON response if available
-  const contentType = response.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  return await response.text();
+  // Use shared API client so Authorization header + refresh cookie are included.
+  const res = await api.requestRaw("POST", "/api/Upload", formData);
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) return await res.json();
+  return await res.text();
 }
 
 async function getUploadedFiles(id, formName) {
-  const pathWithLeadingSlash = "/api/Upload";
   const queryParams = new URLSearchParams({
     id: id.toString(),
     formName,
   }).toString();
-  const url = `${API_BASE}${pathWithLeadingSlash}?${queryParams}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-  });
-
-  if (!response.ok) {
-    let errText = "";
-    try {
-      errText = await response.text();
-    } catch (e) {
-      errText = response.statusText;
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${errText}`);
-  }
-
-  const contentType = response.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  return await response.text();
+  const res = await api.requestRaw("GET", `/api/Upload?${queryParams}`);
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) return await res.json();
+  return await res.text();
 }
 
 async function deleteUploadedFile(fileId) {
-  const pathWithLeadingSlash = `/api/Upload/${fileId}`;
-  const url = `${API_BASE}${pathWithLeadingSlash}`;
-
-  const response = await fetch(url, {
-    method: "DELETE",
-  });
-
-  if (!response.ok) {
-    let errText = "";
-    try {
-      errText = await response.text();
-    } catch (e) {
-      errText = response.statusText;
-    }
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${errText}`);
-  }
-
-  const contentType = response.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) {
-    return await response.json();
-  }
-
-  return await response.text();
+  const res = await api.requestRaw("DELETE", `/api/Upload/${fileId}`);
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) return await res.json();
+  return await res.text();
 }
 
 const uploadApi = {

@@ -19,7 +19,7 @@ import PropTypes from "prop-types";
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
 
-function DataTableBodyCell({ noBorder, align, children, isEvenRow }) {
+function DataTableBodyCell({ noBorder, align, children, isEvenRow, disabledRow }) {
   return (
     <MDBox
       component="td"
@@ -29,9 +29,9 @@ function DataTableBodyCell({ noBorder, align, children, isEvenRow }) {
       sx={({ palette: { light }, borders: { borderWidth } }) => ({
         fontSize: "0.875rem",
         borderBottom: noBorder ? "none" : `${borderWidth[1]} solid ${light.main}`,
-        backgroundColor: isEvenRow ? "#f0f0f0" : "#ffffff",
+        backgroundColor: disabledRow ? "#e6e6e6" : isEvenRow ? "#f0f0f0" : "#ffffff",
         // Force readable row text even when dark theme is enabled
-        color: "#111111 !important",
+        color: disabledRow ? "#777777 !important" : "#111111 !important",
         // Allow multi-line cells and prevent overflow into adjacent columns
         whiteSpace: "normal",
         overflowWrap: "anywhere",
@@ -62,6 +62,7 @@ DataTableBodyCell.defaultProps = {
   noBorder: false,
   align: "left",
   isEvenRow: false,
+  disabledRow: false,
 };
 
 // Typechecking props for the DataTableBodyCell
@@ -70,6 +71,7 @@ DataTableBodyCell.propTypes = {
   noBorder: PropTypes.bool,
   align: PropTypes.oneOf(["left", "right", "center"]),
   isEvenRow: PropTypes.bool,
+  disabledRow: PropTypes.bool,
 };
 
 export default DataTableBodyCell;

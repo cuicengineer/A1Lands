@@ -8,6 +8,9 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
+import FormControl from "@mui/material/FormControl";
+import FormHelperText from "@mui/material/FormHelperText";
+import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 
@@ -41,6 +44,7 @@ function NatureConfig() {
   const [pageSize, setPageSize] = useState(5);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
+  const [newErrors, setNewErrors] = useState({});
 
   useEffect(() => {
     fetchNatures();
@@ -58,6 +62,7 @@ function NatureConfig() {
   const handleAddNature = () => {
     if (editingRowId) return;
     setEditingRowId("__new__");
+    setNewErrors({});
     setNewRowDraft({
       id: tableRows.length > 0 ? Math.max(...tableRows.map((r) => r.id)) + 1 : 1,
       name: "",
@@ -82,17 +87,43 @@ function NatureConfig() {
   const handleChange = (field, value) => {
     if (editingRowId === "__new__") {
       setNewRowDraft((draft) => ({ ...draft, [field]: value }));
+      if (newErrors?.[field]) setNewErrors((prev) => ({ ...prev, [field]: undefined }));
     } else if (editingRowId) {
       setEditDraft((draft) => ({ ...draft, [field]: value }));
     }
   };
 
+  const isEmpty = (val) => {
+    if (val === null || val === undefined) return true;
+    if (Array.isArray(val)) return val.length === 0;
+    if (typeof val === "string") return val.trim().length === 0;
+    return false;
+  };
+
+  const validateNewRow = () => {
+    const next = {};
+    const required = [
+      { key: "name", label: "Name" },
+      { key: "description", label: "Description" },
+      { key: "status", label: "Status" },
+      { key: "rentalVal", label: "Rental Value (Mil)" },
+      { key: "annualRent", label: "Annual Rent (Mil)" },
+      { key: "govtShare", label: "Govt Share" },
+      { key: "pafShare", label: "PAF Share" },
+      { key: "propNumber", label: "Property Number" },
+    ];
+    required.forEach(({ key, label }) => {
+      if (isEmpty(newRowDraft?.[key])) next[key] = `${label} is required`;
+    });
+    setNewErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
   const handleSave = async () => {
     if (editingRowId === "__new__" && newRowDraft) {
-      if (!newRowDraft.name) {
-        alert("Name is mandatory.");
-        return;
-      }
+      // Mandatory validation only for Create New (as requested)
+      const ok = validateNewRow();
+      if (!ok) return;
       try {
         const payload = {
           ...newRowDraft,
@@ -136,6 +167,7 @@ function NatureConfig() {
     setEditingRowId(null);
     setNewRowDraft(null);
     setEditDraft(null);
+    setNewErrors({});
   };
 
   const handleDeleteNature = (id) => {
@@ -188,15 +220,19 @@ function NatureConfig() {
           field === "govtShare" ||
           field === "pafShare") && { step: "any" })}
       required={mandatory}
+      error={Boolean(newErrors[field])}
+      helperText={newErrors[field]}
     />
   );
 
-  const renderStatusSelect = (value) => (
+  const renderStatusSelect = (value, mandatory = false) => (
+    <FormControl size="small" fullWidth required={mandatory} error={Boolean(newErrors.status)}>
+      <InputLabel id="nature-status-label">Status</InputLabel>
     <Select
+        labelId="nature-status-label"
       value={value}
+        label="Status"
       onChange={(e) => handleChange("status", e.target.value)}
-      size="small"
-      fullWidth
     >
       {statusOptions.map((opt) => (
         <MenuItem key={opt.value} value={opt.value}>
@@ -204,6 +240,8 @@ function NatureConfig() {
         </MenuItem>
       ))}
     </Select>
+      {newErrors.status && <FormHelperText>{newErrors.status}</FormHelperText>}
+    </FormControl>
   );
 
   const computedRows = useMemo(() => {
@@ -221,13 +259,13 @@ function NatureConfig() {
       rows.push({
         id: newRowDraft.id,
         name: renderInput("name", newRowDraft.name, "text", true),
-        description: renderInput("description", newRowDraft.description),
-        status: renderStatusSelect(newRowDraft.status),
-        rentalVal: renderInput("rentalVal", newRowDraft.rentalVal, "number"),
-        annualRent: renderInput("annualRent", newRowDraft.annualRent, "number"),
-        govtShare: renderInput("govtShare", newRowDraft.govtShare, "number"),
-        pafShare: renderInput("pafShare", newRowDraft.pafShare, "number"),
-        propNumber: renderInput("propNumber", newRowDraft.propNumber),
+        description: renderInput("description", newRowDraft.description, "text", true),
+        status: renderStatusSelect(newRowDraft.status, true),
+        rentalVal: renderInput("rentalVal", newRowDraft.rentalVal, "number", true),
+        annualRent: renderInput("annualRent", newRowDraft.annualRent, "number", true),
+        govtShare: renderInput("govtShare", newRowDraft.govtShare, "number", true),
+        pafShare: renderInput("pafShare", newRowDraft.pafShare, "number", true),
+        propNumber: renderInput("propNumber", newRowDraft.propNumber, "text", true),
         actions: (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">

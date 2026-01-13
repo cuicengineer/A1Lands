@@ -71,7 +71,7 @@ function ReportsLineChart({ color, title, description, date, chart }) {
               py={2}
               pr={0.5}
               mt={-5}
-              height="12.5rem"
+              height="11rem"
             >
               <Line data={data} options={options} redraw />
             </MDBox>
@@ -86,14 +86,6 @@ function ReportsLineChart({ color, title, description, date, chart }) {
             {description}
           </MDTypography>
           <Divider />
-          <MDBox display="flex" alignItems="center">
-            <MDTypography variant="button" color="text" lineHeight={1} sx={{ mt: 0.15, mr: 0.5 }}>
-              <Icon>schedule</Icon>
-            </MDTypography>
-            <MDTypography variant="button" color="text" fontWeight="light">
-              {date}
-            </MDTypography>
-          </MDBox>
         </MDBox>
       </MDBox>
     </Card>

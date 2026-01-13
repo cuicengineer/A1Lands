@@ -14,6 +14,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
 import api from "services/api.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -24,6 +25,7 @@ import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 
 function TenantsForm({ open, onClose, onSubmit, initialData }) {
+  const isAddMode = !initialData;
   const [form, setForm] = useState({
     tenantNo: "",
     ownerName: "",
@@ -39,8 +41,10 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     status: true,
     remarks: "",
   });
+  const [errors, setErrors] = useState({});
 
   useEffect(() => {
+    setErrors({});
     if (initialData) {
       setForm({
         tenantNo: initialData.tenantNo || "",
@@ -81,9 +85,47 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
       ...prev,
       [field]: field === "status" ? Boolean(value) : value,
     }));
+    if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
-  const handleSave = () => onSubmit(form);
+  const isEmpty = (val) => {
+    if (val === null || val === undefined) return true;
+    if (Array.isArray(val)) return val.length === 0;
+    if (typeof val === "string") return val.trim().length === 0;
+    return false;
+  };
+
+  const validateAddNew = () => {
+    const next = {};
+    const required = [
+      { key: "tenantNo", label: "Tenant No" },
+      { key: "ownerName", label: "Owner Name" },
+      { key: "prefix", label: "Prefix" },
+      { key: "businessName", label: "Business Name" },
+      { key: "address", label: "Address" },
+      { key: "province", label: "Province" },
+      { key: "city", label: "City" },
+      { key: "telephoneNo", label: "Telephone No" },
+      { key: "cellNo", label: "Cell No" },
+      { key: "ntnNo", label: "NTN No" },
+      { key: "gstNo", label: "GST No" },
+      { key: "remarks", label: "Remarks" },
+    ];
+    required.forEach(({ key, label }) => {
+      if (isEmpty(form?.[key])) next[key] = `${label} is required`;
+    });
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSave = () => {
+    // Mandatory validation only for Create New (as requested)
+    if (isAddMode) {
+      const ok = validateAddNew();
+      if (!ok) return;
+    }
+    onSubmit(form);
+  };
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
@@ -101,7 +143,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("tenantNo", e.target.value)}
               fullWidth
               size="small"
-              required
+              required={isAddMode}
+              error={Boolean(errors.tenantNo)}
+              helperText={errors.tenantNo}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -123,7 +167,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("ownerName", e.target.value)}
               fullWidth
               size="small"
-              required
+              required={isAddMode}
+              error={Boolean(errors.ownerName)}
+              helperText={errors.ownerName}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -145,6 +191,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("prefix", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.prefix)}
+              helperText={errors.prefix}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -166,6 +215,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("businessName", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.businessName)}
+              helperText={errors.businessName}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -187,6 +239,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("address", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.address)}
+              helperText={errors.address}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -208,6 +263,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("province", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.province)}
+              helperText={errors.province}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -229,6 +287,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("city", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.city)}
+              helperText={errors.city}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -250,6 +311,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("telephoneNo", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.telephoneNo)}
+              helperText={errors.telephoneNo}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -271,6 +335,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("cellNo", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.cellNo)}
+              helperText={errors.cellNo}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -292,6 +359,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("ntnNo", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.ntnNo)}
+              helperText={errors.ntnNo}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -313,6 +383,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("gstNo", e.target.value)}
               fullWidth
               size="small"
+              required={isAddMode}
+              error={Boolean(errors.gstNo)}
+              helperText={errors.gstNo}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -327,7 +400,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
 
           {/* Status */}
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth required={isAddMode} error={Boolean(errors.status)}>
               <InputLabel id="status-label" sx={{ fontSize: "1.1rem" }}>
                 Status
               </InputLabel>
@@ -366,6 +439,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                   Inactive
                 </MenuItem>
               </Select>
+              {errors.status && <FormHelperText>{errors.status}</FormHelperText>}
             </FormControl>
           </Grid>
 
@@ -380,6 +454,9 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               size="small"
               multiline
               rows={3}
+              required={isAddMode}
+              error={Boolean(errors.remarks)}
+              helperText={errors.remarks}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",

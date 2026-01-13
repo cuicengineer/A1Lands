@@ -1,46 +1,12 @@
-const RAW_API_BASE = (process.env.REACT_APP_API_BASE_URL || "").trim();
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
-if (!RAW_API_BASE) {
-  // eslint-disable-next-line no-console
-  console.warn("REACT_APP_API_BASE_URL is empty or missing; using relative API paths.");
-}
+import api from "services/api.service";
 
-const JSON_HEADERS = { "Content-Type": "application/json" };
-
-async function request(method, path, body, headers = {}) {
-  const pathWithLeadingSlash = path.startsWith("/") ? path : `/${path}`;
-  const url = `${API_BASE}${pathWithLeadingSlash}`;
-
-  const options = {
-    method,
-    headers: { ...JSON_HEADERS, ...headers },
-  };
-
-  if (body !== undefined && body !== null) {
-    options.body = JSON.stringify(body);
-  }
-
-  const res = await fetch(url, options);
-
-  if (!res.ok) {
-    let errText = "";
-    try {
-      errText = await res.text();
-    } catch (e) {
-      errText = res.statusText;
-    }
-    throw new Error(`HTTP ${res.status} ${res.statusText}: ${errText}`);
-  }
-
+async function requestWithPagination(method, path, body) {
+  const res = await api.requestRaw(method, path, body);
   if (res.status === 204) return null;
 
   const contentType = res.headers.get("content-type");
-  let data;
-  if (contentType && contentType.includes("application/json")) {
-    data = await res.json();
-  } else {
-    data = await res.text();
-  }
+  const data =
+    contentType && contentType.includes("application/json") ? await res.json() : await res.text();
 
   // Extract pagination headers if present
   const totalCount = res.headers.get("X-Total-Count");
@@ -66,7 +32,7 @@ function getAll(pageNumber = 1, pageSize = 50) {
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
   }).toString();
-  return request("GET", `/api/RentalProperties?${params}`);
+  return requestWithPagination("GET", `/api/RentalProperties?${params}`);
 }
 
 function create(data) {
@@ -77,7 +43,7 @@ function create(data) {
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return request("POST", `/api/RentalProperties`, payload);
+  return requestWithPagination("POST", `/api/RentalProperties`, payload);
 }
 
 function update(id, data) {
@@ -88,12 +54,12 @@ function update(id, data) {
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return request("PUT", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("PUT", `/api/RentalProperties/${id}`, payload);
 }
 
 function remove(id) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
-  return request("DELETE", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("DELETE", `/api/RentalProperties/${id}`, payload);
 }
 
 const rentalPropertiesApi = { getAll, create, update, remove };

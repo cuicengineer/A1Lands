@@ -24,6 +24,7 @@ function UserMgmt() {
   const [tableRows, setTableRows] = useState([]);
   const [commandOptions, setCommandOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
+  const [roleOptions, setRoleOptions] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const [editingRowId, setEditingRowId] = useState(null);
@@ -39,21 +40,33 @@ function UserMgmt() {
     let mounted = true;
     (async () => {
       try {
-        const [userData, commandData, baseData] = await Promise.all([
+        const [userData, commandData, baseData, roleData] = await Promise.all([
           api.list("User"),
           api.list("Command"),
           api.list("Base"),
+          api.list("Role"),
         ]);
         if (!mounted) return;
 
         const userArr = Array.isArray(userData) ? userData : userData?.items || [];
         const commandArr = Array.isArray(commandData) ? commandData : commandData?.items || [];
         const baseArr = Array.isArray(baseData) ? baseData : baseData?.items || [];
+        const roleArr = Array.isArray(roleData) ? roleData : roleData?.items || [];
 
         setTableRows(userArr);
         setCommandOptions(commandArr.map((cmd) => ({ id: Number(cmd.id), name: cmd.name })));
         setBaseOptions(
           baseArr.map((base) => ({ id: Number(base.id), name: base.name, cmdId: Number(base.cmd) }))
+        );
+        // Category lookup (bind to user-role): store roleName as value, roleName as key (per request)
+        setRoleOptions(
+          roleArr
+            .map((r) => ({
+              key: String(r.roleName ?? r.name ?? r.id ?? ""),
+              value: String(r.roleName ?? r.name ?? r.id ?? ""),
+              id: Number(r.id),
+            }))
+            .filter((r) => r.value)
         );
       } catch (e) {
         console.error("Failed to load data", e);
@@ -87,17 +100,52 @@ function UserMgmt() {
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
+    if (
+      String(row.username || "")
+        .trim()
+        .toLowerCase() === "superuser"
+    )
+      return;
     setEditingRowId(id);
     setEditDraft({ ...row });
   };
 
-  const validateForm = (draftToValidate) => {
+  const PASSWORD_POLICY_TEXT =
+    "Password must be 6-12 characters long and contain at least 1 special character.";
+
+  const validatePasswordPolicy = (value) => {
+    const s = String(value || "");
+    if (!s.trim()) return "Password is required";
+    if (s.length < 6 || s.length > 12) return PASSWORD_POLICY_TEXT;
+    // special char = anything that's not alphanumeric
+    if (!/[^a-zA-Z0-9]/.test(s)) return PASSWORD_POLICY_TEXT;
+    return "";
+  };
+
+  const validateForm = (draftToValidate, showAlert = false) => {
     const errs = {};
     const draft = draftToValidate;
     if (!draft?.username || !String(draft.username).trim()) errs.username = "Username is required";
+    if (!draft?.pakNo || !String(draft.pakNo).trim()) errs.pakNo = "PakNo is required";
     if (!draft?.name || !String(draft.name).trim()) errs.name = "Name is required";
-    if (!draft?.password || !String(draft.password).trim()) errs.password = "Password is required";
+    const pwMsg = validatePasswordPolicy(draft?.password);
+    if (pwMsg) errs.password = pwMsg;
+    if (!draft?.rank || !String(draft.rank).trim()) errs.rank = "Rank is required";
+    if (!draft?.category || !String(draft.category).trim()) errs.category = "Category is required";
+    if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined)
+      errs.cmdId = "Command is required";
+    if (draft?.baseId === "" || draft?.baseId === null || draft?.baseId === undefined)
+      errs.baseId = "Base is required";
+    if (draft?.unitId === "" || draft?.unitId === null || draft?.unitId === undefined)
+      errs.unitId = "Unit ID is required";
+    if (draft?.status === "" || draft?.status === null || draft?.status === undefined)
+      errs.status = "Status is required";
     setErrors(errs);
+
+    if (showAlert && errs.password) {
+      // Requirement: show policy as alert when password is not valid
+      alert(PASSWORD_POLICY_TEXT);
+    }
     return Object.keys(errs).length === 0;
   };
 
@@ -117,7 +165,7 @@ function UserMgmt() {
   };
 
   const handleAddSave = async () => {
-    if (!validateForm(newRowDraft)) return;
+    if (!validateForm(newRowDraft, true)) return;
 
     setErrors({});
 
@@ -145,7 +193,7 @@ function UserMgmt() {
   };
 
   const handleEditSave = async () => {
-    if (!validateForm(editDraft)) return;
+    if (!validateForm(editDraft, true)) return;
 
     setErrors({});
 
@@ -183,6 +231,14 @@ function UserMgmt() {
   };
 
   const handleDeleteUser = async (id) => {
+    const row = tableRows.find((r) => r.id === id);
+    if (
+      row &&
+      String(row.username || "")
+        .trim()
+        .toLowerCase() === "superuser"
+    )
+      return;
     if (window.confirm(`Are you sure you want to delete user with Id ${id}?`)) {
       try {
         await api.remove("User", id);
@@ -256,6 +312,36 @@ function UserMgmt() {
     );
   };
 
+  const renderCategorySelect = (field, value, disabled = false) => (
+    <MDInput
+      select
+      value={value || ""}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+      required
+      disabled={disabled}
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
+    >
+      {roleOptions.map((opt) => (
+        <MenuItem key={opt.value} value={opt.value}>
+          {opt.value}
+        </MenuItem>
+      ))}
+    </MDInput>
+  );
+
   const renderStatusSelect = (field, value) => (
     <MDInput
       select
@@ -263,6 +349,16 @@ function UserMgmt() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Inactive</MenuItem>
@@ -277,6 +373,16 @@ function UserMgmt() {
       size="small"
       fullWidth
       disabled={disabled}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
     >
       {commandOptions.map((opt) => (
         <MenuItem key={opt.id} value={opt.id}>
@@ -296,6 +402,16 @@ function UserMgmt() {
         size="small"
         fullWidth
         disabled={disabled}
+        sx={{
+          "& .MuiInputBase-root": { minHeight: "45px" },
+          "& .MuiSelect-select": {
+            minHeight: "45px",
+            display: "flex",
+            alignItems: "center",
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
+        }}
       >
         {filteredBases.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
@@ -312,14 +428,19 @@ function UserMgmt() {
     tableRows.forEach((r) => {
       const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
+      const isSuperuser =
+        String(r.username || "")
+          .trim()
+          .toLowerCase() === "superuser";
       rows.push({
+        __disabledRow: isSuperuser,
         id: r.id,
         username: isEditing ? renderInput("username", draft.username, true, false) : r.username,
         password: isEditing ? renderInput("password", draft.password, true) : "********",
         pakNo: isEditing ? renderInput("pakNo", draft.pakNo, false, false) : r.pakNo,
         name: isEditing ? renderInput("name", draft.name, false, false) : r.name,
         rank: isEditing ? renderInput("rank", draft.rank, false, false) : r.rank,
-        category: isEditing ? renderInput("category", draft.category, false, false) : r.category,
+        category: isEditing ? renderCategorySelect("category", draft.category, false) : r.category,
         cmdId: isEditing
           ? renderCommandSelect("cmdId", Number(draft.cmdId), false)
           : commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
@@ -332,7 +453,9 @@ function UserMgmt() {
         status: isEditing
           ? renderStatusSelect("Status", draft.status)
           : renderStatusBadge(r.status),
-        actions: isEditing ? (
+        actions: isSuperuser ? (
+          <MDBox />
+        ) : isEditing ? (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleEditSave} title="Save">
               <Icon>check</Icon>
@@ -457,6 +580,7 @@ function UserMgmt() {
         setNewRowDraft={setNewRowDraft}
         commandOptions={commandOptions}
         baseOptions={baseOptions}
+        roleOptions={roleOptions}
         handleAddSave={handleAddSave}
         errors={errors}
         setErrors={setErrors}

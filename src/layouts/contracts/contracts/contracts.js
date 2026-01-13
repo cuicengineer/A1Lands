@@ -251,17 +251,24 @@ function ContractsForm({
   };
   const selectSx = {
     fontSize: "1rem",
+    // Keep a fixed control height whether empty or filled
+    "& .MuiOutlinedInput-root": {
+      minHeight: "45px",
+    },
     "& .MuiSelect-select": {
       fontSize: "1rem",
-      padding: "10px 32px 10px 12px",
-      minHeight: "40px",
+      padding: "12px 32px 12px 12px",
+      minHeight: "45px",
+      display: "flex",
+      alignItems: "center",
+      boxSizing: "border-box",
     },
   };
   const menuItemSx = { fontSize: "1rem" };
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 100 }}>
+      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700 }}>
         {initialData ? "Edit Contract" : "New Contract"}
       </DialogTitle>
       <DialogContent>
@@ -1323,7 +1330,11 @@ export default function Contracts() {
                         setPageNumber(1);
                       }}
                       size="small"
-                      sx={{ width: "5rem" }}
+                      sx={{
+                        width: "5rem",
+                        "& .MuiInputBase-root": { minHeight: "45px" },
+                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                      }}
                       renderInput={(params) => <MDInput {...params} />}
                     />
                     <MDTypography variant="caption" color="secondary">

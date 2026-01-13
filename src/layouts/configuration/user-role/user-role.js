@@ -39,6 +39,16 @@ function UserRole() {
     if (!newRowDraft?.roleName || !newRowDraft.roleName.trim()) {
       errs.roleName = "Role Name is required";
     }
+    if (!newRowDraft?.description || !String(newRowDraft.description).trim()) {
+      errs.description = "Description is required";
+    }
+    if (
+      newRowDraft?.status === "" ||
+      newRowDraft?.status === null ||
+      newRowDraft?.status === undefined
+    ) {
+      errs.status = "Status is required";
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -74,6 +84,17 @@ function UserRole() {
       if (field === "roleName") {
         const msg = nextValue && String(nextValue).trim() ? null : "Role Name is required";
         setErrors((prev) => ({ ...prev, roleName: msg }));
+      }
+      if (field === "description") {
+        const msg = nextValue && String(nextValue).trim() ? null : "Description is required";
+        setErrors((prev) => ({ ...prev, description: msg }));
+      }
+      if (field === "status") {
+        const msg =
+          nextValue !== "" && nextValue !== null && nextValue !== undefined
+            ? null
+            : "Status is required";
+        setErrors((prev) => ({ ...prev, status: msg }));
       }
     } else if (editingRowId) {
       setEditDraft((draft) => ({ ...draft, [field]: nextValue }));
@@ -154,9 +175,19 @@ function UserRole() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
-      required={editingRowId === "__new__" && field === "roleName"}
-      error={editingRowId === "__new__" && field === "roleName" && Boolean(errors?.roleName)}
-      helperText={editingRowId === "__new__" && field === "roleName" ? errors?.roleName : undefined}
+      required={editingRowId === "__new__" && (field === "roleName" || field === "description")}
+      error={
+        editingRowId === "__new__" &&
+        ((field === "roleName" && Boolean(errors?.roleName)) ||
+          (field === "description" && Boolean(errors?.description)))
+      }
+      helperText={
+        editingRowId === "__new__" && field === "roleName"
+          ? errors?.roleName
+          : editingRowId === "__new__" && field === "description"
+          ? errors?.description
+          : undefined
+      }
     />
   );
 
@@ -167,6 +198,19 @@ function UserRole() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      required={editingRowId === "__new__"}
+      error={editingRowId === "__new__" && Boolean(errors?.status)}
+      helperText={editingRowId === "__new__" ? errors?.status : undefined}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+        },
+      }}
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>
