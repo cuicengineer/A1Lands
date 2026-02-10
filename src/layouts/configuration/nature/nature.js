@@ -68,11 +68,6 @@ function NatureConfig() {
       name: "",
       description: "",
       status: statusOptions[0].value,
-      rentalVal: 0,
-      annualRent: 0,
-      govtShare: 0,
-      pafShare: 0,
-      propNumber: "",
     });
   };
 
@@ -106,11 +101,6 @@ function NatureConfig() {
       { key: "name", label: "Name" },
       { key: "description", label: "Description" },
       { key: "status", label: "Status" },
-      { key: "rentalVal", label: "Rental Value (Mil)" },
-      { key: "annualRent", label: "Annual Rent (Mil)" },
-      { key: "govtShare", label: "Govt Share" },
-      { key: "pafShare", label: "PAF Share" },
-      { key: "propNumber", label: "Property Number" },
     ];
     required.forEach(({ key, label }) => {
       if (isEmpty(newRowDraft?.[key])) next[key] = `${label} is required`;
@@ -125,14 +115,7 @@ function NatureConfig() {
       const ok = validateNewRow();
       if (!ok) return;
       try {
-        const payload = {
-          ...newRowDraft,
-          rentalVal: newRowDraft.rentalVal === "" ? null : newRowDraft.rentalVal,
-          annualRent: newRowDraft.annualRent === "" ? null : newRowDraft.annualRent,
-          govtShare: newRowDraft.govtShare === "" ? null : parseFloat(newRowDraft.govtShare),
-          pafShare: newRowDraft.pafShare === "" ? null : parseFloat(newRowDraft.pafShare),
-        };
-        const { id, ...createPayload } = payload;
+        const { id, ...createPayload } = newRowDraft;
         await api.create("Nature", createPayload);
         fetchNatures();
         setEditingRowId(null);
@@ -146,14 +129,7 @@ function NatureConfig() {
         return;
       }
       try {
-        const payload = {
-          ...editDraft,
-          rentalVal: editDraft.rentalVal === "" ? null : parseFloat(editDraft.rentalVal),
-          annualRent: editDraft.annualRent === "" ? null : parseFloat(editDraft.annualRent),
-          govtShare: editDraft.govtShare === "" ? null : parseFloat(editDraft.govtShare),
-          pafShare: editDraft.pafShare === "" ? null : parseFloat(editDraft.pafShare),
-        };
-        await api.update("Nature", editingRowId, payload);
+        await api.update("Nature", editingRowId, editDraft);
         fetchNatures();
         setEditingRowId(null);
         setEditDraft(null);
@@ -200,11 +176,6 @@ function NatureConfig() {
     { Header: "Name", accessor: "name", align: "left", width: "18%" },
     { Header: "Description", accessor: "description", align: "left", width: "24%" },
     { Header: "Status", accessor: "status", align: "center", width: "8%" },
-    { Header: "Rental Value (Mil)", accessor: "rentalVal", align: "right", width: "10%" },
-    { Header: "Annual Rent (Mil)", accessor: "annualRent", align: "right", width: "10%" },
-    { Header: "Govt Share", accessor: "govtShare", align: "right", width: "8%" },
-    { Header: "PAF Share", accessor: "pafShare", align: "right", width: "8%" },
-    { Header: "Property Number", accessor: "propNumber", align: "left", width: "10%" },
   ];
 
   const renderInput = (field, value, type = "text", mandatory = false) => (
@@ -214,11 +185,6 @@ function NatureConfig() {
       size="small"
       fullWidth
       type={type}
-      {...(type === "number" &&
-        (field === "rentalVal" ||
-          field === "annualRent" ||
-          field === "govtShare" ||
-          field === "pafShare") && { step: "any" })}
       required={mandatory}
       error={Boolean(newErrors[field])}
       helperText={newErrors[field]}
@@ -228,18 +194,18 @@ function NatureConfig() {
   const renderStatusSelect = (value, mandatory = false) => (
     <FormControl size="small" fullWidth required={mandatory} error={Boolean(newErrors.status)}>
       <InputLabel id="nature-status-label">Status</InputLabel>
-    <Select
+      <Select
         labelId="nature-status-label"
-      value={value}
+        value={value}
         label="Status"
-      onChange={(e) => handleChange("status", e.target.value)}
-    >
-      {statusOptions.map((opt) => (
-        <MenuItem key={opt.value} value={opt.value}>
-          {opt.label}
-        </MenuItem>
-      ))}
-    </Select>
+        onChange={(e) => handleChange("status", e.target.value)}
+      >
+        {statusOptions.map((opt) => (
+          <MenuItem key={opt.value} value={opt.value}>
+            {opt.label}
+          </MenuItem>
+        ))}
+      </Select>
       {newErrors.status && <FormHelperText>{newErrors.status}</FormHelperText>}
     </FormControl>
   );
@@ -261,11 +227,6 @@ function NatureConfig() {
         name: renderInput("name", newRowDraft.name, "text", true),
         description: renderInput("description", newRowDraft.description, "text", true),
         status: renderStatusSelect(newRowDraft.status, true),
-        rentalVal: renderInput("rentalVal", newRowDraft.rentalVal, "number", true),
-        annualRent: renderInput("annualRent", newRowDraft.annualRent, "number", true),
-        govtShare: renderInput("govtShare", newRowDraft.govtShare, "number", true),
-        pafShare: renderInput("pafShare", newRowDraft.pafShare, "number", true),
-        propNumber: renderInput("propNumber", newRowDraft.propNumber, "text", true),
         actions: (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">
@@ -321,13 +282,6 @@ function NatureConfig() {
         ) : (
           <StatusBadge value={r.status} inactiveLabel="Not Active" inactiveColor="error" />
         ),
-        rentalVal: isEditing ? renderInput("rentalVal", draft.rentalVal, "number") : r.rentalVal,
-        annualRent: isEditing
-          ? renderInput("annualRent", draft.annualRent, "number")
-          : r.annualRent,
-        govtShare: isEditing ? renderInput("govtShare", draft.govtShare, "number") : r.govtShare,
-        pafShare: isEditing ? renderInput("pafShare", draft.pafShare, "number") : r.pafShare,
-        propNumber: isEditing ? renderInput("propNumber", draft.propNumber) : r.propNumber,
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">
@@ -503,6 +457,7 @@ function NatureConfig() {
                   setPageIndex(0); // Reset to first page when page size changes
                 }}
                 showTotalEntries
+                exportFileName="Nature"
                 noEndBorder
               />
             </MDBox>

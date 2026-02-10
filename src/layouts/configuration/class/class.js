@@ -44,6 +44,7 @@ function ClassConfig() {
     setEditingRowId("__new__");
     setNewRowDraft({
       id: 0,
+      code: "",
       name: "",
       desc: "",
       status: 0,
@@ -60,12 +61,24 @@ function ClassConfig() {
   };
 
   const handleChange = (field, value) => {
-    const nextValue = field === "status" ? Number(value) : value;
+    let nextValue = field === "status" ? Number(value) : value;
+
+    // Limit code to 2 characters
+    if (field === "code") {
+      nextValue = String(value || "")
+        .slice(0, 2)
+        .toUpperCase();
+    }
+
     if (editingRowId === "__new__") {
       setNewRowDraft((draft) => ({ ...draft, [field]: nextValue }));
       if (field === "name") {
         const msg = nextValue && String(nextValue).trim() ? null : "Name is required";
         setErrors((prev) => ({ ...prev, name: msg }));
+      } else if (field === "code") {
+        const codeStr = String(nextValue || "").trim();
+        const msg = codeStr.length === 2 ? null : "Code must be exactly 2 characters";
+        setErrors((prev) => ({ ...prev, code: msg }));
       }
     } else if (editingRowId) {
       setEditDraft((draft) => ({ ...draft, [field]: nextValue }));
@@ -77,6 +90,10 @@ function ClassConfig() {
     if (!newRowDraft?.name || !newRowDraft.name.trim()) {
       errs.name = "Name is required";
     }
+    const codeStr = String(newRowDraft?.code || "").trim();
+    if (!codeStr || codeStr.length !== 2) {
+      errs.code = "Code must be exactly 2 characters";
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -87,6 +104,9 @@ function ClassConfig() {
         if (!validateNew()) return;
         const payload = {
           id: newRowDraft.id,
+          code: String(newRowDraft.code || "")
+            .trim()
+            .toUpperCase(),
           name: newRowDraft.name,
           desc: newRowDraft.desc,
           status:
@@ -101,6 +121,9 @@ function ClassConfig() {
       } else if (editingRowId && editDraft) {
         const payload = {
           id: editDraft.id,
+          code: String(editDraft.code || "")
+            .trim()
+            .toUpperCase(),
           name: editDraft.name,
           desc: editDraft.desc,
           status:
@@ -140,18 +163,21 @@ function ClassConfig() {
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
     { Header: "Id", accessor: "id", align: "left", width: "6%" },
-    { Header: "Class Name", accessor: "name", align: "left", width: "20%" },
-    { Header: "Description", accessor: "desc", align: "left", width: "28%" },
+    { Header: "Code", accessor: "code", align: "left", width: "8%" },
+    { Header: "Class Name", accessor: "name", align: "left", width: "18%" },
+    { Header: "Description", accessor: "desc", align: "left", width: "26%" },
     { Header: "Status", accessor: "status", align: "center", width: "10%" },
   ];
 
   const renderStatusBadge = (status) => {
-    const label =
-      status === 1 ||
-      status === "1" ||
-      (typeof status === "string" && status.toLowerCase() === "active")
-        ? "Active"
-        : "DeActive";
+    const s = String(status ?? "")
+      .trim()
+      .toLowerCase();
+
+    let label = "Inactive";
+    if (status === 1 || status === "1" || s === "true" || s === "active") {
+      label = "Active";
+    }
     return (
       <MDBox ml={-1}>
         <MDBadge
@@ -170,9 +196,12 @@ function ClassConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
-      required={editingRowId === "__new__" && field === "name"}
-      error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
-      helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
+      required={editingRowId === "__new__" && (field === "name" || field === "code")}
+      error={editingRowId === "__new__" && Boolean(errors?.[field])}
+      helperText={editingRowId === "__new__" ? errors?.[field] : undefined}
+      {...(field === "code" && {
+        inputProps: { maxLength: 2, style: { textTransform: "uppercase" } },
+      })}
     />
   );
 
@@ -185,7 +214,7 @@ function ClassConfig() {
       fullWidth
     >
       <MenuItem value={1}>Active</MenuItem>
-      <MenuItem value={0}>Not Active</MenuItem>
+      <MenuItem value={0}>Inactive</MenuItem>
     </MDInput>
   );
 
@@ -195,6 +224,7 @@ function ClassConfig() {
     if (editingRowId === "__new__" && newRowDraft) {
       rows.push({
         id: newRowDraft.id,
+        code: renderInput("code", newRowDraft.code),
         name: renderInput("name", newRowDraft.name),
         desc: renderInput("desc", newRowDraft.desc),
         status: renderStatusSelect("status", newRowDraft.status),
@@ -217,6 +247,13 @@ function ClassConfig() {
 
       rows.push({
         id: currentRow.id,
+        code: isEditing ? (
+          renderInput("code", currentRow.code)
+        ) : (
+          <MDBox component="span" sx={{ fontWeight: "medium" }}>
+            {row.code || ""}
+          </MDBox>
+        ),
         name: isEditing ? (
           renderInput("name", currentRow.name)
         ) : (
@@ -407,6 +444,7 @@ function ClassConfig() {
                 showTotalEntries
                 noEndBorder
                 canSearch
+                exportFileName="Class"
               />
             </MDBox>
           </MDBox>

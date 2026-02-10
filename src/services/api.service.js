@@ -6,6 +6,30 @@ if (!RAW_API_BASE) {
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+function tryParseJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    // Pad base64 string
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const json =
+      typeof atob === "function" ? atob(padded) : Buffer.from(padded, "base64").toString("utf8");
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+function isJwtExpiredOrNearExpiry(token, skewSeconds = 60) {
+  const payload = tryParseJwtPayload(token);
+  const exp = payload?.exp;
+  if (!exp || typeof exp !== "number") return true; // if we can't determine, be conservative
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return exp <= nowSeconds + skewSeconds;
+}
+
 function getStoredAccessToken() {
   try {
     return (
@@ -43,6 +67,9 @@ function redirectToLogin(reason) {
   // Refresh token is HttpOnly cookie; frontend can't read it.
   // If refresh fails (401/403) we assume refresh token is missing/expired -> force re-login.
   console.log("refresh token missing", reason || "");
+  console.warn(
+    "Auth refresh failed. Common causes: refresh cookie not stored/sent (check SameSite/Secure), or frontend not running on HTTPS while cookie is Secure."
+  );
   clearStoredAuth();
   try {
     if (typeof window !== "undefined" && window.location) {
@@ -111,10 +138,15 @@ async function refreshAccessToken() {
     const nextToken =
       data?.accessToken ||
       data?.AccessToken ||
+      data?.access_token ||
       data?.token ||
       data?.Token ||
       data?.jwt ||
-      data?.Jwt;
+      data?.Jwt ||
+      data?.data?.accessToken ||
+      data?.data?.AccessToken ||
+      data?.data?.token ||
+      data?.data?.Token;
     if (!nextToken) {
       redirectToLogin("refresh succeeded but no access token returned");
       throw new Error("Refresh response did not include access token");
@@ -177,8 +209,12 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
   const res = await fetch(url, fetchOptions);
 
   // If access token expired, refresh using HttpOnly cookie then retry ONCE.
+  const currentToken = getStoredAccessToken();
+  const tokenLikelyExpired = currentToken ? isJwtExpiredOrNearExpiry(currentToken, 60) : false;
   const shouldTryRefresh =
     res.status === 401 &&
+    Boolean(currentToken) &&
+    tokenLikelyExpired &&
     !requestOptions?._retried &&
     !String(pathWithLeadingSlash).toLowerCase().includes("/api/login") &&
     !String(pathWithLeadingSlash).toLowerCase().includes("/api/login/refresh");

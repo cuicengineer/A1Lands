@@ -40,5 +40,58 @@ function list(pageNumber = 1, pageSize = 50) {
   return getAll(pageNumber, pageSize);
 }
 
-const contractApi = { getAll, list };
+// Search contracts by group name
+function searchByGrpName(grpName) {
+  return api.post("/api/Contracts/searchByGrpName", { grpName });
+}
+
+function create(data) {
+  const payload = {
+    ...(data || {}),
+    Action: "Create",
+    ActionBy: "admin",
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  return requestWithPagination("POST", `/api/Contracts`, payload);
+}
+
+function update(id, data) {
+  const payload = {
+    ...(data || {}),
+    Action: "Update",
+    ActionBy: "admin",
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  return requestWithPagination("PUT", `/api/Contracts/${id}`, payload);
+}
+
+function remove(id, data = {}) {
+  const payload = {
+    ...data,
+    Action: "Delete",
+  };
+  return requestWithPagination("DELETE", `/api/Contracts/${id}`, payload);
+}
+
+// Delete ContractRiseTerm by ID
+function deleteContractRiseTerm(riseTermId) {
+  const payload = {
+    Action: "Delete",
+    ActionBy: "admin",
+    ActionDate: new Date().toISOString(),
+  };
+  return api.request("DELETE", `/api/ContractRiseTerms/${riseTermId}`, payload);
+}
+
+const contractApi = {
+  getAll,
+  list,
+  searchByGrpName,
+  create,
+  update,
+  remove,
+  deleteContractRiseTerm,
+};
 export default contractApi;

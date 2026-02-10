@@ -28,6 +28,7 @@ import Box from "@mui/material/Box";
 import OutlinedInput from "@mui/material/OutlinedInput";
 import api from "services/api.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
+import contractApi from "services/api.contract.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -44,6 +45,7 @@ function PropertyGroupingForm({
   commands,
   bases,
   classes,
+  allPropertyGroupings = [],
 }) {
   const isEditMode = Boolean(initialData);
   const normalizePropertyIds = (data) => {
@@ -93,7 +95,6 @@ function PropertyGroupingForm({
     classid: "",
     property: [],
     gId: "",
-    uoM: "",
     location: "",
     area: "",
     remarks: "",
@@ -105,6 +106,11 @@ function PropertyGroupingForm({
 
   const [allBases, setAllBases] = useState([]); // New state to store all bases
   const [linkedPropertyNameById, setLinkedPropertyNameById] = useState({});
+
+  // Contracts dialog state
+  const [contractsDialogOpen, setContractsDialogOpen] = useState(false);
+  const [activeContracts, setActiveContracts] = useState([]);
+  const [loadingContracts, setLoadingContracts] = useState(false);
 
   const getPropertyLabel = (propertyId) => {
     const idKey = String(propertyId);
@@ -140,7 +146,6 @@ function PropertyGroupingForm({
         classid: initialData.classId || "",
         property: normalizedPropertyIds,
         gId: initialData.gId || "",
-        uoM: initialData.uoM || "",
         location: initialData.location || "",
         area: initialData.area || "",
         remarks: initialData.remarks || "",
@@ -176,7 +181,6 @@ function PropertyGroupingForm({
         classid: "",
         property: [],
         gId: "",
-        uoM: "",
         location: "",
         area: "",
         remarks: "",
@@ -237,7 +241,6 @@ function PropertyGroupingForm({
       { key: "property", label: "Property" },
       { key: "gId", label: "GroupID" },
       { key: "location", label: "Address" },
-      { key: "uoM", label: "UoM" },
       { key: "remarks", label: "Remarks" },
     ];
     required.forEach(({ key, label }) => {
@@ -247,13 +250,95 @@ function PropertyGroupingForm({
     return Object.keys(next).length === 0;
   };
 
+  // Validate for duplicate active Group ID
+  const validateDuplicateGroupId = () => {
+    // Only check if status is active (1/true) and not deleted (0/false)
+    const isActive = form.status === true || form.status === 1;
+    const isNotDeleted = form.isDeleted === false || form.isDeleted === 0;
+
+    if (!isActive || !isNotDeleted) {
+      return true; // No validation needed for inactive or deleted records
+    }
+
+    if (!form.gId || !form.classid || !form.baseid) {
+      return true; // Skip validation if required fields are missing
+    }
+
+    // Check for duplicate active Group ID with same class and base
+    const duplicate = allPropertyGroupings.find((pg) => {
+      const sameGroupId = (pg.gId || "").toString().trim() === form.gId.toString().trim();
+      const sameClass = Number(pg.classId || pg.classid) === Number(form.classid);
+      const sameBase = Number(pg.baseId || pg.baseid) === Number(form.baseid);
+      const isActiveRecord = pg.status === true || pg.status === 1;
+      const isNotDeletedRecord = pg.isDeleted === false || pg.isDeleted === 0;
+      const isDifferentRecord = initialData ? Number(pg.id) !== Number(initialData.id) : true;
+
+      return (
+        sameGroupId &&
+        sameClass &&
+        sameBase &&
+        isActiveRecord &&
+        isNotDeletedRecord &&
+        isDifferentRecord
+      );
+    });
+
+    if (duplicate) {
+      setErrors((prev) => ({
+        ...prev,
+        gId: "Same group ID already active for this class and base",
+      }));
+      return false;
+    }
+
+    return true;
+  };
+
   const handleSave = () => {
     // Apply mandatory check only for "Add New"
     if (!isEditMode) {
       const ok = validateAddNew();
       if (!ok) return;
     }
+
+    // Validate for duplicate active Group ID
+    const isDuplicateValid = validateDuplicateGroupId();
+    if (!isDuplicateValid) return;
+
     onSubmit(form);
+  };
+
+  // Fetch active contracts by Group ID
+  const fetchActiveContractsByGroupId = async (groupId) => {
+    if (!groupId || !groupId.trim()) {
+      setActiveContracts([]);
+      return;
+    }
+
+    setLoadingContracts(true);
+    try {
+      // Call API endpoint to search contracts by group name
+      const response = await contractApi.searchByGrpName(groupId.trim());
+
+      // Handle response - could be array or object with data property
+      const contracts = response?.data || (Array.isArray(response) ? response : []);
+
+      setActiveContracts(contracts);
+      setContractsDialogOpen(true);
+    } catch (error) {
+      console.error("Error fetching contracts by Group ID:", error);
+      setActiveContracts([]);
+      alert("Error fetching contracts. Please try again.");
+    } finally {
+      setLoadingContracts(false);
+    }
+  };
+
+  // Handle Group ID blur (when user finishes entering)
+  const handleGroupIdBlur = () => {
+    if (form.gId && form.gId.trim()) {
+      fetchActiveContractsByGroupId(form.gId.trim());
+    }
   };
 
   const handlePropertyChange = (event) => {
@@ -303,10 +388,20 @@ function PropertyGroupingForm({
         return sum + (property && property.area ? Number(property.area) : 0);
       }, 0);
 
+      // Auto-populate location from selected properties (comma-separated)
+      const locations = selectedProperties
+        .map((propertyId) => {
+          const property = rentalProperties.find((p) => p.id === Number(propertyId));
+          return property?.location || "";
+        })
+        .filter((loc) => loc && loc.trim().length > 0); // Remove empty locations
+      const autoLocation = locations.join(", ");
+
       return {
         ...prevForm,
         property: selectedProperties,
         area: totalArea,
+        location: autoLocation, // Auto-update location based on selected properties
       };
     });
     if (errors?.property) setErrors((prev) => ({ ...prev, property: undefined }));
@@ -329,386 +424,35 @@ function PropertyGroupingForm({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>New Property Grouping</DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} mt={0.5}>
-          {/* First Row: Command, Base, Class */}
-          <Grid item xs={12} sm={4}>
-            <FormControl
-              size="small"
-              fullWidth
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.cmdid)}
-              sx={{
-                minWidth: "140px",
-              }}
-            >
-              <InputLabel
-                id="command-label"
-                sx={{
-                  fontSize: "1rem",
-                }}
-              >
-                Command
-              </InputLabel>
-              <Select
-                labelId="command-label"
-                value={form.cmdid || ""}
-                label="Command"
-                onChange={(e) => handleChange("cmdid", e.target.value)}
-                MenuProps={{
-                  PaperProps: {
-                    style: {
-                      maxHeight: 300,
-                    },
-                  },
-                }}
-                sx={{
-                  fontSize: "1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1rem",
-                    padding: "0 32px 0 14px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                  "& .MuiSelect-icon": {
-                    display: "block !important",
-                    right: "8px",
-                  },
-                }}
-              >
-                {commands.map((option) => (
-                  <MenuItem
-                    key={option.id}
-                    value={option.id}
-                    sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                  >
-                    {option.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {!isEditMode && errors.cmdid && <FormHelperText>{errors.cmdid}</FormHelperText>}
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <FormControl
-              size="small"
-              fullWidth
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.baseid)}
-              sx={{
-                minWidth: "140px",
-              }}
-            >
-              <InputLabel
-                id="base-label"
-                sx={{
-                  fontSize: "1rem",
-                }}
-              >
-                Base
-              </InputLabel>
-              <Select
-                labelId="base-label"
-                value={form.baseid || ""}
-                label="Base"
-                onChange={(e) => handleChange("baseid", e.target.value)}
-                MenuProps={{
-                  PaperProps: {
-                    style: {
-                      maxHeight: 300,
-                    },
-                  },
-                }}
-                sx={{
-                  fontSize: "1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1rem",
-                    padding: "0 32px 0 14px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                  "& .MuiSelect-icon": {
-                    display: "block !important",
-                    right: "8px",
-                  },
-                }}
-              >
-                {allBases
-                  .filter((base) => Number(base.cmd) === Number(form.cmdid))
-                  .map((option) => (
-                    <MenuItem
-                      key={option.id}
-                      value={option.id}
-                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                    >
-                      {option.name}
-                    </MenuItem>
-                  ))}
-              </Select>
-              {!isEditMode && errors.baseid && <FormHelperText>{errors.baseid}</FormHelperText>}
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <FormControl
-              size="small"
-              fullWidth
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.classid)}
-              sx={{
-                minWidth: "140px",
-              }}
-            >
-              <InputLabel
-                id="class-label"
-                sx={{
-                  fontSize: "1rem",
-                }}
-              >
-                Class
-              </InputLabel>
-              <Select
-                labelId="class-label"
-                value={form.classid || ""}
-                label="Class"
-                onChange={(e) => handleChange("classid", e.target.value)}
-                MenuProps={{
-                  PaperProps: {
-                    style: {
-                      maxHeight: 300,
-                    },
-                  },
-                }}
-                sx={{
-                  fontSize: "1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1rem",
-                    padding: "0 32px 0 14px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                  "& .MuiSelect-icon": {
-                    display: "block !important",
-                    right: "8px",
-                  },
-                }}
-              >
-                {classes.map((option) => (
-                  <MenuItem
-                    key={option.id}
-                    value={option.id}
-                    sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                  >
-                    {option.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {!isEditMode && errors.classid && <FormHelperText>{errors.classid}</FormHelperText>}
-            </FormControl>
-          </Grid>
-
-          {/* Property */}
-          <Grid item xs={10} sm={6}>
-            <FormControl
-              size="small"
-              fullWidth
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.property)}
-              sx={{
-                minWidth: "150px",
-              }}
-            >
-              <InputLabel
-                id="property-label"
-                sx={{
-                  fontSize: "1rem",
-                }}
-              >
-                Property
-              </InputLabel>
-              <Select
-                labelId="property-label"
-                multiple
-                value={form.property || []}
-                onChange={handlePropertyChange}
-                disabled={isEditMode}
-                input={<OutlinedInput id="select-multiple-chip" label="Property" />}
-                MenuProps={{
-                  PaperProps: {
-                    style: {
-                      maxHeight: 300,
-                    },
-                  },
-                }}
-                sx={{
-                  fontSize: "1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1rem",
-                    padding: "0 32px 0 14px",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                  "& .MuiSelect-icon": {
-                    display: "block !important",
-                    right: "8px",
-                  },
-                  // Keep it readable even when disabled (read-only requirement)
-                  "&.Mui-disabled": {
-                    opacity: 1,
-                  },
-                  "& .MuiSelect-select.Mui-disabled": {
-                    WebkitTextFillColor: "inherit",
-                  },
-                }}
-                renderValue={(selected) => (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {selected.map((value) => {
-                      const property = rentalProperties.find((p) => Number(p.id) === Number(value));
-                      const label =
-                        linkedPropertyNameById[String(value)] ||
-                        property?.propertyName ||
-                        property?.name ||
-                        property?.pId ||
-                        value;
-                      return (
-                        <Chip
-                          key={value}
-                          label={label}
-                          {...(!isEditMode && { onDelete: handleDeleteProperty(value) })}
-                          sx={{ fontSize: "0.9rem" }}
-                          size="small"
-                        />
-                      );
-                    })}
-                  </Box>
-                )}
-              >
-                {rentalProperties.map((option) => {
-                  const optionLabel = getPropertyLabel(option.id);
-                  const selectedIds = form.property || [];
-                  const selectedLabelSet = new Set(selectedIds.map(getPropertyLabel));
-                  const isSelected = selectedIds.some((id) => Number(id) === Number(option.id));
-                  const isDuplicateName = selectedLabelSet.has(optionLabel) && !isSelected;
-
-                  return (
-                    <MenuItem
-                      key={option.id}
-                      value={option.id}
-                      disabled={isDuplicateName}
-                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                    >
-                      {optionLabel}
-                    </MenuItem>
-                  );
-                })}
-              </Select>
-              {!isEditMode && errors.property && <FormHelperText>{errors.property}</FormHelperText>}
-            </FormControl>
-          </Grid>
-
-          {/* GroupID with reduced width - swapped position */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="GroupID"
-              type="text"
-              value={form.gId}
-              onChange={(e) => handleChange("gId", e.target.value)}
-              size="small"
-              fullWidth
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.gId)}
-              helperText={!isEditMode ? errors.gId : ""}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1rem",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1rem",
-                },
-              }}
-            />
-          </Grid>
-
-          {/* Address */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Address"
-              type="text"
-              value={form.location}
-              onChange={(e) => handleChange("location", e.target.value)}
-              fullWidth
-              size="small"
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.location)}
-              helperText={!isEditMode ? errors.location : ""}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1rem",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1rem",
-                },
-              }}
-            />
-          </Grid>
-
-          {/* Total Area and UOM bound together - swapped position */}
-          <Grid item xs={12} sm={6}>
-            <MDBox display="flex" alignItems="center" gap={1}>
-              <MDInput
-                label="Total Area"
-                type="number"
-                value={form.area}
-                onChange={(e) => handleChange("area", e.target.value)}
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={{
-                  flex: 1,
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                  },
-                  "& .MuiInputLabel-root": {
-                    fontSize: "1rem",
-                  },
-                }}
-              />
+    <>
+      <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+        <DialogTitle>New Property Grouping</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} mt={0.5}>
+            {/* First Row: Command, Base, Class */}
+            <Grid item xs={12} sm={4}>
               <FormControl
                 size="small"
                 fullWidth
                 required={!isEditMode}
-                error={!isEditMode && Boolean(errors.uoM)}
+                error={!isEditMode && Boolean(errors.cmdid)}
                 sx={{
-                  flex: 1,
                   minWidth: "140px",
                 }}
               >
                 <InputLabel
-                  id="uom-label"
+                  id="command-label"
                   sx={{
                     fontSize: "1rem",
                   }}
                 >
-                  UoM
+                  Command
                 </InputLabel>
                 <Select
-                  labelId="uom-label"
-                  value={form.uoM || ""}
-                  label="UoM"
-                  onChange={(e) => handleChange("uoM", e.target.value)}
+                  labelId="command-label"
+                  value={form.cmdid || ""}
+                  label="Command"
+                  onChange={(e) => handleChange("cmdid", e.target.value)}
                   MenuProps={{
                     PaperProps: {
                       style: {
@@ -734,111 +478,1054 @@ function PropertyGroupingForm({
                     },
                   }}
                 >
-                  <MenuItem value="Marla" sx={{ fontSize: "1rem", padding: "8px 14px" }}>
-                    Marla
+                  {commands.map((option) => (
+                    <MenuItem
+                      key={option.id}
+                      value={option.id}
+                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                    >
+                      {option.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {!isEditMode && errors.cmdid && <FormHelperText>{errors.cmdid}</FormHelperText>}
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl
+                size="small"
+                fullWidth
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.baseid)}
+                sx={{
+                  minWidth: "140px",
+                }}
+              >
+                <InputLabel
+                  id="base-label"
+                  sx={{
+                    fontSize: "1rem",
+                  }}
+                >
+                  Base
+                </InputLabel>
+                <Select
+                  labelId="base-label"
+                  value={form.baseid || ""}
+                  label="Base"
+                  onChange={(e) => handleChange("baseid", e.target.value)}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
+                      },
+                    },
+                  }}
+                  sx={{
+                    fontSize: "1rem",
+                    "& .MuiSelect-select": {
+                      fontSize: "1rem",
+                      padding: "0 32px 0 14px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minHeight: "45px",
+                      display: "flex",
+                      alignItems: "center",
+                    },
+                    "& .MuiSelect-icon": {
+                      display: "block !important",
+                      right: "8px",
+                    },
+                  }}
+                >
+                  {allBases
+                    .filter((base) => Number(base.cmd) === Number(form.cmdid))
+                    .map((option) => (
+                      <MenuItem
+                        key={option.id}
+                        value={option.id}
+                        sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                      >
+                        {option.name}
+                      </MenuItem>
+                    ))}
+                </Select>
+                {!isEditMode && errors.baseid && <FormHelperText>{errors.baseid}</FormHelperText>}
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl
+                size="small"
+                fullWidth
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.classid)}
+                sx={{
+                  minWidth: "140px",
+                }}
+              >
+                <InputLabel
+                  id="class-label"
+                  sx={{
+                    fontSize: "1rem",
+                  }}
+                >
+                  Class
+                </InputLabel>
+                <Select
+                  labelId="class-label"
+                  value={form.classid || ""}
+                  label="Class"
+                  onChange={(e) => handleChange("classid", e.target.value)}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
+                      },
+                    },
+                  }}
+                  sx={{
+                    fontSize: "1rem",
+                    "& .MuiSelect-select": {
+                      fontSize: "1rem",
+                      padding: "0 32px 0 14px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minHeight: "45px",
+                      display: "flex",
+                      alignItems: "center",
+                    },
+                    "& .MuiSelect-icon": {
+                      display: "block !important",
+                      right: "8px",
+                    },
+                  }}
+                >
+                  {classes.map((option) => (
+                    <MenuItem
+                      key={option.id}
+                      value={option.id}
+                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                    >
+                      {option.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {!isEditMode && errors.classid && <FormHelperText>{errors.classid}</FormHelperText>}
+              </FormControl>
+            </Grid>
+
+            {/* Property */}
+            <Grid item xs={10} sm={6}>
+              <FormControl
+                size="small"
+                fullWidth
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.property)}
+                sx={{
+                  minWidth: "150px",
+                }}
+              >
+                <InputLabel
+                  id="property-label"
+                  sx={{
+                    fontSize: "1rem",
+                  }}
+                >
+                  Property
+                </InputLabel>
+                <Select
+                  labelId="property-label"
+                  multiple
+                  value={form.property || []}
+                  onChange={handlePropertyChange}
+                  disabled={isEditMode}
+                  input={<OutlinedInput id="select-multiple-chip" label="Property" />}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
+                      },
+                    },
+                  }}
+                  sx={{
+                    fontSize: "1rem",
+                    "& .MuiSelect-select": {
+                      fontSize: "1rem",
+                      padding: "0 32px 0 14px",
+                      minHeight: "45px",
+                      display: "flex",
+                      alignItems: "center",
+                    },
+                    "& .MuiSelect-icon": {
+                      display: "block !important",
+                      right: "8px",
+                    },
+                    // Keep it readable even when disabled (read-only requirement)
+                    "&.Mui-disabled": {
+                      opacity: 1,
+                    },
+                    "& .MuiSelect-select.Mui-disabled": {
+                      WebkitTextFillColor: "inherit",
+                    },
+                  }}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                      {selected.map((value) => {
+                        const property = rentalProperties.find(
+                          (p) => Number(p.id) === Number(value)
+                        );
+                        const label =
+                          linkedPropertyNameById[String(value)] ||
+                          property?.propertyName ||
+                          property?.name ||
+                          property?.pId ||
+                          value;
+                        return (
+                          <Chip
+                            key={value}
+                            label={label}
+                            {...(!isEditMode && { onDelete: handleDeleteProperty(value) })}
+                            sx={{ fontSize: "0.9rem" }}
+                            size="small"
+                          />
+                        );
+                      })}
+                    </Box>
+                  )}
+                >
+                  {rentalProperties.map((option) => {
+                    const optionLabel = getPropertyLabel(option.id);
+                    const selectedIds = form.property || [];
+                    const selectedLabelSet = new Set(selectedIds.map(getPropertyLabel));
+                    const isSelected = selectedIds.some((id) => Number(id) === Number(option.id));
+                    const isDuplicateName = selectedLabelSet.has(optionLabel) && !isSelected;
+
+                    return (
+                      <MenuItem
+                        key={option.id}
+                        value={option.id}
+                        disabled={isDuplicateName}
+                        sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                      >
+                        {optionLabel}
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+                {!isEditMode && errors.property && (
+                  <FormHelperText>{errors.property}</FormHelperText>
+                )}
+              </FormControl>
+            </Grid>
+
+            {/* GroupID with reduced width - swapped position */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="GroupID"
+                type="text"
+                value={form.gId}
+                onChange={(e) => handleChange("gId", e.target.value)}
+                onBlur={handleGroupIdBlur}
+                size="small"
+                fullWidth
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.gId)}
+                helperText={!isEditMode ? errors.gId : ""}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Address */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="Address"
+                type="text"
+                value={form.location}
+                onChange={(e) => handleChange("location", e.target.value)}
+                fullWidth
+                size="small"
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.location)}
+                helperText={!isEditMode ? errors.location : ""}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Total Area */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="Total Area"
+                type="number"
+                value={form.area}
+                onChange={(e) => handleChange("area", e.target.value)}
+                size="small"
+                InputProps={{ readOnly: true }}
+                fullWidth
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Remarks */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="Remarks"
+                type="text"
+                value={form.remarks}
+                onChange={(e) => handleChange("remarks", e.target.value)}
+                fullWidth
+                size="small"
+                required={!isEditMode}
+                error={!isEditMode && Boolean(errors.remarks)}
+                helperText={!isEditMode ? errors.remarks : ""}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Status */}
+            <Grid item xs={12} sm={6}>
+              <FormControl
+                size="small"
+                fullWidth
+                sx={{
+                  minWidth: "120px",
+                }}
+              >
+                <InputLabel
+                  id="status-label"
+                  sx={{
+                    fontSize: "1rem",
+                  }}
+                >
+                  Status
+                </InputLabel>
+                <Select
+                  labelId="status-label"
+                  value={form.status !== undefined ? form.status : true}
+                  label="Status"
+                  onChange={(e) => handleChange("status", e.target.value)}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: 300,
+                      },
+                    },
+                  }}
+                  sx={{
+                    fontSize: "1rem",
+                    "& .MuiSelect-select": {
+                      fontSize: "1rem",
+                      padding: "0 32px 0 14px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minHeight: "45px",
+                      display: "flex",
+                      alignItems: "center",
+                    },
+                    "& .MuiSelect-icon": {
+                      display: "block !important",
+                      right: "8px",
+                    },
+                  }}
+                >
+                  <MenuItem value={true} sx={{ fontSize: "1rem", padding: "8px 14px" }}>
+                    Active
                   </MenuItem>
-                  <MenuItem value="Sq Ft" sx={{ fontSize: "1rem", padding: "8px 14px" }}>
-                    Sq Ft
-                  </MenuItem>
-                  <MenuItem value="Acre" sx={{ fontSize: "1rem", padding: "8px 14px" }}>
-                    Acre
+                  <MenuItem value={false} sx={{ fontSize: "1rem", padding: "8px 14px" }}>
+                    Inactive
                   </MenuItem>
                 </Select>
-                {!isEditMode && errors.uoM && <FormHelperText>{errors.uoM}</FormHelperText>}
               </FormControl>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={onClose}>
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton variant="gradient" color="info" onClick={handleSave}>
+            <Icon>save</Icon>&nbsp;Save
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      {/* Active Contracts Dialog */}
+      <Dialog
+        open={contractsDialogOpen}
+        onClose={() => setContractsDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="medium">
+            Active Contracts for Group ID: {form.gId}
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent>
+          {loadingContracts ? (
+            <MDBox display="flex" justifyContent="center" py={4}>
+              <CurrencyLoading />
             </MDBox>
-          </Grid>
-
-          {/* Remarks */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Remarks"
-              type="text"
-              value={form.remarks}
-              onChange={(e) => handleChange("remarks", e.target.value)}
-              fullWidth
-              size="small"
-              required={!isEditMode}
-              error={!isEditMode && Boolean(errors.remarks)}
-              helperText={!isEditMode ? errors.remarks : ""}
+          ) : activeContracts.length === 0 ? (
+            <MDBox py={4} textAlign="center">
+              <MDTypography variant="body2" color="text">
+                No active contracts found for this Group ID.
+              </MDTypography>
+            </MDBox>
+          ) : (
+            <MDBox
               sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1rem",
+                maxHeight: "500px",
+                overflowY: "auto",
+                // Firefox
+                scrollbarWidth: "thin",
+                scrollbarColor: "#333333 transparent",
+                // Chrome/Safari/Edge
+                "&::-webkit-scrollbar": {
+                  width: "8px",
+                  height: "8px",
                 },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1rem",
+                "&::-webkit-scrollbar-track": {
+                  background: "transparent",
+                  borderRadius: "2px",
                 },
-              }}
-            />
-          </Grid>
-
-          {/* Status */}
-          <Grid item xs={12} sm={6}>
-            <FormControl
-              size="small"
-              fullWidth
-              sx={{
-                minWidth: "120px",
+                "&::-webkit-scrollbar-thumb": {
+                  backgroundColor: "#333333",
+                  borderRadius: "10px",
+                  border: "2px solid transparent",
+                  backgroundClip: "padding-box",
+                  "&:hover": {
+                    backgroundColor: "#1a1a1a",
+                  },
+                },
+                "&::-webkit-scrollbar-button": {
+                  display: "none",
+                },
               }}
             >
-              <InputLabel
-                id="status-label"
-                sx={{
-                  fontSize: "1rem",
-                }}
-              >
-                Status
-              </InputLabel>
-              <Select
-                labelId="status-label"
-                value={form.status !== undefined ? form.status : true}
-                label="Status"
-                onChange={(e) => handleChange("status", e.target.value)}
-                MenuProps={{
-                  PaperProps: {
-                    style: {
-                      maxHeight: 300,
-                    },
-                  },
-                }}
-                sx={{
-                  fontSize: "1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1rem",
-                    padding: "0 32px 0 14px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                  "& .MuiSelect-icon": {
-                    display: "block !important",
-                    right: "8px",
-                  },
-                }}
-              >
-                <MenuItem value={true} sx={{ fontSize: "1rem", padding: "8px 14px" }}>
-                  Active
-                </MenuItem>
-                <MenuItem value={false} sx={{ fontSize: "1rem", padding: "8px 14px" }}>
-                  Inactive
-                </MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <MDButton variant="outlined" color="secondary" onClick={onClose}>
-          <Icon>close</Icon>&nbsp;Cancel
-        </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave}>
-          <Icon>save</Icon>&nbsp;Save
-        </MDButton>
-      </DialogActions>
-    </Dialog>
+              <Card>
+                <MDBox p={2}>
+                  <MDTypography variant="caption" color="text" mb={2}>
+                    Total Active Contracts: {activeContracts.length}
+                  </MDTypography>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Sno
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Class
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Cmd
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Unit
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA No
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Address
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Business Title
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Nature of Business
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Location
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          GP ID
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-CA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-BOO
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Rental Value
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contract Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract From
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract To
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PM
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Term of Payment
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Profit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase (Rate)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase Interval
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit Rs
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          DPC (Per Day)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Govt Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          PAF Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Feasible
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Approving Authority
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Remarks
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeContracts.map((contract, index) => {
+                        // Helper function to get field value with fallbacks
+                        const getField = (camelCase, pascalCase, altNames = []) => {
+                          if (contract[camelCase] !== undefined && contract[camelCase] !== null) {
+                            return contract[camelCase];
+                          }
+                          if (contract[pascalCase] !== undefined && contract[pascalCase] !== null) {
+                            return contract[pascalCase];
+                          }
+                          for (const alt of altNames) {
+                            if (contract[alt] !== undefined && contract[alt] !== null) {
+                              return contract[alt];
+                            }
+                          }
+                          return "-";
+                        };
+
+                        // Helper function to format date
+                        const formatDate = (dateValue) => {
+                          if (!dateValue) return "-";
+                          try {
+                            const date = new Date(dateValue);
+                            return isNaN(date.getTime()) ? "-" : date.toLocaleDateString();
+                          } catch {
+                            return "-";
+                          }
+                        };
+
+                        return (
+                          <tr
+                            key={contract.id || index}
+                            style={{
+                              borderBottom: "1px solid #e0e0e0",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = "#f9f9f9";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = "transparent";
+                            }}
+                          >
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {index + 1}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("class", "Class", ["className", "ClassName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("cmd", "Cmd", ["cmdName", "CmdName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("unit", "Unit", ["unitName", "UnitName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caNo", "CANo", ["contractNo", "ContractNo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorName", "ContractorName", [
+                                "businessName",
+                                "BusinessName",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorAddress", "ContractorAddress", [
+                                "address",
+                                "Address",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("businessTitle", "BusinessTitle", ["title", "Title"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("natureOfBusiness", "NatureOfBusiness", [
+                                "nature",
+                                "Nature",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("location", "Location")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("gpId", "GPId", [
+                                "groupId",
+                                "GroupId",
+                                "gId",
+                                "GId",
+                                "grpId",
+                                "GrpId",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaCA", "AreaCA", ["areaCa", "AreaCa"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaBOO", "AreaBOO", ["areaBoo", "AreaBoo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("revenueRate", "RevenueRate")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("revenueRateDate", "RevenueRateDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("rentalValue", "RentalValue")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("initialContractorName", "InitialContractorName")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("initialContractDate", "InitialContractDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractFrom", "ContractFrom", [
+                                  "contractStartDate",
+                                  "ContractStartDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractTo", "ContractTo", [
+                                  "contractEndDate",
+                                  "ContractEndDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPM", "FirstYRentPM", [
+                                "initialRentPM",
+                                "InitialRentPM",
+                                "firstYearRentPM",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPA", "FirstYRentPA", [
+                                "initialRentPA",
+                                "InitialRentPA",
+                                "firstYearRentPA",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("termOfPayment", "TermOfPayment", [
+                                "paymentTermMonths",
+                                "PaymentTermMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("profitTerm", "ProfitTerm")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseRate", "IncreaseRate", [
+                                "increaseRatePercent",
+                                "IncreaseRatePercent",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseInterval", "IncreaseInterval", [
+                                "increaseIntervalMonths",
+                                "IncreaseIntervalMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositTerm", "SecurityDepositTerm", [
+                                "sdRateMonths",
+                                "SdRateMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositRs", "SecurityDepositRs", [
+                                "securityDepositAmount",
+                                "SecurityDepositAmount",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("dpcPerDay", "DPCPerDay", ["dpc", "DPC"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("govtSharePA", "GovtSharePA", [
+                                "govtShareCondition",
+                                "GovtShareCondition",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("pafSharePA", "PAFSharePA", ["pafShare", "PAFShare"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              <StatusBadge value={getField("status", "Status")} />
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("feasible", "Feasible")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caStatus", "CAStatus")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("approvingAuthority", "ApprovingAuthority")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("remarks", "Remarks")}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </MDBox>
+              </Card>
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={() => setContractsDialogOpen(false)}
+          >
+            <Icon>close</Icon>&nbsp;Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }
 
@@ -851,12 +1538,16 @@ PropertyGroupingForm.propTypes = {
   commands: PropTypes.array.isRequired,
   bases: PropTypes.array.isRequired,
   classes: PropTypes.array.isRequired,
+  allPropertyGroupings: PropTypes.array,
 };
+
+export { PropertyGroupingForm };
 
 export default function PropertyGrouping() {
   const [openForm, setOpenForm] = useState(false);
   const [currentPropertyGrouping, setCurrentPropertyGrouping] = useState(null);
   const [rows, setRows] = useState([]);
+  const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
   const [rentalProperties, setRentalProperties] = useState([]);
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
@@ -903,6 +1594,22 @@ export default function PropertyGrouping() {
       setTotalCount(0);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch all property groupings for duplicate validation
+  const fetchAllPropertyGroupings = async () => {
+    try {
+      // Fetch a large number to get all records for validation
+      const response = await propertyGroupingApi.list(1, 10000);
+      if (response && response.pagination) {
+        setAllPropertyGroupings(response.data || []);
+      } else {
+        setAllPropertyGroupings(Array.isArray(response) ? response : []);
+      }
+    } catch (error) {
+      console.error("Error fetching all property groupings:", error);
+      setAllPropertyGroupings([]);
     }
   };
 
@@ -955,6 +1662,8 @@ export default function PropertyGrouping() {
     // Note: bases list for the form is fetched inside PropertyGroupingForm (allBases)
     if (classes.length === 0) fetchClasses();
     if (rentalProperties.length === 0) fetchRentalProperties();
+    // Fetch all property groupings for duplicate validation
+    fetchAllPropertyGroupings();
   }, [openForm, commands.length, classes.length, rentalProperties.length]);
 
   // Linked Properties dialog may need rentalProperties for name fallback
@@ -1147,7 +1856,6 @@ export default function PropertyGrouping() {
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
     { Header: "Group ID", accessor: "gId", align: "left", width: "8%" },
-    { Header: "UoM", accessor: "uoM", align: "left", width: "7%" },
     { Header: "Area", accessor: "area", align: "right", width: "7%" },
     { Header: "Location", accessor: "location", align: "left", width: "13%" },
     { Header: "Remarks", accessor: "remarks", align: "left" },
@@ -1160,7 +1868,7 @@ export default function PropertyGrouping() {
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
     {
-      Header: "Linked Properties",
+      Header: "Linked Property",
       accessor: "linkedProperties",
       align: "center",
       width: "10%",
@@ -1342,7 +2050,6 @@ export default function PropertyGrouping() {
         baseId: Number(data.baseid),
         classId: Number(data.classid),
         gId: data.gId || "",
-        uoM: data.uoM || "",
         location: data.location || "",
         area: Number(data.area) || 0,
         remarks: data.remarks || "",
@@ -1372,7 +2079,6 @@ export default function PropertyGrouping() {
     baseName: row.baseName || "",
     className: row.className || "",
     gId: row.gId || "",
-    uoM: row.uoM || "",
     area: row.area || 0,
     location: row.location || "",
     remarks: row.remarks || "",
@@ -1533,58 +2239,23 @@ export default function PropertyGrouping() {
                     <CurrencyLoading size={50} />
                   </MDBox>
                 )}
-                {/* Custom Pagination Controls and Search */}
-                <MDBox
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  p={3}
-                  pb={2}
-                >
-                  <MDBox display="flex" alignItems="center">
-                    <Autocomplete
-                      disableClearable
-                      value={pageSize.toString()}
-                      options={["10", "25", "50", "100"]}
-                      onChange={(event, newValue) => {
-                        setPageSize(parseInt(newValue, 10));
-                        setPageNumber(1);
-                      }}
-                      size="small"
-                      sx={{
-                        width: "5rem",
-                        "& .MuiInputBase-root": { minHeight: "45px" },
-                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
-                      }}
-                      renderInput={(params) => <MDInput {...params} />}
-                    />
-                    <MDTypography variant="caption" color="secondary">
-                      &nbsp;&nbsp;entries per page
-                    </MDTypography>
-                  </MDBox>
-                  <MDBox width="12rem">
-                    <MDInput
-                      placeholder="Search..."
-                      size="small"
-                      fullWidth
-                      onChange={(e) => {
-                        // Client-side search on current page data
-                        const searchTerm = e.target.value.toLowerCase();
-                        // Note: For server-side search, you'd need to add search parameter to API
-                      }}
-                    />
-                  </MDBox>
-                </MDBox>
-
-                {/* Table */}
                 <DataTable
                   table={{ columns, rows: computedRows }}
                   isSorted={false}
-                  entriesPerPage={false}
+                  entriesPerPage={{
+                    defaultValue: pageSize,
+                    entries: [10, 25, 50, 100],
+                  }}
+                  onEntriesPerPageChange={(value) => {
+                    setPageSize(value);
+                    setPageNumber(1);
+                    fetchPropertyGroupings(1, value);
+                  }}
                   showTotalEntries={false}
                   noEndBorder
-                  canSearch={false}
+                  canSearch
                   pagination={{ variant: "gradient", color: "info" }}
+                  exportFileName="Property-Grouping"
                 />
 
                 {/* Custom Pagination Footer */}
@@ -1678,6 +2349,7 @@ export default function PropertyGrouping() {
         commands={commands}
         bases={bases}
         classes={classes}
+        allPropertyGroupings={allPropertyGroupings}
       />
       {/* Linked Properties Dialog */}
       <Dialog

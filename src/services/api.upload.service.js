@@ -18,7 +18,8 @@ async function uploadFiles(id, tableName, files) {
   formData.append("tableName", tableName);
   formData.append("Action", "Admin");
 
-  // Append each file to FormData
+  // Append each file to FormData ,
+  //   03075832477.
   // Using a loop to handle files efficiently and avoid memory issues
   for (let i = 0; i < files.length; i++) {
     const file = files[i];

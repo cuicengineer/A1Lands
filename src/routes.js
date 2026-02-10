@@ -57,12 +57,18 @@ import NatureConfig from "layouts/configuration/nature/nature";
 import ProfitSharing from "layouts/configuration/profit-sharing";
 import DataConfig from "layouts/configuration/data-config";
 import RentalProperties from "layouts/configuration/rental-properties/rental-properties";
+import PropertyType from "layouts/configuration/property-type/property-type";
+import BanksList from "layouts/configuration/banks-list/banks-list";
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
 import RevenueRates from "layouts/contracts/revenue-rates/revenue-rates";
 import Tenants from "layouts/contracts/tenants/tenants";
 import ContractsNew from "layouts/contracts/contracts/contracts";
+import AgreementProvInvoice from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
+import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-rate";
+import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
+import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -149,6 +155,22 @@ const routes = [
       },
       {
         type: "collapse",
+        name: "Property Type",
+        key: "configuration-property-type",
+        icon: <Icon fontSize="small">home_work</Icon>,
+        route: "/configuration/property-type",
+        component: <PropertyType />,
+      },
+      {
+        type: "collapse",
+        name: "Banks List",
+        key: "configuration-banks-list",
+        icon: <Icon fontSize="small">account_balance</Icon>,
+        route: "/configuration/banks-list",
+        component: <BanksList />,
+      },
+      {
+        type: "collapse",
         name: "Tenants",
         key: "tenants",
         icon: <Icon fontSize="small">people</Icon>,
@@ -208,6 +230,38 @@ const routes = [
         icon: <Icon fontSize="small">article</Icon>,
         route: "/contracts",
         component: <ContractsNew />,
+      },
+      {
+        type: "collapse",
+        name: "Agreement Prov Invoice",
+        key: "agreement-prov-invoice",
+        icon: <Icon fontSize="small">receipt</Icon>,
+        route: "/contracts/agreement-prov-invoice",
+        component: <AgreementProvInvoice />,
+      },
+      {
+        type: "collapse",
+        name: "Rental Value Rate",
+        key: "rental-value-rate",
+        icon: <Icon fontSize="small">monetization_on</Icon>,
+        route: "/contracts/rental-value-rate",
+        component: <RentalValueRate />,
+      },
+      {
+        type: "collapse",
+        name: "Govt Share Rate",
+        key: "govt-share-rate",
+        icon: <Icon fontSize="small">account_balance</Icon>,
+        route: "/contracts/govt-share-rate",
+        component: <GovtShareRate />,
+      },
+      {
+        type: "collapse",
+        name: "Sharing Formula",
+        key: "sharing-formula",
+        icon: <Icon fontSize="small">schema</Icon>,
+        route: "/contracts/sharing-formula",
+        component: <SharingFormula />,
       },
       // {
       //   type: "collapse",

@@ -553,9 +553,9 @@ function UserMgmt() {
                   },
               }}
             >
-              <DataTable
-                table={{ columns, rows: computedRows }}
-                isSorted={false}
+            <DataTable
+              table={{ columns, rows: computedRows }}
+              isSorted={false}
                 canSearch
                 page={pageIndex}
                 entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
@@ -565,8 +565,14 @@ function UserMgmt() {
                   setPageIndex(0);
                 }}
                 showTotalEntries
+                exportFileName="User-Management"
+<<<<<<< Current (Your changes)
+              noEndBorder
+            />
+=======
                 noEndBorder
               />
+>>>>>>> Incoming (Background Agent changes)
             </MDBox>
           </MDBox>
         </Card>

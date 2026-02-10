@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import PropTypes from "prop-types";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -16,23 +16,29 @@ import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemText from "@mui/material/ListItemText";
+import Divider from "@mui/material/Divider";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import Autocomplete from "@mui/material/Autocomplete";
 import RentalPropertyForm from "./RentalPropertyForm";
 import rentalPropertiesApi from "services/api.rentalproperties.service";
+import uploadApi from "services/api.upload.service";
+import api from "services/api.service";
 
 const StatusBadge = ({ value }) => (
   <MDBadge
-    badgeContent={value ? "Active" : "Disabled"}
-    color={value ? "success" : "error"}
+    badgeContent={value === 1 || value === "1" || value === true ? "Active" : "Inactive"}
+    color={value === 1 || value === "1" || value === true ? "success" : "error"}
     variant="gradient"
     size="sm"
   />
 );
 
 StatusBadge.propTypes = {
-  value: PropTypes.bool.isRequired,
+  value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]).isRequired,
 };
 
 function RentalProperties() {
@@ -41,7 +47,8 @@ function RentalProperties() {
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [propertyTypes, setPropertyTypes] = useState([]);
+  // Search is handled by shared DataTable (canSearch)
 
   const fetchRentalProperties = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
@@ -69,10 +76,38 @@ function RentalProperties() {
   useEffect(() => {
     fetchRentalProperties(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
+
+  useEffect(() => {
+    const fetchPropertyTypes = async () => {
+      try {
+        const response = await api.request("GET", "/api/PropertyTypes");
+        const data = response?.data ?? (Array.isArray(response) ? response : []);
+        // Normalize status: convert byte (0/1) to boolean for UI
+        const normalizedData = Array.isArray(data)
+          ? data.map((item) => ({
+              ...item,
+              status: item.status === 1 || item.status === true,
+            }))
+          : [];
+        console.log("Fetched PropertyTypes for rental properties:", normalizedData);
+        setPropertyTypes(normalizedData);
+      } catch (error) {
+        console.error("Error fetching property types:", error);
+        setPropertyTypes([]);
+      }
+    };
+    fetchPropertyTypes();
+  }, []);
+
   const [formOpen, setFormOpen] = useState(false);
   const [currentProperty, setCurrentProperty] = useState(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [propertyToDelete, setPropertyToDelete] = useState(null);
+  const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
+  const [attachmentList, setAttachmentList] = useState([]);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+  const [attachmentLoadingId, setAttachmentLoadingId] = useState(null);
+  const [currentViewingRecord, setCurrentViewingRecord] = useState(null);
 
   const handleAddProperty = () => {
     setCurrentProperty(null);
@@ -81,11 +116,19 @@ function RentalProperties() {
 
   const handleEditProperty = (id) => {
     const property = tableRows.find((row) => row.id === id);
+    console.log("Editing property:", property);
+    console.log(
+      "Property propertyType:",
+      property.propertyType,
+      "Type:",
+      typeof property.propertyType
+    );
     setCurrentProperty({
       id: property.id,
       cmdId: property.cmdId,
       baseId: property.baseId,
       classId: property.classId,
+      propertyType: property.propertyType ? Number(property.propertyType) : "",
       pId: property.pId,
       uoM: property.uoM,
       area: property.area,
@@ -102,6 +145,10 @@ function RentalProperties() {
         cmdId: formData.cmdId,
         baseId: formData.baseId,
         classId: formData.classId,
+        propertyType:
+          formData.propertyType && formData.propertyType !== ""
+            ? Number(formData.propertyType)
+            : null,
         pId: formData.pId,
         uoM: formData.uoM,
         area: formData.area,
@@ -110,19 +157,29 @@ function RentalProperties() {
         status: formData.status,
       };
 
+      console.log("Submitting rental property with data:", formattedData);
+      console.log("PropertyType in payload:", formattedData.propertyType);
+
+      let createdOrUpdatedId = null;
       if (currentProperty) {
         // Edit existing property
         await rentalPropertiesApi.update(currentProperty.id, formattedData);
-        await fetchRentalProperties(pageNumber, pageSize);
+        createdOrUpdatedId = currentProperty.id;
       } else {
         // Add new property
-        await rentalPropertiesApi.create(formattedData);
-        await fetchRentalProperties(pageNumber, pageSize);
+        const response = await rentalPropertiesApi.create(formattedData);
+        // Extract ID from response (could be response.id or response.data.id)
+        createdOrUpdatedId = response?.id || response?.data?.id || null;
       }
+      await fetchRentalProperties(pageNumber, pageSize);
       setFormOpen(false);
+
+      // Return the ID so the form can upload files if needed
+      return createdOrUpdatedId;
     } catch (error) {
       console.error("Error saving rental property:", error);
       // Optionally, show an error message to the user
+      throw error;
     }
   };
 
@@ -152,6 +209,118 @@ function RentalProperties() {
     setPropertyToDelete(null);
   };
 
+  const handleViewAttachments = async (record) => {
+    if (!record?.id) return;
+
+    setAttachmentLoading(true);
+    setAttachmentLoadingId(record.id);
+    setCurrentViewingRecord(record);
+    try {
+      const response = await uploadApi.getUploadedFiles(record.id, "RentalProperties");
+      const filesArray = response?.files || (Array.isArray(response) ? response : []);
+
+      const normalized = filesArray.map((f) => {
+        if (typeof f === "string") {
+          return {
+            fileName: f.split(/[\\/]/).pop(),
+            downloadUrl: f,
+          };
+        }
+        const fileName =
+          f?.fileName || f?.name || f?.filePath?.split(/[\\/]/).pop() || "Unknown File";
+        const downloadUrl = f?.downloadUrl || f?.fileUrl || f?.url || f?.filePath || f?.path || "";
+        return {
+          ...f,
+          fileName,
+          downloadUrl,
+        };
+      });
+
+      setAttachmentList(normalized);
+      setAttachmentDialogOpen(true);
+    } catch (error) {
+      console.error("Error fetching attachments:", error);
+      alert("Unable to load attachments.");
+    } finally {
+      setAttachmentLoading(false);
+      setAttachmentLoadingId(null);
+    }
+  };
+
+  const handleCloseAttachmentDialog = () => {
+    setAttachmentDialogOpen(false);
+    setAttachmentList([]);
+    setCurrentViewingRecord(null);
+  };
+
+  const handleDownloadAttachment = (file) => {
+    const downloadUrl =
+      file?.downloadUrl || file?.fileUrl || file?.url || file?.filePath || file?.path;
+    if (downloadUrl) {
+      const fullUrl = downloadUrl.startsWith("http")
+        ? downloadUrl
+        : `${process.env.REACT_APP_API_BASE_URL || ""}${
+            downloadUrl.startsWith("/") ? "" : "/"
+          }${downloadUrl}`;
+      window.open(fullUrl, "_blank");
+    } else {
+      alert("Download URL is not available for this file.");
+    }
+  };
+
+  const handleDeleteAttachment = async (file) => {
+    if (!file?.id) {
+      alert("File ID is not available. Cannot delete this file.");
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete "${file.fileName || file.name || "this file"}"?`
+    );
+
+    if (!confirmDelete) {
+      return;
+    }
+
+    try {
+      await uploadApi.deleteUploadedFile(file.id);
+      // Refresh the attachment list from the server
+      const recordId = currentViewingRecord?.id;
+      if (recordId) {
+        const response = await uploadApi.getUploadedFiles(recordId, "RentalProperties");
+        const filesArray = response?.files || (Array.isArray(response) ? response : []);
+        const normalized = filesArray.map((f) => {
+          if (typeof f === "string") {
+            return {
+              fileName: f.split(/[\\/]/).pop(),
+              downloadUrl: f,
+            };
+          }
+          const fileName =
+            f?.fileName || f?.name || f?.filePath?.split(/[\\/]/).pop() || "Unknown File";
+          const downloadUrl =
+            f?.downloadUrl || f?.fileUrl || f?.url || f?.filePath || f?.path || "";
+          return {
+            ...f,
+            fileName,
+            downloadUrl,
+          };
+        });
+        setAttachmentList(normalized);
+      } else {
+        setAttachmentList((prev) => prev.filter((f) => f.id !== file.id));
+      }
+    } catch (error) {
+      console.error("Error deleting attachment:", error);
+      alert(`Failed to delete file: ${error.message}`);
+    }
+  };
+
+  const handleUploadSuccess = () => {
+    // Refresh the table after successful upload
+    fetchRentalProperties(pageNumber, pageSize);
+  };
+
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "10%" },
     { Header: "Is Active", accessor: "status", align: "center", width: "8%", Cell: StatusBadge },
@@ -159,51 +328,115 @@ function RentalProperties() {
     { Header: "Command", accessor: "cmdName", align: "left", width: "12%" },
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
+    {
+      Header: "Property Type",
+      accessor: "propertyTypeName",
+      align: "left",
+      width: "12%",
+      Cell: ({ value }) => value || "-",
+    },
     { Header: "Property ID", accessor: "pId", align: "left", width: "8%" },
     { Header: "UoM", accessor: "uoM", align: "left", width: "7%" },
     { Header: "Area", accessor: "area", align: "right", width: "7%" },
-    { Header: "Location", accessor: "location", align: "left", width: "13%" },
+    { Header: "Location", accessor: "location", align: "left", width: "20%" },
     { Header: "Remarks", accessor: "remarks", align: "left" },
+    {
+      Header: "Attachments",
+      accessor: "attachments",
+      align: "center",
+      width: "8%",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        const hasAttachments = row?.original?.id;
+        return hasAttachments ? (
+          <IconButton
+            size="small"
+            color="primary"
+            // eslint-disable-next-line react/prop-types
+            onClick={() => handleViewAttachments(row.original)}
+            // eslint-disable-next-line react/prop-types
+            disabled={attachmentLoading && attachmentLoadingId === row?.original?.id}
+            title="View attachments"
+          >
+            <Icon>visibility</Icon>
+          </IconButton>
+        ) : (
+          <span>-</span>
+        );
+      },
+    },
   ];
 
-  const computedRows = tableRows.map((row) => ({
-    ...row,
-    // Show backend names; fallback to IDs if backend doesn't send names
-    cmdName: row.cmdName || row.cmdname || row.commandName || row.cmdId || "",
-    baseName: row.baseName || row.basename || row.baseId || "",
-    className: row.className || row.classname || row.classId || "",
-    actions: (
-      <MDBox
-        alignItems="left"
-        justifyContent="left"
-        sx={{
-          backgroundColor: "#f8f9fa", // Light grey background
-          gap: "2px", // Small gap between icons
-          padding: "2px 2px", // Compact padding
-          borderRadius: "2px",
-        }}
-      >
-        <IconButton
-          size="small"
-          color="info"
-          onClick={() => handleEditProperty(row.id)}
-          title="Edit"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>edit</Icon>
-        </IconButton>
-        <IconButton
-          size="small"
-          color="error"
-          onClick={() => handleDeleteProperty(row.id)}
-          title="Delete"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>delete</Icon>
-        </IconButton>
-      </MDBox>
-    ),
-  }));
+  const computedRows = useMemo(
+    () =>
+      tableRows.map((row) => {
+        // Find property type name by id
+        const propertyTypeId = row.propertyType || row.propertytype;
+        const propertyTypeObj = propertyTypes.find(
+          (pt) => Number(pt.id) === Number(propertyTypeId)
+        );
+        const propertyTypeName =
+          propertyTypeObj?.name || row.propertyTypeName || row.propertytypename || "";
+
+        return {
+          ...row,
+          // Show backend names; fallback to IDs if backend doesn't send names
+          cmdName: row.cmdName || row.cmdname || row.commandName || row.cmdId || "",
+          baseName: row.baseName || row.basename || row.baseId || "",
+          className: row.className || row.classname || row.classId || "",
+          propertyTypeName: propertyTypeName,
+          // Location with multiline display and proper wrapping
+          location: (
+            <MDBox
+              component="span"
+              sx={{
+                display: "block",
+                whiteSpace: "normal",
+                wordBreak: "break-word",
+                overflowWrap: "break-word",
+                maxWidth: "100%",
+                lineHeight: 1.5,
+              }}
+            >
+              {row.location || ""}
+            </MDBox>
+          ),
+          actions: (
+            <MDBox
+              alignItems="left"
+              justifyContent="left"
+              sx={{
+                backgroundColor: "#f8f9fa", // Light grey background
+                gap: "2px", // Small gap between icons
+                padding: "2px 2px", // Compact padding
+                borderRadius: "2px",
+              }}
+            >
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditProperty(row.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteProperty(row.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            </MDBox>
+          ),
+        };
+      }),
+    [tableRows, propertyTypes]
+  );
 
   return (
     <DashboardLayout>
@@ -252,41 +485,6 @@ function RentalProperties() {
               </MDBox>
             )}
 
-            {/* Server-side Pagination Controls + Search */}
-            <MDBox display="flex" justifyContent="space-between" alignItems="center" p={3} pb={2}>
-              <MDBox display="flex" alignItems="center">
-                <Autocomplete
-                  disableClearable
-                  value={pageSize.toString()}
-                  options={["10", "25", "50", "100"]}
-                  onChange={(event, newValue) => {
-                    setPageSize(parseInt(newValue, 10));
-                    setPageNumber(1);
-                  }}
-                  size="small"
-                  sx={{
-                    width: "5rem",
-                    "& .MuiInputBase-root": { minHeight: "45px" },
-                    "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
-                  }}
-                  renderInput={(params) => <MDInput {...params} />}
-                />
-                <MDTypography variant="caption" color="secondary">
-                  &nbsp;&nbsp;entries per page
-                </MDTypography>
-              </MDBox>
-
-              <MDBox width="14rem">
-                <MDInput
-                  placeholder="Search..."
-                  size="small"
-                  fullWidth
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </MDBox>
-            </MDBox>
-
             <MDBox
               sx={{
                 overflowX: "auto",
@@ -299,7 +497,7 @@ function RentalProperties() {
                 "& table th, & table td": {
                   whiteSpace: "normal !important",
                   wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
+                  overflowWrap: "break-word !important",
                   verticalAlign: "top",
                 },
                 "& table td > div": {
@@ -308,13 +506,19 @@ function RentalProperties() {
                   maxWidth: "100% !important",
                   whiteSpace: "normal !important",
                   wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
+                  overflowWrap: "break-word !important",
                 },
                 "& table td > div > *": {
                   maxWidth: "100% !important",
                   whiteSpace: "normal !important",
                   wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
+                  overflowWrap: "break-word !important",
+                },
+                // Location column specific styling - ensure no overflow
+                "& table td[data-column='location'], & table th[data-column='location']": {
+                  maxWidth: "200px !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "break-word !important",
                 },
                 "& .MuiTable-root th": {
                   fontSize: "1.05rem !important",
@@ -338,36 +542,22 @@ function RentalProperties() {
               <DataTable
                 table={{
                   columns,
-                  rows: computedRows.filter((r) => {
-                    if (!searchQuery.trim()) return true;
-                    const q = searchQuery.toLowerCase();
-                    return (
-                      String(r.pId || "")
-                        .toLowerCase()
-                        .includes(q) ||
-                      String(r.cmdName || "")
-                        .toLowerCase()
-                        .includes(q) ||
-                      String(r.baseName || "")
-                        .toLowerCase()
-                        .includes(q) ||
-                      String(r.className || "")
-                        .toLowerCase()
-                        .includes(q) ||
-                      String(r.location || "")
-                        .toLowerCase()
-                        .includes(q) ||
-                      String(r.remarks || "")
-                        .toLowerCase()
-                        .includes(q)
-                    );
-                  }),
+                  rows: computedRows,
                 }}
                 isSorted={false}
-                entriesPerPage={false}
+                entriesPerPage={{
+                  defaultValue: pageSize,
+                  entries: [10, 25, 50, 100],
+                }}
+                onEntriesPerPageChange={(value) => {
+                  setPageSize(value);
+                  setPageNumber(1);
+                  fetchRentalProperties(1, value);
+                }}
                 showTotalEntries={false}
                 noEndBorder
-                canSearch={false}
+                canSearch
+                exportFileName="Rental-Properties"
               />
             </MDBox>
 
@@ -444,7 +634,73 @@ function RentalProperties() {
         onClose={handleFormClose}
         onSubmit={handleFormSubmit}
         initialData={currentProperty}
+        onUploadSuccess={handleUploadSuccess}
       />
+
+      <Dialog
+        open={attachmentDialogOpen}
+        onClose={handleCloseAttachmentDialog}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Attachments</DialogTitle>
+        <DialogContent>
+          {attachmentLoading ? (
+            <MDBox display="flex" justifyContent="center" py={3}>
+              <CurrencyLoading size={40} />
+            </MDBox>
+          ) : attachmentList.length === 0 ? (
+            <MDTypography variant="body2" color="text">
+              No attachments uploaded for this record.
+            </MDTypography>
+          ) : (
+            <List disablePadding>
+              {attachmentList.map((file, index) => (
+                <MDBox key={file.id || file.fileName || index}>
+                  <ListItem
+                    disableGutters
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      px: 0,
+                    }}
+                  >
+                    <ListItemText
+                      primary={file.fileName || file.name || `Attachment ${index + 1}`}
+                    />
+                    <MDBox display="flex" gap={1} alignItems="center">
+                      <MDButton
+                        size="small"
+                        variant="outlined"
+                        color="info"
+                        onClick={() => handleDownloadAttachment(file)}
+                        disabled={!file.downloadUrl}
+                      >
+                        <Icon>download</Icon>&nbsp;Download
+                      </MDButton>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => handleDeleteAttachment(file)}
+                        sx={{ ml: 1 }}
+                      >
+                        <Icon>delete</Icon>
+                      </IconButton>
+                    </MDBox>
+                  </ListItem>
+                  {index < attachmentList.length - 1 && <Divider />}
+                </MDBox>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseAttachmentDialog}>
+            Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={showDeleteDialog} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>

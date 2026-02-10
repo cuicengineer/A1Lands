@@ -295,6 +295,7 @@ function Base() {
               entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}
               noEndBorder
+              exportFileName="Base"
             />
           </MDBox>
         </Card>

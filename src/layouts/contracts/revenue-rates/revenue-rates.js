@@ -539,7 +539,7 @@ export default function RevenueRates() {
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Search is handled by shared DataTable (canSearch)
   const [successSB, setSuccessSB] = useState(false);
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
   const [attachmentList, setAttachmentList] = useState([]);
@@ -980,83 +980,25 @@ export default function RevenueRates() {
                   </MDBox>
                 )}
 
-                {/* Custom Pagination Controls + Search (same pattern as property-grouping) */}
-                <MDBox
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  p={3}
-                  pb={2}
-                >
-                  <MDBox display="flex" alignItems="center">
-                    <Autocomplete
-                      disableClearable
-                      value={pageSize.toString()}
-                      options={["10", "25", "50", "100"]}
-                      onChange={(event, newValue) => {
-                        setPageSize(parseInt(newValue, 10));
-                        setPageNumber(1);
-                      }}
-                      size="small"
-                      sx={{
-                        width: "5rem",
-                        "& .MuiInputBase-root": { minHeight: "45px" },
-                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
-                      }}
-                      renderInput={(params) => <MDInput {...params} />}
-                    />
-                    <MDTypography variant="caption" color="secondary">
-                      &nbsp;&nbsp;entries per page
-                    </MDTypography>
-                  </MDBox>
-
-                  <MDBox width="14rem">
-                    <MDInput
-                      placeholder="Search..."
-                      size="small"
-                      fullWidth
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                  </MDBox>
-                </MDBox>
-
                 <DataTable
                   table={{
                     columns,
-                    rows: computedRows.filter((r) => {
-                      if (!searchQuery.trim()) return true;
-                      const q = searchQuery.toLowerCase();
-                      return (
-                        String(r.id || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.propertyId || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.cmdName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.baseName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.className || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.applicableDate || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.rate || "")
-                          .toLowerCase()
-                          .includes(q)
-                      );
-                    }),
+                    rows: computedRows,
                   }}
                   isSorted={false}
-                  entriesPerPage={false}
+                  entriesPerPage={{
+                    defaultValue: pageSize,
+                    entries: [10, 25, 50, 100],
+                  }}
+                  onEntriesPerPageChange={(value) => {
+                    setPageSize(value);
+                    setPageNumber(1);
+                    fetchRevenueRates(1, value);
+                  }}
                   showTotalEntries={false}
                   noEndBorder
-                  canSearch={false}
+                  canSearch
+                  exportFileName="Revenue-Rates"
                 />
 
                 {/* Server-side Pagination Footer */}

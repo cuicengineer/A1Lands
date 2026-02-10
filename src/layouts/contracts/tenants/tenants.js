@@ -753,6 +753,7 @@ export default function Tenants() {
                   showTotalEntries={true}
                   noEndBorder
                   canSearch={true}
+                  exportFileName="Tenants"
                 />
               </MDBox>
             </Card>

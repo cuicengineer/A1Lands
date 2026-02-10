@@ -281,7 +281,35 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         />
 
         {/* Main routes (scrollable) */}
-        <MDBox flex={1} overflow="auto">
+        <MDBox
+          flex={1}
+          overflow="auto"
+          sx={{
+            // Firefox - transparent track
+            scrollbarWidth: "thin",
+            scrollbarColor: "#333333 transparent",
+            // Chrome/Safari/Edge - transparent track, visible thumb only
+            "&::-webkit-scrollbar": {
+              width: "8px",
+            },
+            "&::-webkit-scrollbar-track": {
+              backgroundColor: "transparent",
+            },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: "#333333",
+              borderRadius: "10px",
+              border: "none",
+              "&:hover": {
+                backgroundColor: "#1a1a1a",
+              },
+            },
+            "&::-webkit-scrollbar-button": {
+              display: "none",
+              width: 0,
+              height: 0,
+            },
+          }}
+        >
           <List>{renderNestedRoutes(routes)}</List>
         </MDBox>
 

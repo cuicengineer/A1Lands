@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -23,10 +23,13 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import FormHelperText from "@mui/material/FormHelperText";
 import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
+import propertyGroupingApi from "services/api.propertygrouping.service";
 import StatusBadge from "components/StatusBadge";
+import { PropertyGroupingForm } from "layouts/contracts/property-grouping/property-grouping";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -43,6 +46,7 @@ function ContractsForm({
   classes,
   propertyGroups,
   tenants,
+  onPropertyGroupsRefresh,
 }) {
   const [form, setForm] = useState({
     contractNo: "",
@@ -59,6 +63,7 @@ function ContractsForm({
     initialRentPM: "",
     initialRentPA: "",
     paymentTermMonths: "",
+    term: "",
     increaseRatePercent: "",
     increaseIntervalMonths: "",
     sdRateMonths: "",
@@ -68,14 +73,101 @@ function ContractsForm({
     pafShare: "",
     status: true,
     remarks: "",
+    riseTermType: "",
+    riseyear: "",
+    risedate: "",
   });
   const [errors, setErrors] = useState({});
   const [filteredBases, setFilteredBases] = useState([]);
   const [filteredClasses, setFilteredClasses] = useState([]);
   const [filteredPropertyGroups, setFilteredPropertyGroups] = useState([]);
 
+  // Rise Terms state
+  const [riseTermsDialogOpen, setRiseTermsDialogOpen] = useState(false);
+  const [riseTerms, setRiseTerms] = useState([]);
+  const [editingRiseTermIndex, setEditingRiseTermIndex] = useState(null);
+  const [riseTermForm, setRiseTermForm] = useState({
+    monthsInterval: "",
+    risePercent: "",
+    sequenceNo: "",
+  });
+  const [riseTermErrors, setRiseTermErrors] = useState({});
+
+  // Contracts dialog state
+  const [contractsDialogOpen, setContractsDialogOpen] = useState(false);
+  const [activeContracts, setActiveContracts] = useState([]);
+  const [loadingContracts, setLoadingContracts] = useState(false);
+
+  // Property Grouping form state
+  const [propertyGroupingFormOpen, setPropertyGroupingFormOpen] = useState(false);
+  const [rentalProperties, setRentalProperties] = useState([]);
+  const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
+
+  const normalizeRiseTermType = (value) => {
+    if (!value) return "";
+    const token = String(value).trim().toLowerCase();
+    if (!token) return "";
+    if (token.includes("standard")) return "Standard";
+    if (token.includes("fixed")) return "Fixed Date";
+    if (token.includes("variable")) return "Variable Increase";
+    // Fallback: return original trimmed value so it at least shows in the UI if it matches exactly
+    return String(value).trim();
+  };
+
   useEffect(() => {
     if (initialData) {
+      const rawRiseType =
+        initialData.riseTermType ??
+        initialData.RiseTermType ??
+        initialData.riseTerm ??
+        initialData.RiseTerm ??
+        "";
+      const rawRiseYear =
+        initialData.riseyear ?? initialData.RiseYear ?? initialData.riseYear ?? null;
+      const rawRiseDate =
+        initialData.risedate ?? initialData.RiseDate ?? initialData.riseDate ?? null;
+
+      const normalizedRiseYear = rawRiseYear !== null ? String(rawRiseYear) : "";
+      const normalizedRiseDate =
+        rawRiseDate !== null && String(rawRiseDate).trim() !== ""
+          ? String(rawRiseDate).split("T")[0].slice(0, 10)
+          : "";
+
+      // Normalize govtShareCondition - handle case variations and ensure it matches dropdown options
+      const rawGovtShareCondition =
+        initialData.govtShareCondition ??
+        initialData.GovtShareCondition ??
+        initialData.govtShare ??
+        initialData.GovtShare ??
+        "";
+      const govtShareOptions = ["A", "C", "NA"];
+
+      let validGovtShareCondition = "";
+      if (rawGovtShareCondition) {
+        // Convert to string and trim whitespace
+        const stringValue = String(rawGovtShareCondition).trim();
+
+        // Check if it's already a valid option (exact match - case sensitive)
+        if (govtShareOptions.includes(stringValue)) {
+          validGovtShareCondition = stringValue;
+        } else {
+          // Try case-insensitive normalization
+          const upperValue = stringValue.toUpperCase();
+
+          // Map common variations
+          if (upperValue === "N/A" || upperValue === "N-A" || upperValue === "NA") {
+            validGovtShareCondition = "NA";
+          } else if (upperValue === "A") {
+            validGovtShareCondition = "A";
+          } else if (upperValue === "C") {
+            validGovtShareCondition = "C";
+          } else {
+            // If no match found, set to empty (user will need to select)
+            validGovtShareCondition = "";
+          }
+        }
+      }
+
       setForm({
         contractNo: initialData.contractNo || "",
         cmdId: initialData.cmdId || "",
@@ -97,16 +189,57 @@ function ContractsForm({
         initialRentPM: initialData.initialRentPM || "",
         initialRentPA: initialData.initialRentPA || "",
         paymentTermMonths: initialData.paymentTermMonths || "",
+        term: initialData.term || "",
         increaseRatePercent: initialData.increaseRatePercent || "",
         increaseIntervalMonths: initialData.increaseIntervalMonths || "",
         sdRateMonths: initialData.sdRateMonths || "",
         securityDepositAmount: initialData.securityDepositAmount || "",
         rentalValue: initialData.rentalValue || "",
-        govtShareCondition: initialData.govtShareCondition || "",
+        govtShareCondition: validGovtShareCondition,
         pafShare: initialData.pafShare || "",
         status: initialData.status !== undefined ? initialData.status : true,
         remarks: initialData.remarks || "",
+        riseTermType: normalizeRiseTermType(rawRiseType),
+        riseyear: normalizedRiseYear,
+        risedate: normalizedRiseDate,
       });
+
+      // Initialize riseTerms list from existing contract rise terms, if any
+      const rawRiseTerms =
+        initialData.contractRiseTerms ||
+        initialData.ContractRiseTerms ||
+        initialData.riseTerms ||
+        [];
+      if (Array.isArray(rawRiseTerms) && rawRiseTerms.length > 0) {
+        const normalizedRiseTerms = rawRiseTerms
+          .map((t) => {
+            const monthsInterval =
+              t.monthsInterval ?? t.MonthsInterval ?? t.months_interval ?? null;
+            const risePercent = t.risePercent ?? t.RisePercent ?? t.rise_percent ?? null;
+            const sequenceNo = t.sequenceNo ?? t.SequenceNo ?? t.sequence_no ?? null;
+            const contractID = t.contractID ?? t.ContractID ?? t.contractId ?? t.ContractId ?? null;
+            const isDeleted = t.isDeleted ?? t.IsDeleted ?? null;
+            const id = t.id ?? t.Id ?? t.contractRiseTermId ?? t.ContractRiseTermId ?? null;
+
+            if (monthsInterval === null || risePercent === null || sequenceNo === null) {
+              return null;
+            }
+
+            return {
+              id: id ? Number(id) : null,
+              monthsInterval: String(monthsInterval),
+              risePercent: String(risePercent),
+              sequenceNo: String(sequenceNo),
+              contractID: contractID ? Number(contractID) : null,
+              isDeleted: isDeleted !== null && isDeleted !== undefined ? Boolean(isDeleted) : null,
+            };
+          })
+          .filter(Boolean);
+
+        setRiseTerms(normalizedRiseTerms);
+      } else {
+        setRiseTerms([]);
+      }
     } else {
       setForm({
         contractNo: "",
@@ -123,6 +256,7 @@ function ContractsForm({
         initialRentPM: "",
         initialRentPA: "",
         paymentTermMonths: "",
+        term: "",
         increaseRatePercent: "",
         increaseIntervalMonths: "",
         sdRateMonths: "",
@@ -131,7 +265,12 @@ function ContractsForm({
         govtShareCondition: "",
         status: true,
         remarks: "",
+        riseTermType: "",
+        riseyear: "",
+        risedate: "",
       });
+      // Reset rise terms when opening new form
+      setRiseTerms([]);
     }
     setErrors({});
   }, [initialData, open]);
@@ -176,10 +315,188 @@ function ContractsForm({
     }
   }, [form.cmdId, form.baseId, form.classId, propertyGroups]);
 
+  // Auto-calculate initialRentPA when initialRentPM changes
+  useEffect(() => {
+    const initialRent = Number(form.initialRentPM);
+
+    if (initialRent && !isNaN(initialRent)) {
+      const calculated = initialRent * 12;
+      setForm((prev) => ({
+        ...prev,
+        initialRentPA: String(calculated),
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        initialRentPA: "",
+      }));
+    }
+  }, [form.initialRentPM]);
+
+  // Auto-calculate securityDepositAmount when sdRateMonths or initialRentPM changes
+  useEffect(() => {
+    const sdRate = Number(form.sdRateMonths);
+    const initialRent = Number(form.initialRentPM);
+
+    if (sdRate && initialRent && !isNaN(sdRate) && !isNaN(initialRent)) {
+      const calculated = sdRate * initialRent;
+      setForm((prev) => ({
+        ...prev,
+        securityDepositAmount: String(calculated),
+      }));
+    } else if ((!sdRate || isNaN(sdRate)) && (!initialRent || isNaN(initialRent))) {
+      setForm((prev) => ({
+        ...prev,
+        securityDepositAmount: "",
+      }));
+    }
+  }, [form.sdRateMonths, form.initialRentPM]);
+
   const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    // Prevent manual editing of auto-calculated fields
+    if (field === "securityDepositAmount" || field === "initialRentPA") {
+      return;
+    }
+
+    setForm((prev) => {
+      const updated = {
+        ...prev,
+        [field]: value,
+        // Clear related fields when riseTermType changes
+        ...(field === "riseTermType" && {
+          riseyear: "",
+          risedate: "",
+        }),
+      };
+
+      // If start date changes and end date is now invalid, clear end date
+      if (field === "contractStartDate" && updated.contractEndDate) {
+        if (updated.contractEndDate <= value) {
+          updated.contractEndDate = "";
+        }
+      }
+
+      // If start date or end date changes, validate commercial operation date
+      if (
+        (field === "contractStartDate" || field === "contractEndDate") &&
+        updated.commercialOperationDate
+      ) {
+        if (
+          updated.contractStartDate &&
+          updated.contractEndDate &&
+          (updated.commercialOperationDate < updated.contractStartDate ||
+            updated.commercialOperationDate > updated.contractEndDate)
+        ) {
+          updated.commercialOperationDate = "";
+        }
+      }
+
+      return updated;
+    });
+
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }));
+    }
+
+    // Clear rise terms when switching away from Variable Increase
+    if (field === "riseTermType" && value !== "Variable Increase") {
+      setRiseTerms([]);
+    }
+
+    // When Group ID is selected, fetch active contracts for that group
+    if (field === "grpId" && value) {
+      const selectedGroup = filteredPropertyGroups.find((pg) => pg.id === Number(value));
+      if (selectedGroup && selectedGroup.gId) {
+        fetchActiveContractsByGroupId(selectedGroup.gId);
+      }
+    }
+  };
+
+  // Fetch active contracts by Group ID
+  const fetchActiveContractsByGroupId = async (groupId) => {
+    if (!groupId || !groupId.trim()) {
+      setActiveContracts([]);
+      return;
+    }
+
+    setLoadingContracts(true);
+    try {
+      // Call API endpoint to search contracts by group name
+      const response = await contractApi.searchByGrpName(groupId.trim());
+
+      // Handle response - could be array or object with data property
+      const contracts = response?.data || (Array.isArray(response) ? response : []);
+
+      setActiveContracts(contracts);
+      setContractsDialogOpen(true);
+    } catch (error) {
+      console.error("Error fetching contracts by Group ID:", error);
+      setActiveContracts([]);
+      alert("Error fetching contracts. Please try again.");
+    } finally {
+      setLoadingContracts(false);
+    }
+  };
+
+  // Fetch rental properties and all property groupings for PropertyGroupingForm
+  useEffect(() => {
+    if (propertyGroupingFormOpen) {
+      const fetchRentalProperties = async () => {
+        try {
+          const response = await api.list("rentalproperty");
+          setRentalProperties(response);
+        } catch (error) {
+          console.error("Error fetching rental properties:", error);
+        }
+      };
+      const fetchAllPropertyGroupings = async () => {
+        try {
+          // Fetch a large number to get all records for validation
+          const response = await propertyGroupingApi.list(1, 10000);
+          if (response && response.pagination) {
+            setAllPropertyGroupings(response.data || []);
+          } else {
+            setAllPropertyGroupings(Array.isArray(response) ? response : []);
+          }
+        } catch (error) {
+          console.error("Error fetching all property groupings:", error);
+          setAllPropertyGroupings([]);
+        }
+      };
+      if (rentalProperties.length === 0) {
+        fetchRentalProperties();
+      }
+      fetchAllPropertyGroupings();
+    }
+  }, [propertyGroupingFormOpen, rentalProperties.length]);
+
+  // Handle Property Grouping form save
+  const handlePropertyGroupingSave = async (formData) => {
+    try {
+      const formattedData = {
+        cmdId: Number(formData.cmdid),
+        baseId: Number(formData.baseid),
+        classId: Number(formData.classid),
+        gId: formData.gId || "",
+        location: formData.location || "",
+        area: Number(formData.area) || 0,
+        remarks: formData.remarks || "",
+        property: formData.property.join(", "),
+        PropertyGroupLinkings: formData.property.map((propId) => Number(propId)),
+        status: Boolean(formData.status),
+        isDeleted: Boolean(formData.isDeleted),
+      };
+
+      await propertyGroupingApi.create(formattedData);
+      setPropertyGroupingFormOpen(false);
+
+      // Refresh property groups list
+      if (onPropertyGroupsRefresh) {
+        onPropertyGroupsRefresh();
+      }
+    } catch (error) {
+      console.error("Error saving property grouping:", error);
+      alert("Failed to save property grouping. Please try again.");
     }
   };
 
@@ -196,10 +513,29 @@ function ContractsForm({
       newErrors.natureOfBusiness = "Nature of Business is required";
     if (!form.contractStartDate) newErrors.contractStartDate = "Contract Start Date is required";
     if (!form.contractEndDate) newErrors.contractEndDate = "Contract End Date is required";
+    if (
+      form.contractStartDate &&
+      form.contractEndDate &&
+      form.contractEndDate <= form.contractStartDate
+    ) {
+      newErrors.contractEndDate = "Contract End Date must be greater than Contract Start Date";
+    }
+    if (form.commercialOperationDate && form.contractStartDate && form.contractEndDate) {
+      if (form.commercialOperationDate < form.contractStartDate) {
+        newErrors.commercialOperationDate =
+          "Commercial Operation Date must be on or after Contract Start Date";
+      } else if (form.commercialOperationDate > form.contractEndDate) {
+        newErrors.commercialOperationDate =
+          "Commercial Operation Date must be on or before Contract End Date";
+      }
+    }
     if (!form.initialRentPM) newErrors.initialRentPM = "Initial Rent PM is required";
-    if (!form.initialRentPA) newErrors.initialRentPA = "Initial Rent PA is required";
+    // initialRentPA is auto-calculated, no validation needed
     if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term Months is required";
     if (!form.govtShareCondition) newErrors.govtShareCondition = "Govt Share Condition is required";
+    if (form.remarks && form.remarks.length > 500) {
+      newErrors.remarks = "Remarks cannot exceed 500 characters";
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -223,6 +559,7 @@ function ContractsForm({
       initialRentPM: form.initialRentPM ? Number(form.initialRentPM) : null,
       initialRentPA: form.initialRentPA ? Number(form.initialRentPA) : null,
       paymentTermMonths: form.paymentTermMonths ? Number(form.paymentTermMonths) : null,
+      term: form.term || null,
       increaseRatePercent: form.increaseRatePercent ? Number(form.increaseRatePercent) : null,
       increaseIntervalMonths: form.increaseIntervalMonths
         ? Number(form.increaseIntervalMonths)
@@ -234,9 +571,150 @@ function ContractsForm({
       pafShare: form.pafShare ? Number(form.pafShare) : null,
       status: form.status,
       remarks: form.remarks?.trim() || null,
+      riseTermType: form.riseTermType || null,
+      // If Standard is selected, include riseyear
+      ...(form.riseTermType === "Standard" && {
+        riseyear: form.riseyear ? Number(form.riseyear) : null,
+      }),
+      // If Fixed Date is selected, include risedate
+      ...(form.riseTermType === "Fixed Date" && {
+        risedate: form.risedate || null,
+      }),
+      // If Variable Increase is selected, include contractRiseTerms
+      ...(form.riseTermType === "Variable Increase" && {
+        contractRiseTerms:
+          riseTerms.length > 0
+            ? riseTerms.map((term) => {
+                // Get contract ID from initialData if editing, otherwise use term's existing contractID
+                const contractID =
+                  initialData?.id ??
+                  initialData?.Id ??
+                  initialData?.contractID ??
+                  initialData?.ContractID ??
+                  term.contractID ??
+                  null;
+
+                // Preserve existing isDeleted value, or set to false for new terms
+                const isDeletedValue =
+                  term.isDeleted !== null && term.isDeleted !== undefined
+                    ? Boolean(term.isDeleted)
+                    : false;
+
+                return {
+                  contractID: contractID ? Number(contractID) : 0,
+                  monthsInterval: Number(term.monthsInterval),
+                  risePercent: Number(term.risePercent),
+                  sequenceNo: Number(term.sequenceNo),
+                  status: 1, // true
+                  action: contractID ? "update" : "create",
+                  actionBy: null,
+                  actionDate: null,
+                  isDeleted: isDeletedValue,
+                };
+              })
+            : [],
+      }),
     };
 
     await onSubmit(payload);
+  };
+
+  // Rise Terms handlers
+  const getNextRiseSequenceNo = () => {
+    const maxSeq = riseTerms.reduce((max, t) => {
+      const n = Number(t?.sequenceNo);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+    return String(maxSeq + 1);
+  };
+
+  const handleRiseTermChange = (field, value) => {
+    // Sequence No is auto-generated; prevent manual edits
+    if (field === "sequenceNo") return;
+    setRiseTermForm((prev) => ({ ...prev, [field]: value }));
+    if (riseTermErrors[field]) {
+      setRiseTermErrors((prev) => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  const validateRiseTerm = () => {
+    const newErrors = {};
+    if (!riseTermForm.monthsInterval || Number(riseTermForm.monthsInterval) <= 0) {
+      newErrors.monthsInterval = "Months Interval is required and must be greater than 0";
+    }
+    if (!riseTermForm.risePercent || Number(riseTermForm.risePercent) <= 0) {
+      newErrors.risePercent = "Rise Percent is required and must be greater than 0";
+    }
+
+    setRiseTermErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleAddRiseTerm = () => {
+    if (!validateRiseTerm()) return;
+
+    if (editingRiseTermIndex !== null) {
+      // Update existing term
+      const updated = [...riseTerms];
+      updated[editingRiseTermIndex] = { ...riseTermForm };
+      setRiseTerms(updated);
+    } else {
+      // Add new term
+      const nextSeq = getNextRiseSequenceNo();
+      setRiseTerms([...riseTerms, { ...riseTermForm, sequenceNo: nextSeq }]);
+    }
+
+    setRiseTermForm({
+      monthsInterval: "",
+      risePercent: "",
+      sequenceNo: getNextRiseSequenceNo(),
+    });
+    setRiseTermErrors({});
+    setEditingRiseTermIndex(null);
+  };
+
+  const handleEditRiseTerm = (index) => {
+    setRiseTermForm({ ...riseTerms[index] });
+    setEditingRiseTermIndex(index);
+    setRiseTermErrors({});
+  };
+
+  const handleDeleteRiseTerm = async (index) => {
+    const termToDelete = riseTerms[index];
+
+    // If the term has an ID, call the API to delete it
+    if (termToDelete && termToDelete.id) {
+      try {
+        await contractApi.deleteContractRiseTerm(termToDelete.id);
+        alert("Rise term deleted successfully.");
+
+        // Remove from local state
+        const updated = riseTerms.filter((_, i) => i !== index);
+        setRiseTerms(updated);
+        if (editingRiseTermIndex === index) {
+          setRiseTermForm({ monthsInterval: "", risePercent: "", sequenceNo: "" });
+          setEditingRiseTermIndex(null);
+        }
+      } catch (error) {
+        console.error("Error deleting rise term:", error);
+        alert("Failed to delete rise term. Please try again.");
+      }
+    } else {
+      // If no ID, just remove from local state (new term not yet saved)
+      const updated = riseTerms.filter((_, i) => i !== index);
+      setRiseTerms(updated);
+      if (editingRiseTermIndex === index) {
+        setRiseTermForm({ monthsInterval: "", risePercent: "", sequenceNo: "" });
+        setEditingRiseTermIndex(null);
+      }
+    }
+  };
+
+  const handleCloseRiseTermsDialog = () => {
+    setRiseTermsDialogOpen(false);
+    setRiseTermForm({ monthsInterval: "", risePercent: "", sequenceNo: "" });
+    setRiseTermErrors({});
+    setEditingRiseTermIndex(null);
   };
 
   const paymentTermOptions = [1, 2, 3, 4, 6, 12];
@@ -267,430 +745,1498 @@ function ContractsForm({
   const menuItemSx = { fontSize: "1rem" };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700 }}>
-        {initialData ? "Edit Contract" : "New Contract"}
-      </DialogTitle>
-      <DialogContent>
-        <Grid container spacing={2} mt={1}>
-          {/* ContractNo */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Contract No"
-              type="text"
-              value={form.contractNo}
-              onChange={(e) => handleChange("contractNo", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.contractNo}
-              helperText={errors.contractNo}
-              sx={inputSx}
-            />
-          </Grid>
+    <>
+      <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700 }}>
+          {initialData ? "Edit Contract" : "New Contract"}
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} mt={1}>
+            {/* ContractNo */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Contract No"
+                type="text"
+                value={form.contractNo}
+                onChange={(e) => handleChange("contractNo", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.contractNo}
+                helperText={errors.contractNo}
+                sx={inputSx}
+              />
+            </Grid>
 
-          {/* Command, Base, Class - First Row */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.cmdId}>
-              <InputLabel id="cmd-label" sx={labelSx}>
-                Command
-              </InputLabel>
-              <Select
-                labelId="cmd-label"
-                value={form.cmdId || ""}
-                label="Command"
-                onChange={(e) => handleChange("cmdId", e.target.value)}
-                sx={selectSx}
-              >
-                {commands.map((cmd) => (
-                  <MenuItem key={cmd.id} value={cmd.id} sx={menuItemSx}>
-                    {cmd.name}
+            {/* Command, Base, Class - First Row */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.cmdId}>
+                <InputLabel id="cmd-label" sx={labelSx}>
+                  Command
+                </InputLabel>
+                <Select
+                  labelId="cmd-label"
+                  value={form.cmdId || ""}
+                  label="Command"
+                  onChange={(e) => handleChange("cmdId", e.target.value)}
+                  sx={selectSx}
+                >
+                  {commands.map((cmd) => (
+                    <MenuItem key={cmd.id} value={cmd.id} sx={menuItemSx}>
+                      {cmd.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.baseId}>
+                <InputLabel id="base-label" sx={labelSx}>
+                  Base
+                </InputLabel>
+                <Select
+                  labelId="base-label"
+                  value={form.baseId || ""}
+                  label="Base"
+                  onChange={(e) => handleChange("baseId", e.target.value)}
+                  disabled={!form.cmdId}
+                  sx={selectSx}
+                >
+                  {filteredBases.map((base) => (
+                    <MenuItem key={base.id} value={base.id} sx={menuItemSx}>
+                      {base.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.classId}>
+                <InputLabel id="class-label" sx={labelSx}>
+                  Class
+                </InputLabel>
+                <Select
+                  labelId="class-label"
+                  value={form.classId || ""}
+                  label="Class"
+                  onChange={(e) => handleChange("classId", e.target.value)}
+                  disabled={!form.cmdId || !form.baseId}
+                  sx={selectSx}
+                >
+                  {filteredClasses.map((cls) => (
+                    <MenuItem key={cls.id} value={cls.id} sx={menuItemSx}>
+                      {cls.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Group ID */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDBox display="flex" alignItems="center" gap={1}>
+                <FormControl size="small" fullWidth error={!!errors.grpId} sx={{ flex: 1 }}>
+                  <InputLabel id="grp-label" sx={labelSx}>
+                    Group ID
+                  </InputLabel>
+                  <Select
+                    labelId="grp-label"
+                    value={form.grpId || ""}
+                    label="Group ID"
+                    onChange={(e) => handleChange("grpId", e.target.value)}
+                    disabled={!form.cmdId || !form.baseId || !form.classId}
+                    sx={selectSx}
+                  >
+                    {filteredPropertyGroups.map((pg) => (
+                      <MenuItem key={pg.id} value={pg.id} sx={menuItemSx}>
+                        {pg.gId}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <IconButton
+                  color="primary"
+                  onClick={() => setPropertyGroupingFormOpen(true)}
+                  disabled={!form.cmdId || !form.baseId || !form.classId}
+                  title="Create New Property Group"
+                  sx={{
+                    minWidth: "40px",
+                    width: "40px",
+                    height: "40px",
+                  }}
+                >
+                  <Icon>add</Icon>
+                </IconButton>
+              </MDBox>
+            </Grid>
+
+            {/* TenantNo */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.tenantNo}>
+                <InputLabel id="tenant-label" sx={labelSx}>
+                  Tenant No
+                </InputLabel>
+                <Select
+                  labelId="tenant-label"
+                  value={form.tenantNo || ""}
+                  label="Tenant No"
+                  onChange={(e) => handleChange("tenantNo", e.target.value)}
+                  sx={selectSx}
+                >
+                  {tenants.map((tenant) => (
+                    <MenuItem key={tenant.id} value={tenant.tenantNo} sx={menuItemSx}>
+                      {tenant.tenantNo} - {tenant.ownerName}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Tenant Name (Read-only) */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Tenant Name"
+                type="text"
+                value={
+                  form.tenantNo
+                    ? tenants.find((t) => t.tenantNo === form.tenantNo)?.ownerName || ""
+                    : ""
+                }
+                fullWidth
+                size="small"
+                disabled
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* Tenant Address (Read-only) */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Tenant Address"
+                type="text"
+                value={
+                  form.tenantNo
+                    ? tenants.find((t) => t.tenantNo === form.tenantNo)?.address || ""
+                    : ""
+                }
+                fullWidth
+                size="small"
+                disabled
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* BusinessName */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Business Name"
+                type="text"
+                value={form.businessName}
+                onChange={(e) => handleChange("businessName", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.businessName}
+                helperText={errors.businessName}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* NatureOfBusiness */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Nature of Business"
+                type="text"
+                value={form.natureOfBusiness}
+                onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.natureOfBusiness}
+                helperText={errors.natureOfBusiness}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* ContractStartDate */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Contract Start Date (CSD)"
+                type="date"
+                value={form.contractStartDate}
+                onChange={(e) => handleChange("contractStartDate", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.contractStartDate}
+                helperText={errors.contractStartDate}
+                InputLabelProps={{ shrink: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* ContractEndDate */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Contract End Date (CED)"
+                type="date"
+                value={form.contractEndDate}
+                onChange={(e) => handleChange("contractEndDate", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.contractEndDate}
+                helperText={errors.contractEndDate}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: form.contractStartDate
+                    ? (() => {
+                        // Set min date to one day after start date
+                        const startDate = new Date(form.contractStartDate);
+                        startDate.setDate(startDate.getDate() + 1);
+                        return startDate.toISOString().split("T")[0];
+                      })()
+                    : undefined,
+                }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* CommercialOperationDate */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Commercial Operation Date (COD)"
+                type="date"
+                value={form.commercialOperationDate}
+                onChange={(e) => handleChange("commercialOperationDate", e.target.value)}
+                fullWidth
+                size="small"
+                error={!!errors.commercialOperationDate}
+                helperText={errors.commercialOperationDate}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: form.contractStartDate || undefined,
+                  max: form.contractEndDate || undefined,
+                }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* InitialRentPM */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Initial Rent PM (Rs)"
+                type="number"
+                value={form.initialRentPM}
+                onChange={(e) => handleChange("initialRentPM", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!errors.initialRentPM}
+                helperText={errors.initialRentPM}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* InitialRentPA */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Initial Rent PA (Rs)"
+                type="number"
+                value={form.initialRentPA}
+                onChange={(e) => handleChange("initialRentPA", e.target.value)}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* PaymentTermMonths */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
+                <InputLabel id="payment-term-label" sx={labelSx}>
+                  Payment Term Months
+                </InputLabel>
+                <Select
+                  labelId="payment-term-label"
+                  value={form.paymentTermMonths || ""}
+                  label="Payment Term Months"
+                  onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
+                  sx={selectSx}
+                >
+                  {paymentTermOptions.map((option) => (
+                    <MenuItem key={option} value={option} sx={menuItemSx}>
+                      {option}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Term */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.term}>
+                <InputLabel id="term-label" sx={labelSx}>
+                  Term
+                </InputLabel>
+                <Select
+                  labelId="term-label"
+                  value={form.term || ""}
+                  label="Term"
+                  onChange={(e) => handleChange("term", e.target.value)}
+                  sx={selectSx}
+                >
+                  <MenuItem value="Rent" sx={menuItemSx}>
+                    Rent
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.baseId}>
-              <InputLabel id="base-label" sx={labelSx}>
-                Base
-              </InputLabel>
-              <Select
-                labelId="base-label"
-                value={form.baseId || ""}
-                label="Base"
-                onChange={(e) => handleChange("baseId", e.target.value)}
-                disabled={!form.cmdId}
-                sx={selectSx}
-              >
-                {filteredBases.map((base) => (
-                  <MenuItem key={base.id} value={base.id} sx={menuItemSx}>
-                    {base.name}
+                  <MenuItem value="Profit" sx={menuItemSx}>
+                    Profit
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.classId}>
-              <InputLabel id="class-label" sx={labelSx}>
-                Class
-              </InputLabel>
-              <Select
-                labelId="class-label"
-                value={form.classId || ""}
-                label="Class"
-                onChange={(e) => handleChange("classId", e.target.value)}
-                disabled={!form.cmdId || !form.baseId}
-                sx={selectSx}
-              >
-                {filteredClasses.map((cls) => (
-                  <MenuItem key={cls.id} value={cls.id} sx={menuItemSx}>
-                    {cls.name}
+                  <MenuItem value="Rent + Profit" sx={menuItemSx}>
+                    Rent + Profit
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          {/* Group ID */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.grpId}>
-              <InputLabel id="grp-label" sx={labelSx}>
-                Group ID
-              </InputLabel>
-              <Select
-                labelId="grp-label"
-                value={form.grpId || ""}
-                label="Group ID"
-                onChange={(e) => handleChange("grpId", e.target.value)}
-                disabled={!form.cmdId || !form.baseId || !form.classId}
-                sx={selectSx}
-              >
-                {filteredPropertyGroups.map((pg) => (
-                  <MenuItem key={pg.id} value={pg.id} sx={menuItemSx}>
-                    {pg.gId}
+                  <MenuItem value="Rent/Profit" sx={menuItemSx}>
+                    Rent/Profit
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
+                </Select>
+              </FormControl>
+            </Grid>
 
-          {/* TenantNo */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.tenantNo}>
-              <InputLabel id="tenant-label" sx={labelSx}>
-                Tenant No
-              </InputLabel>
-              <Select
-                labelId="tenant-label"
-                value={form.tenantNo || ""}
-                label="Tenant No"
-                onChange={(e) => handleChange("tenantNo", e.target.value)}
-                sx={selectSx}
-              >
-                {tenants.map((tenant) => (
-                  <MenuItem key={tenant.id} value={tenant.tenantNo} sx={menuItemSx}>
-                    {tenant.tenantNo} - {tenant.ownerName}
+            {/* IncreaseRatePercent */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Increase Rate Percent %"
+                type="number"
+                value={form.increaseRatePercent}
+                onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* IncreaseIntervalMonths */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="increase-interval-label" sx={labelSx}>
+                  Increase Interval Months
+                </InputLabel>
+                <Select
+                  labelId="increase-interval-label"
+                  value={form.increaseIntervalMonths || ""}
+                  label="Increase Interval Months"
+                  onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
+                  sx={selectSx}
+                >
+                  {increaseIntervalOptions.map((option) => (
+                    <MenuItem key={option} value={option} sx={menuItemSx}>
+                      {option}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Rise Terms */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.riseTermType}>
+                <InputLabel id="rise-term-type-label" sx={labelSx}>
+                  Rise Terms
+                </InputLabel>
+                <Select
+                  labelId="rise-term-type-label"
+                  value={form.riseTermType || ""}
+                  label="Rise Terms"
+                  onChange={(e) => handleChange("riseTermType", e.target.value)}
+                  sx={selectSx}
+                >
+                  <MenuItem value="Standard" sx={menuItemSx}>
+                    Standard
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          {/* BusinessName */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Business Name"
-              type="text"
-              value={form.businessName}
-              onChange={(e) => handleChange("businessName", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.businessName}
-              helperText={errors.businessName}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* NatureOfBusiness */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Nature of Business"
-              type="text"
-              value={form.natureOfBusiness}
-              onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.natureOfBusiness}
-              helperText={errors.natureOfBusiness}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* ContractStartDate */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Contract Start Date"
-              type="date"
-              value={form.contractStartDate}
-              onChange={(e) => handleChange("contractStartDate", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.contractStartDate}
-              helperText={errors.contractStartDate}
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* ContractEndDate */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Contract End Date"
-              type="date"
-              value={form.contractEndDate}
-              onChange={(e) => handleChange("contractEndDate", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.contractEndDate}
-              helperText={errors.contractEndDate}
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* CommercialOperationDate */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Commercial Operation Date"
-              type="date"
-              value={form.commercialOperationDate}
-              onChange={(e) => handleChange("commercialOperationDate", e.target.value)}
-              fullWidth
-              size="small"
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* InitialRentPM */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Initial Rent PM"
-              type="number"
-              value={form.initialRentPM}
-              onChange={(e) => handleChange("initialRentPM", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.initialRentPM}
-              helperText={errors.initialRentPM}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* InitialRentPA */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Initial Rent PA"
-              type="number"
-              value={form.initialRentPA}
-              onChange={(e) => handleChange("initialRentPA", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.initialRentPA}
-              helperText={errors.initialRentPA}
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* PaymentTermMonths */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
-              <InputLabel id="payment-term-label" sx={labelSx}>
-                Payment Term Months
-              </InputLabel>
-              <Select
-                labelId="payment-term-label"
-                value={form.paymentTermMonths || ""}
-                label="Payment Term Months"
-                onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
-                sx={selectSx}
-              >
-                {paymentTermOptions.map((option) => (
-                  <MenuItem key={option} value={option} sx={menuItemSx}>
-                    {option}
+                  <MenuItem value="Fixed Date" sx={menuItemSx}>
+                    Fixed Date
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          {/* IncreaseRatePercent */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Increase Rate Percent"
-              type="number"
-              value={form.increaseRatePercent}
-              onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-              fullWidth
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* IncreaseIntervalMonths */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth>
-              <InputLabel id="increase-interval-label" sx={labelSx}>
-                Increase Interval Months
-              </InputLabel>
-              <Select
-                labelId="increase-interval-label"
-                value={form.increaseIntervalMonths || ""}
-                label="Increase Interval Months"
-                onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
-                sx={selectSx}
-              >
-                {increaseIntervalOptions.map((option) => (
-                  <MenuItem key={option} value={option} sx={menuItemSx}>
-                    {option}
+                  <MenuItem value="Variable Increase" sx={menuItemSx}>
+                    Variable Increase
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
+                </Select>
+              </FormControl>
+            </Grid>
 
-          {/* SDRateMonths */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="SD Rate Months"
-              type="number"
-              value={form.sdRateMonths}
-              onChange={(e) => handleChange("sdRateMonths", e.target.value)}
-              fullWidth
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
+            {/* Rise Year (shown when Standard is selected) */}
+            {form.riseTermType === "Standard" && (
+              <Grid item xs={12} sm={6} md={4}>
+                <FormControl size="small" fullWidth error={!!errors.riseyear}>
+                  <InputLabel id="rise-year-label" sx={labelSx}>
+                    Rise Year
+                  </InputLabel>
+                  <Select
+                    labelId="rise-year-label"
+                    value={form.riseyear || ""}
+                    label="Rise Year"
+                    onChange={(e) => handleChange("riseyear", e.target.value)}
+                    sx={selectSx}
+                  >
+                    {Array.from({ length: 50 }, (_, i) => {
+                      const year = new Date().getFullYear() - 10 + i;
+                      return (
+                        <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
+                          {year}
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                  {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
+                </FormControl>
+              </Grid>
+            )}
 
-          {/* SecurityDepositAmount */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Security Deposit Amount"
-              type="number"
-              value={form.securityDepositAmount}
-              onChange={(e) => handleChange("securityDepositAmount", e.target.value)}
-              fullWidth
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
+            {/* Rise Date (shown when Fixed Date is selected) */}
+            {form.riseTermType === "Fixed Date" && (
+              <Grid item xs={12} sm={6} md={4}>
+                <MDInput
+                  label="Rise Date"
+                  type="date"
+                  value={form.risedate}
+                  onChange={(e) => handleChange("risedate", e.target.value)}
+                  fullWidth
+                  size="small"
+                  error={!!errors.risedate}
+                  helperText={errors.risedate}
+                  InputLabelProps={{ shrink: true }}
+                  sx={inputSx}
+                />
+              </Grid>
+            )}
 
-          {/* RentalValue */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="Rental Value"
-              type="number"
-              value={form.rentalValue}
-              onChange={(e) => handleChange("rentalValue", e.target.value)}
-              fullWidth
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
+            {/* Variable Increase Add Icon (shown when Variable Increase is selected) */}
+            {form.riseTermType === "Variable Increase" && (
+              <Grid item xs={12} sm={6} md={4}>
+                <MDBox display="flex" alignItems="center" gap={1}>
+                  <MDInput
+                    label="Variable Increase"
+                    value={
+                      riseTerms.length > 0 ? `${riseTerms.length} term(s) configured` : "No terms"
+                    }
+                    fullWidth
+                    size="small"
+                    InputProps={{ readOnly: true }}
+                    sx={{ flex: 1, ...inputSx }}
+                  />
+                  <IconButton
+                    color="primary"
+                    onClick={() => {
+                      setRiseTermForm({
+                        monthsInterval: "",
+                        risePercent: "",
+                        sequenceNo: getNextRiseSequenceNo(),
+                      });
+                      setRiseTermForm({
+                        monthsInterval: "",
+                        risePercent: "",
+                        sequenceNo: getNextRiseSequenceNo(),
+                      });
+                      setRiseTermErrors({});
+                      setEditingRiseTermIndex(null);
+                      setRiseTermsDialogOpen(true);
+                    }}
+                    title="Add Rise Terms"
+                    sx={{
+                      minWidth: "40px",
+                      width: "40px",
+                      height: "40px",
+                    }}
+                  >
+                    <Icon>add</Icon>
+                  </IconButton>
+                </MDBox>
+              </Grid>
+            )}
 
-          {/* GovtShareCondition */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth error={!!errors.govtShareCondition}>
-              <InputLabel id="govt-share-label" sx={labelSx}>
-                Govt Share Condition
-              </InputLabel>
-              <Select
-                labelId="govt-share-label"
-                value={form.govtShareCondition || ""}
-                label="Govt Share Condition"
-                onChange={(e) => handleChange("govtShareCondition", e.target.value)}
-                sx={selectSx}
-              >
-                {govtShareOptions.map((option) => (
-                  <MenuItem key={option} value={option} sx={menuItemSx}>
-                    {option}
+            {/* SDRateMonths */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="SD Rate Months"
+                type="number"
+                value={form.sdRateMonths}
+                onChange={(e) => handleChange("sdRateMonths", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* SecurityDepositAmount */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Security Deposit Amount (Rs)"
+                type="number"
+                value={form.securityDepositAmount}
+                onChange={(e) => handleChange("securityDepositAmount", e.target.value)}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* RentalValue */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Rental Value"
+                type="number"
+                value={form.rentalValue}
+                onChange={(e) => handleChange("rentalValue", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* GovtShareCondition */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth error={!!errors.govtShareCondition}>
+                <InputLabel id="govt-share-label" sx={labelSx}>
+                  Govt Share Condition
+                </InputLabel>
+                <Select
+                  labelId="govt-share-label"
+                  value={form.govtShareCondition || ""}
+                  label="Govt Share Condition"
+                  onChange={(e) => handleChange("govtShareCondition", e.target.value)}
+                  sx={selectSx}
+                >
+                  {govtShareOptions.map((option) => (
+                    <MenuItem key={option} value={option} sx={menuItemSx}>
+                      {option}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* PAFShare */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="PAF Share (%)"
+                type="number"
+                value={form.pafShare || ""}
+                onChange={(e) => handleChange("pafShare", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* Status */}
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="status-label" sx={labelSx}>
+                  Status
+                </InputLabel>
+                <Select
+                  labelId="status-label"
+                  value={form.status !== undefined ? form.status : true}
+                  label="Status"
+                  onChange={(e) => handleChange("status", e.target.value)}
+                  sx={selectSx}
+                >
+                  <MenuItem value={true} sx={menuItemSx}>
+                    Active
                   </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                  <MenuItem value={false} sx={menuItemSx}>
+                    Inactive
+                  </MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Remarks */}
+            <Grid item xs={12}>
+              <MDInput
+                label="Remarks"
+                type="text"
+                value={form.remarks}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= 500) {
+                    handleChange("remarks", value);
+                  }
+                }}
+                fullWidth
+                multiline
+                rows={3}
+                size="small"
+                sx={inputSx}
+                error={!!errors.remarks}
+                helperText={errors.remarks || `${form.remarks?.length || 0}/500 characters`}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={onClose}>
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton variant="gradient" color="info" onClick={handleSave}>
+            <Icon>save</Icon>&nbsp;Save
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      {/* Active Contracts Dialog */}
+      <Dialog
+        open={contractsDialogOpen}
+        onClose={() => setContractsDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="medium">
+            Active Contracts for Group ID:{" "}
+            {form.grpId
+              ? filteredPropertyGroups.find((pg) => pg.id === Number(form.grpId))?.gId || form.grpId
+              : ""}
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent>
+          {loadingContracts ? (
+            <MDBox display="flex" justifyContent="center" py={4}>
+              <CurrencyLoading />
+            </MDBox>
+          ) : activeContracts.length === 0 ? (
+            <MDBox py={4} textAlign="center">
+              <MDTypography variant="body2" color="text">
+                No active contracts found for this Group ID.
+              </MDTypography>
+            </MDBox>
+          ) : (
+            <MDBox
+              sx={{
+                maxHeight: "500px",
+                overflowY: "auto",
+                // Firefox
+                scrollbarWidth: "thin",
+                scrollbarColor: "#333333 transparent",
+                // Chrome/Safari/Edge
+                "&::-webkit-scrollbar": {
+                  width: "8px",
+                  height: "8px",
+                },
+                "&::-webkit-scrollbar-track": {
+                  background: "transparent",
+                  borderRadius: "2px",
+                },
+                "&::-webkit-scrollbar-thumb": {
+                  backgroundColor: "#333333",
+                  borderRadius: "10px",
+                  border: "2px solid transparent",
+                  backgroundClip: "padding-box",
+                  "&:hover": {
+                    backgroundColor: "#1a1a1a",
+                  },
+                },
+                "&::-webkit-scrollbar-button": {
+                  display: "none",
+                },
+              }}
+            >
+              <Card>
+                <MDBox p={2}>
+                  <MDTypography variant="caption" color="text" mb={2}>
+                    Total Active Contracts: {activeContracts.length}
+                  </MDTypography>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Sno
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Class
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Cmd
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Unit
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA No
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Address
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Business Title
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Nature of Business
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Location
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          GP ID
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-CA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-BOO
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Rental Value
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contract Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract From
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract To
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PM
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Term of Payment
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Profit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase (Rate)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase Interval
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit (Rs)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          DPC (Per Day)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Govt Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          PAF Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Feasible
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Approving Authority
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Remarks
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeContracts.map((contract, index) => {
+                        // Helper function to get field value with fallbacks
+                        const getField = (camelCase, pascalCase, altNames = []) => {
+                          if (contract[camelCase] !== undefined && contract[camelCase] !== null) {
+                            return contract[camelCase];
+                          }
+                          if (contract[pascalCase] !== undefined && contract[pascalCase] !== null) {
+                            return contract[pascalCase];
+                          }
+                          for (const alt of altNames) {
+                            if (contract[alt] !== undefined && contract[alt] !== null) {
+                              return contract[alt];
+                            }
+                          }
+                          return "-";
+                        };
+
+                        // Helper function to format date as dd-mm-yyyy
+                        const formatDate = (dateValue) => {
+                          if (!dateValue) return "-";
+                          try {
+                            // Handle ISO date string (with or without time)
+                            const dateStr = dateValue.split("T")[0]; // Get YYYY-MM-DD part
+                            const [year, month, day] = dateStr.split("-");
+                            if (year && month && day) {
+                              return `${day}-${month}-${year}`;
+                            }
+                            // Try parsing as Date object
+                            const date = new Date(dateValue);
+                            if (!isNaN(date.getTime())) {
+                              const dd = String(date.getDate()).padStart(2, "0");
+                              const mm = String(date.getMonth() + 1).padStart(2, "0");
+                              const yyyy = date.getFullYear();
+                              return `${dd}-${mm}-${yyyy}`;
+                            }
+                            return "-";
+                          } catch {
+                            return "-";
+                          }
+                        };
+
+                        return (
+                          <tr
+                            key={contract.id || index}
+                            style={{
+                              borderBottom: "1px solid #e0e0e0",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = "#f9f9f9";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = "transparent";
+                            }}
+                          >
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {index + 1}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("class", "Class", ["className", "ClassName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("cmd", "Cmd", ["cmdName", "CmdName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("unit", "Unit", ["unitName", "UnitName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caNo", "CANo", ["contractNo", "ContractNo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorName", "ContractorName", [
+                                "businessName",
+                                "BusinessName",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorAddress", "ContractorAddress", [
+                                "address",
+                                "Address",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("businessTitle", "BusinessTitle", ["title", "Title"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("natureOfBusiness", "NatureOfBusiness", [
+                                "nature",
+                                "Nature",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("location", "Location")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("gpId", "GPId", [
+                                "groupId",
+                                "GroupId",
+                                "gId",
+                                "GId",
+                                "grpId",
+                                "GrpId",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaCA", "AreaCA", ["areaCa", "AreaCa"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaBOO", "AreaBOO", ["areaBoo", "AreaBoo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("revenueRate", "RevenueRate")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("revenueRateDate", "RevenueRateDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("rentalValue", "RentalValue")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("initialContractorName", "InitialContractorName")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("initialContractDate", "InitialContractDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractFrom", "ContractFrom", [
+                                  "contractStartDate",
+                                  "ContractStartDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractTo", "ContractTo", [
+                                  "contractEndDate",
+                                  "ContractEndDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPM", "FirstYRentPM", [
+                                "initialRentPM",
+                                "InitialRentPM",
+                                "firstYearRentPM",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPA", "FirstYRentPA", [
+                                "initialRentPA",
+                                "InitialRentPA",
+                                "firstYearRentPA",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("termOfPayment", "TermOfPayment", [
+                                "paymentTermMonths",
+                                "PaymentTermMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("profitTerm", "ProfitTerm")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseRate", "IncreaseRate", [
+                                "increaseRatePercent",
+                                "IncreaseRatePercent",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseInterval", "IncreaseInterval", [
+                                "increaseIntervalMonths",
+                                "IncreaseIntervalMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositTerm", "SecurityDepositTerm", [
+                                "sdRateMonths",
+                                "SdRateMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositRs", "SecurityDepositRs", [
+                                "securityDepositAmount",
+                                "SecurityDepositAmount",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("dpcPerDay", "DPCPerDay", ["dpc", "DPC"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("govtSharePA", "GovtSharePA", [
+                                "govtShareCondition",
+                                "GovtShareCondition",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("pafSharePA", "PAFSharePA", ["pafShare", "PAFShare"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              <StatusBadge value={getField("status", "Status")} />
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("feasible", "Feasible")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caStatus", "CAStatus")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("approvingAuthority", "ApprovingAuthority")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("remarks", "Remarks")}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </MDBox>
+              </Card>
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={() => setContractsDialogOpen(false)}
+          >
+            <Icon>close</Icon>&nbsp;Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+      {/* Property Grouping Form Dialog */}
+      <PropertyGroupingForm
+        open={propertyGroupingFormOpen}
+        onClose={() => setPropertyGroupingFormOpen(false)}
+        onSubmit={handlePropertyGroupingSave}
+        initialData={null}
+        rentalProperties={rentalProperties}
+        commands={commands}
+        bases={bases}
+        classes={classes}
+        allPropertyGroupings={allPropertyGroupings}
+      />
+
+      {/* Rise Terms Dialog */}
+      <Dialog
+        open={riseTermsDialogOpen}
+        onClose={handleCloseRiseTermsDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="medium">
+            {editingRiseTermIndex !== null ? "Edit Rise Term" : "Add Rise Term"}
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} sm={4}>
+              <FormControl size="small" fullWidth error={!!riseTermErrors.monthsInterval}>
+                <InputLabel id="months-interval-label" sx={labelSx}>
+                  Months Interval
+                </InputLabel>
+                <Select
+                  labelId="months-interval-label"
+                  value={riseTermForm.monthsInterval || ""}
+                  label="Months Interval"
+                  onChange={(e) => handleRiseTermChange("monthsInterval", e.target.value)}
+                  sx={selectSx}
+                >
+                  {[12, 24, 36, 48, 60, 72, 84, 96].map((value) => (
+                    <MenuItem key={value} value={value.toString()} sx={menuItemSx}>
+                      {value}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {riseTermErrors.monthsInterval && (
+                  <FormHelperText>{riseTermErrors.monthsInterval}</FormHelperText>
+                )}
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <MDInput
+                label="Rise Percent"
+                type="number"
+                step="0.01"
+                value={riseTermForm.risePercent}
+                onChange={(e) => handleRiseTermChange("risePercent", e.target.value)}
+                fullWidth
+                size="small"
+                required
+                error={!!riseTermErrors.risePercent}
+                helperText={riseTermErrors.risePercent}
+                sx={inputSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <MDInput
+                label="Sequence No"
+                type="number"
+                value={riseTermForm.sequenceNo}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
           </Grid>
 
-          {/* PAFShare */}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDInput
-              label="PAF Share (%)"
-              type="number"
-              value={form.pafShare || ""}
-              onChange={(e) => handleChange("pafShare", e.target.value)}
-              fullWidth
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
-
-          {/* Status */}
-          <Grid item xs={12} sm={6} md={4}>
-            <FormControl size="small" fullWidth>
-              <InputLabel id="status-label" sx={labelSx}>
-                Status
-              </InputLabel>
-              <Select
-                labelId="status-label"
-                value={form.status !== undefined ? form.status : true}
-                label="Status"
-                onChange={(e) => handleChange("status", e.target.value)}
-                sx={selectSx}
-              >
-                <MenuItem value={true} sx={menuItemSx}>
-                  Active
-                </MenuItem>
-                <MenuItem value={false} sx={menuItemSx}>
-                  Inactive
-                </MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-
-          {/* Remarks */}
-          <Grid item xs={12}>
-            <MDInput
-              label="Remarks"
-              type="text"
-              value={form.remarks}
-              onChange={(e) => handleChange("remarks", e.target.value)}
-              fullWidth
-              multiline
-              rows={3}
-              size="small"
-              sx={inputSx}
-            />
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <MDButton variant="outlined" color="secondary" onClick={onClose}>
-          <Icon>close</Icon>&nbsp;Cancel
-        </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave}>
-          <Icon>save</Icon>&nbsp;Save
-        </MDButton>
-      </DialogActions>
-    </Dialog>
+          {riseTerms.length > 0 && (
+            <MDBox mt={3}>
+              <MDTypography variant="h6" fontWeight="medium" mb={2}>
+                Existing Rise Terms
+              </MDTypography>
+              <Card>
+                <MDBox p={2}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Sequence No
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Months Interval
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Rise Percent
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "center",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...riseTerms]
+                        .sort((a, b) => Number(a.sequenceNo) - Number(b.sequenceNo))
+                        .map((term, index) => {
+                          const originalIndex = riseTerms.findIndex(
+                            (t) =>
+                              t.sequenceNo === term.sequenceNo &&
+                              t.monthsInterval === term.monthsInterval
+                          );
+                          return (
+                            <tr key={index} style={{ borderBottom: "1px solid #e0e0e0" }}>
+                              <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                                {term.sequenceNo}
+                              </td>
+                              <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                                {term.monthsInterval}
+                              </td>
+                              <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                                {term.risePercent}%
+                              </td>
+                              <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                                <IconButton
+                                  size="small"
+                                  color="info"
+                                  onClick={() => handleEditRiseTerm(originalIndex)}
+                                  sx={{ mr: 1 }}
+                                >
+                                  <Icon>edit</Icon>
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => handleDeleteRiseTerm(originalIndex)}
+                                >
+                                  <Icon>delete</Icon>
+                                </IconButton>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </MDBox>
+              </Card>
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseRiseTermsDialog}>
+            <Icon>close</Icon>&nbsp;Close
+          </MDButton>
+          <MDButton variant="gradient" color="info" onClick={handleAddRiseTerm}>
+            <Icon>{editingRiseTermIndex !== null ? "save" : "add"}</Icon>&nbsp;
+            {editingRiseTermIndex !== null ? "Update" : "Add"} Term
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }
 
@@ -704,6 +2250,7 @@ ContractsForm.propTypes = {
   classes: PropTypes.array.isRequired,
   propertyGroups: PropTypes.array.isRequired,
   tenants: PropTypes.array.isRequired,
+  onPropertyGroupsRefresh: PropTypes.func,
 };
 
 export default function Contracts() {
@@ -716,13 +2263,14 @@ export default function Contracts() {
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Search is handled by shared DataTable (canSearch)
 
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [classes, setClasses] = useState([]);
   const [propertyGroups, setPropertyGroups] = useState([]);
   const [tenants, setTenants] = useState([]);
+  const [userIPAddress, setUserIPAddress] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
@@ -732,6 +2280,8 @@ export default function Contracts() {
   const [currentViewingRecord, setCurrentViewingRecord] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
 
   const fetchContracts = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
@@ -802,6 +2352,71 @@ export default function Contracts() {
     }
   };
 
+  // Fetch user's IP address
+  const fetchUserIPAddress = async () => {
+    try {
+      // Try multiple IP services for reliability
+      const ipServices = [
+        { url: "https://api.ipify.org?format=json", extract: (data) => data.ip },
+        {
+          url: "https://api.ip.sb/ip",
+          extract: (data) => (typeof data === "string" ? data : data.ip),
+        },
+        { url: "https://api.myip.com", extract: (data) => data.ip || data.query },
+        {
+          url: "https://ipapi.co/ip/",
+          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
+        },
+      ];
+
+      for (const service of ipServices) {
+        try {
+          const response = await fetch(service.url, { method: "GET" });
+          if (response.ok) {
+            const contentType = response.headers.get("content-type");
+            let data;
+            if (contentType && contentType.includes("application/json")) {
+              data = await response.json();
+            } else {
+              data = await response.text();
+            }
+            const ip = service.extract(data);
+            if (ip && typeof ip === "string" && ip.trim().length > 0) {
+              setUserIPAddress(ip.trim());
+              return;
+            }
+          }
+        } catch (e) {
+          // Try next service
+          continue;
+        }
+      }
+      // Fallback: set to unknown if all services fail
+      setUserIPAddress("unknown");
+    } catch (error) {
+      console.error("Error fetching IP address:", error);
+      setUserIPAddress("unknown");
+    }
+  };
+
+  // Fetch all property groupings for grouping display
+  useEffect(() => {
+    const fetchAllPropertyGroupings = async () => {
+      try {
+        const response = await propertyGroupingApi.list(1, 10000);
+        if (response && response.pagination) {
+          setAllPropertyGroupings(response.data || []);
+        } else {
+          setAllPropertyGroupings(Array.isArray(response) ? response : []);
+        }
+      } catch (error) {
+        console.error("Error fetching all property groupings:", error);
+        setAllPropertyGroupings([]);
+      }
+    };
+    fetchAllPropertyGroupings();
+  }, []);
+
   // Lazy-load dropdown lists only when form opens (Add New / Edit)
   useEffect(() => {
     if (!openForm) return;
@@ -819,6 +2434,11 @@ export default function Contracts() {
     propertyGroups.length,
     tenants.length,
   ]);
+
+  // Fetch user IP address on component mount
+  useEffect(() => {
+    fetchUserIPAddress();
+  }, []);
 
   // Load current page from backend
   useEffect(() => {
@@ -846,7 +2466,13 @@ export default function Contracts() {
   const handleConfirmDelete = async () => {
     if (recordToDelete) {
       try {
-        await api.remove("contract", recordToDelete);
+        // Include IP address in delete request body
+        const deleteData = {
+          ActionBy: "admin",
+          ActionDate: new Date().toISOString(),
+          userIPAddress: userIPAddress || "unknown",
+        };
+        await contractApi.remove(recordToDelete, deleteData);
         await fetchContracts(pageNumber, pageSize);
         setDeleteDialogOpen(false);
         setRecordToDelete(null);
@@ -864,10 +2490,16 @@ export default function Contracts() {
 
   const handleSubmit = async (data) => {
     try {
+      // Add IP address to the payload
+      const dataWithIP = {
+        ...data,
+        userIPAddress: userIPAddress || "unknown",
+      };
+
       if (currentContract && currentContract.id) {
-        await api.update("contract", currentContract.id, data);
+        await contractApi.update(currentContract.id, dataWithIP);
       } else {
-        await api.create("contract", data);
+        await contractApi.create(dataWithIP);
       }
       await fetchContracts(pageNumber, pageSize);
       handleCloseForm();
@@ -1034,6 +2666,23 @@ export default function Contracts() {
     }
   };
 
+  // Helper function to format date as dd-mm-yyyy
+  const formatDateDDMMYYYY = (dateValue) => {
+    if (!dateValue) return "";
+    try {
+      // Handle ISO date string (with or without time)
+      const dateStr = dateValue.split("T")[0]; // Get YYYY-MM-DD part
+      const [year, month, day] = dateStr.split("-");
+      if (year && month && day) {
+        return `${day}-${month}-${year}`;
+      }
+      // If already in dd-mm-yyyy format, return as is
+      return dateValue;
+    } catch {
+      return dateValue || "";
+    }
+  };
+
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
     { Header: "ID", accessor: "id", align: "center", width: "56px" },
@@ -1042,9 +2691,117 @@ export default function Contracts() {
     { Header: "Command", accessor: "cmdName", align: "left" },
     { Header: "Base", accessor: "baseName", align: "left" },
     { Header: "Class", accessor: "className", align: "left" },
-    { Header: "Group", accessor: "grpName", align: "left" },
+    {
+      Header: "Group",
+      accessor: "grpName",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          // eslint-disable-next-line react/prop-types
+          const groupKey = row.original.groupKey;
+          const isExpanded = expandedGroups.has(groupKey);
+          return (
+            <MDBox display="flex" alignItems="center" gap={1}>
+              <IconButton
+                size="small"
+                onClick={() => {
+                  const newExpanded = new Set(expandedGroups);
+                  if (isExpanded) {
+                    newExpanded.delete(groupKey);
+                  } else {
+                    newExpanded.add(groupKey);
+                  }
+                  setExpandedGroups(newExpanded);
+                }}
+                sx={{ padding: "4px" }}
+              >
+                <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
+              </IconButton>
+              <MDTypography variant="body2" fontWeight="medium">
+                {/* eslint-disable-next-line react/prop-types */}
+                {row.original.grpName || row.original.gId || ""}
+              </MDTypography>
+            </MDBox>
+          );
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.grpName || row.original.gId || "-";
+      },
+    },
+    {
+      Header: "Total Area",
+      accessor: "totalArea",
+      align: "right",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          // eslint-disable-next-line react/prop-types
+          const totalArea = row.original.totalArea || 0;
+          return (
+            <MDTypography variant="body2" fontWeight="medium">
+              {totalArea ? Number(totalArea).toLocaleString() : "-"}
+            </MDTypography>
+          );
+        }
+        return "-";
+      },
+    },
+    {
+      Header: "Location",
+      accessor: "location",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          // eslint-disable-next-line react/prop-types
+          const location = row.original.location || "";
+          return (
+            <MDTypography variant="body2" fontWeight="medium">
+              {location || "-"}
+            </MDTypography>
+          );
+        }
+        return "-";
+      },
+    },
     { Header: "Unit", accessor: "unitName", align: "left" },
-    { Header: "Tenant No", accessor: "tenantNo", align: "left" },
+    {
+      Header: "Tenant No",
+      accessor: "tenantNo",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const tenantNo = value || row.original?.tenantNo || "";
+        // Find tenant from tenants list
+        const tenant = tenants.find((t) => t.tenantNo === tenantNo);
+        if (tenant) {
+          return (
+            <MDBox>
+              <MDTypography variant="caption" fontWeight="medium">
+                {tenantNo}
+              </MDTypography>
+              <MDTypography variant="caption" display="block" color="text">
+                {tenant.ownerName || "-"}
+              </MDTypography>
+              <MDTypography
+                variant="caption"
+                display="block"
+                color="text"
+                sx={{ fontSize: "0.75rem" }}
+              >
+                {tenant.address || "-"}
+              </MDTypography>
+            </MDBox>
+          );
+        }
+        return tenantNo || "-";
+      },
+    },
     { Header: "Business Name", accessor: "businessName", align: "left" },
     { Header: "Nature of Business", accessor: "natureOfBusiness", align: "left" },
     {
@@ -1052,21 +2809,21 @@ export default function Contracts() {
       accessor: "contractStartDate",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? value.split("T")[0] : ""),
+      Cell: ({ value }) => formatDateDDMMYYYY(value),
     },
     {
       Header: "Contract End Date",
       accessor: "contractEndDate",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? value.split("T")[0] : ""),
+      Cell: ({ value }) => formatDateDDMMYYYY(value),
     },
     {
       Header: "Commercial Operation Date",
       accessor: "commercialOperationDate",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? value.split("T")[0] : "-"),
+      Cell: ({ value }) => (value ? formatDateDDMMYYYY(value) : "-"),
     },
     {
       Header: "Initial Rent PM",
@@ -1083,6 +2840,7 @@ export default function Contracts() {
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
     { Header: "Payment Term Months", accessor: "paymentTermMonths", align: "right" },
+    { Header: "Term", accessor: "term", align: "left" },
     {
       Header: "Increase Rate %",
       accessor: "increaseRatePercent",
@@ -1097,7 +2855,7 @@ export default function Contracts() {
     },
     { Header: "SD Rate Months", accessor: "sdRateMonths", align: "right" },
     {
-      Header: "Security Deposit Amount",
+      Header: "Security Deposit Amount (Rs)",
       accessor: "securityDepositAmount",
       align: "right",
       // eslint-disable-next-line react/prop-types
@@ -1153,46 +2911,182 @@ export default function Contracts() {
     { Header: "Remarks", accessor: "remarks", align: "left" },
   ];
 
-  const computedRows = rows.map((row) => ({
-    ...row,
-    // Be tolerant to backend field naming variations
-    cmdName: row.cmdName || row.cmdname || row.commandName || "",
-    baseName: row.baseName || row.basename || row.baseNameText || "",
-    className: row.className || row.classname || row.classNameText || "",
-    grpName: row.grpName || row.grpname || row.groupName || row.gId || "",
-    unitName: row.unitName || row.unitname || row.uomName || row.uoM || row.uoMName || "",
-    actions: (
-      <MDBox
-        alignItems="left"
-        justifyContent="left"
-        sx={{
-          backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
-          gap: "2px",
-          padding: "2px 2px",
-          borderRadius: "2px",
-        }}
-      >
-        <IconButton
-          size="small"
-          color="info"
-          onClick={() => handleEditContract(row.id)}
-          title="Edit"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>edit</Icon>
-        </IconButton>
-        <IconButton
-          size="small"
-          color="error"
-          onClick={() => handleDeleteContract(row.id)}
-          title="Delete"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>delete</Icon>
-        </IconButton>
-      </MDBox>
-    ),
-  }));
+  // Group contracts by grpId
+  const groupedData = useMemo(() => {
+    // Normalize rows
+    const normalizedRows = rows.map((row) => ({
+      ...row,
+      cmdName: row.cmdName || row.cmdname || row.commandName || "",
+      baseName: row.baseName || row.basename || row.baseNameText || "",
+      className: row.className || row.classname || row.classNameText || "",
+      grpName: row.grpName || row.grpname || row.groupName || row.gId || "",
+      grpId: row.grpId || row.gId || "",
+      unitName: row.unitName || row.unitname || row.uomName || row.uoM || row.uoMName || "",
+    }));
+
+    // Group by grpId
+    const groups = new Map();
+    normalizedRows.forEach((row) => {
+      const grpId = row.grpId || row.gId || "";
+      if (!grpId) {
+        // If no group, add as individual row
+        if (!groups.has("_no_group")) {
+          groups.set("_no_group", { grpId: "", grpName: "", rows: [] });
+        }
+        groups.get("_no_group").rows.push(row);
+        return;
+      }
+
+      const groupKey = grpId;
+      if (!groups.has(groupKey)) {
+        // Find property grouping to get area and location
+        const propertyGrouping = allPropertyGroupings.find(
+          (pg) => pg.gId === grpId || pg.id === Number(grpId)
+        );
+        groups.set(groupKey, {
+          grpId: grpId,
+          grpName: propertyGrouping?.gId || row.grpName || grpId,
+          totalArea: propertyGrouping?.area || 0,
+          location: propertyGrouping?.location || "",
+          rows: [],
+        });
+      }
+      groups.get(groupKey).rows.push(row);
+    });
+
+    // Build result array
+    const result = [];
+    groups.forEach((group, groupKey) => {
+      if (groupKey === "_no_group") {
+        // Add ungrouped rows directly
+        group.rows.forEach((row) => {
+          result.push({
+            ...row,
+            actions: (
+              <MDBox
+                alignItems="left"
+                justifyContent="left"
+                sx={{
+                  backgroundColor: "#f8f9fa",
+                  gap: "2px",
+                  padding: "2px 2px",
+                  borderRadius: "2px",
+                }}
+              >
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => handleEditContract(row.id)}
+                  title="Edit"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>edit</Icon>
+                </IconButton>
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteContract(row.id)}
+                  title="Delete"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
+              </MDBox>
+            ),
+          });
+        });
+        return;
+      }
+
+      const isExpanded = expandedGroups.has(groupKey);
+
+      // Add group row
+      result.push({
+        ...group.rows[0],
+        grpName: group.grpName,
+        totalArea: group.totalArea,
+        location: group.location,
+        isGroupRow: true,
+        groupKey: groupKey,
+        groupRows: group.rows,
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => {
+                const newExpanded = new Set(expandedGroups);
+                if (isExpanded) {
+                  newExpanded.delete(groupKey);
+                } else {
+                  newExpanded.add(groupKey);
+                }
+                setExpandedGroups(newExpanded);
+              }}
+              title={isExpanded ? "Collapse" : "Expand"}
+              sx={{ padding: "1px" }}
+            >
+              <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
+            </IconButton>
+          </MDBox>
+        ),
+      });
+
+      // Add expanded rows if group is expanded
+      if (isExpanded) {
+        group.rows.forEach((row) => {
+          result.push({
+            ...row,
+            isExpandedRow: true,
+            actions: (
+              <MDBox
+                alignItems="left"
+                justifyContent="left"
+                sx={{
+                  backgroundColor: "#f8f9fa",
+                  gap: "2px",
+                  padding: "2px 2px",
+                  borderRadius: "2px",
+                }}
+              >
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => handleEditContract(row.id)}
+                  title="Edit"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>edit</Icon>
+                </IconButton>
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteContract(row.id)}
+                  title="Delete"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
+              </MDBox>
+            ),
+          });
+        });
+      }
+    });
+
+    return result;
+  }, [rows, allPropertyGroupings, expandedGroups]);
+
+  const computedRows = groupedData;
 
   return (
     <DashboardLayout>
@@ -1312,86 +3206,25 @@ export default function Contracts() {
                   </MDBox>
                 )}
 
-                {/* Server-side Pagination Controls + Search */}
-                <MDBox
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  p={3}
-                  pb={2}
-                >
-                  <MDBox display="flex" alignItems="center">
-                    <Autocomplete
-                      disableClearable
-                      value={pageSize.toString()}
-                      options={["10", "25", "50", "100"]}
-                      onChange={(event, newValue) => {
-                        setPageSize(parseInt(newValue, 10));
-                        setPageNumber(1);
-                      }}
-                      size="small"
-                      sx={{
-                        width: "5rem",
-                        "& .MuiInputBase-root": { minHeight: "45px" },
-                        "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
-                      }}
-                      renderInput={(params) => <MDInput {...params} />}
-                    />
-                    <MDTypography variant="caption" color="secondary">
-                      &nbsp;&nbsp;entries per page
-                    </MDTypography>
-                  </MDBox>
-
-                  <MDBox width="14rem">
-                    <MDInput
-                      placeholder="Search..."
-                      size="small"
-                      fullWidth
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                  </MDBox>
-                </MDBox>
-
                 <DataTable
                   table={{
                     columns,
-                    rows: computedRows.filter((r) => {
-                      if (!searchQuery.trim()) return true;
-                      const q = searchQuery.toLowerCase();
-                      return (
-                        String(r.contractNo || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.cmdName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.baseName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.className || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.grpName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.unitName || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.tenantNo || "")
-                          .toLowerCase()
-                          .includes(q) ||
-                        String(r.businessName || "")
-                          .toLowerCase()
-                          .includes(q)
-                      );
-                    }),
+                    rows: computedRows,
                   }}
                   isSorted={false}
-                  entriesPerPage={false}
+                  entriesPerPage={{
+                    defaultValue: pageSize,
+                    entries: [10, 25, 50, 100],
+                  }}
+                  onEntriesPerPageChange={(value) => {
+                    setPageSize(value);
+                    setPageNumber(1);
+                    fetchContracts(1, value);
+                  }}
                   showTotalEntries={false}
                   noEndBorder
-                  canSearch={false}
+                  canSearch
+                  exportFileName="Contracts"
                 />
 
                 {/* Server-side Pagination Footer */}
@@ -1473,6 +3306,7 @@ export default function Contracts() {
         classes={classes}
         propertyGroups={propertyGroups}
         tenants={tenants}
+        onPropertyGroupsRefresh={fetchPropertyGroups}
       />
       <Dialog
         open={attachmentDialogOpen}

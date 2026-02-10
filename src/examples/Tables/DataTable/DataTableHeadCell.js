@@ -23,7 +23,8 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 
 // Material Dashboard 2 React contexts
-function DataTableHeadCell({ width, children, sorted, align, ...rest }) {
+function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest }) {
+  const hasFilterNode = Boolean(filterNode);
   return (
     <MDBox
       component="th"
@@ -86,6 +87,23 @@ function DataTableHeadCell({ width, children, sorted, align, ...rest }) {
             </MDBox>
           </MDBox>
         )}
+        {filterNode && (
+          <MDBox
+            position="absolute"
+            // Place the filter icon directly below the sort arrows
+            top={18}
+            right={align !== "right" ? "16px" : 0}
+            left={align === "right" ? "-5px" : "unset"}
+            sx={{
+              cursor: "default",
+              userSelect: "none",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            {filterNode}
+          </MDBox>
+        )}
       </MDBox>
     </MDBox>
   );
@@ -96,6 +114,7 @@ DataTableHeadCell.defaultProps = {
   width: "auto",
   sorted: "none",
   align: "left",
+  filterNode: null,
 };
 
 // Typechecking props for the DataTableHeadCell
@@ -104,6 +123,7 @@ DataTableHeadCell.propTypes = {
   children: PropTypes.node.isRequired,
   sorted: PropTypes.oneOf([false, "none", "asce", "desc"]),
   align: PropTypes.oneOf(["left", "right", "center"]),
+  filterNode: PropTypes.node,
 };
 
 export default DataTableHeadCell;

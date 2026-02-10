@@ -381,6 +381,7 @@ function UnitsConfig() {
               entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}
               noEndBorder
+              exportFileName="Units"
             />
           </MDBox>
         </Card>

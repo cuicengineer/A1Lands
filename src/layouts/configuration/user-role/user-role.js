@@ -164,7 +164,7 @@ function UserRole() {
   const renderStatusBadge = (status) => {
     return (
       <MDBox ml={-1}>
-        <StatusBadge value={status} inactiveLabel="DeActive" inactiveColor="error" />
+        <StatusBadge value={status} />
       </MDBox>
     );
   };
@@ -213,7 +213,7 @@ function UserRole() {
       }}
     >
       <MenuItem value={1}>Active</MenuItem>
-      <MenuItem value={0}>Not Active</MenuItem>
+      <MenuItem value={0}>Inactive</MenuItem>
     </MDInput>
   );
 
@@ -437,6 +437,7 @@ function UserRole() {
                   setPageIndex(0);
                 }}
                 showTotalEntries
+                exportFileName="User-Roles"
                 noEndBorder
               />
             </MDBox>

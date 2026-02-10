@@ -25,6 +25,9 @@ import "@fontsource/roboto/500.css";
 import "@fontsource/roboto/700.css";
 import "material-icons/iconfont/material-icons.css";
 
+// Custom scrollbar styles
+import "assets/css/scrollbar.css";
+
 // Material Dashboard 2 React Context Provider
 import { MaterialUIControllerProvider } from "context";
 

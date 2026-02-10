@@ -1,82 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-import Icon from "@mui/material/Icon";
 
 import MDBox from "components/MDBox";
 import PageLayout from "examples/LayoutContainers/PageLayout";
 import api from "services/api.service";
 
-import pafLogo from "../../../examples/login_page/assets/img/PAF-Logo.gif";
-import bgOne from "../../../examples/login_page/assets/img/one.webp";
-import bgTwo from "../../../examples/login_page/assets/img/two.jpg";
-import bgThree from "../../../examples/login_page/assets/img/three.webp";
+const pafLogo = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
 
 import "./styles.css";
 
 function A1Login() {
   const navigate = useNavigate();
 
-  const slides = useMemo(
-    () => [
-      {
-        img: bgOne,
-        title: "PAF Land <br> Management",
-        text: "Centralized management of land assets, contracts, tenants, and revenue.",
-      },
-      {
-        img: bgTwo,
-        title: "Digital Control<br> of Land Assets",
-        text: "Structured management of contracts, tenants, rentals, and government share",
-      },
-      {
-        img: bgThree,
-        title: "Sustainable<br>Land Planning",
-        text: "Support growth while protecting natural resources",
-      },
-    ],
-    []
-  );
-
-  const [username, setUsername] = useState("superuser");
-  const [password, setPassword] = useState("pakistan@123");
-  const [showPassword, setShowPassword] = useState(false);
+  const [username, setUsername] = useState("alpha");
+  const [password, setPassword] = useState("alpha");
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [bottomImg, setBottomImg] = useState(slides[0].img);
-  const [topImg, setTopImg] = useState(slides[0].img);
-  const [topVisible, setTopVisible] = useState(false);
-  const [titleHtml, setTitleHtml] = useState(slides[0].title);
-  const [text, setText] = useState(slides[0].text);
-
-  const slideIndexRef = useRef(0);
-  const fadeTimeoutRef = useRef(null);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const nextIndex = slideIndexRef.current % slides.length;
-      const slide = slides[nextIndex];
-
-      setTopImg(slide.img);
-      setTopVisible(true);
-      setTitleHtml(slide.title);
-      setText(slide.text);
-
-      if (fadeTimeoutRef.current) clearTimeout(fadeTimeoutRef.current);
-      fadeTimeoutRef.current = setTimeout(() => {
-        setBottomImg(slide.img);
-        setTopVisible(false);
-      }, 1200);
-
-      slideIndexRef.current = (nextIndex + 1) % slides.length;
-    }, 4000);
-
-    return () => {
-      clearInterval(id);
-      if (fadeTimeoutRef.current) clearTimeout(fadeTimeoutRef.current);
-    };
-  }, [slides]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -123,82 +62,113 @@ function A1Login() {
   return (
     <PageLayout background="transparent">
       <MDBox className="a1-login">
-        {/* Background layers */}
-        <div className="bg bottom" style={{ backgroundImage: `url(${bottomImg})` }} />
-        <div
-          className="bg top"
-          style={{ backgroundImage: `url(${topImg})`, opacity: topVisible ? 0.5 : 0 }}
-        />
+        {/* Background slider */}
+        <div className="slider">
+          <div className="slide"></div>
+          <div className="slide"></div>
+          <div className="slide"></div>
+          <div className="slide"></div>
+          <div className="bg-overlay"></div>
+        </div>
 
-        <div className="login-wrapper">
-          {/* LEFT */}
-          <div className="login-left">
-            <div className="left-content">
+        <div className="page">
+          {/* LEFT SIDE - Login Card */}
+          <div className="left-side">
+            <div className="login-card">
               <div className="brand">
-                <img src={pafLogo} alt="Pakistan Air Force" />
-                <span>
-                  <span>Pakistan Air Force</span>
-                  <h3>A1 Land Management System</h3>
-                </span>
-              </div>
-
-              <div className="sep-l" />
-
-              <div className="carousel-contnet">
-                <h1 id="bgTitle" dangerouslySetInnerHTML={{ __html: titleHtml }} />
-                <p id="bgText">{text}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT */}
-          <div className="login-right">
-            <h2>A1 Land Management System</h2>
-            <p>Access your Land Management Dashboard</p>
-
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>User Name</label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter User Name"
-                  autoComplete="username"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Password</label>
-                <div className="password-field">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    title={showPassword ? "Hide password" : "Show password"}
-                    onClick={() => setShowPassword((v) => !v)}
-                  >
-                    <Icon sx={{ fontSize: 18 }}>
-                      {showPassword ? "visibility_off" : "visibility"}
-                    </Icon>
-                  </button>
+                <img className="logo-symb" src={pafLogo} alt="PAF Logo" />
+                <div className="brand-text">
+                  <h2>A1 LMS</h2>
+                  <small>Land Mgmt System</small>
                 </div>
               </div>
 
-              {authError ? <div className="auth-error">{authError}</div> : null}
+              <div className="welcome-section">
+                <h3></h3>
+                <p>Audit & Accounts Sub Branch</p>
+              </div>
 
-              <button type="submit" className="btn-login" disabled={isSubmitting}>
-                {isSubmitting ? "Signing In..." : "Sign In"}
-                <Icon sx={{ fontSize: 18 }}>north_east</Icon>
-              </button>
-            </form>
+              <form onSubmit={handleSubmit}>
+                <div className="field-group">
+                  <label>User Name</label>
+                  <input
+                    type="text"
+                    className="input-underline"
+                    placeholder="Enter User Name"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div className="field-group">
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    className="input-underline"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+
+                {authError ? <div className="auth-error">{authError}</div> : null}
+
+                <button type="submit" className="btn-signin" disabled={isSubmitting}>
+                  {isSubmitting ? "Signing In..." : "Sign In"}
+                  <i
+                    className="fa-solid fa-arrow-right-long"
+                    style={{ transform: "rotate(-45deg)" }}
+                  ></i>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* RIGHT SIDE - Hex Grid */}
+          <div className="right-side">
+            <div className="hex-grid">
+              <div className="hex-col c1">
+                <div className="hex-box">
+                  <i className="fa-solid fa-map"></i>
+                  <span>Plots</span>
+                </div>
+              </div>
+
+              <div className="hex-col c2">
+                <div className="hex-box">
+                  <i className="fa-solid fa-gas-pump"></i>
+                  <span>Petrol Station</span>
+                </div>
+                <div className="hex-box">
+                  <i className="fa-solid fa-building"></i>
+                  <span>Towers</span>
+                </div>
+              </div>
+
+              <div className="hex-col c3">
+                <div className="hex-box">
+                  <i className="fa-solid fa-rectangle-ad"></i>
+                  <span>Billboards</span>
+                </div>
+                <div className="hex-box">
+                  <i className="fa-solid fa-store"></i>
+                  <span>Shopping Malls</span>
+                </div>
+                <div className="hex-box">
+                  <i className="fa-solid fa-tractor"></i>
+                  <span>Agri Lands</span>
+                </div>
+              </div>
+
+              <div className="hex-col c4">
+                <div className="hex-box blank"></div>
+                <div className="hex-box blank"></div>
+                <div className="hex-box blank"></div>
+                <div className="hex-box blank"></div>
+              </div>
+            </div>
           </div>
         </div>
       </MDBox>
