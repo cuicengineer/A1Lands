@@ -68,7 +68,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
     area: 0,
     location: "",
     remarks: "",
-    status: 0, // Default value (0 = Inactive, 1 = Active)
+    status: false,
   });
   const [errors, setErrors] = useState({});
 
@@ -162,7 +162,10 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
         area: initialData.area || 0,
         location: initialData.location || "",
         remarks: initialData.remarks || "",
-        status: initialData.status || false,
+        status:
+          initialData.status === true ||
+          initialData.status === 1 ||
+          initialData.status === "1",
       };
       console.log(
         "New form with propertyType:",
@@ -248,16 +251,21 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
   };
 
   const handleChange = (field, value) => {
+    const normalizedValue =
+      field === "status"
+        ? value === true || value === "true" || value === 1 || value === "1"
+        : value;
+
     setForm((prevForm) => ({
       ...prevForm,
       [field]:
         field === "area"
-          ? Number(value)
+          ? Number(normalizedValue)
           : field === "propertyType"
-          ? value
-            ? Number(value)
+          ? normalizedValue
+            ? Number(normalizedValue)
             : ""
-          : value,
+          : normalizedValue,
       ...(field === "cmdId" && { baseId: "" }), // Reset baseId when cmdId changes
     }));
     if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -418,8 +426,8 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
       key: "status",
       type: "select",
       options: [
-        { id: 1, name: "Active" },
-        { id: 0, name: "Inactive" },
+        { id: true, name: "Active" },
+        { id: false, name: "Inactive" },
       ],
       mandatory: isAddMode,
     },

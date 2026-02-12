@@ -32,59 +32,42 @@ function getAll(pageNumber = 1, pageSize = 50) {
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
   }).toString();
-  return requestWithPagination("GET", `/api/RentalProperties?${params}`);
+  return requestWithPagination("GET", `/api/SharingFormula?${params}`);
 }
 
+function getById(id) {
+  return api.request("GET", `/api/SharingFormula/${id}`);
+}
+
+// POST accepts single object or list of objects
 function create(data) {
-  const normalizedStatus =
-    data?.status === true || data?.status === 1 || data?.status === "1"
-      ? true
-      : data?.status === false || data?.status === 0 || data?.status === "0"
-      ? false
-      : null;
-
-  const rentalProperty = {
-    ...(data || {}),
-    status: normalizedStatus,
-  };
-
-  const payload = {
-    rentalProperty,
+  // If data is an array, send as-is. If single object, wrap in array.
+  const payload = Array.isArray(data) ? data : [data];
+  const payloadWithAction = payload.map((item) => ({
+    ...(item || {}),
     Action: "Create",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
-  };
-  return requestWithPagination("POST", `/api/RentalProperties`, payload);
+  }));
+  return requestWithPagination("POST", `/api/SharingFormula`, payloadWithAction);
 }
 
 function update(id, data) {
-  const normalizedStatus =
-    data?.status === true || data?.status === 1 || data?.status === "1"
-      ? true
-      : data?.status === false || data?.status === 0 || data?.status === "0"
-      ? false
-      : null;
-
-  const rentalProperty = {
-    ...(data || {}),
-    status: normalizedStatus,
-  };
-
   const payload = {
-    rentalProperty,
+    ...(data || {}),
     Action: "Update",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return requestWithPagination("PUT", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("PUT", `/api/SharingFormula/${id}`, payload);
 }
 
 function remove(id) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
-  return requestWithPagination("DELETE", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("DELETE", `/api/SharingFormula/${id}`, payload);
 }
 
-const rentalPropertiesApi = { getAll, create, update, remove };
-export default rentalPropertiesApi;
+const sharingFormulaApi = { getAll, getById, create, update, remove };
+export default sharingFormulaApi;

@@ -134,7 +134,7 @@ function RentalProperties() {
       area: property.area,
       location: property.location,
       remarks: property.remarks,
-      status: property.status,
+      status: property.status === true || property.status === 1 || property.status === "1",
     });
     setFormOpen(true);
   };
@@ -154,7 +154,7 @@ function RentalProperties() {
         area: formData.area,
         location: formData.location,
         remarks: formData.remarks,
-        status: formData.status,
+        status: formData.status === true || formData.status === 1 || formData.status === "1",
       };
 
       console.log("Submitting rental property with data:", formattedData);

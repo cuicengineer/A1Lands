@@ -31,60 +31,37 @@ function getAll(pageNumber = 1, pageSize = 50) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
+    type: "1", // Filter to only fetch type 1 values (Rental Value Rate)
   }).toString();
-  return requestWithPagination("GET", `/api/RentalProperties?${params}`);
+  return requestWithPagination("GET", `/api/RentalValueGovtShareRates?${params}`);
 }
 
 function create(data) {
-  const normalizedStatus =
-    data?.status === true || data?.status === 1 || data?.status === "1"
-      ? true
-      : data?.status === false || data?.status === 0 || data?.status === "0"
-      ? false
-      : null;
-
-  const rentalProperty = {
-    ...(data || {}),
-    status: normalizedStatus,
-  };
-
   const payload = {
-    rentalProperty,
+    ...(data || {}),
     Action: "Create",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return requestWithPagination("POST", `/api/RentalProperties`, payload);
+  return requestWithPagination("POST", `/api/RentalValueGovtShareRates`, payload);
 }
 
 function update(id, data) {
-  const normalizedStatus =
-    data?.status === true || data?.status === 1 || data?.status === "1"
-      ? true
-      : data?.status === false || data?.status === 0 || data?.status === "0"
-      ? false
-      : null;
-
-  const rentalProperty = {
-    ...(data || {}),
-    status: normalizedStatus,
-  };
-
   const payload = {
-    rentalProperty,
+    ...(data || {}),
     Action: "Update",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
-  return requestWithPagination("PUT", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("PUT", `/api/RentalValueGovtShareRates/${id}`, payload);
 }
 
 function remove(id) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
-  return requestWithPagination("DELETE", `/api/RentalProperties/${id}`, payload);
+  return requestWithPagination("DELETE", `/api/RentalValueGovtShareRates/${id}`, payload);
 }
 
-const rentalPropertiesApi = { getAll, create, update, remove };
-export default rentalPropertiesApi;
+const rentalValueRateApi = { getAll, create, update, remove };
+export default rentalValueRateApi;
