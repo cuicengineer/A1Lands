@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -26,9 +26,17 @@ import FormHelperText from "@mui/material/FormHelperText";
 import Chip from "@mui/material/Chip";
 import Box from "@mui/material/Box";
 import OutlinedInput from "@mui/material/OutlinedInput";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Paper from "@mui/material/Paper";
 import api from "services/api.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
+import revenueRatesApi from "services/api.revenuerates.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -51,28 +59,23 @@ function PropertyGroupingForm({
   const normalizePropertyIds = (data) => {
     if (!data) return [];
 
-    const fromLinkings = data.PropertyGroupLinkings || data.propertyGroupLinkings;
+    // API returns PropertyGroupLinkings (PascalCase)
+    const fromLinkings = data.PropertyGroupLinkings;
     if (Array.isArray(fromLinkings) && fromLinkings.length) {
       const ids = fromLinkings
         .map((x) => {
           if (x === null || x === undefined) return null;
           if (typeof x === "number" || typeof x === "string") return Number(x);
-          // best-effort for object shapes
-          const candidate =
-            x.propertyId?.id ??
-            x.propertyId ??
-            x.property?.id ??
-            x.property ??
-            x.rentalPropertyId?.id ??
-            x.rentalPropertyId ??
-            x.id;
-          return Number(candidate);
+          // API returns PropertyId or Id (PascalCase)
+          const candidate = x.PropertyId || x.Id;
+          return candidate ? Number(candidate) : null;
         })
-        .filter((n) => Number.isFinite(n));
+        .filter((n) => n !== null && Number.isFinite(n));
       return Array.from(new Set(ids));
     }
 
-    const raw = data.property;
+    // Check for property array/string (API may return Property)
+    const raw = data.Property;
     if (Array.isArray(raw)) {
       const ids = raw.map((v) => Number(v)).filter((n) => Number.isFinite(n));
       return Array.from(new Set(ids));
@@ -95,6 +98,8 @@ function PropertyGroupingForm({
     classid: "",
     property: [],
     gId: "",
+    rate: 0,
+    uoM: "",
     location: "",
     area: "",
     remarks: "",
@@ -106,19 +111,277 @@ function PropertyGroupingForm({
 
   const [allBases, setAllBases] = useState([]); // New state to store all bases
   const [linkedPropertyNameById, setLinkedPropertyNameById] = useState({});
-
-  // Contracts dialog state
-  const [contractsDialogOpen, setContractsDialogOpen] = useState(false);
-  const [activeContracts, setActiveContracts] = useState([]);
-  const [loadingContracts, setLoadingContracts] = useState(false);
+  const [notGroupedProperties, setNotGroupedProperties] = useState([]);
+  const [propertyRevenueRates, setPropertyRevenueRates] = useState(new Map()); // Cache revenue rates by property ID
+  const [linkedPropertiesForEdit, setLinkedPropertiesForEdit] = useState([]); // Linked properties for edit mode
 
   const getPropertyLabel = (propertyId) => {
     const idKey = String(propertyId);
     const fromLinked = linkedPropertyNameById[idKey];
     if (fromLinked) return String(fromLinked);
-    const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
-    return String(prop?.propertyName || prop?.name || prop?.pId || propertyId);
+
+    // Check in selectableRentalProperties first (for NotGroupedProperties)
+    const fromSelectable = selectableRentalProperties.find((p) => {
+      const pid = getPropertyId(p);
+      return pid !== null && Number(pid) === Number(propertyId);
+    });
+    if (fromSelectable) {
+      return String(fromSelectable.PropertyName || fromSelectable.PId || propertyId);
+    }
+
+    // Fallback to rentalProperties
+    const prop = rentalProperties.find((p) => {
+      const pid = getPropertyId(p);
+      return pid !== null && Number(pid) === Number(propertyId);
+    });
+    return String(prop?.PropertyName || prop?.PId || propertyId);
   };
+  const getPropertyId = (property) => {
+    if (!property) return null;
+    // API returns Id or PropertyId (PascalCase)
+    const id = property.Id || property.PropertyId || property.PropId;
+    return id ? Number(id) : null;
+  };
+  const getPropertyById = (propertyId) => {
+    const targetId = Number(propertyId);
+    if (!Number.isFinite(targetId)) return null;
+    const fromSelectable = (selectableRentalProperties || []).find(
+      (p) => getPropertyId(p) === targetId
+    );
+    if (fromSelectable) return fromSelectable;
+    return (rentalProperties || []).find((p) => getPropertyId(p) === targetId) || null;
+  };
+  // Fetch revenue rate for a property (latest applicable date, not after today)
+  const fetchRevenueRateForProperty = async (propertyId) => {
+    if (!propertyId) return null;
+
+    // Check cache first
+    if (propertyRevenueRates.has(Number(propertyId))) {
+      return propertyRevenueRates.get(Number(propertyId));
+    }
+
+    try {
+      // Fetch all revenue rates and filter by property ID
+      const response = await revenueRatesApi.getAll(1, 1000); // Get large page to find all rates
+      const rates = response?.pagination
+        ? response.data || []
+        : Array.isArray(response)
+        ? response
+        : [];
+
+      // Filter by property ID (API returns PascalCase)
+      const propertyRates = rates
+        .filter((rate) => {
+          const ratePropertyId = rate.PropertyId || rate.propertyId;
+          return ratePropertyId && Number(ratePropertyId) === Number(propertyId);
+        })
+        .filter((rate) => {
+          // Only active and not deleted rates
+          const isActive = rate.Status === true || rate.Status === 1;
+          const isNotDeleted = rate.IsDeleted === false || rate.IsDeleted === 0;
+          return isActive && isNotDeleted;
+        });
+
+      if (propertyRates.length === 0) return null;
+
+      // Get today's date for comparison
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Filter rates where applicable date is not after today, then sort by applicable date (latest first)
+      const validRates = propertyRates
+        .filter((rate) => {
+          const applicableDate = rate.ApplicableDate || rate.applicableDate;
+          if (!applicableDate) return false;
+          const date = new Date(applicableDate);
+          date.setHours(0, 0, 0, 0);
+          return date <= today; // Only dates not after today
+        })
+        .sort((a, b) => {
+          const dateA = new Date(a.ApplicableDate || a.applicableDate || 0);
+          const dateB = new Date(b.ApplicableDate || b.applicableDate || 0);
+          return dateB - dateA; // Latest first
+        });
+
+      if (validRates.length === 0) return null;
+
+      // Get the latest applicable rate (closest date not after today)
+      const latestRate = validRates[0];
+      const rateValue = latestRate.Rate || latestRate.rate || 0;
+
+      // Cache the result
+      const cachedValue = {
+        rate: Number(rateValue) || 0,
+        applicableDate: latestRate.ApplicableDate || latestRate.applicableDate,
+      };
+      setPropertyRevenueRates((prev) => new Map(prev).set(Number(propertyId), cachedValue));
+
+      return cachedValue;
+    } catch (error) {
+      console.error(`Error fetching revenue rate for property ${propertyId}:`, error);
+      return null;
+    }
+  };
+
+  // Get property rate (synchronous - uses cache if available)
+  const getPropertyRateNumber = (property, propertyId = null) => {
+    if (!property) return 0;
+
+    // API returns PascalCase - check Rate first
+    const rateValue = property.Rate || property.rate || 0;
+    const parsed = Number(rateValue);
+    const propertyRate = Number.isFinite(parsed) ? parsed : 0;
+
+    // If property rate is 0, check revenue rates cache
+    if (propertyRate === 0) {
+      const propId = propertyId || getPropertyId(property);
+      if (propId) {
+        const cachedRate = propertyRevenueRates.get(Number(propId));
+        if (cachedRate && cachedRate.rate > 0) {
+          return cachedRate.rate;
+        }
+      }
+    }
+
+    return propertyRate;
+  };
+
+  // Get property rate with revenue rate fetch (async)
+  const getPropertyRateWithRevenueRate = async (property, propertyId = null) => {
+    if (!property) return { rate: 0, hasRevenueRate: false };
+
+    const propId = propertyId || getPropertyId(property);
+    // API returns PascalCase - check Rate first
+    const rateValue = property.Rate || property.rate || 0;
+    const parsed = Number(rateValue);
+    const propertyRate = Number.isFinite(parsed) ? parsed : 0;
+
+    // If property rate is 0, fetch from revenue rates
+    if (propertyRate === 0 && propId) {
+      const revenueRate = await fetchRevenueRateForProperty(propId);
+      if (revenueRate && revenueRate.rate > 0) {
+        return {
+          rate: revenueRate.rate,
+          hasRevenueRate: true,
+          applicableDate: revenueRate.applicableDate,
+        };
+      }
+      return { rate: 0, hasRevenueRate: false };
+    }
+
+    return { rate: propertyRate, hasRevenueRate: false };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchNotGroupedProperties = async () => {
+      if (!open || isEditMode) {
+        setNotGroupedProperties([]);
+        return;
+      }
+      if (!form.cmdid || !form.baseid) {
+        setNotGroupedProperties([]);
+        return;
+      }
+
+      try {
+        const response = await propertyGroupingApi.notGroupedProperties(
+          Number(form.cmdid),
+          Number(form.baseid)
+        );
+        // Handle both paginated and direct array responses
+        let options = [];
+        if (response && response.pagination) {
+          options = Array.isArray(response.data)
+            ? response.data
+            : response.data
+            ? [response.data]
+            : [];
+        } else if (Array.isArray(response)) {
+          options = response;
+        } else if (response) {
+          options = [response];
+        }
+
+        // API returns PascalCase: Id, PropertyId, PropertyName, PId
+        const normalizedOptions = options
+          .map((opt) => ({
+            ...opt,
+            id: opt.Id || opt.PropertyId || null,
+            PId: opt.PId || opt.PropertyName || "",
+            PropertyName: opt.PropertyName || opt.PId || "",
+          }))
+          .filter((opt) => opt.id !== null);
+
+        if (!cancelled) setNotGroupedProperties(normalizedOptions);
+      } catch (error) {
+        console.error("Error fetching not-grouped properties:", error);
+        if (!cancelled) setNotGroupedProperties([]);
+      }
+    };
+
+    fetchNotGroupedProperties();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isEditMode, form.cmdid, form.baseid]);
+
+  const selectableRentalProperties = useMemo(() => {
+    if (isEditMode) {
+      // In edit mode, combine rentalProperties with linked properties
+      // Start with rentalProperties - API returns PascalCase
+      const allProperties = (rentalProperties || [])
+        .map((p) => ({
+          ...p,
+          Id: p.Id || p.PropertyId || null,
+          PId: p.PId || p.PropertyName || "",
+          PropertyName: p.PropertyName || p.PId || "",
+        }))
+        .filter((p) => p.Id !== null);
+
+      // Add linked properties if they're not already in rentalProperties
+      if (linkedPropertiesForEdit && linkedPropertiesForEdit.length > 0) {
+        linkedPropertiesForEdit.forEach((linkedProp) => {
+          // Get property ID from linked property (API returns PascalCase)
+          const linkedPropId =
+            linkedProp.PropertyId ||
+            linkedProp.PropId ||
+            (typeof linkedProp.PropertyId === "object"
+              ? linkedProp.PropertyId.Id || linkedProp.PropertyId.PropertyId
+              : null);
+
+          if (linkedPropId) {
+            // Check if this property is already in allProperties
+            const exists = allProperties.some((p) => {
+              const pid = p.Id || p.PropertyId;
+              return pid && Number(pid) === Number(linkedPropId);
+            });
+
+            if (!exists) {
+              // Add linked property to the list
+              const propertyName = linkedProp.PropertyName || linkedProp.PropId || "";
+              allProperties.push({
+                Id: Number(linkedPropId),
+                PropertyId: Number(linkedPropId),
+                PId: propertyName,
+                PropertyName: propertyName,
+                // Include other properties from linkedProp if available
+                Area: linkedProp.Area || linkedProp.area || 0,
+                Rate: linkedProp.Rate || linkedProp.rate || 0,
+                Location: linkedProp.Location || linkedProp.location || "",
+                UoM: linkedProp.UoM || linkedProp.uoM || "",
+              });
+            }
+          }
+        });
+      }
+
+      return allProperties;
+    }
+    // In create mode, use notGroupedProperties (already normalized)
+    return notGroupedProperties || [];
+  }, [isEditMode, rentalProperties, notGroupedProperties, linkedPropertiesForEdit]);
 
   useEffect(() => {
     const fetchAllBases = async () => {
@@ -140,29 +403,38 @@ function PropertyGroupingForm({
     setErrors({});
     if (initialData) {
       const normalizedPropertyIds = normalizePropertyIds(initialData);
-      const newForm = {
-        cmdid: initialData.cmdId || "",
-        baseid: initialData.baseId || "",
-        classid: initialData.classId || "",
-        property: normalizedPropertyIds,
-        gId: initialData.gId || "",
-        location: initialData.location || "",
-        area: initialData.area || "",
-        remarks: initialData.remarks || "",
+      // API returns PascalCase
+      const cmdId = initialData.CmdId || "";
+      const baseId = initialData.BaseId || "";
+      const classId = initialData.ClassId || "";
+      const gId = initialData.GId || "";
+      const rate = initialData.Rate || 0;
+      const uoM = initialData.UoM || "";
+      const location = initialData.Location || "";
+      const area = initialData.Area || "";
+      const remarks = initialData.Remarks || "";
+      const status = initialData.Status !== undefined ? initialData.Status : true;
+      const isDeleted = initialData.IsDeleted !== undefined ? initialData.IsDeleted : false;
 
-        status:
-          initialData.status === true || initialData.status === false ? initialData.status : true,
-        isDeleted:
-          initialData.isDeleted === true || initialData.isDeleted === false
-            ? initialData.isDeleted
-            : false,
+      const newForm = {
+        cmdid: cmdId ? Number(cmdId) : "",
+        baseid: baseId ? Number(baseId) : "",
+        classid: classId ? Number(classId) : "",
+        property: normalizedPropertyIds,
+        gId: gId,
+        rate: Number(rate) || 0,
+        uoM: uoM,
+        location: location,
+        area: area ? (typeof area === "number" ? area : Number(area) || "") : "",
+        remarks: remarks,
+        status: status === true || status === false ? Boolean(status) : true,
+        isDeleted: isDeleted === true || isDeleted === false ? Boolean(isDeleted) : false,
       };
       let currentFilteredBases = [];
       if (newForm.cmdid && allBases.length > 0) {
         currentFilteredBases = allBases.filter(
           (base) => Number(base.cmd) === Number(newForm.cmdid)
         );
-      } else {
       }
 
       // Validate base against filtered bases
@@ -181,6 +453,8 @@ function PropertyGroupingForm({
         classid: "",
         property: [],
         gId: "",
+        rate: 0,
+        uoM: "",
         location: "",
         area: "",
         remarks: "",
@@ -189,31 +463,183 @@ function PropertyGroupingForm({
         isDeleted: false,
       });
       setLinkedPropertyNameById({});
+      setLinkedPropertiesForEdit([]);
     }
   }, [initialData, allBases]);
 
-  // Auto-calculate area when properties change
+  // Fetch linked properties when in edit mode
   useEffect(() => {
-    if (form.property && form.property.length > 0 && rentalProperties.length > 0) {
+    let cancelled = false;
+
+    const fetchLinkedProperties = async () => {
+      if (!open || !isEditMode || !initialData || !initialData.Id) {
+        setLinkedPropertiesForEdit([]);
+        return;
+      }
+
+      try {
+        const response = await propertyGroupingApi.getByGroup(initialData.Id, 1, 1000);
+        const linkedProps = response?.pagination
+          ? response.data || []
+          : Array.isArray(response)
+          ? response
+          : [];
+
+        if (!cancelled) {
+          setLinkedPropertiesForEdit(linkedProps);
+        }
+      } catch (error) {
+        console.error("Error fetching linked properties for edit:", error);
+        if (!cancelled) {
+          setLinkedPropertiesForEdit([]);
+        }
+      }
+    };
+
+    fetchLinkedProperties();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isEditMode, initialData]);
+
+  // Auto-calculate derived read-only values when properties change
+  useEffect(() => {
+    // Skip auto-calculation if we're in edit mode and have initialData with existing values
+    // This prevents overwriting correct values when properties can't be found
+    if (isEditMode && initialData && (initialData.area || initialData.uoM || initialData.rate)) {
+      // Only auto-calculate if we can find all properties and the calculation would be meaningful
+      const allPropertiesFound = form.property.every((propertyId) => {
+        const property = getPropertyById(propertyId);
+        return property !== null;
+      });
+
+      // If we can't find all properties, preserve the initialData values
+      if (!allPropertiesFound && form.property.length > 0) {
+        // Don't overwrite - keep the values from initialData
+        return;
+      }
+    }
+
+    if (form.property && form.property.length > 0) {
+      // Calculate total area from selected properties (API returns PascalCase)
       const totalArea = form.property.reduce((sum, propertyId) => {
-        const property = rentalProperties.find((p) => p.id === Number(propertyId));
-        return sum + (property && property.area ? Number(property.area) : 0);
+        const property = getPropertyById(propertyId);
+        const area = property?.Area || property?.area || 0;
+        return sum + Number(area || 0);
       }, 0);
 
-      // Only update if the calculated area is different from current area
-      if (form.area !== totalArea) {
+      // Calculate total rate from selected properties - use cached revenue rates if property rate is 0
+      const totalRate = form.property.reduce((sum, propertyId) => {
+        const property = getPropertyById(propertyId);
+        return sum + getPropertyRateNumber(property, propertyId);
+      }, 0);
+
+      // Get unique UoMs from selected properties (API returns PascalCase)
+      const uniqueUoMs = Array.from(
+        new Set(
+          form.property
+            .map((propertyId) => {
+              const property = getPropertyById(propertyId);
+              return property?.UoM || property?.uoM || "";
+            })
+            .filter((value) => String(value || "").trim().length > 0)
+        )
+      );
+      const uoMText = uniqueUoMs.join(", ");
+
+      // Calculate location from selected properties (concatenate unique locations)
+      const locations = form.property
+        .map((propertyId) => {
+          const property = getPropertyById(propertyId);
+          return property?.Location || property?.location || "";
+        })
+        .filter((loc) => String(loc || "").trim().length > 0);
+      const locationText = Array.from(new Set(locations)).join(", ");
+
+      // Only update if the calculated values are different from current values
+      // In edit mode, only update if we have meaningful calculated values
+      const shouldUpdate =
+        form.area !== totalArea ||
+        (form.uoM || "") !== uoMText ||
+        Number(form.rate || 0) !== totalRate ||
+        (form.location || "") !== locationText;
+
+      // In edit mode, only update if we have calculated values (not all zeros/empty)
+      const hasCalculatedValues =
+        totalArea > 0 || totalRate > 0 || uoMText.length > 0 || locationText.length > 0;
+
+      if (shouldUpdate && (!isEditMode || hasCalculatedValues)) {
         setForm((prevForm) => ({
           ...prevForm,
+          rate: totalRate,
           area: totalArea,
+          uoM: uoMText,
+          location: locationText,
         }));
       }
-    } else if (form.property && form.property.length === 0 && form.area !== "") {
+    } else if (
+      form.property &&
+      form.property.length === 0 &&
+      !isEditMode && // Only clear in create mode
+      (form.area !== "" || form.uoM !== "" || form.location !== "" || Number(form.rate || 0) !== 0)
+    ) {
       setForm((prevForm) => ({
         ...prevForm,
+        rate: 0,
         area: "",
+        uoM: "",
+        location: "",
       }));
     }
-  }, [form.property, rentalProperties]);
+  }, [form.property, rentalProperties, selectableRentalProperties, isEditMode, initialData]);
+
+  // Fetch revenue rates for properties with rate 0 when properties are selected
+  useEffect(() => {
+    if (!form.property || form.property.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchRatesForProperties = async () => {
+      const fetchPromises = form.property.map(async (propertyId) => {
+        if (cancelled) return;
+        const property = getPropertyById(propertyId);
+        if (!property) return;
+
+        const propertyRate = property.Rate || property.rate || 0;
+        // Only fetch if property rate is 0 and not already cached
+        if (Number(propertyRate) === 0) {
+          // Check cache first
+          if (!propertyRevenueRates.has(Number(propertyId))) {
+            await fetchRevenueRateForProperty(propertyId);
+          }
+        }
+      });
+
+      await Promise.all(fetchPromises);
+
+      if (cancelled) return;
+
+      // Recalculate rate after fetching revenue rates
+      const totalRate = form.property.reduce((sum, propertyId) => {
+        const property = getPropertyById(propertyId);
+        return sum + getPropertyRateNumber(property, propertyId);
+      }, 0);
+
+      // Update form if rate changed
+      if (Number(form.rate || 0) !== totalRate) {
+        setForm((prevForm) => ({
+          ...prevForm,
+          rate: totalRate,
+        }));
+      }
+    };
+
+    fetchRatesForProperties();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.property]);
 
   const handleChange = (f, v) => {
     setForm((p) => ({
@@ -294,6 +720,96 @@ function PropertyGroupingForm({
     return true;
   };
 
+  // Validate: All selected properties must have the same UoM
+  const validateSameUoM = () => {
+    const selected = Array.isArray(form.property) ? form.property : [];
+    if (selected.length === 0) return true;
+
+    // Get UoM from all selected properties (API returns PascalCase)
+    const uoMs = selected
+      .map((id) => {
+        const property = getPropertyById(id);
+        return property?.UoM || property?.uoM || "";
+      })
+      .filter((uom) => String(uom || "").trim().length > 0);
+
+    if (uoMs.length === 0) return true; // No UoM data, skip validation
+
+    const uniqueUoMs = Array.from(new Set(uoMs));
+    if (uniqueUoMs.length > 1) {
+      setErrors((prev) => ({
+        ...prev,
+        property: "Properties with different UoM cannot be grouped together",
+      }));
+      alert(
+        `Cannot group properties with different UoM values.\n\n` +
+          `Selected properties have UoM: ${uniqueUoMs.join(", ")}\n\n` +
+          `All properties in a group must have the same UoM.`
+      );
+      return false;
+    }
+
+    return true;
+  };
+
+  // Validate: each property can belong to only 1 active group at a time
+  // On creation, block saving if any selected property is already in another active group.
+  const validatePropertiesNotInOtherActiveGroup = () => {
+    const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+    // Only enforce when creating an ACTIVE, not-deleted group
+    const isNewActive = toBool(form.status);
+    const isNewNotDeleted = !toBool(form.isDeleted);
+    if (!isNewActive || !isNewNotDeleted) return true;
+
+    const selected = Array.isArray(form.property) ? form.property : [];
+    if (selected.length === 0) return true;
+
+    // Build a lookup of propertyId -> active group gId (first match wins)
+    const propertyToActiveGroupId = new Map();
+    allPropertyGroupings.forEach((pg) => {
+      if (!pg) return;
+      const isActiveRecord = toBool(pg?.status ?? pg?.Status);
+      const isNotDeletedRecord = !toBool(pg?.isDeleted ?? pg?.IsDeleted);
+      if (!isActiveRecord || !isNotDeletedRecord) return;
+
+      // If editing in the future, skip self (currently creation-only validation)
+      if (initialData && Number(pg.id) === Number(initialData.id)) return;
+
+      const ids = normalizePropertyIds(pg);
+      ids.forEach((id) => {
+        if (!propertyToActiveGroupId.has(Number(id))) {
+          propertyToActiveGroupId.set(Number(id), (pg.gId || pg.GId || "").toString().trim());
+        }
+      });
+    });
+
+    const conflicts = selected
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id))
+      .map((id) => ({
+        id,
+        label: getPropertyLabel(id),
+        groupId: propertyToActiveGroupId.get(id),
+      }))
+      .filter((x) => x.groupId);
+
+    if (conflicts.length === 0) return true;
+
+    // User alert + block save
+    const lines = conflicts.map((c) => `- ${c.label} (Active Group ID: ${c.groupId})`);
+    alert(
+      `Some selected properties are already part of an active group.\n` +
+        `Each property can be part of 1 active group at any time.\n\n` +
+        `${lines.join("\n")}\n\n` +
+        `Please remove them from this grouping or deactivate the existing group.`
+    );
+    setErrors((prev) => ({
+      ...prev,
+      property: "Some selected properties are already part of an active group",
+    }));
+    return false;
+  };
+
   const handleSave = () => {
     // Apply mandatory check only for "Add New"
     if (!isEditMode) {
@@ -301,9 +817,19 @@ function PropertyGroupingForm({
       if (!ok) return;
     }
 
+    // Validate: All selected properties must have the same UoM
+    const isUoMValid = validateSameUoM();
+    if (!isUoMValid) return;
+
     // Validate for duplicate active Group ID
     const isDuplicateValid = validateDuplicateGroupId();
     if (!isDuplicateValid) return;
+
+    // Validate: property can belong to only 1 active group at a time (creation-time)
+    if (!isEditMode) {
+      const ok = validatePropertiesNotInOtherActiveGroup();
+      if (!ok) return;
+    }
 
     onSubmit(form);
   };
@@ -341,7 +867,7 @@ function PropertyGroupingForm({
     }
   };
 
-  const handlePropertyChange = (event) => {
+  const handlePropertyChange = async (event) => {
     const {
       target: { value },
     } = event;
@@ -350,16 +876,48 @@ function PropertyGroupingForm({
       .map((v) => Number(v))
       .filter((n) => Number.isFinite(n));
 
-    setForm((prevForm) => {
-      const prevIds = Array.isArray(prevForm.property) ? prevForm.property : [];
+    // Validate rates for newly added properties
+    const prevIds = Array.isArray(form.property) ? form.property : [];
+    const addedIds = selectedProperties.filter((id) => !prevIds.includes(id));
 
+    if (addedIds.length > 0) {
+      // Check rates for newly added properties
+      for (const id of addedIds) {
+        const property = getPropertyById(id);
+        if (!property) continue;
+
+        // Check property rate first
+        const propertyRate = property.Rate || property.rate || 0;
+
+        if (Number(propertyRate) === 0) {
+          // Property rate is 0, fetch from revenue rates
+          const rateInfo = await getPropertyRateWithRevenueRate(property, id);
+
+          if (rateInfo.rate === 0) {
+            // No rate found in property or revenue rates
+            const propertyLabel = getPropertyLabel(id);
+            alert(
+              `Property "${propertyLabel}" has no revenue rate configured.\n\n` +
+                `Please add a revenue rate for this property first before grouping it.`
+            );
+            setErrors((prev) => ({
+              ...prev,
+              property: `Property "${propertyLabel}" has no revenue rate. Please add revenue rate first.`,
+            }));
+            // Revert to previous selection
+            return;
+          }
+        }
+      }
+    }
+
+    setForm((prevForm) => {
       // Allow removals freely; enforce unique labels only when adding new selection(s)
       const isRemoval = selectedProperties.length < prevIds.length;
       if (!isRemoval) {
         const prevLabelSet = new Set(prevIds.map(getPropertyLabel));
 
         // Detect newly-added ids and block duplicates by label
-        const addedIds = selectedProperties.filter((id) => !prevIds.includes(id));
         for (let i = 0; i < addedIds.length; i += 1) {
           const id = addedIds[i];
           const label = getPropertyLabel(id);
@@ -380,19 +938,88 @@ function PropertyGroupingForm({
           }
           seen.add(label);
         }
+
+        // Validate UoM: All selected properties must have the same UoM
+        if (prevIds.length > 0 || addedIds.length > 0) {
+          // Get UoM from existing properties
+          const existingUoMs = prevIds
+            .map((id) => {
+              const property = getPropertyById(id);
+              return property?.UoM || property?.uoM || "";
+            })
+            .filter((uom) => String(uom || "").trim().length > 0);
+
+          // Get UoM from newly added properties
+          const newUoMs = addedIds
+            .map((id) => {
+              const property = getPropertyById(id);
+              return property?.UoM || property?.uoM || "";
+            })
+            .filter((uom) => String(uom || "").trim().length > 0);
+
+          // Combine all UoMs from selected properties
+          const allUoMs = [...existingUoMs, ...newUoMs];
+          const uniqueUoMs = Array.from(new Set(allUoMs));
+
+          // If there are multiple different UoMs, block selection
+          if (uniqueUoMs.length > 1) {
+            const conflictingProperty = addedIds.find((id) => {
+              const property = getPropertyById(id);
+              const uom = property?.UoM || property?.uoM || "";
+              return uom && existingUoMs.length > 0 && !existingUoMs.includes(uom);
+            });
+
+            if (conflictingProperty) {
+              const propertyLabel = getPropertyLabel(conflictingProperty);
+              const property = getPropertyById(conflictingProperty);
+              const propertyUoM = property?.UoM || property?.uoM || "Unknown";
+              const existingUoM = existingUoMs[0] || "Unknown";
+
+              alert(
+                `Cannot group properties with different UoM values.\n\n` +
+                  `"${propertyLabel}" has UoM: ${propertyUoM}\n` +
+                  `Existing properties have UoM: ${existingUoM}\n\n` +
+                  `All properties in a group must have the same UoM.`
+              );
+              setErrors((prev) => ({
+                ...prev,
+                property: "Properties with different UoM cannot be grouped together",
+              }));
+              return prevForm;
+            }
+          }
+        }
       }
 
-      // Calculate total area from selected properties
+      // Calculate total area from selected properties (API returns PascalCase)
       const totalArea = selectedProperties.reduce((sum, propertyId) => {
-        const property = rentalProperties.find((p) => p.id === Number(propertyId));
-        return sum + (property && property.area ? Number(property.area) : 0);
+        const property = getPropertyById(propertyId);
+        const area = property?.Area || property?.area || 0;
+        return sum + Number(area || 0);
       }, 0);
+      // Calculate total rate - use cached revenue rates if property rate is 0
+      const totalRate = selectedProperties.reduce((sum, propertyId) => {
+        const property = getPropertyById(propertyId);
+        return sum + getPropertyRateNumber(property, propertyId);
+      }, 0);
+      // Get UoM from selected properties (API returns PascalCase)
+      const uniqueUoMs = Array.from(
+        new Set(
+          selectedProperties
+            .map((propertyId) => {
+              const property = getPropertyById(propertyId);
+              return property?.UoM || property?.uoM || "";
+            })
+            .filter((value) => String(value || "").trim().length > 0)
+        )
+      );
+      const uoMText = uniqueUoMs.length > 0 ? uniqueUoMs[0] : ""; // Should only be one UoM after validation
 
-      // Auto-populate location from selected properties (comma-separated)
+      // Auto-populate location from selected properties (comma-separated) (API returns PascalCase)
       const locations = selectedProperties
         .map((propertyId) => {
-          const property = rentalProperties.find((p) => p.id === Number(propertyId));
-          return property?.location || "";
+          const property = getPropertyById(propertyId);
+          return property?.Location || property?.location || "";
         })
         .filter((loc) => loc && loc.trim().length > 0); // Remove empty locations
       const autoLocation = locations.join(", ");
@@ -400,7 +1027,9 @@ function PropertyGroupingForm({
       return {
         ...prevForm,
         property: selectedProperties,
+        rate: totalRate,
         area: totalArea,
+        uoM: uoMText,
         location: autoLocation, // Auto-update location based on selected properties
       };
     });
@@ -410,16 +1039,35 @@ function PropertyGroupingForm({
   const handleDeleteProperty = (propertyToDelete) => () => {
     const updatedProperties = form.property.filter((property) => property !== propertyToDelete);
 
-    // Recalculate total area after removing a property
+    // Recalculate total area after removing a property (API returns PascalCase)
     const totalArea = updatedProperties.reduce((sum, propertyId) => {
-      const property = rentalProperties.find((p) => p.id === Number(propertyId));
-      return sum + (property && property.area ? Number(property.area) : 0);
+      const property = getPropertyById(propertyId);
+      const area = property?.Area || property?.area || 0;
+      return sum + Number(area || 0);
     }, 0);
+    const totalRate = updatedProperties.reduce((sum, propertyId) => {
+      const property = getPropertyById(propertyId);
+      return sum + getPropertyRateNumber(property);
+    }, 0);
+    // Get UoM from remaining properties (API returns PascalCase)
+    const uniqueUoMs = Array.from(
+      new Set(
+        updatedProperties
+          .map((propertyId) => {
+            const property = getPropertyById(propertyId);
+            return property?.UoM || property?.uoM || "";
+          })
+          .filter((value) => String(value || "").trim().length > 0)
+      )
+    );
+    const uoMText = uniqueUoMs.length > 0 ? uniqueUoMs[0] : ""; // Should only be one UoM
 
     setForm((prevForm) => ({
       ...prevForm,
       property: updatedProperties,
+      rate: totalRate,
       area: totalArea,
+      uoM: uoMText,
     }));
   };
 
@@ -673,15 +1321,8 @@ function PropertyGroupingForm({
                   renderValue={(selected) => (
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                       {selected.map((value) => {
-                        const property = rentalProperties.find(
-                          (p) => Number(p.id) === Number(value)
-                        );
-                        const label =
-                          linkedPropertyNameById[String(value)] ||
-                          property?.propertyName ||
-                          property?.name ||
-                          property?.pId ||
-                          value;
+                        // Use getPropertyLabel which handles normalization and all data sources
+                        const label = getPropertyLabel(value);
                         return (
                           <Chip
                             key={value}
@@ -695,19 +1336,44 @@ function PropertyGroupingForm({
                     </Box>
                   )}
                 >
-                  {rentalProperties.map((option) => {
-                    const optionLabel = getPropertyLabel(option.id);
+                  {selectableRentalProperties.map((option) => {
+                    const optionId = getPropertyId(option);
+                    if (optionId === null) return null; // Skip invalid options
+
+                    const optionLabel = getPropertyLabel(optionId);
                     const selectedIds = form.property || [];
                     const selectedLabelSet = new Set(selectedIds.map(getPropertyLabel));
-                    const isSelected = selectedIds.some((id) => Number(id) === Number(option.id));
+                    const isSelected = selectedIds.some((id) => Number(id) === Number(optionId));
                     const isDuplicateName = selectedLabelSet.has(optionLabel) && !isSelected;
+
+                    // Check if this property has a different UoM than already selected properties
+                    let isDifferentUoM = false;
+                    if (selectedIds.length > 0 && !isSelected) {
+                      const optionProperty = getPropertyById(optionId);
+                      const optionUoM = optionProperty?.UoM || optionProperty?.uoM || "";
+
+                      // Get UoM from first selected property
+                      const firstSelectedId = selectedIds[0];
+                      const firstProperty = getPropertyById(firstSelectedId);
+                      const firstUoM = firstProperty?.UoM || firstProperty?.uoM || "";
+
+                      // If both have UoM and they're different, disable this option
+                      if (optionUoM && firstUoM && optionUoM !== firstUoM) {
+                        isDifferentUoM = true;
+                      }
+                    }
 
                     return (
                       <MenuItem
-                        key={option.id}
-                        value={option.id}
-                        disabled={isDuplicateName}
+                        key={optionId}
+                        value={optionId}
+                        disabled={isDuplicateName || isDifferentUoM}
                         sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                        title={
+                          isDifferentUoM
+                            ? "Properties with different UoM cannot be grouped together"
+                            : ""
+                        }
                       >
                         {optionLabel}
                       </MenuItem>
@@ -753,6 +1419,7 @@ function PropertyGroupingForm({
                 onChange={(e) => handleChange("location", e.target.value)}
                 fullWidth
                 size="small"
+                InputProps={{ readOnly: true }}
                 required={!isEditMode}
                 error={!isEditMode && Boolean(errors.location)}
                 helperText={!isEditMode ? errors.location : ""}
@@ -774,6 +1441,46 @@ function PropertyGroupingForm({
                 type="number"
                 value={form.area}
                 onChange={(e) => handleChange("area", e.target.value)}
+                size="small"
+                InputProps={{ readOnly: true }}
+                fullWidth
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Rate (read-only) */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="Rate"
+                type="number"
+                value={form.rate || 0}
+                size="small"
+                InputProps={{ readOnly: true }}
+                fullWidth
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* UoM (read-only) */}
+            <Grid item xs={12} sm={6}>
+              <MDInput
+                label="UoM"
+                type="text"
+                value={form.uoM || ""}
                 size="small"
                 InputProps={{ readOnly: true }}
                 fullWidth
@@ -867,6 +1574,76 @@ function PropertyGroupingForm({
                 </Select>
               </FormControl>
             </Grid>
+
+            {/* Property Information Section - Only show when adding new group */}
+            {!isEditMode && form.property && form.property.length > 0 && (
+              <Grid item xs={12}>
+                <MDBox
+                  sx={{
+                    mt: 2,
+                    p: 2,
+                    backgroundColor: "#f5f5f5",
+                    borderRadius: 1,
+                    border: "1px solid #e0e0e0",
+                  }}
+                >
+                  <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 1.5 }}>
+                    Selected Properties Information
+                  </MDTypography>
+                  <TableContainer
+                    component={Paper}
+                    sx={{
+                      boxShadow: "none",
+                      maxHeight: "200px",
+                      overflowY: "auto",
+                    }}
+                  >
+                    <Table size="small" sx={{ "& .MuiTableCell-root": { padding: "4px 8px" } }}>
+                      <TableBody>
+                        {form.property.map((propertyId) => {
+                          const property = getPropertyById(propertyId);
+                          if (!property) return null;
+
+                          const propertyName = getPropertyLabel(propertyId);
+                          const propertyRate = property.Rate || property.rate || 0;
+                          const cachedRevenueRate = propertyRevenueRates.get(Number(propertyId));
+
+                          // Determine rate source
+                          let displayRate = Number(propertyRate) || 0;
+                          let rateSource = "Property";
+
+                          if (
+                            Number(propertyRate) === 0 &&
+                            cachedRevenueRate &&
+                            cachedRevenueRate.rate > 0
+                          ) {
+                            displayRate = cachedRevenueRate.rate;
+                            rateSource = "Revenue Rate";
+                          } else if (Number(propertyRate) > 0) {
+                            rateSource = "verify Revenue Rate";
+                          }
+
+                          return (
+                            <TableRow key={propertyId}>
+                              <TableCell sx={{ fontSize: "0.75rem", padding: "4px 8px" }}>
+                                {propertyName}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: "0.75rem", padding: "4px 8px" }}>
+                                {displayRate.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}{" "}
+                                ({rateSource})
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </MDBox>
+              </Grid>
+            )}
           </Grid>
         </DialogContent>
         <DialogActions>
@@ -879,652 +1656,7 @@ function PropertyGroupingForm({
         </DialogActions>
       </Dialog>
 
-      {/* Active Contracts Dialog */}
-      <Dialog
-        open={contractsDialogOpen}
-        onClose={() => setContractsDialogOpen(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>
-          <MDTypography variant="h5" fontWeight="medium">
-            Active Contracts for Group ID: {form.gId}
-          </MDTypography>
-        </DialogTitle>
-        <DialogContent>
-          {loadingContracts ? (
-            <MDBox display="flex" justifyContent="center" py={4}>
-              <CurrencyLoading />
-            </MDBox>
-          ) : activeContracts.length === 0 ? (
-            <MDBox py={4} textAlign="center">
-              <MDTypography variant="body2" color="text">
-                No active contracts found for this Group ID.
-              </MDTypography>
-            </MDBox>
-          ) : (
-            <MDBox
-              sx={{
-                maxHeight: "500px",
-                overflowY: "auto",
-                // Firefox
-                scrollbarWidth: "thin",
-                scrollbarColor: "#333333 transparent",
-                // Chrome/Safari/Edge
-                "&::-webkit-scrollbar": {
-                  width: "8px",
-                  height: "8px",
-                },
-                "&::-webkit-scrollbar-track": {
-                  background: "transparent",
-                  borderRadius: "2px",
-                },
-                "&::-webkit-scrollbar-thumb": {
-                  backgroundColor: "#333333",
-                  borderRadius: "10px",
-                  border: "2px solid transparent",
-                  backgroundClip: "padding-box",
-                  "&:hover": {
-                    backgroundColor: "#1a1a1a",
-                  },
-                },
-                "&::-webkit-scrollbar-button": {
-                  display: "none",
-                },
-              }}
-            >
-              <Card>
-                <MDBox p={2}>
-                  <MDTypography variant="caption" color="text" mb={2}>
-                    Total Active Contracts: {activeContracts.length}
-                  </MDTypography>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Sno
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Class
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Cmd
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Unit
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          CA No
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Contractor Name
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Contractor Address
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Business Title
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Nature of Business
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Location
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          GP ID
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Area-CA
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Area-BOO
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Revenue Rate
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Revenue Rate Date
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Rental Value
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Initial Contractor Name
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Initial Contract Date
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Contract From
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Contract To
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          1st Y Rent PM
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          1st Y Rent PA
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Term of Payment
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Profit Term
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Increase (Rate)
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Increase Interval
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Security Deposit Term
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Security Deposit Rs
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          DPC (Per Day)
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Govt Share-PA
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          PAF Share-PA
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Status
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Feasible
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          CA Status
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Approving Authority
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Remarks
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeContracts.map((contract, index) => {
-                        // Helper function to get field value with fallbacks
-                        const getField = (camelCase, pascalCase, altNames = []) => {
-                          if (contract[camelCase] !== undefined && contract[camelCase] !== null) {
-                            return contract[camelCase];
-                          }
-                          if (contract[pascalCase] !== undefined && contract[pascalCase] !== null) {
-                            return contract[pascalCase];
-                          }
-                          for (const alt of altNames) {
-                            if (contract[alt] !== undefined && contract[alt] !== null) {
-                              return contract[alt];
-                            }
-                          }
-                          return "-";
-                        };
-
-                        // Helper function to format date
-                        const formatDate = (dateValue) => {
-                          if (!dateValue) return "-";
-                          try {
-                            const date = new Date(dateValue);
-                            return isNaN(date.getTime()) ? "-" : date.toLocaleDateString();
-                          } catch {
-                            return "-";
-                          }
-                        };
-
-                        return (
-                          <tr
-                            key={contract.id || index}
-                            style={{
-                              borderBottom: "1px solid #e0e0e0",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = "#f9f9f9";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = "transparent";
-                            }}
-                          >
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {index + 1}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("class", "Class", ["className", "ClassName"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("cmd", "Cmd", ["cmdName", "CmdName"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("unit", "Unit", ["unitName", "UnitName"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("caNo", "CANo", ["contractNo", "ContractNo"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("contractorName", "ContractorName", [
-                                "businessName",
-                                "BusinessName",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("contractorAddress", "ContractorAddress", [
-                                "address",
-                                "Address",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("businessTitle", "BusinessTitle", ["title", "Title"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("natureOfBusiness", "NatureOfBusiness", [
-                                "nature",
-                                "Nature",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("location", "Location")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("gpId", "GPId", [
-                                "groupId",
-                                "GroupId",
-                                "gId",
-                                "GId",
-                                "grpId",
-                                "GrpId",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("areaCA", "AreaCA", ["areaCa", "AreaCa"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("areaBOO", "AreaBOO", ["areaBoo", "AreaBoo"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("revenueRate", "RevenueRate")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {formatDate(getField("revenueRateDate", "RevenueRateDate"))}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("rentalValue", "RentalValue")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("initialContractorName", "InitialContractorName")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {formatDate(getField("initialContractDate", "InitialContractDate"))}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {formatDate(
-                                getField("contractFrom", "ContractFrom", [
-                                  "contractStartDate",
-                                  "ContractStartDate",
-                                ])
-                              )}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {formatDate(
-                                getField("contractTo", "ContractTo", [
-                                  "contractEndDate",
-                                  "ContractEndDate",
-                                ])
-                              )}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("firstYRentPM", "FirstYRentPM", [
-                                "initialRentPM",
-                                "InitialRentPM",
-                                "firstYearRentPM",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("firstYRentPA", "FirstYRentPA", [
-                                "initialRentPA",
-                                "InitialRentPA",
-                                "firstYearRentPA",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("termOfPayment", "TermOfPayment", [
-                                "paymentTermMonths",
-                                "PaymentTermMonths",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("profitTerm", "ProfitTerm")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("increaseRate", "IncreaseRate", [
-                                "increaseRatePercent",
-                                "IncreaseRatePercent",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("increaseInterval", "IncreaseInterval", [
-                                "increaseIntervalMonths",
-                                "IncreaseIntervalMonths",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("securityDepositTerm", "SecurityDepositTerm", [
-                                "sdRateMonths",
-                                "SdRateMonths",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("securityDepositRs", "SecurityDepositRs", [
-                                "securityDepositAmount",
-                                "SecurityDepositAmount",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("dpcPerDay", "DPCPerDay", ["dpc", "DPC"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("govtSharePA", "GovtSharePA", [
-                                "govtShareCondition",
-                                "GovtShareCondition",
-                              ])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("pafSharePA", "PAFSharePA", ["pafShare", "PAFShare"])}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              <StatusBadge value={getField("status", "Status")} />
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("feasible", "Feasible")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("caStatus", "CAStatus")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("approvingAuthority", "ApprovingAuthority")}
-                            </td>
-                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("remarks", "Remarks")}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </MDBox>
-              </Card>
-            </MDBox>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <MDButton
-            variant="outlined"
-            color="secondary"
-            onClick={() => setContractsDialogOpen(false)}
-          >
-            <Icon>close</Icon>&nbsp;Close
-          </MDButton>
-        </DialogActions>
-      </Dialog>
+      {/* Active Contracts Dialog - Moved to parent component */}
     </>
   );
 }
@@ -1556,12 +1688,19 @@ export default function PropertyGrouping() {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [linkedPropertiesDialogOpen, setLinkedPropertiesDialogOpen] = useState(false);
   const [linkedProperties, setLinkedProperties] = useState([]);
+  const [contractsDialogOpen, setContractsDialogOpen] = useState(false);
+  const [activeContracts, setActiveContracts] = useState([]);
+  const [loadingContracts, setLoadingContracts] = useState(false);
+  const [currentViewingGroupId, setCurrentViewingGroupId] = useState("");
   const [loadingLinkedProperties, setLoadingLinkedProperties] = useState(false);
   const [currentGroupId, setCurrentGroupId] = useState("");
   const [currentGroupRecordId, setCurrentGroupRecordId] = useState(null);
   const [removingPropertyId, setRemovingPropertyId] = useState(null);
   const [linkingSelection, setLinkingSelection] = useState([]);
   const [savingLinkings, setSavingLinkings] = useState(false);
+  const [availablePropertiesForLinking, setAvailablePropertiesForLinking] = useState([]);
+  const [currentGroupCmdId, setCurrentGroupCmdId] = useState(null);
+  const [currentGroupBaseId, setCurrentGroupBaseId] = useState(null);
 
   // Pagination state for main table
   const [pageNumber, setPageNumber] = useState(1);
@@ -1600,12 +1739,42 @@ export default function PropertyGrouping() {
   // Fetch all property groupings for duplicate validation
   const fetchAllPropertyGroupings = async () => {
     try {
-      // Fetch a large number to get all records for validation
-      const response = await propertyGroupingApi.list(1, 10000);
-      if (response && response.pagination) {
-        setAllPropertyGroupings(response.data || []);
+      // Fetch all pages because backend may cap page size regardless of requested size.
+      const firstResponse = await propertyGroupingApi.list(1, 1000);
+      if (firstResponse && firstResponse.pagination) {
+        const firstPageData = firstResponse.data || [];
+        const totalCount = Number(firstResponse.pagination.totalCount || 0);
+        const serverPageSize = Number(
+          firstResponse.pagination.pageSize || firstPageData.length || 1
+        );
+        const totalPages =
+          totalCount > 0 && serverPageSize > 0 ? Math.ceil(totalCount / serverPageSize) : 1;
+
+        if (totalPages <= 1) {
+          setAllPropertyGroupings(firstPageData);
+          return;
+        }
+
+        const pagePromises = [];
+        for (let page = 2; page <= totalPages; page += 1) {
+          pagePromises.push(propertyGroupingApi.list(page, serverPageSize));
+        }
+
+        const remainingResponses = await Promise.allSettled(pagePromises);
+        const allData = [...firstPageData];
+        remainingResponses.forEach((result) => {
+          if (result.status !== "fulfilled") return;
+          const value = result.value;
+          if (value && value.pagination) {
+            allData.push(...(value.data || []));
+          } else if (Array.isArray(value)) {
+            allData.push(...value);
+          }
+        });
+
+        setAllPropertyGroupings(allData);
       } else {
-        setAllPropertyGroupings(Array.isArray(response) ? response : []);
+        setAllPropertyGroupings(Array.isArray(firstResponse) ? firstResponse : []);
       }
     } catch (error) {
       console.error("Error fetching all property groupings:", error);
@@ -1681,6 +1850,64 @@ export default function PropertyGrouping() {
     setLinkingSelection([]);
     setLinkedPropertiesPageNumber(page);
     setLinkedPropertiesPageSize(size);
+
+    // Get the property grouping to extract cmdId and baseId
+    const propertyGrouping = rows.find((row) => {
+      const rowId = row.Id || row.id;
+      return rowId && Number(rowId) === Number(recordId);
+    });
+
+    if (propertyGrouping) {
+      const cmdId = propertyGrouping.CmdId || propertyGrouping.cmdId;
+      const baseId = propertyGrouping.BaseId || propertyGrouping.baseId;
+      setCurrentGroupCmdId(cmdId ? Number(cmdId) : null);
+      setCurrentGroupBaseId(baseId ? Number(baseId) : null);
+
+      // Fetch not-grouped properties for this cmd and base
+      if (cmdId && baseId) {
+        try {
+          const notGroupedResponse = await propertyGroupingApi.notGroupedProperties(
+            Number(cmdId),
+            Number(baseId)
+          );
+          let options = [];
+          if (notGroupedResponse && notGroupedResponse.pagination) {
+            options = Array.isArray(notGroupedResponse.data)
+              ? notGroupedResponse.data
+              : notGroupedResponse.data
+              ? [notGroupedResponse.data]
+              : [];
+          } else if (Array.isArray(notGroupedResponse)) {
+            options = notGroupedResponse;
+          } else if (notGroupedResponse) {
+            options = [notGroupedResponse];
+          }
+
+          // Normalize options (API returns PascalCase)
+          const normalizedOptions = options
+            .map((opt) => ({
+              ...opt,
+              Id: opt.Id || opt.PropertyId || null,
+              PropertyId: opt.Id || opt.PropertyId || null,
+              PId: opt.PId || opt.PropertyName || "",
+              PropertyName: opt.PropertyName || opt.PId || "",
+            }))
+            .filter((opt) => opt.Id !== null);
+
+          setAvailablePropertiesForLinking(normalizedOptions);
+        } catch (error) {
+          console.error("Error fetching not-grouped properties for linking:", error);
+          setAvailablePropertiesForLinking([]);
+        }
+      } else {
+        setAvailablePropertiesForLinking([]);
+      }
+    } else {
+      setCurrentGroupCmdId(null);
+      setCurrentGroupBaseId(null);
+      setAvailablePropertiesForLinking([]);
+    }
+
     try {
       const response = await propertyGroupingApi.getByGroup(recordId, page, size);
       if (response && response.pagination) {
@@ -1730,35 +1957,41 @@ export default function PropertyGrouping() {
     setLinkedPropertiesPageNumber(1);
     setLinkedPropertiesPageSize(100);
     setLinkedPropertiesTotalCount(0);
+    setAvailablePropertiesForLinking([]);
+    setCurrentGroupCmdId(null);
+    setCurrentGroupBaseId(null);
   };
 
-  const getRentalPropertyLabel = (rp) => String(rp?.propertyName || rp?.name || rp?.pId || "");
+  const getRentalPropertyLabel = (rp) => String(rp?.PropertyName || rp?.PId || "");
 
-  const getLinkedPropertyLabel = (item) =>
-    String(
-      item?.propertyName ||
-        item?.name ||
-        (typeof item?.property === "object"
-          ? item.property.groupName || item.property.name || item.property.pId
-          : "") ||
-        ""
-    );
+  const getLinkedPropertyLabel = (item) => {
+    if (!item) return "";
+    // API returns PropertyName (PascalCase)
+    if (item.PropertyName) return String(item.PropertyName);
+    if (item.PropId) return String(item.PropId);
+    if (typeof item.Property === "object") {
+      return String(item.Property.PropertyName || item.Property.PId || "");
+    }
+    return "";
+  };
 
   const getPropertyLabelById = (propertyId) => {
-    const rp = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
+    const rp = rentalProperties.find((p) => {
+      const pid = p.Id || p.PropertyId;
+      return pid && Number(pid) === Number(propertyId);
+    });
     return rp ? getRentalPropertyLabel(rp) : `Property ID: ${propertyId}`;
   };
 
-  const getLinkedPropertyId = (item) =>
-    Number(
-      item?.propertyId?.id ??
-        item?.propertyId ??
-        item?.property?.id ??
-        item?.property?.propertyId ??
-        item?.property ??
-        item?.rentalPropertyId?.id ??
-        item?.rentalPropertyId
-    );
+  const getLinkedPropertyId = (item) => {
+    if (!item) return null;
+    // API returns PropertyId or PropId (PascalCase)
+    const id = item.PropertyId || item.PropId;
+    if (typeof id === "object") {
+      return Number(id.Id || id.PropertyId || null);
+    }
+    return id ? Number(id) : null;
+  };
 
   const getLinkedPropertyNameSet = () => {
     const set = new Set();
@@ -1775,6 +2008,34 @@ export default function PropertyGrouping() {
       new Set((linkingSelection || []).map((n) => Number(n)).filter(Number.isFinite))
     );
     if (ids.length === 0) return;
+
+    // Check for active contracts before allowing addition
+    if (currentGroupId) {
+      try {
+        const contractsResponse = await contractApi.searchByGrpName(currentGroupId.trim());
+        const contracts =
+          contractsResponse?.data || (Array.isArray(contractsResponse) ? contractsResponse : []);
+
+        // Filter for active contracts (status = true)
+        const activeContracts = contracts.filter((contract) => {
+          const isActive = contract.Status === true || contract.Status === 1;
+          const isNotDeleted = contract.IsDeleted === false || contract.IsDeleted === 0;
+          return isActive && isNotDeleted;
+        });
+
+        if (activeContracts.length > 0) {
+          alert(
+            `Cannot add properties to group "${currentGroupId}".\n\n` +
+              `There are ${activeContracts.length} active contract(s) associated with this group.\n` +
+              `Please deactivate or delete the active contracts first before modifying linked properties.`
+          );
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking for active contracts:", error);
+        // Continue with addition if contract check fails (don't block user)
+      }
+    }
 
     setSavingLinkings(true);
     try {
@@ -1807,9 +2068,184 @@ export default function PropertyGrouping() {
       return;
     }
 
+    // Check for active contracts before allowing removal
+    if (currentGroupId) {
+      try {
+        const contractsResponse = await contractApi.searchByGrpName(currentGroupId.trim());
+        const contracts =
+          contractsResponse?.data || (Array.isArray(contractsResponse) ? contractsResponse : []);
+
+        // Filter for active contracts (status = true)
+        const activeContracts = contracts.filter((contract) => {
+          const isActive = contract.Status === true || contract.Status === 1;
+          const isNotDeleted = contract.IsDeleted === false || contract.IsDeleted === 0;
+          return isActive && isNotDeleted;
+        });
+
+        if (activeContracts.length > 0) {
+          alert(
+            `Cannot remove property from group "${currentGroupId}".\n\n` +
+              `There are ${activeContracts.length} active contract(s) associated with this group.\n` +
+              `Please deactivate or delete the active contracts first before removing properties.`
+          );
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking for active contracts:", error);
+        // Continue with removal if contract check fails (don't block user)
+      }
+    }
+
     setRemovingPropertyId(linkingId);
     try {
-      await propertyGroupingApi.removePropertyFromGroup(linkingId);
+      // Find the property being removed to get its details
+      const linkingToRemove = linkedProperties.find((lp) => {
+        const lpId = lp.Id || lp.id;
+        return lpId && Number(lpId) === Number(linkingId);
+      });
+
+      if (!linkingToRemove) {
+        alert("Property linking not found.");
+        return;
+      }
+
+      // Get property ID from the linking (API returns PascalCase)
+      const propertyId =
+        linkingToRemove.PropertyId ||
+        linkingToRemove.PropId ||
+        (typeof linkingToRemove.PropertyId === "object"
+          ? linkingToRemove.PropertyId.Id || linkingToRemove.PropertyId.PropertyId
+          : null);
+
+      if (!propertyId) {
+        alert("Property ID not found in linking.");
+        return;
+      }
+
+      // Get property details from rentalProperties
+      const propertyToRemove = rentalProperties.find((rp) => {
+        const pid = rp.Id || rp.PropertyId;
+        return pid && Number(pid) === Number(propertyId);
+      });
+
+      if (!propertyToRemove) {
+        // If property not found in rentalProperties, still proceed with removal
+        // but skip area/rate/location updates
+        await propertyGroupingApi.removePropertyFromGroup(linkingId);
+      } else {
+        // Get property details (API returns PascalCase)
+        const propertyArea = Number(propertyToRemove.Area || propertyToRemove.area || 0);
+        const propertyLocation = String(
+          propertyToRemove.Location || propertyToRemove.location || ""
+        ).trim();
+
+        // Get property rate - check if it's 0, then try revenue rates
+        let propertyRate = Number(propertyToRemove.Rate || propertyToRemove.rate || 0);
+        if (propertyRate === 0) {
+          // Fetch revenue rate for this property
+          try {
+            const response = await revenueRatesApi.getAll(1, 1000);
+            const rates = response?.pagination
+              ? response.data || []
+              : Array.isArray(response)
+              ? response
+              : [];
+
+            // Filter by property ID and get latest applicable date (not after today)
+            const propertyRates = rates
+              .filter((rate) => {
+                const ratePropertyId = rate.PropertyId || rate.propertyId;
+                return ratePropertyId && Number(ratePropertyId) === Number(propertyId);
+              })
+              .filter((rate) => {
+                const isActive = rate.Status === true || rate.Status === 1;
+                const isNotDeleted = rate.IsDeleted === false || rate.IsDeleted === 0;
+                return isActive && isNotDeleted;
+              });
+
+            if (propertyRates.length > 0) {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+
+              const validRates = propertyRates
+                .filter((rate) => {
+                  const applicableDate = rate.ApplicableDate || rate.applicableDate;
+                  if (!applicableDate) return false;
+                  const date = new Date(applicableDate);
+                  date.setHours(0, 0, 0, 0);
+                  return date <= today;
+                })
+                .sort((a, b) => {
+                  const dateA = new Date(a.ApplicableDate || a.applicableDate || 0);
+                  const dateB = new Date(b.ApplicableDate || b.applicableDate || 0);
+                  return dateB - dateA;
+                });
+
+              if (validRates.length > 0) {
+                propertyRate = Number(validRates[0].Rate || validRates[0].rate || 0);
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching revenue rate for property:", error);
+            // Continue with propertyRate = 0
+          }
+        }
+
+        // Get current property grouping to update
+        const currentGrouping = rows.find((pg) => {
+          const pgId = pg.Id || pg.id;
+          return pgId && Number(pgId) === Number(currentGroupRecordId);
+        });
+
+        if (currentGrouping) {
+          // Calculate new values
+          const currentArea = Number(currentGrouping.Area || currentGrouping.area || 0);
+          const currentRate = Number(currentGrouping.Rate || currentGrouping.rate || 0);
+          const currentLocation = String(
+            currentGrouping.Location || currentGrouping.location || ""
+          ).trim();
+
+          const newArea = Math.max(0, currentArea - propertyArea);
+          const newRate = Math.max(0, currentRate - propertyRate);
+
+          // Remove property location from group location
+          let newLocation = currentLocation;
+          if (propertyLocation && currentLocation) {
+            // Split location by comma, remove the property's location, rejoin
+            const locations = currentLocation
+              .split(",")
+              .map((loc) => loc.trim())
+              .filter((loc) => loc && loc.toLowerCase() !== propertyLocation.toLowerCase());
+            newLocation = locations.join(", ");
+          }
+
+          // Update property grouping
+          const updateData = {
+            cmdId: Number(currentGrouping.CmdId || currentGrouping.cmdId),
+            baseId: Number(currentGrouping.BaseId || currentGrouping.baseId),
+            classId: Number(currentGrouping.ClassId || currentGrouping.classId),
+            gId: currentGrouping.GId || currentGrouping.gId || "",
+            rate: newRate,
+            area: newArea,
+            location: newLocation,
+            uoM: currentGrouping.UoM || currentGrouping.uoM || "",
+            remarks: currentGrouping.Remarks || currentGrouping.remarks || "",
+            status: currentGrouping.Status !== undefined ? currentGrouping.Status : true,
+            property: currentGrouping.Property || "", // Keep existing property field
+            PropertyGroupLinkings: [], // Will be updated by backend after removal
+          };
+
+          // Remove the property from group and update grouping in parallel
+          await Promise.all([
+            propertyGroupingApi.removePropertyFromGroup(linkingId),
+            propertyGroupingApi.update(currentGroupRecordId, updateData),
+          ]);
+        } else {
+          // If grouping not found, just remove the property
+          await propertyGroupingApi.removePropertyFromGroup(linkingId);
+        }
+      }
+
       // Refresh the linked properties list
       const response = await propertyGroupingApi.getByGroup(
         currentGroupRecordId,
@@ -1825,7 +2261,7 @@ export default function PropertyGrouping() {
       }
       // Refresh the main table
       fetchPropertyGroupings(pageNumber, pageSize);
-      alert("Property removed successfully!");
+      alert("Property removed successfully and grouping updated!");
     } catch (error) {
       console.error("Error removing property:", error);
       alert("Failed to remove property. Please try again.");
@@ -1836,12 +2272,18 @@ export default function PropertyGrouping() {
 
   const getPropertyName = (propertyId) => {
     if (!propertyId) return "Unknown Property";
-    // Handle if propertyId is already an object with name/groupName
+    // Handle if propertyId is already an object - API returns PascalCase
     if (typeof propertyId === "object") {
-      return propertyId.groupName || propertyId.name || propertyId.pId || "Unknown Property";
+      return String(propertyId.PropertyName || propertyId.PId || "Unknown Property");
     }
-    const property = rentalProperties.find((p) => p.id === Number(propertyId));
-    return property ? property.pId : `Property ID: ${propertyId}`;
+    // Look up property by ID - API returns Id or PropertyId (PascalCase)
+    const property = rentalProperties.find((p) => {
+      const pid = p.Id || p.PropertyId;
+      return pid && Number(pid) === Number(propertyId);
+    });
+    return property
+      ? String(property.PropertyName || property.PId || `Property ID: ${propertyId}`)
+      : `Property ID: ${propertyId}`;
   };
 
   const columns = [
@@ -1856,7 +2298,9 @@ export default function PropertyGrouping() {
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
     { Header: "Group ID", accessor: "gId", align: "left", width: "8%" },
+    { Header: "Rate", accessor: "rate", align: "right", width: "7%" },
     { Header: "Area", accessor: "area", align: "right", width: "7%" },
+    { Header: "UoM", accessor: "uoM", align: "left", width: "7%" },
     { Header: "Location", accessor: "location", align: "left", width: "13%" },
     { Header: "Remarks", accessor: "remarks", align: "left" },
     {
@@ -1869,24 +2313,49 @@ export default function PropertyGrouping() {
     },
     {
       Header: "Linked Property",
-      accessor: "linkedProperties",
+      accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
       width: "10%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const recordId = row?.original?.id;
-        // eslint-disable-next-line react/prop-types
-        const grpId = row?.original?.gId || "";
-        return recordId ? (
+        const rowData = row?.original || {};
+        // Use id from computedRows (lowercase) or fallback to original Id (PascalCase)
+        const recordId = rowData.id || rowData.Id;
+        const grpId = rowData.gId || rowData.GId || "";
+        // Always show the icon - it was displaying before
+        return (
           <IconButton
             size="small"
             color="primary"
-            // eslint-disable-next-line react/prop-types
             onClick={() => handleViewLinkedProperties(recordId, grpId)}
             title="View linked properties"
+            disabled={!recordId}
           >
             <Icon>visibility</Icon>
+          </IconButton>
+        );
+      },
+    },
+    {
+      Header: "Active Contracts",
+      accessor: "activeContracts",
+      align: "center",
+      width: "10%",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        const groupId = rowData.gId || rowData.GId || "";
+        return groupId ? (
+          <IconButton
+            size="small"
+            color="info"
+            onClick={() => handleViewActiveContractsForGroup(groupId)}
+            disabled={loadingContracts}
+            title="View active contracts for this group"
+          >
+            <Icon>description</Icon>
           </IconButton>
         ) : (
           <span>-</span>
@@ -1901,118 +2370,218 @@ export default function PropertyGrouping() {
   };
   const handleCloseForm = () => setOpenForm(false);
 
-  const handleEditPropertyGrouping = (id) => {
-    const propertyGrouping = rows.find((row) => row.id === id);
+  // View Active Contracts for a Group
+  const handleViewActiveContractsForGroup = async (groupId) => {
+    if (!groupId || !groupId.trim()) {
+      setActiveContracts([]);
+      setCurrentViewingGroupId("");
+      return;
+    }
+
+    setCurrentViewingGroupId(groupId.trim());
+    setLoadingContracts(true);
+    try {
+      // Call API endpoint to search contracts by group name
+      const response = await contractApi.searchByGrpName(groupId.trim());
+
+      // Handle different response structures
+      let contracts = [];
+      if (Array.isArray(response)) {
+        contracts = response;
+      } else if (response && Array.isArray(response.data)) {
+        contracts = response.data;
+      } else if (response && response.data) {
+        // If data is a single object, wrap it in an array
+        contracts = Array.isArray(response.data) ? response.data : [response.data];
+      } else if (response && typeof response === "object") {
+        // If response is a single object, wrap it in an array
+        contracts = [response];
+      }
+
+      // Ensure contracts is an array
+      if (!Array.isArray(contracts)) {
+        contracts = [];
+      }
+
+      // Filter for active contracts (status = true, not deleted)
+      // Use both PascalCase and camelCase for field access
+      const activeContractsList = contracts.filter((contract) => {
+        if (!contract || typeof contract !== "object") return false;
+        // Check status - use both PascalCase and camelCase
+        const status = contract.Status !== undefined ? contract.Status : contract.status;
+        const isDeleted =
+          contract.IsDeleted !== undefined ? contract.IsDeleted : contract.isDeleted;
+
+        // If status is explicitly false or 0, exclude it
+        // If status is true or 1, include it
+        // If status is undefined/null, include it (assume active)
+        const isActive = status === undefined || status === null || status === true || status === 1;
+
+        // If IsDeleted is explicitly true or 1, exclude it
+        // If IsDeleted is false, 0, undefined, or null, include it
+        const isNotDeleted =
+          isDeleted === undefined || isDeleted === null || isDeleted === false || isDeleted === 0;
+
+        return isActive && isNotDeleted;
+      });
+
+      setActiveContracts(activeContractsList);
+      setContractsDialogOpen(true);
+    } catch (error) {
+      console.error("Error fetching contracts by Group ID:", error);
+      setActiveContracts([]);
+      alert("Error fetching contracts. Please try again.");
+    } finally {
+      setLoadingContracts(false);
+    }
+  };
+
+  // Check if group has active contracts
+  const checkActiveContractsForGroup = async (groupId) => {
+    if (!groupId || !groupId.trim()) {
+      return { hasActiveContracts: false, count: 0 };
+    }
+
+    try {
+      const response = await contractApi.searchByGrpName(groupId.trim());
+      const contracts = response?.data || (Array.isArray(response) ? response : []);
+
+      // Filter for active contracts (status = true, not deleted)
+      const activeContractsList = contracts.filter((contract) => {
+        const isActive = contract.Status === true || contract.Status === 1;
+        const isNotDeleted = contract.IsDeleted === false || contract.IsDeleted === 0;
+        return isActive && isNotDeleted;
+      });
+
+      return {
+        hasActiveContracts: activeContractsList.length > 0,
+        count: activeContractsList.length,
+      };
+    } catch (error) {
+      console.error("Error checking active contracts for group:", error);
+      return { hasActiveContracts: false, count: 0 };
+    }
+  };
+
+  const handleEditPropertyGrouping = async (id) => {
+    const propertyGrouping = rows.find((row) => Number(row?.id ?? row?.Id) === Number(id));
+    if (!propertyGrouping) {
+      console.error("Property grouping not found for id:", id);
+      return;
+    }
+
+    // Check for active contracts before allowing edit
+    const grpId = propertyGrouping.GId || propertyGrouping.gId || "";
+    if (grpId) {
+      const contractCheck = await checkActiveContractsForGroup(grpId);
+      if (contractCheck.hasActiveContracts) {
+        alert(
+          `Cannot edit property group "${grpId}".\n\n` +
+            `There are ${contractCheck.count} active contract(s) associated with this group.\n` +
+            `Please deactivate or delete the active contracts first before editing this group.`
+        );
+        return;
+      }
+    }
     const normalizePropertyIds = (data) => {
       if (!data) return [];
-      const fromLinkings = data.PropertyGroupLinkings || data.propertyGroupLinkings;
+
+      // API returns PropertyGroupLinkings (PascalCase)
+      const fromLinkings = data.PropertyGroupLinkings;
       if (Array.isArray(fromLinkings) && fromLinkings.length) {
         const ids = fromLinkings
           .map((x) => {
             if (x === null || x === undefined) return null;
             if (typeof x === "number" || typeof x === "string") return Number(x);
-            const candidate =
-              x.propertyId?.id ??
-              x.propertyId ??
-              x.property?.id ??
-              x.property ??
-              x.rentalPropertyId?.id ??
-              x.rentalPropertyId ??
-              x.id;
-            return Number(candidate);
+            // API returns PropertyId or Id (PascalCase)
+            const candidate = x.PropertyId || x.Id;
+            return candidate ? Number(candidate) : null;
           })
+          .filter((n) => n !== null && Number.isFinite(n));
+        return Array.from(new Set(ids));
+      }
+
+      // Check for property array/string (API may return Property)
+      const raw = data.Property;
+      if (Array.isArray(raw)) {
+        const ids = raw.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+        return Array.from(new Set(ids));
+      }
+
+      if (typeof raw === "string") {
+        const ids = raw
+          .split(",")
+          .map((s) => Number(String(s).trim()))
           .filter((n) => Number.isFinite(n));
         return Array.from(new Set(ids));
       }
-      const raw = data.property;
-      if (Array.isArray(raw))
-        return Array.from(new Set(raw.map((v) => Number(v)).filter(Number.isFinite)));
-      if (typeof raw === "string")
-        return Array.from(
-          new Set(
-            raw
-              .split(",")
-              .map((s) => Number(String(s).trim()))
-              .filter((n) => Number.isFinite(n))
-          )
-        );
+
       return [];
     };
 
-    const extractLinkedPropertiesMeta = (resp) => {
-      const list = resp && resp.pagination ? resp.data || [] : Array.isArray(resp) ? resp : [];
-      const nameById = {};
-      const ids = [];
+    const mapToFormInitialData = (pg) => {
+      if (!pg) return null;
+      // API returns PascalCase
+      const cmdId = pg.CmdId || "";
+      const baseId = pg.BaseId || "";
+      const classId = pg.ClassId || "";
+      const gId = pg.GId || "";
+      const uoM = pg.UoM || "";
+      const location = pg.Location || "";
+      const remarks = pg.Remarks || "";
+      const area = pg.Area || "";
+      const rate = pg.Rate || 0;
+      const status = pg.Status !== undefined ? pg.Status : true;
+      const isDeleted = pg.IsDeleted !== undefined ? pg.IsDeleted : false;
 
-      list.forEach((x) => {
-        if (!x) return;
-        const candidate =
-          x.propertyId?.id ??
-          x.propertyId ??
-          x.property?.id ??
-          x.property?.propertyId ??
-          x.property ??
-          x.rentalPropertyId?.id ??
-          x.rentalPropertyId ??
-          x.id;
-        const idNum = Number(candidate);
-        if (!Number.isFinite(idNum)) return;
-        ids.push(idNum);
-
-        const displayName =
-          x.propertyName ||
-          x.name ||
-          (typeof x.property === "object"
-            ? x.property.groupName || x.property.name || x.property.pId
-            : null) ||
-          null;
-        if (displayName) nameById[String(idNum)] = String(displayName);
-      });
-
-      return { ids: Array.from(new Set(ids)), nameById };
+      return {
+        ...pg,
+        id: pg.Id,
+        cmdId: cmdId,
+        baseId: baseId,
+        classId: classId,
+        cmdid: cmdId ? Number(cmdId) : "",
+        baseid: baseId ? Number(baseId) : "",
+        classid: classId ? Number(classId) : "",
+        gId: gId,
+        uoM: uoM,
+        location: location,
+        remarks: remarks,
+        property: normalizePropertyIds(pg),
+        area: area ? (typeof area === "number" ? area : Number(area) || "") : "",
+        rate: Number(rate) || 0,
+        status: Boolean(status),
+        isDeleted: Boolean(isDeleted),
+      };
     };
 
-    const mapToFormInitialData = (pg) => ({
-      ...pg,
-      cmdId: pg.cmdId || pg.cmdid,
-      baseId: pg.baseId || pg.baseid,
-      classId: pg.classId || pg.classid,
-      cmdid: Number(pg.cmdId || pg.cmdid),
-      baseid: Number(pg.baseId || pg.baseid),
-      classid: Number(pg.classId || pg.classid),
-      property: normalizePropertyIds(pg),
-      area: Number(pg.area),
-      status: Boolean(pg.status),
-      isDeleted: Boolean(pg.isDeleted),
+    // Use only the row data - no additional API calls needed
+    // The row data already contains all necessary information
+    const mappedData = mapToFormInitialData(propertyGrouping);
+
+    // Extract linked property names from the row data if available
+    // Try to build nameById from available property data
+    const propertyIds = normalizePropertyIds(propertyGrouping);
+    const nameById = {};
+    if (propertyIds.length > 0) {
+      // Try to get property names from rentalProperties if available
+      propertyIds.forEach((propId) => {
+        const prop = rentalProperties.find((p) => {
+          const pid = p.id ?? p.Id ?? p.propertyId ?? p.PropertyId;
+          return Number(pid) === Number(propId);
+        });
+        if (prop) {
+          const name = prop.pId ?? prop.PId ?? prop.pid ?? prop.name ?? prop.Name ?? String(propId);
+          nameById[String(propId)] = String(name);
+        }
+      });
+    }
+
+    setCurrentPropertyGrouping({
+      ...mappedData,
+      linkedPropertyNameById: nameById,
     });
-
-    // Open immediately using row data (fast), then hydrate using:
-    // - GET /api/PropertyGroup/:id for full record
-    // - GET /api/PropertyGroup/ByGroup/:id for linked properties (same as the eye-icon dialog)
-    setCurrentPropertyGrouping(mapToFormInitialData(propertyGrouping));
     setOpenForm(true);
-
-    (async () => {
-      try {
-        const [full, byGroup] = await Promise.all([
-          propertyGroupingApi.get(id),
-          propertyGroupingApi.getByGroup(id, 1, 1000),
-        ]);
-        const { ids: linkedIds, nameById } = extractLinkedPropertiesMeta(byGroup);
-        const base = full || propertyGrouping || {};
-        const hydrated = {
-          ...base,
-          ...(linkedIds.length ? { property: linkedIds } : {}),
-          linkedPropertyNameById: nameById,
-        };
-        setCurrentPropertyGrouping(mapToFormInitialData(hydrated));
-      } catch (e) {
-        // keep the row-based data if GET fails
-        console.error("Error fetching property grouping details:", e);
-      }
-    })();
-
-    return;
   };
 
   const handleDeletePropertyGrouping = (id) => {
@@ -2027,6 +2596,29 @@ export default function PropertyGrouping() {
 
   const handleConfirmDelete = async () => {
     if (!recordToDelete) return;
+
+    // Find the property grouping to get its Group ID
+    const propertyGrouping = rows.find(
+      (row) => Number(row?.id ?? row?.Id) === Number(recordToDelete)
+    );
+    if (propertyGrouping) {
+      const grpId = propertyGrouping.GId || propertyGrouping.gId || "";
+      if (grpId) {
+        // Check for active contracts before allowing delete
+        const contractCheck = await checkActiveContractsForGroup(grpId);
+        if (contractCheck.hasActiveContracts) {
+          alert(
+            `Cannot delete property group "${grpId}".\n\n` +
+              `There are ${contractCheck.count} active contract(s) associated with this group.\n` +
+              `Please deactivate or delete the active contracts first before deleting this group.`
+          );
+          setDeleteDialogOpen(false);
+          setRecordToDelete(null);
+          return;
+        }
+      }
+    }
+
     try {
       await propertyGroupingApi.remove(recordToDelete);
       fetchPropertyGroupings();
@@ -2040,6 +2632,29 @@ export default function PropertyGrouping() {
 
   const handleSubmit = async (data) => {
     try {
+      // Check for duplicate group ID before saving (only for create, not update)
+      if (!currentPropertyGrouping) {
+        // Check if group ID already exists for the same class and base
+        const duplicateGroup = allPropertyGroupings.find((pg) => {
+          const sameGroupId =
+            (pg.GId || pg.gId || "").toString().trim() === (data.gId || "").toString().trim();
+          const sameClass = Number(pg.ClassId || pg.classId) === Number(data.classid);
+          const sameBase = Number(pg.BaseId || pg.baseId) === Number(data.baseid);
+          const isActive = pg.Status === true || pg.Status === 1;
+          const isNotDeleted = pg.IsDeleted === false || pg.IsDeleted === 0;
+
+          return sameGroupId && sameClass && sameBase && isActive && isNotDeleted;
+        });
+
+        if (duplicateGroup) {
+          alert(
+            `Group ID "${data.gId}" already exists for this class and base.\n\n` +
+              `Please use a different Group ID or deactivate the existing group first.`
+          );
+          return;
+        }
+      }
+
       // Convert property array to list of IDs for PropertyGroupLinkings
       const propertyGroupLinkings = Array.isArray(data.property)
         ? data.property.map((propId) => Number(propId))
@@ -2050,6 +2665,8 @@ export default function PropertyGrouping() {
         baseId: Number(data.baseid),
         classId: Number(data.classid),
         gId: data.gId || "",
+        rate: Number(data.rate) || 0,
+        uoM: data.uoM || "",
         location: data.location || "",
         area: Number(data.area) || 0,
         remarks: data.remarks || "",
@@ -2059,7 +2676,7 @@ export default function PropertyGrouping() {
         isDeleted: Boolean(data.isDeleted),
       };
       if (currentPropertyGrouping) {
-        await propertyGroupingApi.update(currentPropertyGrouping.id, formattedData);
+        await propertyGroupingApi.update(currentPropertyGrouping.Id, formattedData);
       } else {
         await propertyGroupingApi.create(formattedData);
       }
@@ -2067,54 +2684,62 @@ export default function PropertyGrouping() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving property grouping:", error);
+      alert("Failed to save property grouping. Please try again.");
     }
   };
 
-  const computedRows = rows.map((row) => ({
-    id: row.id,
-    cmdId: row.cmdId || row.cmdid,
-    baseId: row.baseId || row.baseid,
-    classId: row.classId || row.classid,
-    cmdName: row.cmdName || "",
-    baseName: row.baseName || "",
-    className: row.className || "",
-    gId: row.gId || "",
-    area: row.area || 0,
-    location: row.location || "",
-    remarks: row.remarks || "",
-    status: row.status,
-    actions: (
-      <MDBox
-        alignItems="left"
-        justifyContent="left"
-        sx={{
-          backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
-          gap: "2px", // Small gap between icons
-          padding: "2px 2px", // Compact padding
-          borderRadius: "2px",
-        }}
-      >
-        <IconButton
-          size="small"
-          color="info"
-          onClick={() => handleEditPropertyGrouping(row.id)}
-          title="Edit"
-          sx={{ padding: "1px" }}
+  const computedRows = rows.map((row) => {
+    // API returns PascalCase
+    const normalizedId = row.Id;
+    return {
+      id: normalizedId,
+      cmdId: row.CmdId,
+      baseId: row.BaseId,
+      classId: row.ClassId,
+      cmdName: row.CmdName || "",
+      baseName: row.BaseName || "",
+      className: row.ClassName || "",
+      gId: row.GId || "",
+      rate: Number(row.Rate || 0),
+      area: Number(row.Area || 0),
+      uoM: row.UoM || "",
+      location: row.Location || "",
+      remarks: row.Remarks || "",
+      status: row.Status,
+      linkedProperties: normalizedId, // Dummy field for Linked Property column accessor
+      actions: (
+        <MDBox
+          alignItems="left"
+          justifyContent="left"
+          sx={{
+            backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
+            gap: "2px", // Small gap between icons
+            padding: "2px 2px", // Compact padding
+            borderRadius: "2px",
+          }}
         >
-          <Icon>edit</Icon>
-        </IconButton>
-        <IconButton
-          size="small"
-          color="error"
-          onClick={() => handleDeletePropertyGrouping(row.id)}
-          title="Delete"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>delete</Icon>
-        </IconButton>
-      </MDBox>
-    ),
-  }));
+          <IconButton
+            size="small"
+            color="info"
+            onClick={() => handleEditPropertyGrouping(normalizedId)}
+            title="Edit"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>edit</Icon>
+          </IconButton>
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() => handleDeletePropertyGrouping(normalizedId)}
+            title="Delete"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>delete</Icon>
+          </IconButton>
+        </MDBox>
+      ),
+    };
+  });
 
   return (
     <DashboardLayout>
@@ -2373,16 +2998,27 @@ export default function PropertyGrouping() {
             <Autocomplete
               multiple
               disableCloseOnSelect
-              options={rentalProperties || []}
-              value={(rentalProperties || []).filter((rp) =>
-                (linkingSelection || []).some((id) => Number(id) === Number(rp.id))
-              )}
-              getOptionLabel={(option) =>
-                getRentalPropertyLabel(option) || String(option?.id || "")
-              }
-              isOptionEqualToValue={(option, value) => Number(option?.id) === Number(value?.id)}
+              options={availablePropertiesForLinking || []}
+              value={(availablePropertiesForLinking || []).filter((rp) => {
+                const pid = rp.Id || rp.PropertyId;
+                return pid && (linkingSelection || []).some((id) => Number(id) === Number(pid));
+              })}
+              getOptionLabel={(option) => {
+                const pid = option.Id || option.PropertyId;
+                return getRentalPropertyLabel(option) || String(pid || "");
+              }}
+              isOptionEqualToValue={(option, value) => {
+                const optId = option.Id || option.PropertyId;
+                const valId = value.Id || value.PropertyId;
+                return optId && valId && Number(optId) === Number(valId);
+              }}
               onChange={(event, newValue) => {
-                const nextIds = (newValue || []).map((v) => Number(v.id)).filter(Number.isFinite);
+                const nextIds = (newValue || [])
+                  .map((v) => {
+                    const pid = v.Id || v.PropertyId;
+                    return pid ? Number(pid) : null;
+                  })
+                  .filter((n) => n !== null && Number.isFinite(n));
 
                 // Enforce unique propertyName across already-linked + newly-selected
                 const usedNames = getLinkedPropertyNameSet();
@@ -2403,17 +3039,21 @@ export default function PropertyGrouping() {
                 <MDInput {...params} placeholder="Select properties..." size="small" fullWidth />
               )}
               renderTags={(value, getTagProps) =>
-                value.map((option, index) => (
-                  <Chip
-                    key={option?.id ?? index}
-                    label={getRentalPropertyLabel(option) || String(option?.id || "")}
-                    size="small"
-                    {...getTagProps({ index })}
-                  />
-                ))
+                value.map((option, index) => {
+                  const pid = option.Id || option.PropertyId;
+                  return (
+                    <Chip
+                      key={pid || index}
+                      label={getRentalPropertyLabel(option) || String(pid || "")}
+                      size="small"
+                      {...getTagProps({ index })}
+                    />
+                  );
+                })
               }
               renderOption={(props, option) => {
-                const optionLabel = getRentalPropertyLabel(option) || String(option?.id || "");
+                const pid = option.Id || option.PropertyId;
+                const optionLabel = getRentalPropertyLabel(option) || String(pid || "");
                 const linkedNameSet = getLinkedPropertyNameSet();
                 const selectedNameSet = new Set(
                   (linkingSelection || []).map((id) => getPropertyLabelById(id))
@@ -2421,7 +3061,8 @@ export default function PropertyGrouping() {
                 const isAlreadyLinked = linkedNameSet.has(optionLabel);
                 const isDuplicateByName =
                   selectedNameSet.has(optionLabel) &&
-                  !(linkingSelection || []).includes(Number(option.id));
+                  pid &&
+                  !(linkingSelection || []).includes(Number(pid));
 
                 return (
                   <li {...props} aria-disabled={isAlreadyLinked || isDuplicateByName}>
@@ -2504,35 +3145,33 @@ export default function PropertyGrouping() {
               )}
               <List disablePadding>
                 {linkedProperties.map((property, index) => {
-                  const linkingId = property.id; // PropertyGroupLinking ID
+                  // API returns Id (PascalCase) for linking ID
+                  const linkingId = property.Id;
 
-                  // Extract property name - handle different response formats
+                  // API returns PropertyName (PascalCase)
                   let propertyName = "Unknown Property";
 
-                  // Check if property has a groupName or name field directly
-                  if (property.propertyName) {
-                    propertyName = property.propertyName;
-                  } else if (property.name) {
-                    propertyName = property.name;
-                  } else if (property.property) {
-                    // If property is an object, check for groupName, name, or pId
-                    if (typeof property.property === "object") {
+                  if (property.PropertyName) {
+                    propertyName = String(property.PropertyName);
+                  } else if (property.PropId) {
+                    propertyName = String(property.PropId);
+                  } else if (property.Property) {
+                    if (typeof property.Property === "object") {
                       propertyName =
-                        property.property.groupName ||
-                        property.property.name ||
-                        property.property.pId ||
+                        property.Property.PropertyName ||
+                        property.Property.PId ||
                         "Unknown Property";
                     } else {
-                      // If property is just an ID, look it up
-                      propertyName = getPropertyName(property.property);
+                      propertyName = getPropertyName(property.Property);
                     }
-                  } else if (property.propertyId) {
-                    // If propertyId exists, extract it and look up the property
+                  } else if (property.PropertyId) {
                     const propertyId =
-                      typeof property.propertyId === "object"
-                        ? property.propertyId.id || property.propertyId.propertyId
-                        : property.propertyId;
-                    propertyName = getPropertyName(propertyId);
+                      typeof property.PropertyId === "object"
+                        ? property.PropertyId.Id || property.PropertyId.PropertyId
+                        : property.PropertyId;
+                    if (propertyId) {
+                      propertyName = getPropertyName(propertyId);
+                    }
                   }
 
                   return (
@@ -2639,6 +3278,683 @@ export default function PropertyGrouping() {
             onClick={handleCloseLinkedPropertiesDialog}
           >
             Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      {/* Active Contracts Dialog */}
+      <Dialog
+        open={contractsDialogOpen}
+        onClose={() => {
+          setContractsDialogOpen(false);
+          setActiveContracts([]);
+          setCurrentViewingGroupId("");
+        }}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="medium">
+            Active Contracts for Group ID: {currentViewingGroupId || "N/A"}
+          </MDTypography>
+          {activeContracts.length > 0 && (
+            <MDTypography variant="body2" color="secondary" sx={{ mt: 1 }}>
+              Total Active Contracts: {activeContracts.length}
+            </MDTypography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {loadingContracts ? (
+            <MDBox display="flex" justifyContent="center" py={4}>
+              <CurrencyLoading />
+            </MDBox>
+          ) : activeContracts.length === 0 ? (
+            <MDBox py={4} textAlign="center">
+              <MDTypography variant="body2" color="text">
+                No active contracts found for this Group ID.
+              </MDTypography>
+            </MDBox>
+          ) : (
+            <MDBox
+              sx={{
+                maxHeight: "500px",
+                overflowY: "auto",
+                scrollbarWidth: "thin",
+                scrollbarColor: "#333333 transparent",
+                "&::-webkit-scrollbar": {
+                  width: "8px",
+                  height: "8px",
+                },
+                "&::-webkit-scrollbar-track": {
+                  background: "transparent",
+                  borderRadius: "2px",
+                },
+                "&::-webkit-scrollbar-thumb": {
+                  backgroundColor: "#333333",
+                  borderRadius: "10px",
+                  border: "2px solid transparent",
+                  backgroundClip: "padding-box",
+                  "&:hover": {
+                    backgroundColor: "#1a1a1a",
+                  },
+                },
+                "&::-webkit-scrollbar-button": {
+                  display: "none",
+                },
+              }}
+            >
+              <Card>
+                <MDBox p={2}>
+                  <MDTypography variant="caption" color="text" mb={2}>
+                    Total Active Contracts: {activeContracts.length}
+                  </MDTypography>
+                  <TableContainer component={Paper} sx={{ maxHeight: "600px", overflowX: "auto" }}>
+                    <Table
+                      size="small"
+                      stickyHeader
+                      sx={{
+                        "& .MuiTableCell-root": {
+                          padding: "6px 8px",
+                        },
+                        "& .MuiTableCell-head": {
+                          padding: "8px 8px",
+                        },
+                      }}
+                    >
+                      <TableHead>
+                        <TableRow>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            ID
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Contract No
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Command
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Base
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Class
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Tenant No
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Business Name
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Nature of Business
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Start Date
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            End Date
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            COD
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Group Area
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Group Rate
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            VA Area
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Rental Value
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            % Rate
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Govt Share
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            PAF Share
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Initial Rent PM
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Initial Rent PA
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Payment Term (Months)
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            SD Rate (Months)
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Security Deposit
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Increase Rate %
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Increase Interval (Months)
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Term
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Status
+                          </TableCell>
+                          <TableCell
+                            sx={{
+                              fontWeight: 600,
+                              backgroundColor: "#f5f5f5",
+                              whiteSpace: "nowrap",
+                              padding: "8px 8px",
+                            }}
+                          >
+                            Remarks
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {activeContracts.map((contract, index) => {
+                          const formatDate = (dateValue) => {
+                            if (!dateValue) return "-";
+                            try {
+                              const date = new Date(dateValue);
+                              return isNaN(date.getTime())
+                                ? "-"
+                                : date.toLocaleDateString("en-GB", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                  });
+                            } catch {
+                              return "-";
+                            }
+                          };
+
+                          const formatNumber = (value) => {
+                            if (value === null || value === undefined || value === "") return "-";
+                            return typeof value === "number"
+                              ? value.toLocaleString()
+                              : String(value);
+                          };
+
+                          return (
+                            <TableRow
+                              key={contract.Id || contract.id || index}
+                              sx={{
+                                "&:hover": { backgroundColor: "#f9f9f9" },
+                              }}
+                            >
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.Id || contract.id || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  fontWeight: "medium",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.ContractNo || contract.contractNo || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.CmdName || contract.cmdName || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.BaseName || contract.baseName || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.ClassName || contract.className || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.TenantNo || contract.tenantNo || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.BusinessName || contract.businessName || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.NatureOfBusiness || contract.natureOfBusiness || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  whiteSpace: "nowrap",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatDate(
+                                  contract.ContractStartDate || contract.contractStartDate
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  whiteSpace: "nowrap",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatDate(contract.ContractEndDate || contract.contractEndDate)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  whiteSpace: "nowrap",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatDate(
+                                  contract.CommercialOperationDate ||
+                                    contract.commercialOperationDate
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.GroupArea || contract.groupArea)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.GroupRate || contract.groupRate)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.VaArea || contract.vaArea)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  fontWeight: "medium",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.RentalValue || contract.rentalValue)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.RentalValueRate || contract.rentalValueRate)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.GovtShare || contract.govtShare)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.PAFShare || contract.pafShare)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.InitialRentPM || contract.initialRentPM)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.InitialRentPA || contract.initialRentPA)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(
+                                  contract.PaymentTermMonths || contract.paymentTermMonths
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(contract.SDRateMonths || contract.sdRateMonths)}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(
+                                  contract.SecurityDepositAmount || contract.securityDepositAmount
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(
+                                  contract.IncreaseRatePercent || contract.increaseRatePercent
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  textAlign: "right",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {formatNumber(
+                                  contract.IncreaseIntervalMonths || contract.increaseIntervalMonths
+                                )}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.Term || contract.term || "-"}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                <StatusBadge value={contract.Status || contract.status} />
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontSize: "0.875rem",
+                                  padding: "6px 8px",
+                                }}
+                              >
+                                {contract.Remarks || contract.remarks || "-"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </MDBox>
+              </Card>
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={() => {
+              setContractsDialogOpen(false);
+              setActiveContracts([]);
+              setCurrentViewingGroupId("");
+            }}
+          >
+            <Icon>close</Icon>&nbsp;Close
           </MDButton>
         </DialogActions>
       </Dialog>

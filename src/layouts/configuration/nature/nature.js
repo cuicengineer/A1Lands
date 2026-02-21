@@ -28,8 +28,11 @@ import DataTable from "examples/Tables/DataTable";
 
 import api from "services/api.service";
 import StatusBadge from "components/StatusBadge";
+import { useMaterialUIController } from "context";
 
 function NatureConfig() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const statusOptions = [
     { value: 1, label: "Active" },
     { value: 0, label: "Not Active" },
@@ -188,17 +191,46 @@ function NatureConfig() {
       required={mandatory}
       error={Boolean(newErrors[field])}
       helperText={newErrors[field]}
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
   const renderStatusSelect = (value, mandatory = false) => (
     <FormControl size="small" fullWidth required={mandatory} error={Boolean(newErrors.status)}>
-      <InputLabel id="nature-status-label">Status</InputLabel>
+      <InputLabel id="nature-status-label" sx={darkMode ? { color: "#000000 !important" } : {}}>
+        Status
+      </InputLabel>
       <Select
         labelId="nature-status-label"
         value={value}
         label="Status"
         onChange={(e) => handleChange("status", e.target.value)}
+        sx={
+          darkMode
+            ? {
+                "& .MuiSelect-select": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}
+        }
       >
         {statusOptions.map((opt) => (
           <MenuItem key={opt.value} value={opt.value}>
@@ -206,7 +238,11 @@ function NatureConfig() {
           </MenuItem>
         ))}
       </Select>
-      {newErrors.status && <FormHelperText>{newErrors.status}</FormHelperText>}
+      {newErrors.status && (
+        <FormHelperText sx={darkMode ? { color: "#000000 !important" } : {}}>
+          {newErrors.status}
+        </FormHelperText>
+      )}
     </FormControl>
   );
 

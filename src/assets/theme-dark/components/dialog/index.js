@@ -25,10 +25,14 @@ const dialog = {
     paper: {
       borderRadius: borderRadius.lg,
       boxShadow: xxl,
+      backgroundColor: "#ffffff", // White background for dialogs in dark mode
+      color: "#000000", // Black text for dialogs in dark mode
     },
 
     paperFullScreen: {
       borderRadius: 0,
+      backgroundColor: "#ffffff", // White background for fullscreen dialogs
+      color: "#000000", // Black text for fullscreen dialogs
     },
   },
 };

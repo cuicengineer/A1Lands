@@ -35,6 +35,7 @@ function GovtShareRateForm({
   commands,
   bases,
   onUploadSuccess,
+  existingRecords = [],
 }) {
   const [form, setForm] = useState({
     applicableDate: "",
@@ -71,18 +72,32 @@ function GovtShareRateForm({
 
   useEffect(() => {
     if (initialData) {
+      // Use PascalCase first (strict API response format), then fallback to camelCase for normalized data
+      const applicableDateRaw =
+        initialData.ApplicableDate ||
+        initialData.applicableDate ||
+        initialData.ApplicationDate ||
+        initialData.applicationDate ||
+        "";
+      const applicableDate = applicableDateRaw
+        ? typeof applicableDateRaw === "string"
+          ? applicableDateRaw.split("T")[0]
+          : String(applicableDateRaw).split("T")[0]
+        : "";
+
       setForm({
-        applicableDate: initialData.applicableDate
-          ? initialData.applicableDate.split("T")[0]
-          : initialData.applicationDate
-          ? initialData.applicationDate.split("T")[0]
-          : "",
-        cmdId: initialData.cmdId || "",
-        baseId: initialData.baseId || "",
-        classId: initialData.classId || "",
-        rate: initialData.rate || "",
-        description: initialData.description || "",
-        status: initialData.status !== undefined ? initialData.status : true,
+        applicableDate: applicableDate,
+        cmdId: initialData.CmdId || initialData.cmdId || "",
+        baseId: initialData.BaseId || initialData.baseId || "",
+        classId: initialData.ClassId || initialData.classId || "",
+        rate: initialData.Rate || initialData.rate || "",
+        description: initialData.Description || initialData.description || "",
+        status:
+          initialData.Status !== undefined
+            ? initialData.Status
+            : initialData.status !== undefined
+            ? initialData.status
+            : true,
       });
     } else {
       setForm({
@@ -222,6 +237,40 @@ function GovtShareRateForm({
       newErrors.description = "Description must not exceed 250 characters";
     }
 
+    // Check for duplicate date (same applicableDate, cmdId, baseId, classId combination)
+    if (form.applicableDate && form.cmdId && form.baseId && form.classId) {
+      const currentRecordId = initialData?.Id || initialData?.id || null;
+      const duplicate = existingRecords.find((record) => {
+        const recordId = record.Id || record.id;
+        // Skip the current record if editing
+        if (currentRecordId && Number(recordId) === Number(currentRecordId)) {
+          return false;
+        }
+
+        // Use PascalCase (strict API response format)
+        const recordDate = record.ApplicableDate || record.applicableDate || "";
+        const recordCmdId = record.CmdId || record.cmdId;
+        const recordBaseId = record.BaseId || record.baseId;
+        const recordClassId = record.ClassId || record.classId;
+
+        // Compare dates (normalize to date string without time)
+        const formDateStr = form.applicableDate.split("T")[0];
+        const recordDateStr = recordDate ? String(recordDate).split("T")[0] : "";
+
+        return (
+          recordDateStr === formDateStr &&
+          Number(recordCmdId) === Number(form.cmdId) &&
+          Number(recordBaseId) === Number(form.baseId) &&
+          Number(recordClassId) === Number(form.classId)
+        );
+      });
+
+      if (duplicate) {
+        newErrors.applicableDate =
+          "A record with the same date, command, base, and class already exists";
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -241,26 +290,39 @@ function GovtShareRateForm({
       type: 2, // Static value, not displayed to user
     };
 
-    const result = await onSubmit(payload);
+    try {
+      const result = await onSubmit(payload);
 
-    // Get the record ID (either from existing or newly created)
-    const recordId = initialData?.id || result?.id;
+      // Get the record ID (either from existing or newly created)
+      const recordId = initialData?.Id || initialData?.id || result?.id;
 
-    // If files are selected, upload them
-    if (recordId && selectedFiles.length > 0) {
-      setIsUploading(true);
-      try {
-        await uploadApi.uploadFiles(recordId, "GovtShareRates", selectedFiles);
-        if (onUploadSuccess) {
-          onUploadSuccess();
+      // If files are selected, upload them
+      if (recordId && selectedFiles.length > 0) {
+        setIsUploading(true);
+        try {
+          await uploadApi.uploadFiles(recordId, "GovtShareRates", selectedFiles);
+          if (onUploadSuccess) {
+            onUploadSuccess();
+          }
+          setSelectedFiles([]);
+        } catch (error) {
+          console.error("Error uploading files:", error);
+          alert(`Failed to upload files: ${error.message}`);
+          return; // Don't close form if file upload fails
+        } finally {
+          setIsUploading(false);
         }
-        setSelectedFiles([]);
-      } catch (error) {
-        console.error("Error uploading files:", error);
-        alert(`Failed to upload files: ${error.message}`);
-      } finally {
-        setIsUploading(false);
       }
+
+      // Show success message and close form
+      const isEdit = Boolean(initialData);
+      alert(
+        isEdit ? "Govt Share Rate updated successfully!" : "Govt Share Rate created successfully!"
+      );
+      onClose();
+    } catch (error) {
+      console.error("Error saving govt share rate:", error);
+      alert("Failed to save govt share rate. Please try again.");
     }
   };
 
@@ -588,12 +650,14 @@ GovtShareRateForm.propTypes = {
   commands: PropTypes.array.isRequired,
   bases: PropTypes.array.isRequired,
   onUploadSuccess: PropTypes.func,
+  existingRecords: PropTypes.array,
 };
 
 export default function GovtShareRate() {
   const [openForm, setOpenForm] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(null);
   const [tableRows, setTableRows] = useState([]);
+  const [allRecords, setAllRecords] = useState([]); // All records for duplicate checking
   const [classes, setClasses] = useState([]);
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
@@ -648,6 +712,17 @@ export default function GovtShareRate() {
 
       setTableRows(Array.isArray(data) ? data : []);
       setTotalCount(Number(pagination?.totalCount || 0));
+
+      // Also fetch all records for duplicate checking
+      try {
+        const allResponse = await govtShareRateApi.getAll(1, 10000);
+        const allData = allResponse?.data ?? (Array.isArray(allResponse) ? allResponse : []);
+        setAllRecords(Array.isArray(allData) ? allData : []);
+      } catch (error) {
+        console.error("Error fetching all govt share rates for duplicate check:", error);
+        // Fallback to current page data
+        setAllRecords(Array.isArray(data) ? data : []);
+      }
     } catch (error) {
       console.error("Error fetching govt share rates:", error);
     } finally {
@@ -700,20 +775,54 @@ export default function GovtShareRate() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditRecord = (id) => {
-    const record = tableRows.find((row) => row.id === id);
+    // Handle both camelCase and PascalCase for id lookup
+    const record = tableRows.find(
+      (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
+    );
+    if (!record) {
+      console.error("Record not found for id:", id);
+      return;
+    }
+    // Use PascalCase first (strict API response format), then fallback to camelCase
+    const applicableDateRaw =
+      record.ApplicableDate ??
+      record.applicableDate ??
+      record.ApplicationDate ??
+      record.applicationDate ??
+      null;
+    const cmdId = record.CmdId ?? record.cmdId ?? "";
+    const baseId = record.BaseId ?? record.baseId ?? "";
+    const classId = record.ClassId ?? record.classId ?? "";
+    const rate = record.Rate ?? record.rate ?? "";
+    const description = record.Description ?? record.description ?? "";
+    const status = record.Status ?? record.status ?? true;
+
     setCurrentRecord({
       ...record,
-      applicableDate: record.applicableDate
-        ? record.applicableDate.split("T")[0]
-        : record.applicationDate
-        ? record.applicationDate.split("T")[0]
+      Id: record.Id ?? record.id,
+      id: record.Id ?? record.id,
+      ApplicableDate: applicableDateRaw
+        ? typeof applicableDateRaw === "string"
+          ? applicableDateRaw.split("T")[0]
+          : String(applicableDateRaw).split("T")[0]
         : "",
-      cmdId: record.cmdId || "",
-      baseId: record.baseId || "",
-      classId: record.classId || "",
-      rate: record.rate || "",
-      description: record.description || "",
-      status: record.status !== undefined ? record.status : true,
+      applicableDate: applicableDateRaw
+        ? typeof applicableDateRaw === "string"
+          ? applicableDateRaw.split("T")[0]
+          : String(applicableDateRaw).split("T")[0]
+        : "",
+      CmdId: cmdId || "",
+      cmdId: cmdId || "",
+      BaseId: baseId || "",
+      baseId: baseId || "",
+      ClassId: classId || "",
+      classId: classId || "",
+      Rate: rate || "",
+      rate: rate || "",
+      Description: description || "",
+      description: description || "",
+      Status: status !== undefined ? Boolean(status) : true,
+      status: status !== undefined ? Boolean(status) : true,
     });
     setOpenForm(true);
   };
@@ -794,19 +903,26 @@ export default function GovtShareRate() {
   const handleSubmit = async (data) => {
     try {
       let savedRecord;
-      if (currentRecord && currentRecord.id) {
-        savedRecord = await govtShareRateApi.update(currentRecord.id, data);
+      const isEdit = currentRecord && (currentRecord.Id || currentRecord.id);
+
+      if (isEdit) {
+        const recordId = currentRecord.Id || currentRecord.id;
+        savedRecord = await govtShareRateApi.update(recordId, data);
       } else {
         savedRecord = await govtShareRateApi.create(data);
       }
 
       // If new record was created and has files, upload them
-      if (!currentRecord?.id && savedRecord?.id) {
-        // Get the ID from the response
+      if (!isEdit) {
+        // Get the ID from the response (use PascalCase)
         const newId =
+          savedRecord?.Id ||
           savedRecord?.id ||
+          savedRecord?.data?.Id ||
           savedRecord?.data?.id ||
-          (Array.isArray(savedRecord?.data) ? savedRecord?.data[0]?.id : null);
+          (Array.isArray(savedRecord?.data)
+            ? savedRecord?.data[0]?.Id || savedRecord?.data[0]?.id
+            : null);
         if (newId) {
           // Files will be uploaded in the form's handleSave after onSubmit
           // We need to pass the new ID back to the form
@@ -814,11 +930,13 @@ export default function GovtShareRate() {
         }
       }
 
-      fetchGovtShareRates(pageNumber, pageSize);
-      handleCloseForm();
+      // Refresh the table and close form (success message shown in handleSave)
+      await fetchGovtShareRates(pageNumber, pageSize);
+      // Note: Form will close itself after showing success message in handleSave
+      return savedRecord;
     } catch (error) {
       console.error("Error saving govt share rate:", error);
-      alert("Failed to save govt share rate. Please try again.");
+      throw error; // Re-throw so handleSave can show error
     }
   };
 
@@ -857,7 +975,8 @@ export default function GovtShareRate() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const index = tableRows.findIndex((r) => r.id === row.original.id);
+        const rowId = row.original.id ?? row.original.Id;
+        const index = tableRows.findIndex((r) => (r.id ?? r.Id) === rowId);
         return (pageNumber - 1) * pageSize + index + 1;
       },
     },
@@ -867,8 +986,13 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        // Support both field names for backward compatibility
-        const dateValue = value || row.original.applicationDate;
+        // Use PascalCase (strict API response format)
+        const dateValue =
+          value ||
+          row.original?.ApplicableDate ||
+          row.original?.applicableDate ||
+          row.original?.ApplicationDate ||
+          row.original?.applicationDate;
         return formatDateDDMMYYYY(dateValue);
       },
     },
@@ -878,7 +1002,8 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const cmdId = row.original.cmdId;
+        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
+        if (!cmdId) return value || "-";
         const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
         return cmdItem ? cmdItem.name : value || "-";
       },
@@ -889,7 +1014,8 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const baseId = row.original.baseId;
+        const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
+        if (!baseId) return value || "-";
         const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
         return baseItem ? baseItem.name : value || "-";
       },
@@ -900,7 +1026,8 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const classId = row.original.classId;
+        const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
+        if (!classId) return value || "-";
         const classItem = classes.find((c) => Number(c.id) === Number(classId));
         return classItem ? classItem.name : value || "-";
       },
@@ -923,20 +1050,57 @@ export default function GovtShareRate() {
   ];
 
   const computedRows = tableRows.map((row) => {
-    const classItem = classes.find((c) => Number(c.id) === Number(row.classId));
-    const cmdItem = commands.find((c) => Number(c.id) === Number(row.cmdId));
-    const baseItem = bases.find((b) => Number(b.id) === Number(row.baseId));
+    // Normalize id and foreign keys (handle both camelCase and PascalCase)
+    const normalizedId = row?.id ?? row?.Id;
+    const classId = row.classId ?? row.ClassId;
+    const cmdId = row.cmdId ?? row.CmdId;
+    const baseId = row.baseId ?? row.BaseId;
+
+    const classItem = classes.find((c) => Number(c.id) === Number(classId));
+    const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
+    const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
+
+    const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
+    const countValue =
+      row?.attachmentCount ??
+      row?.attachmentsCount ??
+      row?.filesCount ??
+      row?.AttachmentCount ??
+      row?.AttachmentsCount ??
+      row?.FilesCount;
+    const hasAttachmentByCount = Number(countValue || 0) > 0;
+    const hasAttachmentData =
+      rawIsAttachment === true ||
+      rawIsAttachment === 1 ||
+      rawIsAttachment === "1" ||
+      String(rawIsAttachment || "")
+        .trim()
+        .toLowerCase() === "true" ||
+      hasAttachmentByCount;
 
     return {
       ...row,
-      cmdName: cmdItem?.name || row.cmdName || row.cmdname || "",
-      baseName: baseItem?.name || row.baseName || row.basename || "",
-      className: classItem?.name || row.className || row.classname || "",
+      id: normalizedId,
+      cmdId: cmdId,
+      baseId: baseId,
+      classId: classId,
+      cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
+      baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
+      className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
+      applicableDate:
+        row.ApplicableDate ??
+        row.applicableDate ??
+        row.ApplicationDate ??
+        row.applicationDate ??
+        "",
+      rate: row.rate ?? row.Rate ?? 0,
+      description: row.description ?? row.Description ?? "",
+      status: row.status ?? row.Status ?? true,
       attachments: (
         <IconButton
           size="small"
-          color="info"
-          onClick={() => handleOpenAttachments(row.id)}
+          color={hasAttachmentData ? "success" : "error"}
+          onClick={() => handleOpenAttachments(normalizedId)}
           title="View Attachments"
           sx={{ padding: "1px" }}
         >
@@ -957,7 +1121,7 @@ export default function GovtShareRate() {
           <IconButton
             size="small"
             color="info"
-            onClick={() => handleEditRecord(row.id)}
+            onClick={() => handleEditRecord(normalizedId)}
             title="Edit"
             sx={{ padding: "1px" }}
           >
@@ -966,7 +1130,7 @@ export default function GovtShareRate() {
           <IconButton
             size="small"
             color="error"
-            onClick={() => handleDeleteRecord(row.id)}
+            onClick={() => handleDeleteRecord(normalizedId)}
             title="Delete"
             sx={{ padding: "1px" }}
           >
@@ -1079,6 +1243,7 @@ export default function GovtShareRate() {
         classes={classes}
         commands={commands}
         bases={bases}
+        existingRecords={allRecords}
         onUploadSuccess={() => {
           fetchGovtShareRates(pageNumber, pageSize);
         }}

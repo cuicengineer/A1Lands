@@ -14,21 +14,20 @@ Coded by www.creative-tim.com
 */
 
 // Material Dashboard 2 React Base Styles
-import colors from "assets/theme/base/colors";
 import typography from "assets/theme/base/typography";
 
-const { text, info } = colors;
 const { size } = typography;
+const LABEL_COLOR = "#000000";
 
 const inputLabel = {
   styleOverrides: {
     root: {
       fontSize: size.sm,
-      color: text.main,
+      color: LABEL_COLOR,
       lineHeight: 0.9,
 
       "&.Mui-focused": {
-        color: info.main,
+        color: LABEL_COLOR,
       },
 
       "&.MuiInputLabel-shrink": {

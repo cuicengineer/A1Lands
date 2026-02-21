@@ -25,6 +25,12 @@ function AddUserForm({
   errors,
   setErrors,
 }) {
+  const LEVEL_OPTIONS = [
+    { id: 1, label: "AHQ" },
+    { id: 2, label: "Command" },
+    { id: 3, label: "Base" },
+  ];
+
   const [showPassword, setShowPassword] = useState(false);
 
   const PASSWORD_POLICY_TEXT =
@@ -44,15 +50,46 @@ function AddUserForm({
     }
   }, [open]);
 
+  const isAhqCommand = (cmdId) => {
+    const command = (commandOptions || []).find((c) => Number(c.id) === Number(cmdId));
+    const name = String(command?.name || "")
+      .trim()
+      .toLowerCase();
+    return name === "ahq";
+  };
+
+  const getAutoLevelId = (cmdId, baseId) => {
+    if (isAhqCommand(cmdId)) return 1;
+    if (baseId === "" || baseId === null || baseId === undefined) return 2;
+    return 3;
+  };
+
   const handleChange = (field, value) => {
     const nextValue =
-      field === "status" || field === "cmdId" || field === "baseId" ? Number(value) : value;
+      field === "status" || field === "cmdId"
+        ? Number(value)
+        : field === "baseId"
+        ? value === "" || value === null || value === undefined
+          ? ""
+          : Number(value)
+        : value;
 
     setNewRowDraft((draft) => {
       const updatedDraft = { ...draft, [field]: nextValue };
       if (field === "cmdId") {
-        const filteredBases = baseOptions.filter((base) => base.cmdId === nextValue);
-        updatedDraft.baseId = filteredBases.length > 0 ? filteredBases[0].id : "";
+        const ahqSelected = isAhqCommand(nextValue);
+        if (ahqSelected) {
+          updatedDraft.baseId = null;
+          updatedDraft.unitId = null;
+          updatedDraft.levelId = 1;
+        } else {
+          // Base is optional for non-AHQ in Add New User.
+          updatedDraft.baseId = "";
+          updatedDraft.levelId = 2;
+        }
+      }
+      if (field === "baseId") {
+        updatedDraft.levelId = getAutoLevelId(updatedDraft.cmdId, nextValue);
       }
       return updatedDraft;
     });
@@ -82,7 +119,11 @@ function AddUserForm({
       setErrors((prev) => ({ ...prev, category: msg }));
     }
     if (field === "unitId") {
-      const msg = nextValue && String(nextValue).trim() ? null : "Unit ID is required";
+      const msg = isAhqCommand(newRowDraft?.cmdId)
+        ? null
+        : nextValue && String(nextValue).trim()
+        ? null
+        : "Unit ID is required";
       setErrors((prev) => ({ ...prev, unitId: msg }));
     }
     if (field === "cmdId") {
@@ -93,11 +134,8 @@ function AddUserForm({
       setErrors((prev) => ({ ...prev, cmdId: msg }));
     }
     if (field === "baseId") {
-      const msg =
-        nextValue !== "" && nextValue !== null && nextValue !== undefined
-          ? null
-          : "Base is required";
-      setErrors((prev) => ({ ...prev, baseId: msg }));
+      // Base is optional for non-AHQ, so no validation error is needed.
+      setErrors((prev) => ({ ...prev, baseId: null, levelId: null }));
     }
     if (field === "status") {
       const msg =
@@ -242,7 +280,7 @@ function AddUserForm({
         onChange={(e) => handleChange(field, e.target.value)}
         size="small"
         fullWidth
-        required
+        required={false}
         error={Boolean(errors[field])}
         helperText={errors[field]}
         sx={{
@@ -256,6 +294,7 @@ function AddUserForm({
           },
         }}
       >
+        <MenuItem value="">None</MenuItem>
         {filteredBases.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
             {opt.name}
@@ -264,6 +303,18 @@ function AddUserForm({
       </MDInput>
     );
   };
+
+  const renderLevelReadOnly = (value) => (
+    <MDInput
+      value={value || ""}
+      size="small"
+      fullWidth
+      InputProps={{ readOnly: true }}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+      }}
+    />
+  );
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -317,17 +368,35 @@ function AddUserForm({
             </MDTypography>
             {renderCommandSelect("cmdId", newRowDraft?.cmdId)}
           </MDBox>
+          {!isAhqCommand(newRowDraft?.cmdId) && (
+            <MDBox>
+              <MDTypography variant="caption" fontWeight="bold">
+                Base
+              </MDTypography>
+              {renderBaseSelect("baseId", newRowDraft?.baseId, newRowDraft?.cmdId)}
+            </MDBox>
+          )}
+          {!isAhqCommand(newRowDraft?.cmdId) && (
+            <MDBox>
+              <MDTypography variant="caption" fontWeight="bold">
+                Unit ID
+              </MDTypography>
+              {renderInput("unitId", newRowDraft?.unitId, true)}
+            </MDBox>
+          )}
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
-              Base
+              Level ID
             </MDTypography>
-            {renderBaseSelect("baseId", newRowDraft?.baseId, newRowDraft?.cmdId)}
-          </MDBox>
-          <MDBox>
-            <MDTypography variant="caption" fontWeight="bold">
-              Unit ID
-            </MDTypography>
-            {renderInput("unitId", newRowDraft?.unitId, true)}
+            {renderLevelReadOnly(
+              (() => {
+                const levelId = Number(
+                  newRowDraft?.levelId || getAutoLevelId(newRowDraft?.cmdId, newRowDraft?.baseId)
+                );
+                const levelLabel = LEVEL_OPTIONS.find((opt) => opt.id === levelId)?.label || "";
+                return levelLabel ? `${levelId} - ${levelLabel}` : `${levelId || ""}`;
+              })()
+            )}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">

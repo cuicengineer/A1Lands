@@ -31,7 +31,26 @@ const dialogContent = {
     root: {
       padding: pxToRem(16),
       fontSize: size.md,
-      color: rgba(white.main, 0.8),
+      color: "#000000", // Black text for better readability in dialogs
+      backgroundColor: "#ffffff", // White background for dialogs
+      "& .MuiInputLabel-root": {
+        color: "#000000 !important", // Black labels
+      },
+      "& .MuiInputBase-input": {
+        color: "#000000 !important", // Black input text
+      },
+      "& .MuiSelect-select": {
+        color: "#000000 !important", // Black select text
+      },
+      "& .MuiTypography-root": {
+        color: "#000000 !important", // Black typography
+      },
+      "& .MuiFormLabel-root": {
+        color: "#000000 !important", // Black form labels
+      },
+      "& .MuiFormHelperText-root": {
+        color: "#000000 !important", // Black helper text
+      },
     },
 
     dividers: {

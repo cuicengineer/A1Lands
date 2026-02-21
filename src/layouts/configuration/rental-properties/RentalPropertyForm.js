@@ -163,9 +163,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
         location: initialData.location || "",
         remarks: initialData.remarks || "",
         status:
-          initialData.status === true ||
-          initialData.status === 1 ||
-          initialData.status === "1",
+          initialData.status === true || initialData.status === 1 || initialData.status === "1",
       };
       console.log(
         "New form with propertyType:",

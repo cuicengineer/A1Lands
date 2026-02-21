@@ -61,6 +61,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
 
   const [openCollapse, setOpenCollapse] = useState(null);
   const [openUserMenu, setOpenUserMenu] = useState(null);
+  const [loggedInUser, setLoggedInUser] = useState({ username: "User", category: "N/A" });
 
   let textColor = "white";
 
@@ -103,6 +104,24 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     navigate("/");
   };
 
+  const readLoggedInUser = () => {
+    try {
+      const raw = localStorage.getItem("auth");
+      if (!raw) return { username: "User", category: "N/A" };
+      const obj = JSON.parse(raw);
+      const username = String(
+        obj?.username || obj?.Username || obj?.userName || obj?.unique_name || ""
+      ).trim();
+      const category = String(obj?.category || obj?.Category || "").trim();
+      return {
+        username: username || "User",
+        category: category || "N/A",
+      };
+    } catch (e) {
+      return { username: "User", category: "N/A" };
+    }
+  };
+
   useEffect(() => {
     function handleMiniSidenav() {
       if (!hasUserManuallyToggledSidenav) {
@@ -123,6 +142,20 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
 
     return () => window.removeEventListener("resize", handleMiniSidenav);
   }, [dispatch, location, transparentSidenav, whiteSidenav, hasUserManuallyToggledSidenav]);
+
+  useEffect(() => {
+    setLoggedInUser(readLoggedInUser());
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (!event || event.key === "auth") {
+        setLoggedInUser(readLoggedInUser());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
@@ -338,9 +371,14 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               onClick={handleOpenUserMenu}
             />
             {!miniSidenav && (
-              <MDTypography variant="button" fontWeight="medium" color={textColor}>
-                Admin User
-              </MDTypography>
+              <MDBox display="flex" flexDirection="column" lineHeight={1.2}>
+                <MDTypography variant="button" fontWeight="medium" color={textColor}>
+                  {loggedInUser.username}
+                </MDTypography>
+                <MDTypography variant="caption" fontWeight="regular" color={textColor}>
+                  {loggedInUser.category}
+                </MDTypography>
+              </MDBox>
             )}
           </MDBox>
 

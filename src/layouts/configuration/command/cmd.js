@@ -154,6 +154,21 @@ function Command() {
       required={editingRowId === "__new__" && field === "name"}
       error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
       helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
@@ -164,6 +179,18 @@ function Command() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>

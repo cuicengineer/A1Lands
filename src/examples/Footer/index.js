@@ -57,15 +57,10 @@ function Footer({ company, links }) {
         alignItems="center"
         flexWrap="wrap"
         color="text"
-        fontSize={size.sm}
-        px={1.5}
+        fontSize={size.xs}
+        px={0.01}
       >
-        Powered By
-        <Link href={href} target="_blank">
-          <MDTypography variant="button" fontWeight="medium">
-            &nbsp;{name}&nbsp;
-          </MDTypography>
-        </Link>
+        Powered By No 1 SDU
       </MDBox>
       <MDBox
         component="ul"

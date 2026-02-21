@@ -29,8 +29,11 @@ import DataTable from "examples/Tables/DataTable";
 import api from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
+import { useMaterialUIController } from "context";
 
 function BanksList() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const statusOptions = [
     { value: true, label: "Active" },
     { value: false, label: "Inactive" },
@@ -234,17 +237,46 @@ function BanksList() {
       helperText={newErrors[field]}
       multiline={field === "address"}
       rows={field === "address" ? 2 : 1}
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
   const renderStatusSelect = (value, mandatory = false) => (
     <FormControl size="small" fullWidth required={mandatory} error={Boolean(newErrors.status)}>
-      <InputLabel id="bank-status-label">Status</InputLabel>
+      <InputLabel id="bank-status-label" sx={darkMode ? { color: "#000000 !important" } : {}}>
+        Status
+      </InputLabel>
       <Select
         labelId="bank-status-label"
         value={value}
         label="Status"
         onChange={(e) => handleChange("status", e.target.value)}
+        sx={
+          darkMode
+            ? {
+                "& .MuiSelect-select": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}
+        }
       >
         {statusOptions.map((opt) => (
           <MenuItem key={String(opt.value)} value={opt.value}>
@@ -252,7 +284,11 @@ function BanksList() {
           </MenuItem>
         ))}
       </Select>
-      {newErrors.status && <FormHelperText>{newErrors.status}</FormHelperText>}
+      {newErrors.status && (
+        <FormHelperText sx={darkMode ? { color: "#000000 !important" } : {}}>
+          {newErrors.status}
+        </FormHelperText>
+      )}
     </FormControl>
   );
 

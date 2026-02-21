@@ -16,8 +16,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import api from "../../../services/api.service";
+import { useMaterialUIController } from "context";
 
 function ClassConfig() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
   const [errors, setErrors] = useState({});
 
@@ -46,7 +49,7 @@ function ClassConfig() {
       id: 0,
       code: "",
       name: "",
-      desc: "",
+      description: "",
       status: 0,
     });
     setErrors({});
@@ -63,11 +66,8 @@ function ClassConfig() {
   const handleChange = (field, value) => {
     let nextValue = field === "status" ? Number(value) : value;
 
-    // Limit code to 2 characters
     if (field === "code") {
-      nextValue = String(value || "")
-        .slice(0, 2)
-        .toUpperCase();
+      nextValue = String(value || "").toUpperCase();
     }
 
     if (editingRowId === "__new__") {
@@ -75,10 +75,6 @@ function ClassConfig() {
       if (field === "name") {
         const msg = nextValue && String(nextValue).trim() ? null : "Name is required";
         setErrors((prev) => ({ ...prev, name: msg }));
-      } else if (field === "code") {
-        const codeStr = String(nextValue || "").trim();
-        const msg = codeStr.length === 2 ? null : "Code must be exactly 2 characters";
-        setErrors((prev) => ({ ...prev, code: msg }));
       }
     } else if (editingRowId) {
       setEditDraft((draft) => ({ ...draft, [field]: nextValue }));
@@ -89,10 +85,6 @@ function ClassConfig() {
     const errs = {};
     if (!newRowDraft?.name || !newRowDraft.name.trim()) {
       errs.name = "Name is required";
-    }
-    const codeStr = String(newRowDraft?.code || "").trim();
-    if (!codeStr || codeStr.length !== 2) {
-      errs.code = "Code must be exactly 2 characters";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -108,7 +100,7 @@ function ClassConfig() {
             .trim()
             .toUpperCase(),
           name: newRowDraft.name,
-          desc: newRowDraft.desc,
+          description: newRowDraft.description,
           status:
             typeof newRowDraft.status === "string"
               ? Number(newRowDraft.status)
@@ -125,7 +117,7 @@ function ClassConfig() {
             .trim()
             .toUpperCase(),
           name: editDraft.name,
-          desc: editDraft.desc,
+          description: editDraft.description,
           status:
             typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
         };
@@ -165,7 +157,7 @@ function ClassConfig() {
     { Header: "Id", accessor: "id", align: "left", width: "6%" },
     { Header: "Code", accessor: "code", align: "left", width: "8%" },
     { Header: "Class Name", accessor: "name", align: "left", width: "18%" },
-    { Header: "Description", accessor: "desc", align: "left", width: "26%" },
+    { Header: "Description", accessor: "description", align: "left", width: "26%" },
     { Header: "Status", accessor: "status", align: "center", width: "10%" },
   ];
 
@@ -200,8 +192,23 @@ function ClassConfig() {
       error={editingRowId === "__new__" && Boolean(errors?.[field])}
       helperText={editingRowId === "__new__" ? errors?.[field] : undefined}
       {...(field === "code" && {
-        inputProps: { maxLength: 2, style: { textTransform: "uppercase" } },
+        inputProps: { maxLength: 10, style: { textTransform: "uppercase" } },
       })}
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
@@ -212,6 +219,18 @@ function ClassConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Inactive</MenuItem>
@@ -226,7 +245,7 @@ function ClassConfig() {
         id: newRowDraft.id,
         code: renderInput("code", newRowDraft.code),
         name: renderInput("name", newRowDraft.name),
-        desc: renderInput("desc", newRowDraft.desc),
+        description: renderInput("description", newRowDraft.description),
         status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
@@ -270,8 +289,8 @@ function ClassConfig() {
             {row.name}
           </MDBox>
         ),
-        desc: isEditing ? (
-          renderInput("desc", currentRow.desc)
+        description: isEditing ? (
+          renderInput("description", currentRow.description)
         ) : (
           <MDBox
             component="span"
@@ -283,7 +302,7 @@ function ClassConfig() {
               maxWidth: "100%",
             }}
           >
-            {row.desc}
+            {row.description}
           </MDBox>
         ),
         status: isEditing

@@ -13,8 +13,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import api from "../../../services/api.service";
+import { useMaterialUIController } from "context";
 
 function UserRole() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
 
   const [editingRowId, setEditingRowId] = useState(null);
@@ -188,6 +191,21 @@ function UserRole() {
           ? errors?.description
           : undefined
       }
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
@@ -209,7 +227,18 @@ function UserRole() {
           alignItems: "center",
           paddingTop: 0,
           paddingBottom: 0,
+          ...(darkMode ? { color: "#000000 !important" } : {}),
         },
+        ...(darkMode
+          ? {
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
       }}
     >
       <MenuItem value={1}>Active</MenuItem>

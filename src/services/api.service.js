@@ -5,6 +5,24 @@ if (!RAW_API_BASE) {
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+const LAST_ACTIVITY_KEY = "lastActivityAt";
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+
+function getLastActivityTs() {
+  try {
+    const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
+    const ts = Number(raw);
+    return Number.isFinite(ts) ? ts : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function isUserInactive() {
+  const lastTs = getLastActivityTs();
+  if (!lastTs) return false;
+  return Date.now() - lastTs >= INACTIVITY_TIMEOUT_MS;
+}
 
 function tryParseJwtPayload(token) {
   try {
@@ -70,6 +88,12 @@ function redirectToLogin(reason) {
   console.warn(
     "Auth refresh failed. Common causes: refresh cookie not stored/sent (check SameSite/Secure), or frontend not running on HTTPS while cookie is Secure."
   );
+  // Keep user on screen while actively working; App.js enforces 5-min idle logout.
+  if (!isUserInactive()) {
+    console.warn("Skipping forced logout because user is still active.", reason || "");
+    return;
+  }
+
   clearStoredAuth();
   try {
     if (typeof window !== "undefined" && window.location) {

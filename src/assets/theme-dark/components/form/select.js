@@ -24,9 +24,11 @@ const { transparent } = colors;
 const select = {
   styleOverrides: {
     select: {
-      display: "grid",
+      minHeight: pxToRem(45),
+      boxSizing: "border-box",
+      display: "flex",
       alignItems: "center",
-      padding: `0 ${pxToRem(12)} !important`,
+      padding: `${pxToRem(12)} ${pxToRem(32)} ${pxToRem(12)} ${pxToRem(12)} !important`,
 
       "& .Mui-selected": {
         backgroundColor: transparent.main,

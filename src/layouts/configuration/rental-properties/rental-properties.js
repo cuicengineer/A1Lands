@@ -27,6 +27,8 @@ import RentalPropertyForm from "./RentalPropertyForm";
 import rentalPropertiesApi from "services/api.rentalproperties.service";
 import uploadApi from "services/api.upload.service";
 import api from "services/api.service";
+import contractApi from "services/api.contract.service";
+import propertyGroupingApi from "services/api.propertygrouping.service";
 
 const StatusBadge = ({ value }) => (
   <MDBadge
@@ -109,32 +111,55 @@ function RentalProperties() {
   const [attachmentLoadingId, setAttachmentLoadingId] = useState(null);
   const [currentViewingRecord, setCurrentViewingRecord] = useState(null);
 
+  // Active Contracts and Groups dialogs
+  const [activeContractsDialogOpen, setActiveContractsDialogOpen] = useState(false);
+  const [activeGroupsDialogOpen, setActiveGroupsDialogOpen] = useState(false);
+  const [activeContracts, setActiveContracts] = useState([]);
+  const [activeGroups, setActiveGroups] = useState([]);
+  const [loadingActiveData, setLoadingActiveData] = useState(false);
+  const [currentPropertyId, setCurrentPropertyId] = useState(null);
+
   const handleAddProperty = () => {
     setCurrentProperty(null);
     setFormOpen(true);
   };
 
   const handleEditProperty = (id) => {
-    const property = tableRows.find((row) => row.id === id);
-    console.log("Editing property:", property);
-    console.log(
-      "Property propertyType:",
-      property.propertyType,
-      "Type:",
-      typeof property.propertyType
+    // Handle both camelCase and PascalCase for id lookup
+    const property = tableRows.find(
+      (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
     );
+    if (!property) {
+      console.error("Property not found for id:", id);
+      return;
+    }
+    console.log("Editing property:", property);
+    // Handle both camelCase and PascalCase for all fields
+    const propertyId = property.id ?? property.Id;
+    const cmdId = property.cmdId ?? property.CmdId ?? null;
+    const baseId = property.baseId ?? property.BaseId ?? null;
+    const classId = property.classId ?? property.ClassId ?? null;
+    const propertyType = property.propertyType ?? property.PropertyType ?? null;
+    const pId = property.pId ?? property.PId ?? property.pid ?? "";
+    const uoM = property.uoM ?? property.UoM ?? property.uom ?? "";
+    const area = property.area ?? property.Area ?? "";
+    const location = property.location ?? property.Location ?? "";
+    const remarks = property.remarks ?? property.Remarks ?? "";
+    const status = property.status ?? property.Status ?? true;
+
+    console.log("Property propertyType:", propertyType, "Type:", typeof propertyType);
     setCurrentProperty({
-      id: property.id,
-      cmdId: property.cmdId,
-      baseId: property.baseId,
-      classId: property.classId,
-      propertyType: property.propertyType ? Number(property.propertyType) : "",
-      pId: property.pId,
-      uoM: property.uoM,
-      area: property.area,
-      location: property.location,
-      remarks: property.remarks,
-      status: property.status === true || property.status === 1 || property.status === "1",
+      id: propertyId,
+      cmdId: cmdId,
+      baseId: baseId,
+      classId: classId,
+      propertyType: propertyType ? Number(propertyType) : "",
+      pId: pId,
+      uoM: uoM,
+      area: area,
+      location: location,
+      remarks: remarks,
+      status: status === true || status === 1 || status === "1",
     });
     setFormOpen(true);
   };
@@ -321,6 +346,147 @@ function RentalProperties() {
     fetchRentalProperties(pageNumber, pageSize);
   };
 
+  // Helper function to normalize property IDs from a group (same logic as property-grouping)
+  const normalizePropertyIdsFromGroup = (group) => {
+    if (!group) return [];
+
+    // API returns PropertyGroupLinkings (PascalCase)
+    const fromLinkings = group.PropertyGroupLinkings;
+    if (Array.isArray(fromLinkings) && fromLinkings.length) {
+      const ids = fromLinkings
+        .map((x) => {
+          if (x === null || x === undefined) return null;
+          if (typeof x === "number" || typeof x === "string") return Number(x);
+          // API returns PropertyId, PropId, or Id (PascalCase)
+          const candidate = x.PropertyId || x.PropId || x.Id;
+          return candidate ? Number(candidate) : null;
+        })
+        .filter((n) => n !== null && Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    // Check for property array/string (API may return Property)
+    const raw = group.Property;
+    if (Array.isArray(raw)) {
+      const ids = raw.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    if (typeof raw === "string") {
+      const ids = raw
+        .split(",")
+        .map((s) => Number(String(s).trim()))
+        .filter((n) => Number.isFinite(n));
+      return Array.from(new Set(ids));
+    }
+
+    return [];
+  };
+
+  // Fetch active contracts for a property
+
+  // Fetch active groups for a property
+  const handleViewActiveGroups = async (propertyId) => {
+    setCurrentPropertyId(propertyId);
+    setLoadingActiveData(true);
+    setActiveGroups([]);
+
+    try {
+      // Fetch all property groups (fetch all pages)
+      let allGroups = [];
+      let currentPage = 1;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await propertyGroupingApi.list(currentPage, pageSize);
+        const groups = response?.pagination
+          ? response.data || []
+          : Array.isArray(response)
+          ? response
+          : [];
+
+        allGroups = allGroups.concat(groups);
+
+        if (response?.pagination) {
+          const totalPages = Math.ceil(response.pagination.totalCount / pageSize);
+          hasMore = currentPage < totalPages;
+          currentPage += 1;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      // Filter groups that contain this property and are active
+      // First, try using PropertyGroupLinkings from the list response
+      let groupsWithProperty = allGroups.filter((group) => {
+        const isActive = group.Status === true || group.Status === 1;
+        const isNotDeleted = group.IsDeleted === false || group.IsDeleted === 0;
+        if (!isActive || !isNotDeleted) return false;
+
+        // Use normalized property IDs to check if property is in the group
+        const propertyIds = normalizePropertyIdsFromGroup(group);
+        return (
+          propertyIds.length > 0 && propertyIds.some((id) => Number(id) === Number(propertyId))
+        );
+      });
+
+      // If no groups found and PropertyGroupLinkings might not be populated,
+      // fetch linked properties for each active group
+      if (groupsWithProperty.length === 0) {
+        const activeGroups = allGroups.filter((group) => {
+          const isActive = group.Status === true || group.Status === 1;
+          const isNotDeleted = group.IsDeleted === false || group.IsDeleted === 0;
+          return isActive && isNotDeleted;
+        });
+
+        // Check each active group by fetching its linked properties
+        const groupsWithPropertyPromises = activeGroups.map(async (group) => {
+          try {
+            const groupId = group.Id || group.id;
+            if (!groupId) return null;
+
+            const linkedPropsResponse = await propertyGroupingApi.getByGroup(groupId, 1, 1000);
+            const linkedProps = linkedPropsResponse?.pagination
+              ? linkedPropsResponse.data || []
+              : Array.isArray(linkedPropsResponse)
+              ? linkedPropsResponse
+              : [];
+
+            // Check if property is in linked properties
+            const hasProperty = linkedProps.some((linking) => {
+              const linkingPropId =
+                linking.PropertyId ||
+                linking.PropId ||
+                (typeof linking === "number" ? linking : null);
+              return linkingPropId && Number(linkingPropId) === Number(propertyId);
+            });
+
+            return hasProperty ? group : null;
+          } catch (error) {
+            console.error(
+              `Error fetching linked properties for group ${group.Id || group.id}:`,
+              error
+            );
+            return null;
+          }
+        });
+
+        const resolvedGroups = await Promise.all(groupsWithPropertyPromises);
+        groupsWithProperty = resolvedGroups.filter((g) => g !== null);
+      }
+
+      setActiveGroups(groupsWithProperty);
+      setActiveGroupsDialogOpen(true);
+    } catch (error) {
+      console.error("Error fetching active groups:", error);
+      alert("Failed to load active groups.");
+      setActiveGroups([]);
+    } finally {
+      setLoadingActiveData(false);
+    }
+  };
+
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "10%" },
     { Header: "Is Active", accessor: "status", align: "center", width: "8%", Cell: StatusBadge },
@@ -335,11 +501,47 @@ function RentalProperties() {
       width: "12%",
       Cell: ({ value }) => value || "-",
     },
-    { Header: "Property ID", accessor: "pId", align: "left", width: "8%" },
-    { Header: "UoM", accessor: "uoM", align: "left", width: "7%" },
-    { Header: "Area", accessor: "area", align: "right", width: "7%" },
+    {
+      Header: "Property ID",
+      accessor: "pId",
+      align: "left",
+      width: "8%",
+      Cell: ({ value, row }) => {
+        const rowData = row?.original || {};
+        return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
+      },
+    },
+    {
+      Header: "UoM",
+      accessor: "uoM",
+      align: "left",
+      width: "7%",
+      Cell: ({ value, row }) => {
+        const rowData = row?.original || {};
+        return value ?? rowData?.uoM ?? rowData?.UoM ?? rowData?.uom ?? "-";
+      },
+    },
+    {
+      Header: "Area",
+      accessor: "area",
+      align: "right",
+      width: "7%",
+      Cell: ({ value, row }) => {
+        const rowData = row?.original || {};
+        const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
+        return areaValue ? Number(areaValue).toLocaleString() : "-";
+      },
+    },
     { Header: "Location", accessor: "location", align: "left", width: "20%" },
-    { Header: "Remarks", accessor: "remarks", align: "left" },
+    {
+      Header: "Remarks",
+      accessor: "remarks",
+      align: "left",
+      Cell: ({ value, row }) => {
+        const rowData = row?.original || {};
+        return value ?? rowData?.remarks ?? rowData?.Remarks ?? "-";
+      },
+    },
     {
       Header: "Attachments",
       accessor: "attachments",
@@ -348,11 +550,28 @@ function RentalProperties() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const hasAttachments = row?.original?.id;
+        const rowData = row?.original || {};
+        const hasAttachments = rowData?.id;
+        const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
+        const countValue =
+          rowData?.attachmentCount ??
+          rowData?.attachmentsCount ??
+          rowData?.filesCount ??
+          rowData?.AttachmentCount ??
+          rowData?.AttachmentsCount ??
+          rowData?.FilesCount;
+        const hasAttachmentData =
+          rawIsAttachment === true ||
+          rawIsAttachment === 1 ||
+          rawIsAttachment === "1" ||
+          String(rawIsAttachment || "")
+            .trim()
+            .toLowerCase() === "true" ||
+          Number(countValue || 0) > 0;
         return hasAttachments ? (
           <IconButton
             size="small"
-            color="primary"
+            color={hasAttachmentData ? "success" : "error"}
             // eslint-disable-next-line react/prop-types
             onClick={() => handleViewAttachments(row.original)}
             // eslint-disable-next-line react/prop-types
@@ -366,27 +585,73 @@ function RentalProperties() {
         );
       },
     },
+    {
+      Header: "Active Groups",
+      accessor: "activeGroups",
+      align: "center",
+      width: "10%",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        const propertyId = rowData?.id ?? rowData?.Id;
+        return propertyId ? (
+          <IconButton
+            size="small"
+            color="warning"
+            onClick={() => handleViewActiveGroups(propertyId)}
+            disabled={loadingActiveData}
+            title="View active property groupings using this property"
+          >
+            <Icon>group</Icon>
+          </IconButton>
+        ) : (
+          <span>-</span>
+        );
+      },
+    },
   ];
 
   const computedRows = useMemo(
     () =>
       tableRows.map((row) => {
-        // Find property type name by id
-        const propertyTypeId = row.propertyType || row.propertytype;
+        // Normalize id (handle both camelCase and PascalCase)
+        const normalizedId = row?.id ?? row?.Id;
+        // Find property type name by id (handle both camelCase and PascalCase)
+        const propertyTypeId = row.propertyType ?? row.PropertyType ?? row.propertytype;
         const propertyTypeObj = propertyTypes.find(
           (pt) => Number(pt.id) === Number(propertyTypeId)
         );
         const propertyTypeName =
-          propertyTypeObj?.name || row.propertyTypeName || row.propertytypename || "";
+          propertyTypeObj?.name ||
+          row.propertyTypeName ||
+          row.PropertyTypeName ||
+          row.propertytypename ||
+          "";
 
         return {
           ...row,
-          // Show backend names; fallback to IDs if backend doesn't send names
-          cmdName: row.cmdName || row.cmdname || row.commandName || row.cmdId || "",
-          baseName: row.baseName || row.basename || row.baseId || "",
-          className: row.className || row.classname || row.classId || "",
+          id: normalizedId,
+          status: row.status ?? row.Status ?? true,
+          // Normalize property fields (handle both camelCase and PascalCase)
+          pId: row.pId ?? row.PId ?? row.pid ?? "",
+          uoM: row.uoM ?? row.UoM ?? row.uom ?? "",
+          area: row.area ?? row.Area ?? "",
+          remarks: row.remarks ?? row.Remarks ?? "",
+          // Show backend names; fallback to IDs if backend doesn't send names (handle both camelCase and PascalCase)
+          cmdName:
+            row.cmdName ??
+            row.CmdName ??
+            row.cmdname ??
+            row.commandName ??
+            row.cmdId ??
+            row.CmdId ??
+            "",
+          baseName: row.baseName ?? row.BaseName ?? row.basename ?? row.baseId ?? row.BaseId ?? "",
+          className:
+            row.className ?? row.ClassName ?? row.classname ?? row.classId ?? row.ClassId ?? "",
           propertyTypeName: propertyTypeName,
-          // Location with multiline display and proper wrapping
+          // Location with multiline display and proper wrapping (handle both camelCase and PascalCase)
           location: (
             <MDBox
               component="span"
@@ -399,7 +664,7 @@ function RentalProperties() {
                 lineHeight: 1.5,
               }}
             >
-              {row.location || ""}
+              {row.location ?? row.Location ?? ""}
             </MDBox>
           ),
           actions: (
@@ -416,7 +681,7 @@ function RentalProperties() {
               <IconButton
                 size="small"
                 color="info"
-                onClick={() => handleEditProperty(row.id)}
+                onClick={() => handleEditProperty(normalizedId)}
                 title="Edit"
                 sx={{ padding: "1px" }}
               >
@@ -425,7 +690,7 @@ function RentalProperties() {
               <IconButton
                 size="small"
                 color="error"
-                onClick={() => handleDeleteProperty(row.id)}
+                onClick={() => handleDeleteProperty(normalizedId)}
                 title="Delete"
                 sx={{ padding: "1px" }}
               >
@@ -715,6 +980,93 @@ function RentalProperties() {
           </MDButton>
           <MDButton onClick={handleConfirmDelete} color="error">
             Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      {/* Active Groups Dialog */}
+      <Dialog
+        open={activeGroupsDialogOpen}
+        onClose={() => {
+          setActiveGroupsDialogOpen(false);
+          setActiveGroups([]);
+          setCurrentPropertyId(null);
+        }}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="medium">
+            Active Property Groupings for Property ID: {currentPropertyId}
+          </MDTypography>
+          <MDTypography variant="body2" color="secondary" sx={{ mt: 1 }}>
+            Total Active Groups: {activeGroups.length}
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent>
+          {loadingActiveData ? (
+            <MDBox display="flex" justifyContent="center" p={3}>
+              <CurrencyLoading size={50} />
+            </MDBox>
+          ) : activeGroups.length === 0 ? (
+            <MDTypography variant="body1" color="text" sx={{ p: 2 }}>
+              No active property groupings found for this property.
+            </MDTypography>
+          ) : (
+            <List>
+              {activeGroups.map((group, index) => {
+                const groupId = group.GId || group.gId || "N/A";
+                const cmdName = group.CmdName || group.cmdName || "N/A";
+                const baseName = group.BaseName || group.baseName || "N/A";
+                const className = group.ClassName || group.className || "N/A";
+                const location = group.Location || group.location || "N/A";
+
+                return (
+                  <MDBox key={group.Id || group.id || index}>
+                    <ListItem>
+                      <ListItemText
+                        primary={
+                          <MDTypography variant="h6" fontWeight="medium">
+                            Group ID: {groupId}
+                          </MDTypography>
+                        }
+                        secondary={
+                          <MDBox>
+                            <MDTypography variant="body2" color="text">
+                              Command: {cmdName} | Base: {baseName} | Class: {className}
+                            </MDTypography>
+                            <MDTypography variant="body2" color="text">
+                              Location: {location}
+                            </MDTypography>
+                            <MDTypography
+                              variant="caption"
+                              color="warning"
+                              sx={{ mt: 0.5, display: "block" }}
+                            >
+                              Note: Make this group inactive before modifying this property.
+                            </MDTypography>
+                          </MDBox>
+                        }
+                      />
+                    </ListItem>
+                    {index < activeGroups.length - 1 && <Divider />}
+                  </MDBox>
+                );
+              })}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={() => {
+              setActiveGroupsDialogOpen(false);
+              setActiveGroups([]);
+              setCurrentPropertyId(null);
+            }}
+          >
+            Close
           </MDButton>
         </DialogActions>
       </Dialog>

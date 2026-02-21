@@ -12,7 +12,6 @@ async function requestWithPagination(method, path, body) {
   const totalCount = res.headers.get("X-Total-Count");
   const pageNumber = res.headers.get("X-Page-Number");
   const pageSize = res.headers.get("X-Page-Size");
-
   if (totalCount !== null || pageNumber !== null || pageSize !== null) {
     return {
       data: Array.isArray(data) ? data : [data],
@@ -76,6 +75,14 @@ function getByGroup(id, pageNumber = 1, pageSize = 100) {
   return requestWithPagination("GET", `/api/PropertyGroup/ByGroup/${id}?${qs}`);
 }
 
+function notGroupedProperties(cmdId, baseId) {
+  const params = new URLSearchParams({
+    cmdId: String(cmdId),
+    baseId: String(baseId),
+  }).toString();
+  return requestWithPagination("GET", `/api/PropertyGroup/NotGroupedProperties?${params}`);
+}
+
 function removePropertyFromGroup(linkingId) {
   const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
   return requestWithPagination("DELETE", `/api/PropertyGroup/Linking/${linkingId}`, payload);
@@ -100,6 +107,7 @@ const propertyGroupingApi = {
   update,
   remove,
   getByGroup,
+  notGroupedProperties,
   removePropertyFromGroup,
   createPropertyGroupLinking,
 };

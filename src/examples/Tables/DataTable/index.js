@@ -51,6 +51,9 @@ import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
 import MDPagination from "components/MDPagination";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 // Material Dashboard 2 React example components
 import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
@@ -134,6 +137,8 @@ function displayValueFromToken(token, column) {
 }
 
 function ColumnValueFilter({ column }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [anchorEl, setAnchorEl] = useState(null);
   const [searchText, setSearchText] = useState("");
   const open = Boolean(anchorEl);
@@ -205,7 +210,7 @@ function ColumnValueFilter({ column }) {
             // Reduce filter icon size (~50%) for all grid columns
             fontSize: "12px",
             padding: "1px",
-            color: hasActiveFilter ? "#1A73E8" : "#111111",
+            color: hasActiveFilter ? "#1A73E8" : darkMode ? "#ffffff" : "#111111",
           }}
         >
           <Icon fontSize="inherit">filter_alt</Icon>
@@ -215,7 +220,26 @@ function ColumnValueFilter({ column }) {
         anchorEl={anchorEl}
         open={open}
         onClose={handleClose}
-        PaperProps={{ sx: { width: 260, maxHeight: 360 } }}
+        PaperProps={{
+          sx: {
+            width: 260,
+            maxHeight: 360,
+            ...(darkMode
+              ? {
+                  backgroundColor: "#202940 !important",
+                  "& .MuiMenuItem-root": {
+                    color: "#ffffff !important",
+                  },
+                  "& .MuiTypography-root": {
+                    color: "#ffffff !important",
+                  },
+                  "& .MuiDivider-root": {
+                    borderColor: "rgba(255, 255, 255, 0.12) !important",
+                  },
+                }
+              : {}),
+          },
+        }}
         MenuListProps={{
           dense: true,
           onClick: (e) => e.stopPropagation(),
@@ -228,6 +252,31 @@ function ColumnValueFilter({ column }) {
             fullWidth
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
+            sx={
+              darkMode
+                ? {
+                    "& .MuiInputBase-input": {
+                      color: "#ffffff !important",
+                      "&::placeholder": {
+                        color: "#ffffff !important",
+                        opacity: 0.7,
+                      },
+                    },
+                    "& .MuiInputLabel-root": {
+                      color: "#ffffff !important",
+                    },
+                    "& .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.3) !important",
+                    },
+                    "&:hover .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.5) !important",
+                    },
+                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.7) !important",
+                    },
+                  }
+                : {}
+            }
           />
         </MDBox>
         <Divider />
@@ -244,7 +293,13 @@ function ColumnValueFilter({ column }) {
           }}
         >
           <Checkbox size="small" checked={allSelected} indeterminate={someSelected} />
-          <MDTypography variant="button" sx={{ fontSize: "0.85rem" }}>
+          <MDTypography
+            variant="button"
+            sx={{
+              fontSize: "0.85rem",
+              ...(darkMode ? { color: "#ffffff !important" } : {}),
+            }}
+          >
             (Select All)
           </MDTypography>
         </MenuItem>
@@ -259,7 +314,13 @@ function ColumnValueFilter({ column }) {
             }}
           >
             <Checkbox size="small" checked={selected.includes(token)} />
-            <MDTypography variant="button" sx={{ fontSize: "0.85rem" }}>
+            <MDTypography
+              variant="button"
+              sx={{
+                fontSize: "0.85rem",
+                ...(darkMode ? { color: "#ffffff !important" } : {}),
+              }}
+            >
               {displayValueFromToken(token, column)}
             </MDTypography>
           </MenuItem>
@@ -285,7 +346,13 @@ function DataTable({
   onPageChange,
   onEntriesPerPageChange,
   exportFileName,
+  exportCellFormatter,
+  exportExcludeGroupParentsWhenExpanded,
+  exportAllColumns,
+  initialHiddenColumns,
 }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 10;
   const entries = entriesPerPage.entries
     ? entriesPerPage.entries.map((el) => el.toString())
@@ -369,7 +436,11 @@ function DataTable({
     {
       columns,
       data,
-      initialState: { pageIndex: currentPageIndex, pageSize: currentPageSize },
+      initialState: {
+        pageIndex: currentPageIndex,
+        pageSize: currentPageSize,
+        hiddenColumns: Array.isArray(initialHiddenColumns) ? initialHiddenColumns : [],
+      },
       defaultColumn,
       filterTypes,
       state: isControlled
@@ -476,11 +547,23 @@ function DataTable({
 
   const exportToExcel = async () => {
     try {
-      const currentHidden = Array.isArray(hiddenColumns) ? hiddenColumns : [];
-      const visibleCols = selectableColumns.filter((c) => !currentHidden.includes(c.id));
+      // If exportAllColumns is true, export all columns regardless of visibility
+      // Otherwise, only export visible columns
+      const colsToExport = exportAllColumns
+        ? selectableColumns
+        : (() => {
+            const currentHidden = Array.isArray(hiddenColumns) ? hiddenColumns : [];
+            return selectableColumns.filter((c) => !currentHidden.includes(c.id));
+          })();
 
       // Export filtered/sorted rows (not just current page)
-      const exportRows = (rows || []).slice();
+      let exportRows = (rows || []).slice();
+      if (exportExcludeGroupParentsWhenExpanded) {
+        const hasExpandedRows = exportRows.some((r) => Boolean(r?.original?.isExpandedRow));
+        if (hasExpandedRows) {
+          exportRows = exportRows.filter((r) => !Boolean(r?.original?.isGroupRow));
+        }
+      }
 
       const dataForSheet = exportRows.map((r) => {
         // Ensure row values are computed
@@ -491,14 +574,23 @@ function DataTable({
         }
 
         const obj = {};
-        visibleCols.forEach((c) => {
+        colsToExport.forEach((c) => {
           const headerLabel =
             typeof c.Header === "string"
               ? c.Header === "Actions"
                 ? "Action"
                 : c.Header
               : String(c.id || "");
-          obj[headerLabel] = extractText(r.values?.[c.id]);
+          const rawValue = extractText(r.values?.[c.id]);
+          obj[headerLabel] =
+            typeof exportCellFormatter === "function"
+              ? exportCellFormatter({
+                  value: rawValue,
+                  column: c,
+                  headerLabel,
+                  row: r?.original || null,
+                })
+              : rawValue;
         });
         return obj;
       });
@@ -717,10 +809,35 @@ function DataTable({
                   setEntriesPerPage(parseInt(newValue, 10));
                 }}
                 size="small"
-                sx={{ width: "5rem" }}
+                sx={{
+                  width: "5rem",
+                  ...(darkMode
+                    ? {
+                        "& .MuiInputBase-input": {
+                          color: "#ffffff !important",
+                        },
+                        "& .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.3) !important",
+                        },
+                        "&:hover .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.5) !important",
+                        },
+                        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.7) !important",
+                        },
+                        "& .MuiSvgIcon-root": {
+                          color: "#ffffff !important",
+                        },
+                      }
+                    : {}),
+                }}
                 renderInput={(params) => <MDInput {...params} />}
               />
-              <MDTypography variant="caption" color="secondary">
+              <MDTypography
+                variant="caption"
+                color="secondary"
+                sx={darkMode ? { color: "#ffffff !important" } : {}}
+              >
                 &nbsp;&nbsp;entries per page
               </MDTypography>
             </MDBox>
@@ -737,6 +854,31 @@ function DataTable({
                   setSearch(currentTarget.value);
                   onSearchChange(currentTarget.value);
                 }}
+                sx={
+                  darkMode
+                    ? {
+                        "& .MuiInputBase-input": {
+                          color: "#ffffff !important",
+                          "&::placeholder": {
+                            color: "#ffffff !important",
+                            opacity: 0.7,
+                          },
+                        },
+                        "& .MuiInputLabel-root": {
+                          color: "#ffffff !important",
+                        },
+                        "& .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.3) !important",
+                        },
+                        "&:hover .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.5) !important",
+                        },
+                        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                          borderColor: "rgba(255, 255, 255, 0.7) !important",
+                        },
+                      }
+                    : {}
+                }
               />
             </MDBox>
 
@@ -748,18 +890,52 @@ function DataTable({
                   e.preventDefault();
                   setColumnsAnchorEl(e.currentTarget);
                 }}
-                sx={{ border: "1px solid #d0d0d0", borderRadius: "6px" }}
+                sx={{
+                  border: "1px solid #d0d0d0",
+                  borderRadius: "6px",
+                  ...(darkMode
+                    ? {
+                        borderColor: "rgba(255, 255, 255, 0.3) !important",
+                        "& .MuiSvgIcon-root": {
+                          color: "#ffffff !important",
+                        },
+                        "&:hover": {
+                          borderColor: "rgba(255, 255, 255, 0.5) !important",
+                          backgroundColor: "rgba(255, 255, 255, 0.1) !important",
+                        },
+                      }
+                    : {}),
+                }}
               >
-                <Icon fontSize="small">view_column</Icon>
+                <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
+                  view_column
+                </Icon>
               </IconButton>
             </Tooltip>
             <Tooltip title="Export to Excel">
               <IconButton
                 size="small"
                 onClick={exportToExcel}
-                sx={{ border: "1px solid #d0d0d0", borderRadius: "6px" }}
+                sx={{
+                  border: "1px solid #d0d0d0",
+                  borderRadius: "6px",
+                  ...(darkMode
+                    ? {
+                        borderColor: "rgba(255, 255, 255, 0.3) !important",
+                        "& .MuiSvgIcon-root": {
+                          color: "#ffffff !important",
+                        },
+                        "&:hover": {
+                          borderColor: "rgba(255, 255, 255, 0.5) !important",
+                          backgroundColor: "rgba(255, 255, 255, 0.1) !important",
+                        },
+                      }
+                    : {}),
+                }}
               >
-                <Icon fontSize="small">file_download</Icon>
+                <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
+                  file_download
+                </Icon>
               </IconButton>
             </Tooltip>
 
@@ -804,7 +980,26 @@ function DataTable({
           setColumnsAnchorEl(null);
           setColumnsSearch("");
         }}
-        PaperProps={{ sx: { width: 260, maxHeight: 360 } }}
+        PaperProps={{
+          sx: {
+            width: 260,
+            maxHeight: 360,
+            ...(darkMode
+              ? {
+                  backgroundColor: "#202940 !important",
+                  "& .MuiMenuItem-root": {
+                    color: "#ffffff !important",
+                  },
+                  "& .MuiTypography-root": {
+                    color: "#ffffff !important",
+                  },
+                  "& .MuiDivider-root": {
+                    borderColor: "rgba(255, 255, 255, 0.12) !important",
+                  },
+                }
+              : {}),
+          },
+        }}
         MenuListProps={{
           dense: true,
           onClick: (e) => e.stopPropagation(),
@@ -817,6 +1012,31 @@ function DataTable({
             fullWidth
             value={columnsSearch}
             onChange={(e) => setColumnsSearch(e.target.value)}
+            sx={
+              darkMode
+                ? {
+                    "& .MuiInputBase-input": {
+                      color: "#ffffff !important",
+                      "&::placeholder": {
+                        color: "#ffffff !important",
+                        opacity: 0.7,
+                      },
+                    },
+                    "& .MuiInputLabel-root": {
+                      color: "#ffffff !important",
+                    },
+                    "& .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.3) !important",
+                    },
+                    "&:hover .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.5) !important",
+                    },
+                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(255, 255, 255, 0.7) !important",
+                    },
+                  }
+                : {}
+            }
           />
         </MDBox>
         <Divider />
@@ -832,7 +1052,13 @@ function DataTable({
             checked={(hiddenColumns || []).length === 0}
             indeterminate={false}
           />
-          <MDTypography variant="button" sx={{ fontSize: "0.85rem" }}>
+          <MDTypography
+            variant="button"
+            sx={{
+              fontSize: "0.85rem",
+              ...(darkMode ? { color: "#ffffff !important" } : {}),
+            }}
+          >
             (Show All)
           </MDTypography>
         </MenuItem>
@@ -856,7 +1082,13 @@ function DataTable({
               }}
             >
               <Checkbox size="small" checked={checked} />
-              <MDTypography variant="button" sx={{ fontSize: "0.85rem" }}>
+              <MDTypography
+                variant="button"
+                sx={{
+                  fontSize: "0.85rem",
+                  ...(darkMode ? { color: "#ffffff !important" } : {}),
+                }}
+              >
                 {label}
               </MDTypography>
             </MenuItem>
@@ -996,6 +1228,10 @@ DataTable.propTypes = {
   onPageChange: PropTypes.func,
   onEntriesPerPageChange: PropTypes.func,
   exportFileName: PropTypes.string,
+  exportCellFormatter: PropTypes.func,
+  exportExcludeGroupParentsWhenExpanded: PropTypes.bool,
+  exportAllColumns: PropTypes.bool,
+  initialHiddenColumns: PropTypes.arrayOf(PropTypes.string),
 };
 
 export default DataTable;

@@ -696,20 +696,42 @@ export default function RentalValueRate() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditRecord = (id) => {
-    const record = tableRows.find((row) => row.id === id);
+    // Handle both camelCase and PascalCase for id lookup
+    const record = tableRows.find(
+      (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
+    );
+    if (!record) {
+      console.error("Record not found for id:", id);
+      return;
+    }
+    // Handle both camelCase and PascalCase for all fields
+    const applicableDate = record.applicableDate ?? record.ApplicableDate ?? null;
+    const applicationDate = record.applicationDate ?? record.ApplicationDate ?? null;
+    const cmdId = record.cmdId ?? record.CmdId ?? "";
+    const baseId = record.baseId ?? record.BaseId ?? "";
+    const classId = record.classId ?? record.ClassId ?? "";
+    const rate = record.rate ?? record.Rate ?? "";
+    const description = record.description ?? record.Description ?? "";
+    const status = record.status ?? record.Status ?? true;
+
     setCurrentRecord({
       ...record,
-      applicableDate: record.applicableDate
-        ? record.applicableDate.split("T")[0]
-        : record.applicationDate
-        ? record.applicationDate.split("T")[0]
+      id: record.id ?? record.Id,
+      applicableDate: applicableDate
+        ? typeof applicableDate === "string"
+          ? applicableDate.split("T")[0]
+          : applicableDate
+        : applicationDate
+        ? typeof applicationDate === "string"
+          ? applicationDate.split("T")[0]
+          : applicationDate
         : "",
-      cmdId: record.cmdId || "",
-      baseId: record.baseId || "",
-      classId: record.classId || "",
-      rate: record.rate || "",
-      description: record.description || "",
-      status: record.status !== undefined ? record.status : true,
+      cmdId: cmdId || "",
+      baseId: baseId || "",
+      classId: classId || "",
+      rate: rate || "",
+      description: description || "",
+      status: status !== undefined ? Boolean(status) : true,
     });
     setOpenForm(true);
   };
@@ -837,7 +859,8 @@ export default function RentalValueRate() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const index = tableRows.findIndex((r) => r.id === row.original.id);
+        const rowId = row.original.id ?? row.original.Id;
+        const index = tableRows.findIndex((r) => (r.id ?? r.Id) === rowId);
         return (pageNumber - 1) * pageSize + index + 1;
       },
     },
@@ -858,7 +881,8 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const cmdId = row.original.cmdId;
+        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
+        if (!cmdId) return value || "-";
         const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
         return cmdItem ? cmdItem.name : value || "-";
       },
@@ -869,7 +893,8 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const baseId = row.original.baseId;
+        const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
+        if (!baseId) return value || "-";
         const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
         return baseItem ? baseItem.name : value || "-";
       },
@@ -880,7 +905,8 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const classId = row.original.classId;
+        const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
+        if (!classId) return value || "-";
         const classItem = classes.find((c) => Number(c.id) === Number(classId));
         return classItem ? classItem.name : value || "-";
       },
@@ -903,20 +929,51 @@ export default function RentalValueRate() {
   ];
 
   const computedRows = tableRows.map((row) => {
-    const classItem = classes.find((c) => Number(c.id) === Number(row.classId));
-    const cmdItem = commands.find((c) => Number(c.id) === Number(row.cmdId));
-    const baseItem = bases.find((b) => Number(b.id) === Number(row.baseId));
+    // Normalize id and foreign keys (handle both camelCase and PascalCase)
+    const normalizedId = row?.id ?? row?.Id;
+    const classId = row.classId ?? row.ClassId;
+    const cmdId = row.cmdId ?? row.CmdId;
+    const baseId = row.baseId ?? row.BaseId;
+
+    const classItem = classes.find((c) => Number(c.id) === Number(classId));
+    const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
+    const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
+
+    const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
+    const countValue =
+      row?.attachmentCount ??
+      row?.attachmentsCount ??
+      row?.filesCount ??
+      row?.AttachmentCount ??
+      row?.AttachmentsCount ??
+      row?.FilesCount;
+    const hasAttachmentByCount = Number(countValue || 0) > 0;
+    const hasAttachmentData =
+      rawIsAttachment === true ||
+      rawIsAttachment === 1 ||
+      rawIsAttachment === "1" ||
+      String(rawIsAttachment || "")
+        .trim()
+        .toLowerCase() === "true" ||
+      hasAttachmentByCount;
 
     return {
       ...row,
-      cmdName: cmdItem?.name || row.cmdName || row.cmdname || "",
-      baseName: baseItem?.name || row.baseName || row.basename || "",
-      className: classItem?.name || row.className || row.classname || "",
+      id: normalizedId,
+      cmdId: cmdId,
+      baseId: baseId,
+      classId: classId,
+      cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
+      baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
+      className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
+      rate: row.rate ?? row.Rate ?? 0,
+      description: row.description ?? row.Description ?? "",
+      status: row.status ?? row.Status ?? true,
       attachments: (
         <IconButton
           size="small"
-          color="info"
-          onClick={() => handleOpenAttachments(row.id)}
+          color={hasAttachmentData ? "success" : "error"}
+          onClick={() => handleOpenAttachments(normalizedId)}
           title="View Attachments"
           sx={{ padding: "1px" }}
         >
@@ -937,7 +994,7 @@ export default function RentalValueRate() {
           <IconButton
             size="small"
             color="info"
-            onClick={() => handleEditRecord(row.id)}
+            onClick={() => handleEditRecord(normalizedId)}
             title="Edit"
             sx={{ padding: "1px" }}
           >
@@ -946,7 +1003,7 @@ export default function RentalValueRate() {
           <IconButton
             size="small"
             color="error"
-            onClick={() => handleDeleteRecord(row.id)}
+            onClick={() => handleDeleteRecord(normalizedId)}
             title="Delete"
             sx={{ padding: "1px" }}
           >

@@ -20,6 +20,8 @@ const dialogActions = {
   styleOverrides: {
     root: {
       padding: pxToRem(16),
+      backgroundColor: "#ffffff", // White background for dialog actions
+      color: "#000000", // Black text for dialog actions
     },
   },
 };

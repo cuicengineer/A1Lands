@@ -10,7 +10,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Icon from "@mui/material/Icon";
+import { useMaterialUIController } from "context";
+
 function DataConfig() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
@@ -119,6 +123,18 @@ function DataConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
   const computedRows = (() => {

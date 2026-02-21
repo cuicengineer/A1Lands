@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -40,9 +40,13 @@ function RevenueRatesForm({
   onSubmit,
   initialData,
   rentalProperties,
+  commandOptions,
+  baseOptions,
   onUploadSuccess,
 }) {
   const [form, setForm] = useState({
+    cmdId: "",
+    baseId: "",
     propertyId: "",
     applicableDate: "",
     rate: "",
@@ -56,7 +60,21 @@ function RevenueRatesForm({
 
   useEffect(() => {
     if (initialData) {
+      const selectedProp = (rentalProperties || []).find(
+        (p) => Number(p.id) === Number(initialData.propertyId)
+      );
+      const resolvedCmdId =
+        initialData.cmdId ?? initialData.cmdid ?? selectedProp?.cmdId ?? selectedProp?.cmdid ?? "";
+      const resolvedBaseId =
+        initialData.baseId ??
+        initialData.baseid ??
+        selectedProp?.baseId ??
+        selectedProp?.baseid ??
+        "";
+
       setForm({
+        cmdId: resolvedCmdId ? Number(resolvedCmdId) : "",
+        baseId: resolvedBaseId ? Number(resolvedBaseId) : "",
         propertyId: initialData.propertyId || "",
         applicableDate: initialData.applicableDate || "",
         rate: initialData.rate || "",
@@ -73,6 +91,8 @@ function RevenueRatesForm({
       }
     } else {
       setForm({
+        cmdId: "",
+        baseId: "",
         propertyId: "",
         applicableDate: "",
         rate: "",
@@ -82,7 +102,7 @@ function RevenueRatesForm({
       setSelectedFiles([]);
       setExistingFiles([]);
     }
-  }, [initialData, open]);
+  }, [initialData, open, rentalProperties]);
 
   const fetchExistingFiles = async (id) => {
     setLoadingExistingFiles(true);
@@ -121,11 +141,52 @@ function RevenueRatesForm({
   };
 
   const handleChange = (field, value) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: field === "rate" ? (value ? Number(value) : "") : value,
-    }));
+    setForm((prev) => {
+      const next = {
+        ...prev,
+        [field]: field === "rate" ? (value ? Number(value) : "") : value,
+      };
+
+      if (field === "cmdId") {
+        next.baseId = "";
+        next.propertyId = "";
+      } else if (field === "baseId") {
+        next.propertyId = "";
+      }
+
+      return next;
+    });
   };
+
+  const getOptionLabel = (opt) =>
+    String(
+      opt?.name ??
+        opt?.value ??
+        opt?.label ??
+        opt?.Name ??
+        opt?.Value ??
+        opt?.Label ??
+        opt?.id ??
+        ""
+    );
+
+  const filteredBaseOptions = useMemo(() => {
+    const selectedCmdId = Number(form.cmdId || 0);
+    if (!selectedCmdId) return [];
+    return (baseOptions || []).filter((b) => Number(b?.cmdId) === selectedCmdId);
+  }, [baseOptions, form.cmdId]);
+
+  const filteredRentalProperties = useMemo(() => {
+    const selectedCmdId = Number(form.cmdId || 0);
+    const selectedBaseId = Number(form.baseId || 0);
+    return (rentalProperties || []).filter((p) => {
+      const cmdId = Number(p?.cmdId ?? p?.cmdid ?? p?.commandId ?? 0);
+      const baseId = Number(p?.baseId ?? p?.baseid ?? 0);
+      if (selectedCmdId && cmdId !== selectedCmdId) return false;
+      if (selectedBaseId && baseId !== selectedBaseId) return false;
+      return true;
+    });
+  }, [rentalProperties, form.cmdId, form.baseId]);
 
   const handleFileSelect = (event) => {
     const files = Array.from(event.target.files);
@@ -220,6 +281,69 @@ function RevenueRatesForm({
       </DialogTitle>
       <DialogContent>
         <Grid container spacing={3} mt={1}>
+          {/* Command Dropdown */}
+          <Grid item xs={12} sm={6}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="cmd-label" sx={{ fontSize: "1.1rem" }}>
+                Command
+              </InputLabel>
+              <Select
+                labelId="cmd-label"
+                value={form.cmdId || ""}
+                label="Command"
+                onChange={(e) => handleChange("cmdId", e.target.value)}
+                sx={{
+                  fontSize: "1.1rem",
+                  "& .MuiSelect-select": {
+                    fontSize: "1.1rem",
+                    padding: "0 32px 0 14px",
+                    minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
+                  },
+                }}
+              >
+                {commandOptions.map((option) => (
+                  <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
+                    {getOptionLabel(option)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Base Dropdown */}
+          <Grid item xs={12} sm={6}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="base-label" sx={{ fontSize: "1.1rem" }}>
+                Base
+              </InputLabel>
+              <Select
+                labelId="base-label"
+                value={form.baseId || ""}
+                label="Base"
+                onChange={(e) => handleChange("baseId", e.target.value)}
+                disabled={!form.cmdId}
+                sx={{
+                  fontSize: "1.1rem",
+                  "& .MuiSelect-select": {
+                    fontSize: "1.1rem",
+                    padding: "0 32px 0 14px",
+                    minHeight: "45px",
+                    display: "flex",
+                    alignItems: "center",
+                  },
+                }}
+              >
+                {filteredBaseOptions.map((option) => (
+                  <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
+                    {getOptionLabel(option)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
           {/* PropertyId Dropdown */}
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
@@ -256,7 +380,7 @@ function RevenueRatesForm({
                   },
                 }}
               >
-                {rentalProperties.map((option) => (
+                {filteredRentalProperties.map((option) => (
                   <MenuItem
                     key={option.id}
                     value={option.id}
@@ -527,6 +651,8 @@ RevenueRatesForm.propTypes = {
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
   rentalProperties: PropTypes.array.isRequired,
+  commandOptions: PropTypes.array.isRequired,
+  baseOptions: PropTypes.array.isRequired,
   onUploadSuccess: PropTypes.func,
 };
 
@@ -535,6 +661,8 @@ export default function RevenueRates() {
   const [currentRevenueRate, setCurrentRevenueRate] = useState(null);
   const [tableRows, setTableRows] = useState([]);
   const [rentalProperties, setRentalProperties] = useState([]);
+  const [commandOptions, setCommandOptions] = useState([]);
+  const [baseOptions, setBaseOptions] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
@@ -577,8 +705,43 @@ export default function RevenueRates() {
     }
   };
 
+  const fetchCommands = async () => {
+    try {
+      const response = await api.list("command");
+      const arr = Array.isArray(response) ? response : [];
+      setCommandOptions(
+        arr.map((cmd) => ({
+          id: Number(cmd?.id),
+          name: String(cmd?.name ?? cmd?.value ?? cmd?.label ?? cmd?.Name ?? cmd?.Value ?? ""),
+        }))
+      );
+    } catch (error) {
+      console.error("Error fetching commands:", error);
+      setCommandOptions([]);
+    }
+  };
+
+  const fetchBases = async () => {
+    try {
+      const response = await api.list("base");
+      const arr = Array.isArray(response) ? response : [];
+      setBaseOptions(
+        arr.map((base) => ({
+          id: Number(base?.id),
+          name: String(base?.name ?? base?.value ?? base?.label ?? base?.Name ?? base?.Value ?? ""),
+          cmdId: Number(base?.cmdId ?? base?.cmd ?? base?.commandId ?? 0),
+        }))
+      );
+    } catch (error) {
+      console.error("Error fetching bases:", error);
+      setBaseOptions([]);
+    }
+  };
+
   useEffect(() => {
     fetchRentalProperties();
+    fetchCommands();
+    fetchBases();
   }, []);
 
   useEffect(() => {
@@ -593,14 +756,33 @@ export default function RevenueRates() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditRevenueRate = (id) => {
-    const revenueRate = tableRows.find((row) => row.id === id);
+    // Handle both camelCase and PascalCase for id lookup
+    const revenueRate = tableRows.find(
+      (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
+    );
+    if (!revenueRate) {
+      console.error("Revenue rate not found for id:", id);
+      return;
+    }
+    // Handle both camelCase and PascalCase for all fields
+    const propertyId = revenueRate.propertyId ?? revenueRate.PropertyId ?? null;
+    const applicableDate = revenueRate.applicableDate ?? revenueRate.ApplicableDate ?? null;
+    const rate = revenueRate.rate ?? revenueRate.Rate ?? "";
+    const attachments = revenueRate.attachments ?? revenueRate.Attachments ?? "";
+    const status = revenueRate.status ?? revenueRate.Status ?? true;
+
     setCurrentRevenueRate({
       ...revenueRate,
-      propertyId: revenueRate.propertyId,
-      applicableDate: revenueRate.applicableDate ? revenueRate.applicableDate.split("T")[0] : "",
-      rate: revenueRate.rate || "",
-      attachments: revenueRate.attachments || "",
-      status: revenueRate.status !== undefined ? revenueRate.status : true,
+      id: revenueRate.id ?? revenueRate.Id,
+      propertyId: propertyId,
+      applicableDate: applicableDate
+        ? typeof applicableDate === "string"
+          ? applicableDate.split("T")[0]
+          : applicableDate
+        : "",
+      rate: rate || "",
+      attachments: attachments || "",
+      status: status !== undefined ? Boolean(status) : true,
     });
     setOpenForm(true);
   };
@@ -780,9 +962,13 @@ export default function RevenueRates() {
       Header: "Property",
       accessor: "propertyId",
       align: "left",
-      Cell: ({ value }) => {
-        const property = rentalProperties.find((p) => Number(p.id) === Number(value));
-        return property ? property.pId : value;
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
+        const propId = value ?? row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        if (!propId) return "-";
+        const property = rentalProperties.find((p) => Number(p.id) === Number(propId));
+        return property ? property.pId ?? property.pid ?? property.PId ?? "" : String(propId);
       },
     },
     {
@@ -804,13 +990,24 @@ export default function RevenueRates() {
       Header: "Applicable Date",
       accessor: "applicableDate",
       align: "left",
-      Cell: ({ value }) => (value ? new Date(value).toLocaleDateString() : ""),
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
+        const dateValue =
+          value ?? row?.original?.applicableDate ?? row?.original?.ApplicableDate ?? null;
+        return dateValue ? new Date(dateValue).toLocaleDateString() : "";
+      },
     },
     {
       Header: "Revenue Rate",
       accessor: "rate",
       align: "left",
-      Cell: ({ value }) => (value ? Number(value).toLocaleString() : ""),
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
+        const rateValue = value ?? row?.original?.rate ?? row?.original?.Rate ?? 0;
+        return rateValue ? Number(rateValue).toLocaleString() : "";
+      },
     },
     {
       Header: "Attachments",
@@ -821,11 +1018,28 @@ export default function RevenueRates() {
         // Show view icon if record has been saved (has an id)
         // Files are uploaded separately, so we show the icon for any saved record
         // eslint-disable-next-line react/prop-types
-        const hasAttachments = row?.original?.id;
+        const rowData = row?.original || {};
+        const hasAttachments = rowData?.id;
+        const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
+        const countValue =
+          rowData?.attachmentCount ??
+          rowData?.attachmentsCount ??
+          rowData?.filesCount ??
+          rowData?.AttachmentCount ??
+          rowData?.AttachmentsCount ??
+          rowData?.FilesCount;
+        const hasAttachmentData =
+          rawIsAttachment === true ||
+          rawIsAttachment === 1 ||
+          rawIsAttachment === "1" ||
+          String(rawIsAttachment || "")
+            .trim()
+            .toLowerCase() === "true" ||
+          Number(countValue || 0) > 0;
         return hasAttachments ? (
           <IconButton
             size="small"
-            color="primary"
+            color={hasAttachmentData ? "success" : "error"}
             // eslint-disable-next-line react/prop-types
             onClick={() => handleViewAttachments(row.original)}
             // eslint-disable-next-line react/prop-types
@@ -848,33 +1062,47 @@ export default function RevenueRates() {
   ];
 
   const computedRows = tableRows.map((row) => {
-    const prop = rentalProperties.find((p) => Number(p.id) === Number(row.propertyId));
+    // Normalize id and propertyId (handle both camelCase and PascalCase)
+    const normalizedId = row?.id ?? row?.Id;
+    const propertyId = row.propertyId ?? row.PropertyId;
+    const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
 
     return {
       ...row,
+      id: normalizedId,
+      propertyId: propertyId,
+      rate: row.rate ?? row.Rate ?? 0,
+      applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
+      status: row.status ?? row.Status ?? true,
       cmdName:
-        row.cmdName ||
-        row.cmdname ||
-        prop?.cmdName ||
-        prop?.cmdname ||
-        row.cmdId ||
-        prop?.cmdId ||
+        row.cmdName ??
+        row.CmdName ??
+        row.cmdname ??
+        prop?.cmdName ??
+        prop?.cmdname ??
+        row.cmdId ??
+        row.CmdId ??
+        prop?.cmdId ??
         "",
       baseName:
-        row.baseName ||
-        row.basename ||
-        prop?.baseName ||
-        prop?.basename ||
-        row.baseId ||
-        prop?.baseId ||
+        row.baseName ??
+        row.BaseName ??
+        row.basename ??
+        prop?.baseName ??
+        prop?.basename ??
+        row.baseId ??
+        row.BaseId ??
+        prop?.baseId ??
         "",
       className:
-        row.className ||
-        row.classname ||
-        prop?.className ||
-        prop?.classname ||
-        row.classId ||
-        prop?.classId ||
+        row.className ??
+        row.ClassName ??
+        row.classname ??
+        prop?.className ??
+        prop?.classname ??
+        row.classId ??
+        row.ClassId ??
+        prop?.classId ??
         "",
       actions: (
         <MDBox
@@ -890,7 +1118,7 @@ export default function RevenueRates() {
           <IconButton
             size="small"
             color="info"
-            onClick={() => handleEditRevenueRate(row.id)}
+            onClick={() => handleEditRevenueRate(normalizedId)}
             title="Edit"
             sx={{ padding: "1px" }}
           >
@@ -899,7 +1127,7 @@ export default function RevenueRates() {
           <IconButton
             size="small"
             color="error"
-            onClick={() => handleDeleteRevenueRate(row.id)}
+            onClick={() => handleDeleteRevenueRate(normalizedId)}
             title="Delete"
             sx={{ padding: "1px" }}
           >
@@ -1076,6 +1304,8 @@ export default function RevenueRates() {
         onSubmit={handleSubmit}
         initialData={currentRevenueRate}
         rentalProperties={rentalProperties}
+        commandOptions={commandOptions}
+        baseOptions={baseOptions}
         onUploadSuccess={openSuccessSB}
       />
       <Dialog

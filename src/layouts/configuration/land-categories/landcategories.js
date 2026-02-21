@@ -11,8 +11,11 @@ import DataTable from "examples/Tables/DataTable";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import StatusBadge from "components/StatusBadge";
+import { useMaterialUIController } from "context";
 
 function LandCategories() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const statusOptions = ["Active", "Deactive"];
 
   const [tableRows, setTableRows] = useState([
@@ -84,6 +87,18 @@ function LandCategories() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
@@ -93,6 +108,18 @@ function LandCategories() {
       onChange={(e) => handleChange("status", e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     >
       {statusOptions.map((opt) => (
         <MenuItem key={opt} value={opt}>

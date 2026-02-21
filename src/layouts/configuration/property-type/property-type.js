@@ -29,8 +29,11 @@ import DataTable from "examples/Tables/DataTable";
 import api from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
+import { useMaterialUIController } from "context";
 
 function PropertyType() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const statusOptions = [
     { value: true, label: "Active" },
     { value: false, label: "Inactive" },
@@ -242,17 +245,46 @@ function PropertyType() {
       required={mandatory}
       error={Boolean(newErrors[field])}
       helperText={newErrors[field]}
+      sx={
+        darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     />
   );
 
   const renderStatusSelect = (value, mandatory = false) => (
     <FormControl size="small" fullWidth required={mandatory} error={Boolean(newErrors.status)}>
-      <InputLabel id="property-status-label">Status</InputLabel>
+      <InputLabel id="property-status-label" sx={darkMode ? { color: "#000000 !important" } : {}}>
+        Status
+      </InputLabel>
       <Select
         labelId="property-status-label"
         value={value}
         label="Status"
         onChange={(e) => handleChange("status", e.target.value)}
+        sx={
+          darkMode
+            ? {
+                "& .MuiSelect-select": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}
+        }
       >
         {statusOptions.map((opt) => (
           <MenuItem key={String(opt.value)} value={opt.value}>
@@ -260,7 +292,11 @@ function PropertyType() {
           </MenuItem>
         ))}
       </Select>
-      {newErrors.status && <FormHelperText>{newErrors.status}</FormHelperText>}
+      {newErrors.status && (
+        <FormHelperText sx={darkMode ? { color: "#000000 !important" } : {}}>
+          {newErrors.status}
+        </FormHelperText>
+      )}
     </FormControl>
   );
 

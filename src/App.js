@@ -52,6 +52,9 @@ import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "co
 // Images
 import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
 
+const LAST_ACTIVITY_KEY = "lastActivityAt";
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+
 export default function App() {
   const [controller, dispatch] = useMaterialUIController();
   const {
@@ -105,6 +108,78 @@ export default function App() {
   useEffect(() => {
     document.documentElement.scrollTop = 0;
     document.scrollingElement.scrollTop = 0;
+  }, [pathname]);
+
+  // Logout only on inactivity of 5 minutes.
+  useEffect(() => {
+    let inactivityTimer;
+    const activityEvents = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+    const getLastActivityTs = () => {
+      try {
+        const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
+        const ts = Number(raw);
+        return Number.isFinite(ts) ? ts : 0;
+      } catch (e) {
+        return 0;
+      }
+    };
+
+    const clearAuthAndLogout = () => {
+      try {
+        localStorage.removeItem("token");
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("auth");
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
+      } catch (e) {
+        // ignore
+      }
+      if (window.location.pathname !== "/") {
+        window.location.assign("/");
+      }
+    };
+
+    const resetInactivityTimer = () => {
+      if (!hasAccessToken()) return;
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        const lastTs = getLastActivityTs();
+        const isInactive = !lastTs || Date.now() - lastTs >= INACTIVITY_TIMEOUT_MS;
+        // Cross-tab safe: logout only if all tabs have been inactive.
+        if (isInactive) {
+          clearAuthAndLogout();
+        } else {
+          resetInactivityTimer();
+        }
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    const markActivity = () => {
+      if (!hasAccessToken()) return;
+      try {
+        localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+      } catch (e) {
+        // ignore
+      }
+      resetInactivityTimer();
+    };
+    const handleStorage = (event) => {
+      if (event.key === LAST_ACTIVITY_KEY && hasAccessToken()) {
+        resetInactivityTimer();
+      }
+    };
+
+    if (hasAccessToken()) {
+      markActivity();
+      activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity));
+      window.addEventListener("storage", handleStorage);
+    }
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
+      window.removeEventListener("storage", handleStorage);
+    };
   }, [pathname]);
 
   const getRoutes = (allRoutes) =>

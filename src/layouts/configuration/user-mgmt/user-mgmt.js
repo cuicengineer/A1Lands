@@ -19,8 +19,17 @@ import api from "../../../services/api.service";
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
 import StatusBadge from "components/StatusBadge";
+import { useMaterialUIController } from "context";
 
 function UserMgmt() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
+  const LEVEL_OPTIONS = [
+    { id: 1, label: "AHQ" },
+    { id: 2, label: "Command" },
+    { id: 3, label: "Base" },
+  ];
+
   const [tableRows, setTableRows] = useState([]);
   const [commandOptions, setCommandOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
@@ -35,6 +44,14 @@ function UserMgmt() {
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(5);
+
+  const isAhqCommand = (cmdId) => {
+    const command = commandOptions.find((c) => Number(c.id) === Number(cmdId));
+    const name = String(command?.name || "")
+      .trim()
+      .toLowerCase();
+    return name === "ahq";
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -79,6 +96,8 @@ function UserMgmt() {
 
   const handleAddUser = () => {
     if (editingRowId) return;
+    const defaultCmdId = commandOptions[0]?.id || "";
+    const isAhq = defaultCmdId ? isAhqCommand(defaultCmdId) : false;
     setNewRowDraft({
       id: 0,
       username: "",
@@ -87,9 +106,10 @@ function UserMgmt() {
       password: "",
       rank: "",
       category: "",
-      unitId: "",
-      baseId: baseOptions[0]?.id || "",
-      cmdId: commandOptions[0]?.id || "",
+      unitId: isAhq ? null : "",
+      baseId: isAhq ? null : "",
+      cmdId: defaultCmdId,
+      levelId: isAhq ? 1 : 2,
       status: 1,
     });
     setErrors({});
@@ -122,7 +142,7 @@ function UserMgmt() {
     return "";
   };
 
-  const validateForm = (draftToValidate, showAlert = false) => {
+  const validateForm = (draftToValidate, showAlert = false, mode = "add") => {
     const errs = {};
     const draft = draftToValidate;
     if (!draft?.username || !String(draft.username).trim()) errs.username = "Username is required";
@@ -134,10 +154,20 @@ function UserMgmt() {
     if (!draft?.category || !String(draft.category).trim()) errs.category = "Category is required";
     if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined)
       errs.cmdId = "Command is required";
-    if (draft?.baseId === "" || draft?.baseId === null || draft?.baseId === undefined)
+    const ahqSelected = isAhqCommand(draft?.cmdId);
+    if (
+      mode !== "add" &&
+      !ahqSelected &&
+      (draft?.baseId === "" || draft?.baseId === null || draft?.baseId === undefined)
+    )
       errs.baseId = "Base is required";
-    if (draft?.unitId === "" || draft?.unitId === null || draft?.unitId === undefined)
+    if (
+      !ahqSelected &&
+      (draft?.unitId === "" || draft?.unitId === null || draft?.unitId === undefined)
+    )
       errs.unitId = "Unit ID is required";
+    if (draft?.levelId === "" || draft?.levelId === null || draft?.levelId === undefined)
+      errs.levelId = "Level ID is required";
     if (draft?.status === "" || draft?.status === null || draft?.status === undefined)
       errs.status = "Status is required";
     setErrors(errs);
@@ -151,10 +181,32 @@ function UserMgmt() {
 
   const handleChange = (field, value) => {
     const nextValue =
-      field === "Status" || field === "CmdId" || field === "BaseId" ? Number(value) : value;
+      field === "Status" ||
+      field === "CmdId" ||
+      field === "BaseId" ||
+      field === "status" ||
+      field === "cmdId" ||
+      field === "baseId" ||
+      field === "levelId"
+        ? Number(value)
+        : value;
     if (editingRowId) {
       setEditDraft((draft) => {
         const updatedDraft = { ...draft, [field]: nextValue };
+        if (field === "CmdId" || field === "cmdId") {
+          if (isAhqCommand(nextValue)) {
+            updatedDraft.baseId = null;
+            updatedDraft.BaseId = null;
+            updatedDraft.unitId = null;
+            updatedDraft.levelId = 1;
+          } else {
+            const filteredBases = baseOptions.filter((base) => base.cmdId === Number(nextValue));
+            updatedDraft.baseId = filteredBases.length > 0 ? filteredBases[0].id : "";
+            if (!updatedDraft.levelId || Number(updatedDraft.levelId) === 1) {
+              updatedDraft.levelId = 2;
+            }
+          }
+        }
         if (field === "CmdId") {
           const filteredBases = baseOptions.filter((base) => base.cmdId === nextValue);
           updatedDraft.BaseId = filteredBases.length > 0 ? filteredBases[0].id : "";
@@ -165,11 +217,17 @@ function UserMgmt() {
   };
 
   const handleAddSave = async () => {
-    if (!validateForm(newRowDraft, true)) return;
+    if (!validateForm(newRowDraft, true, "add")) return;
 
     setErrors({});
 
     try {
+      const ahqSelected = isAhqCommand(newRowDraft.cmdId);
+      const hasBase =
+        newRowDraft.baseId !== "" &&
+        newRowDraft.baseId !== null &&
+        newRowDraft.baseId !== undefined;
+      const computedLevelId = ahqSelected ? 1 : hasBase ? 3 : 2;
       const payload = {
         username: newRowDraft.username,
         pakNo: newRowDraft.pakNo,
@@ -177,10 +235,11 @@ function UserMgmt() {
         password: newRowDraft.password,
         rank: newRowDraft.rank,
         category: newRowDraft.category,
-        unitId: newRowDraft.unitId ? Number(newRowDraft.unitId) : 0,
+        unitId: ahqSelected ? null : newRowDraft.unitId ? Number(newRowDraft.unitId) : null,
         status: Number(newRowDraft.status),
         cmdId: Number(newRowDraft.cmdId),
-        baseId: Number(newRowDraft.baseId),
+        baseId: ahqSelected ? null : newRowDraft.baseId ? Number(newRowDraft.baseId) : null,
+        levelId: computedLevelId,
       };
       const created = await api.create("User", payload);
       setTableRows((prev) => [{ ...created, id: created.id }, ...prev]);
@@ -193,19 +252,21 @@ function UserMgmt() {
   };
 
   const handleEditSave = async () => {
-    if (!validateForm(editDraft, true)) return;
+    if (!validateForm(editDraft, true, "edit")) return;
 
     setErrors({});
 
     try {
       if (editingRowId && editDraft) {
+        const ahqSelected = isAhqCommand(editDraft.cmdId);
         const payload = {
           id: editDraft.id,
           ...editDraft,
           status: Number(editDraft.status),
           cmdId: Number(editDraft.cmdId),
-          baseId: Number(editDraft.baseId),
-          unitId: editDraft.unitId ? Number(editDraft.unitId) : 0,
+          baseId: ahqSelected ? null : editDraft.baseId ? Number(editDraft.baseId) : null,
+          unitId: ahqSelected ? null : editDraft.unitId ? Number(editDraft.unitId) : null,
+          levelId: ahqSelected ? 1 : editDraft.levelId ? Number(editDraft.levelId) : null,
         };
         const updated = await api.update("User", editingRowId, payload);
         setTableRows((prev) =>
@@ -277,12 +338,31 @@ function UserMgmt() {
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
+        const ahqSelected = isAhqCommand(draft?.cmdId);
+        if (ahqSelected) return "-";
         return isEditing
           ? renderBaseSelect("baseId", Number(draft.baseId), Number(draft.cmdId), false)
           : baseOptions.find((base) => base.id === Number(value))?.name || value;
       },
     },
     { Header: "Unit", accessor: "unitId", align: "left" },
+    {
+      Header: "Level ID",
+      accessor: "levelId",
+      align: "left",
+      Cell: ({ cell: { value, row } }) => {
+        const isEditing = editingRowId === row.original.id;
+        const draft = isEditing ? editDraft : row.original;
+        const ahqSelected = isAhqCommand(draft?.cmdId);
+        return isEditing
+          ? renderLevelSelect(
+              "levelId",
+              Number(draft.levelId || (ahqSelected ? 1 : 2)),
+              ahqSelected
+            )
+          : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(value))?.label || value || "-";
+      },
+    },
     { Header: "Status", accessor: "status", align: "center" },
   ];
 
@@ -308,6 +388,21 @@ function UserMgmt() {
         InputProps={{
           readOnly: isReadOnly,
         }}
+        sx={
+          darkMode
+            ? {
+                "& .MuiInputBase-input": {
+                  color: "#000000 !important",
+                },
+                "& .MuiInputLabel-root": {
+                  color: "#000000 !important",
+                },
+                "& .MuiFormHelperText-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}
+        }
       />
     );
   };
@@ -331,7 +426,21 @@ function UserMgmt() {
           alignItems: "center",
           paddingTop: 0,
           paddingBottom: 0,
+          ...(darkMode ? { color: "#000000 !important" } : {}),
         },
+        ...(darkMode
+          ? {
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
       }}
     >
       {roleOptions.map((opt) => (
@@ -357,7 +466,18 @@ function UserMgmt() {
           alignItems: "center",
           paddingTop: 0,
           paddingBottom: 0,
+          ...(darkMode ? { color: "#000000 !important" } : {}),
         },
+        ...(darkMode
+          ? {
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
       }}
     >
       <MenuItem value={1}>Active</MenuItem>
@@ -381,7 +501,18 @@ function UserMgmt() {
           alignItems: "center",
           paddingTop: 0,
           paddingBottom: 0,
+          ...(darkMode ? { color: "#000000 !important" } : {}),
         },
+        ...(darkMode
+          ? {
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
       }}
     >
       {commandOptions.map((opt) => (
@@ -410,7 +541,18 @@ function UserMgmt() {
             alignItems: "center",
             paddingTop: 0,
             paddingBottom: 0,
+            ...(darkMode ? { color: "#000000 !important" } : {}),
           },
+          ...(darkMode
+            ? {
+                "& .MuiInputLabel-root": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}),
         }}
       >
         {filteredBases.map((opt) => (
@@ -421,6 +563,49 @@ function UserMgmt() {
       </MDInput>
     );
   };
+
+  const renderLevelSelect = (field, value, disabled = false) => (
+    <MDInput
+      select
+      value={value}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+      disabled={disabled}
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+        "& .MuiSelect-select": {
+          minHeight: "45px",
+          display: "flex",
+          alignItems: "center",
+          paddingTop: 0,
+          paddingBottom: 0,
+          ...(darkMode ? { color: "#000000 !important" } : {}),
+        },
+        ...(darkMode
+          ? {
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
+      }}
+    >
+      {LEVEL_OPTIONS.map((opt) => (
+        <MenuItem key={opt.id} value={opt.id}>
+          {opt.id} - {opt.label}
+        </MenuItem>
+      ))}
+    </MDInput>
+  );
 
   const computedRows = (() => {
     const rows = [];
@@ -444,12 +629,25 @@ function UserMgmt() {
         cmdId: isEditing
           ? renderCommandSelect("cmdId", Number(draft.cmdId), false)
           : commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
-        baseId: isEditing
+        baseId: isAhqCommand(draft?.cmdId)
+          ? "-"
+          : isEditing
           ? renderBaseSelect("baseId", Number(draft.baseId), Number(draft.cmdId), false)
           : baseOptions.find((base) => base.id === Number(r.baseId))?.name || r.baseId,
-        unitId: isEditing
+        unitId: isAhqCommand(draft?.cmdId)
+          ? "-"
+          : isEditing
           ? renderInput("unitId", Number(draft.unitId), false, false)
           : Number(r.unitId),
+        levelId: isEditing
+          ? renderLevelSelect(
+              "levelId",
+              Number(draft.levelId || (isAhqCommand(draft?.cmdId) ? 1 : 2)),
+              isAhqCommand(draft?.cmdId)
+            )
+          : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(r.levelId))?.label ||
+            r.levelId ||
+            "-",
         status: isEditing
           ? renderStatusSelect("Status", draft.status)
           : renderStatusBadge(r.status),

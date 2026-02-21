@@ -556,6 +556,52 @@ export default function SharingFormula() {
 
   const columns = [
     {
+      Header: "Actions",
+      accessor: "actions",
+      align: "center",
+      width: "100px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isExpandedRow) {
+          // eslint-disable-next-line react/prop-types
+          const recordId = row.original.id;
+          return (
+            <MDBox
+              alignItems="left"
+              justifyContent="left"
+              sx={{
+                backgroundColor: "#f8f9fa",
+                gap: "2px",
+                padding: "2px 2px",
+                borderRadius: "2px",
+              }}
+            >
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditRecord(recordId)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteRecord(recordId)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            </MDBox>
+          );
+        }
+        return "";
+      },
+    },
+    {
       Header: "",
       accessor: "expand",
       align: "center",
@@ -769,52 +815,6 @@ export default function SharingFormula() {
           }
         }
         return <StatusBadge value={value} />;
-      },
-    },
-    {
-      Header: "Actions",
-      accessor: "actions",
-      align: "center",
-      width: "100px",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        if (row.original.isExpandedRow) {
-          // eslint-disable-next-line react/prop-types
-          const recordId = row.original.id;
-          return (
-            <MDBox
-              alignItems="left"
-              justifyContent="left"
-              sx={{
-                backgroundColor: "#f8f9fa",
-                gap: "2px",
-                padding: "2px 2px",
-                borderRadius: "2px",
-              }}
-            >
-              <IconButton
-                size="small"
-                color="info"
-                onClick={() => handleEditRecord(recordId)}
-                title="Edit"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>edit</Icon>
-              </IconButton>
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDeleteRecord(recordId)}
-                title="Delete"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>delete</Icon>
-              </IconButton>
-            </MDBox>
-          );
-        }
-        return "";
       },
     },
   ];

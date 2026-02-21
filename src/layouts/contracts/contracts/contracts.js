@@ -12,6 +12,12 @@ import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Divider from "@mui/material/Divider";
 import Chip from "@mui/material/Chip";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -28,12 +34,15 @@ import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
+import rentalValueRateApi from "services/api.rentalvaluerate.service";
+import govtShareRateApi from "services/api.govtsharerate.service";
 import StatusBadge from "components/StatusBadge";
 import { PropertyGroupingForm } from "layouts/contracts/property-grouping/property-grouping";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
+import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 
 function ContractsForm({
@@ -46,6 +55,7 @@ function ContractsForm({
   classes,
   propertyGroups,
   tenants,
+  natures,
   onPropertyGroupsRefresh,
 }) {
   const [form, setForm] = useState({
@@ -69,13 +79,14 @@ function ContractsForm({
     sdRateMonths: "",
     securityDepositAmount: "",
     rentalValue: "",
-    govtShareCondition: "",
+    govtShare: "",
     pafShare: "",
     status: true,
     remarks: "",
     riseTermType: "",
     riseyear: "",
     risedate: "",
+    vaArea: "",
   });
   const [errors, setErrors] = useState({});
   const [filteredBases, setFilteredBases] = useState([]);
@@ -98,34 +109,41 @@ function ContractsForm({
   const [activeContracts, setActiveContracts] = useState([]);
   const [loadingContracts, setLoadingContracts] = useState(false);
 
+  // Form loading state
+  const [formLoading, setFormLoading] = useState(false);
+
   // Property Grouping form state
   const [propertyGroupingFormOpen, setPropertyGroupingFormOpen] = useState(false);
   const [rentalProperties, setRentalProperties] = useState([]);
   const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
+  const [rentalValueRates, setRentalValueRates] = useState([]);
+  const [govtShareRates, setGovtShareRates] = useState([]);
 
   const normalizeRiseTermType = (value) => {
     if (!value) return "";
     const token = String(value).trim().toLowerCase();
     if (!token) return "";
-    if (token.includes("standard")) return "Standard";
+    if (token.includes("uniform")) return "Uniform";
     if (token.includes("fixed")) return "Fixed Date";
-    if (token.includes("variable")) return "Variable Increase";
+    if (token.includes("increase")) return "Increase";
     // Fallback: return original trimmed value so it at least shows in the UI if it matches exactly
     return String(value).trim();
   };
 
   useEffect(() => {
+    // Set loading when form opens with initialData (edit mode)
+    if (open && initialData) {
+      setFormLoading(true);
+    } else if (open && !initialData) {
+      // New form - no loading needed
+      setFormLoading(false);
+    }
+
     if (initialData) {
-      const rawRiseType =
-        initialData.riseTermType ??
-        initialData.RiseTermType ??
-        initialData.riseTerm ??
-        initialData.RiseTerm ??
-        "";
-      const rawRiseYear =
-        initialData.riseyear ?? initialData.RiseYear ?? initialData.riseYear ?? null;
-      const rawRiseDate =
-        initialData.risedate ?? initialData.RiseDate ?? initialData.riseDate ?? null;
+      // Use only PascalCase (strict API response format)
+      const rawRiseType = initialData.RiseTermType || "";
+      const rawRiseYear = initialData.RiseYear ?? null;
+      const rawRiseDate = initialData.RiseDate ?? null;
 
       const normalizedRiseYear = rawRiseYear !== null ? String(rawRiseYear) : "";
       const normalizedRiseDate =
@@ -133,93 +151,56 @@ function ContractsForm({
           ? String(rawRiseDate).split("T")[0].slice(0, 10)
           : "";
 
-      // Normalize govtShareCondition - handle case variations and ensure it matches dropdown options
-      const rawGovtShareCondition =
-        initialData.govtShareCondition ??
-        initialData.GovtShareCondition ??
-        initialData.govtShare ??
-        initialData.GovtShare ??
-        "";
-      const govtShareOptions = ["A", "C", "NA"];
-
-      let validGovtShareCondition = "";
-      if (rawGovtShareCondition) {
-        // Convert to string and trim whitespace
-        const stringValue = String(rawGovtShareCondition).trim();
-
-        // Check if it's already a valid option (exact match - case sensitive)
-        if (govtShareOptions.includes(stringValue)) {
-          validGovtShareCondition = stringValue;
-        } else {
-          // Try case-insensitive normalization
-          const upperValue = stringValue.toUpperCase();
-
-          // Map common variations
-          if (upperValue === "N/A" || upperValue === "N-A" || upperValue === "NA") {
-            validGovtShareCondition = "NA";
-          } else if (upperValue === "A") {
-            validGovtShareCondition = "A";
-          } else if (upperValue === "C") {
-            validGovtShareCondition = "C";
-          } else {
-            // If no match found, set to empty (user will need to select)
-            validGovtShareCondition = "";
-          }
-        }
-      }
+      const rawGovtShare = initialData.GovtShare ?? 0;
 
       setForm({
-        contractNo: initialData.contractNo || "",
-        cmdId: initialData.cmdId || "",
-        baseId: initialData.baseId || "",
-        classId: initialData.classId || "",
-        grpId: initialData.grpId || "",
-        tenantNo: initialData.tenantNo || "",
-        businessName: initialData.businessName || "",
-        natureOfBusiness: initialData.natureOfBusiness || "",
-        contractStartDate: initialData.contractStartDate
-          ? initialData.contractStartDate.split("T")[0]
+        contractNo: initialData.ContractNo || "",
+        cmdId: initialData.CmdId || "",
+        baseId: initialData.BaseId || "",
+        classId: initialData.ClassId || "",
+        grpId: initialData.GrpId || "",
+        tenantNo: initialData.TenantNo || "",
+        businessName: initialData.BusinessName || "",
+        natureOfBusiness: initialData.NatureOfBusiness || "",
+        contractStartDate: initialData.ContractStartDate
+          ? initialData.ContractStartDate.split("T")[0]
           : "",
-        contractEndDate: initialData.contractEndDate
-          ? initialData.contractEndDate.split("T")[0]
+        contractEndDate: initialData.ContractEndDate
+          ? initialData.ContractEndDate.split("T")[0]
           : "",
-        commercialOperationDate: initialData.commercialOperationDate
-          ? initialData.commercialOperationDate.split("T")[0]
+        commercialOperationDate: initialData.CommercialOperationDate
+          ? initialData.CommercialOperationDate.split("T")[0]
           : "",
-        initialRentPM: initialData.initialRentPM || "",
-        initialRentPA: initialData.initialRentPA || "",
-        paymentTermMonths: initialData.paymentTermMonths || "",
-        term: initialData.term || "",
-        increaseRatePercent: initialData.increaseRatePercent || "",
-        increaseIntervalMonths: initialData.increaseIntervalMonths || "",
-        sdRateMonths: initialData.sdRateMonths || "",
-        securityDepositAmount: initialData.securityDepositAmount || "",
-        rentalValue: initialData.rentalValue || "",
-        govtShareCondition: validGovtShareCondition,
-        pafShare: initialData.pafShare || "",
-        status: initialData.status !== undefined ? initialData.status : true,
-        remarks: initialData.remarks || "",
+        initialRentPM: initialData.InitialRentPM || "",
+        initialRentPA: initialData.InitialRentPA || "",
+        paymentTermMonths: initialData.PaymentTermMonths || "",
+        term: initialData.Term || "",
+        increaseRatePercent: initialData.IncreaseRatePercent || "",
+        increaseIntervalMonths: initialData.IncreaseIntervalMonths || "",
+        sdRateMonths: initialData.SDRateMonths || "",
+        securityDepositAmount: initialData.SecurityDepositAmount || "",
+        rentalValue: initialData.RentalValue || "",
+        govtShare: Number(rawGovtShare || 0),
+        pafShare: initialData.PAFShare || "",
+        status: initialData.Status !== undefined ? initialData.Status : true,
+        remarks: initialData.Remarks || "",
         riseTermType: normalizeRiseTermType(rawRiseType),
         riseyear: normalizedRiseYear,
         risedate: normalizedRiseDate,
+        vaArea: initialData.VaArea || "",
       });
 
       // Initialize riseTerms list from existing contract rise terms, if any
-      const rawRiseTerms =
-        initialData.contractRiseTerms ||
-        initialData.ContractRiseTerms ||
-        initialData.riseTerms ||
-        [];
+      const rawRiseTerms = initialData.ContractRiseTerms || [];
       if (Array.isArray(rawRiseTerms) && rawRiseTerms.length > 0) {
         const normalizedRiseTerms = rawRiseTerms
           .map((t) => {
-            const monthsInterval =
-              t.monthsInterval ?? t.MonthsInterval ?? t.months_interval ?? null;
-            const risePercent = t.risePercent ?? t.RisePercent ?? t.rise_percent ?? null;
-            const sequenceNo = t.sequenceNo ?? t.SequenceNo ?? t.sequence_no ?? null;
-            const contractID = t.contractID ?? t.ContractID ?? t.contractId ?? t.ContractId ?? null;
-            const isDeleted = t.isDeleted ?? t.IsDeleted ?? null;
-            const id = t.id ?? t.Id ?? t.contractRiseTermId ?? t.ContractRiseTermId ?? null;
+            const monthsInterval = t.MonthsInterval ?? null;
+            const risePercent = t.RisePercent ?? null;
+            const sequenceNo = t.SequenceNo ?? null;
+            const contractID = t.ContractID ?? null;
+            const isDeleted = t.IsDeleted ?? null;
+            const id = t.Id ?? null;
 
             if (monthsInterval === null || risePercent === null || sequenceNo === null) {
               return null;
@@ -240,6 +221,11 @@ function ContractsForm({
       } else {
         setRiseTerms([]);
       }
+
+      // Data loaded, turn off loading after a small delay to ensure all state updates complete
+      setTimeout(() => {
+        setFormLoading(false);
+      }, 100);
     } else {
       setForm({
         contractNo: "",
@@ -262,15 +248,18 @@ function ContractsForm({
         sdRateMonths: "",
         securityDepositAmount: "",
         rentalValue: "",
-        govtShareCondition: "",
+        govtShare: "",
+        pafShare: "",
         status: true,
         remarks: "",
         riseTermType: "",
         riseyear: "",
         risedate: "",
+        vaArea: "",
       });
       // Reset rise terms when opening new form
       setRiseTerms([]);
+      setFormLoading(false);
     }
     setErrors({});
   }, [initialData, open]);
@@ -302,12 +291,12 @@ function ContractsForm({
     if (form.cmdId && form.baseId && form.classId && propertyGroups.length > 0) {
       const filtered = propertyGroups.filter(
         (pg) =>
-          Number(pg.cmdId) === Number(form.cmdId) &&
-          Number(pg.baseId) === Number(form.baseId) &&
-          Number(pg.classId) === Number(form.classId)
+          Number(pg.CmdId || pg.cmdId) === Number(form.cmdId) &&
+          Number(pg.BaseId || pg.baseId) === Number(form.baseId) &&
+          Number(pg.ClassId || pg.classId) === Number(form.classId)
       );
       setFilteredPropertyGroups(filtered);
-      if (form.grpId && !filtered.find((pg) => pg.id === form.grpId)) {
+      if (form.grpId && !filtered.find((pg) => (pg.Id || pg.id) === form.grpId)) {
         setForm((prev) => ({ ...prev, grpId: "" }));
       }
     } else {
@@ -352,9 +341,57 @@ function ContractsForm({
     }
   }, [form.sdRateMonths, form.initialRentPM]);
 
+  // Load Rental Value Rate (%) records when form opens.
+  useEffect(() => {
+    if (!open) return;
+    const fetchRentalValueRates = async () => {
+      try {
+        const response = await rentalValueRateApi.getAll(1, 10000);
+        const list =
+          response && response.pagination
+            ? response.data || []
+            : Array.isArray(response)
+            ? response
+            : [];
+        setRentalValueRates(list);
+      } catch (error) {
+        console.error("Error fetching rental value rates:", error);
+        setRentalValueRates([]);
+      }
+    };
+    fetchRentalValueRates();
+  }, [open]);
+
+  // Load Govt Share Rate (%) records when form opens.
+  useEffect(() => {
+    if (!open) return;
+    const fetchGovtShareRates = async () => {
+      try {
+        const response = await govtShareRateApi.getAll(1, 10000);
+        const list =
+          response && response.pagination
+            ? response.data || []
+            : Array.isArray(response)
+            ? response
+            : [];
+        setGovtShareRates(list);
+      } catch (error) {
+        console.error("Error fetching govt share rates:", error);
+        setGovtShareRates([]);
+      }
+    };
+    fetchGovtShareRates();
+  }, [open]);
+
   const handleChange = (field, value) => {
     // Prevent manual editing of auto-calculated fields
-    if (field === "securityDepositAmount" || field === "initialRentPA") {
+    if (
+      field === "securityDepositAmount" ||
+      field === "initialRentPA" ||
+      field === "rentalValue" ||
+      field === "govtShare" ||
+      field === "pafShare"
+    ) {
       return;
     }
 
@@ -366,7 +403,16 @@ function ContractsForm({
         ...(field === "riseTermType" && {
           riseyear: "",
           risedate: "",
+          increaseIntervalMonths: "",
         }),
+        // If selected Term does not contain "Rent", keep rent-increase fields empty
+        ...(field === "term" &&
+          !String(value || "")
+            .toLowerCase()
+            .includes("rent") && {
+            increaseRatePercent: "",
+            increaseIntervalMonths: "",
+          }),
       };
 
       // If start date changes and end date is now invalid, clear end date
@@ -374,6 +420,10 @@ function ContractsForm({
         if (updated.contractEndDate <= value) {
           updated.contractEndDate = "";
         }
+      }
+      // Auto-fill COD with selected CSD. User can still manually change COD afterwards.
+      if (field === "contractStartDate") {
+        updated.commercialOperationDate = value || "";
       }
 
       // If start date or end date changes, validate commercial operation date
@@ -398,8 +448,8 @@ function ContractsForm({
       setErrors((prev) => ({ ...prev, [field]: "" }));
     }
 
-    // Clear rise terms when switching away from Variable Increase
-    if (field === "riseTermType" && value !== "Variable Increase") {
+    // Clear rise terms when switching away from Increase
+    if (field === "riseTermType" && value !== "Increase") {
       setRiseTerms([]);
     }
 
@@ -532,7 +582,6 @@ function ContractsForm({
     if (!form.initialRentPM) newErrors.initialRentPM = "Initial Rent PM is required";
     // initialRentPA is auto-calculated, no validation needed
     if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term Months is required";
-    if (!form.govtShareCondition) newErrors.govtShareCondition = "Govt Share Condition is required";
     if (form.remarks && form.remarks.length > 500) {
       newErrors.remarks = "Remarks cannot exceed 500 characters";
     }
@@ -543,6 +592,9 @@ function ContractsForm({
 
   const handleSave = async () => {
     if (!validate()) return;
+    const hasRentInTerm = String(form.term || "")
+      .toLowerCase()
+      .includes("rent");
 
     const payload = {
       contractNo: form.contractNo.trim(),
@@ -560,28 +612,40 @@ function ContractsForm({
       initialRentPA: form.initialRentPA ? Number(form.initialRentPA) : null,
       paymentTermMonths: form.paymentTermMonths ? Number(form.paymentTermMonths) : null,
       term: form.term || null,
-      increaseRatePercent: form.increaseRatePercent ? Number(form.increaseRatePercent) : null,
-      increaseIntervalMonths: form.increaseIntervalMonths
-        ? Number(form.increaseIntervalMonths)
-        : null,
+      increaseRatePercent:
+        hasRentInTerm && form.increaseRatePercent ? Number(form.increaseRatePercent) : null,
+      increaseIntervalMonths:
+        !hasRentInTerm || form.riseTermType === "Increase"
+          ? null
+          : form.increaseIntervalMonths
+          ? Number(form.increaseIntervalMonths)
+          : null,
       sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
       securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
       rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
-      govtShareCondition: form.govtShareCondition,
+      govtShare: form.govtShare ? Number(form.govtShare) : null,
       pafShare: form.pafShare ? Number(form.pafShare) : null,
+      feasible: Number(form.govtShare || 0) > Number(form.pafShare || 0) ? "Viable" : "Unviable",
       status: form.status,
       remarks: form.remarks?.trim() || null,
       riseTermType: form.riseTermType || null,
-      // If Standard is selected, include riseyear
-      ...(form.riseTermType === "Standard" && {
-        riseyear: form.riseyear ? Number(form.riseyear) : null,
-      }),
+      riseyear:
+        form.riseTermType === "Increase" || form.riseTermType === "Uniform"
+          ? null
+          : form.riseyear
+          ? Number(form.riseyear)
+          : null,
       // If Fixed Date is selected, include risedate
       ...(form.riseTermType === "Fixed Date" && {
         risedate: form.risedate || null,
       }),
-      // If Variable Increase is selected, include contractRiseTerms
-      ...(form.riseTermType === "Variable Increase" && {
+      // Group Area, Group Rate, Rental Value Rate, and VA Area
+      GroupArea: Number(selectedGroupArea) || null,
+      GroupRate: Number(selectedGroupRate) || null,
+      RentalValueRate: Number(selectedRentalValuePercentRate) || null,
+      VaArea: form.vaArea ? Number(form.vaArea) : null,
+      // If Increase is selected, include contractRiseTerms
+      ...(form.riseTermType === "Increase" && {
         contractRiseTerms:
           riseTerms.length > 0
             ? riseTerms.map((term) => {
@@ -618,6 +682,242 @@ function ContractsForm({
 
     await onSubmit(payload);
   };
+
+  const selectedPropertyGroup = filteredPropertyGroups.find(
+    (pg) => Number(pg.Id || pg.id) === Number(form.grpId)
+  );
+  const isContractNoMissing = !form.contractNo?.trim();
+  const hasTenantSelection = Boolean(String(form.tenantNo || "").trim());
+  const selectedTenant = useMemo(() => {
+    if (!hasTenantSelection) return null;
+    const selectedTenantNo = String(form.tenantNo).trim();
+    return tenants.find((t) => String(t?.tenantNo ?? "").trim() === selectedTenantNo) || null;
+  }, [tenants, form.tenantNo, hasTenantSelection]);
+  // Use only PascalCase (strict API response format)
+  const selectedGroupArea = selectedPropertyGroup?.Area ?? "";
+  const selectedGroupRate = selectedPropertyGroup?.Rate ?? "";
+  const selectedGroupLocation = selectedPropertyGroup?.Location ?? "";
+  const selectedGroupUoM = selectedPropertyGroup?.UoM ?? "";
+
+  const selectedRentalValueRateMeta = useMemo(() => {
+    if (!form.cmdId || !form.baseId || !form.classId || !form.contractStartDate) {
+      return { percent: 0, applicationDate: "" };
+    }
+    const isActive = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const isDeleted = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const contractStartTs = new Date(`${form.contractStartDate}T23:59:59`).getTime();
+    if (!Number.isFinite(contractStartTs) || contractStartTs <= 0) {
+      return { percent: 0, applicationDate: "" };
+    }
+
+    // Use only PascalCase (strict API response format)
+    const matched = (rentalValueRates || []).filter((r) => {
+      const cmdId = r.CmdId ?? null;
+      const baseId = r.BaseId ?? null;
+      const classId = r.ClassId ?? null;
+      const appDateRaw = r.ApplicableDate ?? null;
+
+      // Check if IDs match
+      if (
+        !cmdId ||
+        !baseId ||
+        !classId ||
+        Number(cmdId) !== Number(form.cmdId) ||
+        Number(baseId) !== Number(form.baseId) ||
+        Number(classId) !== Number(form.classId)
+      ) {
+        return false;
+      }
+
+      // Check status and deleted
+      if (!isActive(r.Status) || isDeleted(r.IsDeleted)) {
+        return false;
+      }
+
+      // Check application date
+      if (!appDateRaw) {
+        return false;
+      }
+
+      const appDateTs = new Date(appDateRaw).getTime();
+      if (!Number.isFinite(appDateTs) || appDateTs <= 0 || appDateTs > contractStartTs) {
+        return false;
+      }
+
+      return true;
+    });
+    if (matched.length === 0) return { percent: 0, applicationDate: "" };
+
+    const sorted = [...matched].sort((a, b) => {
+      const da = new Date(a.ApplicableDate || 0).getTime() || 0;
+      const db = new Date(b.ApplicableDate || 0).getTime() || 0;
+      return db - da;
+    });
+    const selected = sorted[0] || {};
+    const rate = Number(selected?.Rate ?? 0);
+    const appDate = selected?.ApplicableDate || "";
+    return { percent: Number.isFinite(rate) ? rate : 0, applicationDate: String(appDate || "") };
+  }, [rentalValueRates, form.cmdId, form.baseId, form.classId, form.contractStartDate]);
+  const selectedRentalValuePercentRate = selectedRentalValueRateMeta.percent;
+
+  // Auto-calculate Rental Value = Area * Rate * (%Rate / 100)
+  useEffect(() => {
+    const area = Number(selectedGroupArea);
+    const rate = Number(selectedGroupRate);
+    const percent = Number(selectedRentalValuePercentRate);
+    const hasInputs = Number.isFinite(area) && Number.isFinite(rate) && Number.isFinite(percent);
+    const calculated = hasInputs ? Number(((area * rate * percent) / 100).toFixed(6)) : 0;
+
+    setForm((prev) => {
+      const prevNum = Number(prev.rentalValue || 0);
+      if (prevNum === calculated) return prev;
+      return { ...prev, rentalValue: calculated };
+    });
+  }, [selectedGroupArea, selectedGroupRate, selectedRentalValuePercentRate]);
+
+  const rentalValueFormulaText = useMemo(() => {
+    const area = Number(selectedGroupArea) || 0;
+    const rate = Number(selectedGroupRate) || 0;
+    const percent = Number(selectedRentalValuePercentRate) || 0;
+    const calculated = Number(((area * rate * percent) / 100).toFixed(6));
+    if (!form.contractStartDate) {
+      return "Formula: Rental Value = Area x Revenue Rate x (% Rental Value Rate / 100). Select Contract Start Date to apply the correct % Rate.";
+    }
+    const appDateInfo = selectedRentalValueRateMeta.applicationDate
+      ? ` | % Rate App Date: ${String(selectedRentalValueRateMeta.applicationDate).split("T")[0]}`
+      : " | % Rate App Date: N/A";
+    return `Formula: ${area} x ${rate} x (${percent} / 100) = ${calculated}${appDateInfo}`;
+  }, [
+    selectedGroupArea,
+    selectedGroupRate,
+    selectedRentalValuePercentRate,
+    selectedRentalValueRateMeta.applicationDate,
+    form.contractStartDate,
+  ]);
+
+  const selectedGovtShareRateMeta = useMemo(() => {
+    if (!form.cmdId || !form.baseId || !form.classId || !form.contractStartDate) {
+      return { percent: 0, applicationDate: "" };
+    }
+    const isActive = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const isDeleted = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const contractStartTs = new Date(`${form.contractStartDate}T23:59:59`).getTime();
+    if (!Number.isFinite(contractStartTs) || contractStartTs <= 0) {
+      return { percent: 0, applicationDate: "" };
+    }
+
+    // Use only PascalCase (strict API response format)
+    const matched = (govtShareRates || []).filter((r) => {
+      const cmdId = r.CmdId ?? null;
+      const baseId = r.BaseId ?? null;
+      const classId = r.ClassId ?? null;
+      const appDateRaw = r.ApplicableDate ?? null;
+
+      // Check if IDs match
+      if (
+        !cmdId ||
+        !baseId ||
+        !classId ||
+        Number(cmdId) !== Number(form.cmdId) ||
+        Number(baseId) !== Number(form.baseId) ||
+        Number(classId) !== Number(form.classId)
+      ) {
+        return false;
+      }
+
+      // Check status and deleted
+      if (!isActive(r.Status) || isDeleted(r.IsDeleted)) {
+        return false;
+      }
+
+      // Check application date
+      if (!appDateRaw) {
+        return false;
+      }
+
+      const appDateTs = new Date(appDateRaw).getTime();
+      if (!Number.isFinite(appDateTs) || appDateTs <= 0 || appDateTs > contractStartTs) {
+        return false;
+      }
+
+      return true;
+    });
+    if (matched.length === 0) return { percent: 0, applicationDate: "" };
+
+    const sorted = [...matched].sort((a, b) => {
+      const da = new Date(a.ApplicableDate || 0).getTime() || 0;
+      const db = new Date(b.ApplicableDate || 0).getTime() || 0;
+      return db - da;
+    });
+    const selected = sorted[0] || {};
+    const rate = Number(selected?.Rate ?? 0);
+    const appDate = selected?.ApplicableDate || "";
+    return { percent: Number.isFinite(rate) ? rate : 0, applicationDate: String(appDate || "") };
+  }, [govtShareRates, form.cmdId, form.baseId, form.classId, form.contractStartDate]);
+  const selectedGovtSharePercentRate = selectedGovtShareRateMeta.percent;
+
+  // Auto-calculate Govt Share = Rental Value * (%Govt Share / 100)
+  useEffect(() => {
+    const rentalValue = Number(form.rentalValue);
+    const percent = Number(selectedGovtSharePercentRate);
+    const hasInputs = Number.isFinite(rentalValue) && Number.isFinite(percent);
+    const calculated = hasInputs ? Number(((rentalValue * percent) / 100).toFixed(6)) : 0;
+
+    setForm((prev) => {
+      const prevNum = Number(prev.govtShare || 0);
+      if (prevNum === calculated) return prev;
+      return { ...prev, govtShare: calculated };
+    });
+  }, [form.rentalValue, selectedGovtSharePercentRate]);
+
+  const govtShareFormulaText = useMemo(() => {
+    const rentalValue = Number(form.rentalValue) || 0;
+    const percent = Number(selectedGovtSharePercentRate) || 0;
+    const calculated = Number(((rentalValue * percent) / 100).toFixed(6));
+    if (!form.contractStartDate) {
+      return "Formula: GovtShare = Rental Value x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
+    }
+    const appDateInfo = selectedGovtShareRateMeta.applicationDate
+      ? ` | % Rate App Date: ${String(selectedGovtShareRateMeta.applicationDate).split("T")[0]}`
+      : " | % Rate App Date: N/A";
+    return `Formula: ${rentalValue} x (${percent} / 100) = ${calculated}${appDateInfo}`;
+  }, [
+    form.rentalValue,
+    selectedGovtSharePercentRate,
+    selectedGovtShareRateMeta.applicationDate,
+    form.contractStartDate,
+  ]);
+
+  // Auto-calculate PAF Share = Rental Value - Govt Share
+  useEffect(() => {
+    const rentalValue = Number(form.rentalValue);
+    const govtShare = Number(form.govtShare);
+    const hasInputs = Number.isFinite(rentalValue) && Number.isFinite(govtShare);
+    const calculated = hasInputs ? Number((rentalValue - govtShare).toFixed(6)) : 0;
+
+    setForm((prev) => {
+      const prevNum = Number(prev.pafShare || 0);
+      if (prevNum === calculated) return prev;
+      return { ...prev, pafShare: calculated };
+    });
+  }, [form.rentalValue, form.govtShare]);
+
+  const pafShareFormulaText = useMemo(() => {
+    const rentalValue = Number(form.rentalValue) || 0;
+    const govtShare = Number(form.govtShare) || 0;
+    const calculated = Number((rentalValue - govtShare).toFixed(6));
+    return `Formula: ${rentalValue} - ${govtShare} = ${calculated}`;
+  }, [form.rentalValue, form.govtShare]);
+
+  const viabilityLabel = useMemo(() => {
+    const govtShare = Number(form.govtShare) || 0;
+    const pafShare = Number(form.pafShare) || 0;
+    return govtShare > pafShare ? "Viable" : "Unviable";
+  }, [form.govtShare, form.pafShare]);
 
   // Rise Terms handlers
   const getNextRiseSequenceNo = () => {
@@ -710,6 +1010,72 @@ function ContractsForm({
     }
   };
 
+  // Fetch ContractRiseTerms by ContractID
+  const fetchContractRiseTerms = async (contractId) => {
+    if (!contractId) {
+      setRiseTerms([]);
+      return;
+    }
+
+    try {
+      const response = await contractApi.getContractRiseTermsByContractId(contractId);
+      const data = Array.isArray(response) ? response : response?.data || [];
+
+      // Filter out deleted records and normalize data
+      const normalizedRiseTerms = data
+        .filter((t) => !t.IsDeleted && t.IsDeleted !== true)
+        .map((t) => {
+          const monthsInterval = t.MonthsInterval ?? null;
+          const risePercent = t.RisePercent ?? null;
+          const sequenceNo = t.SequenceNo ?? null;
+          const contractID = t.ContractID ?? null;
+          const isDeleted = t.IsDeleted ?? null;
+          const id = t.Id ?? null;
+
+          if (monthsInterval === null || risePercent === null || sequenceNo === null) {
+            return null;
+          }
+
+          return {
+            id: id ? Number(id) : null,
+            monthsInterval: String(monthsInterval),
+            risePercent: String(risePercent),
+            sequenceNo: String(sequenceNo),
+            contractID: contractID ? Number(contractID) : null,
+            isDeleted: isDeleted !== null && isDeleted !== undefined ? Boolean(isDeleted) : null,
+          };
+        })
+        .filter(Boolean);
+
+      setRiseTerms(normalizedRiseTerms);
+    } catch (error) {
+      console.error("Error fetching ContractRiseTerms:", error);
+      // If API call fails, keep existing riseTerms from initialData
+    }
+  };
+
+  const handleOpenRiseTermsDialog = () => {
+    // Reset form
+    setRiseTermForm({
+      monthsInterval: "",
+      risePercent: "",
+      sequenceNo: getNextRiseSequenceNo(),
+    });
+    setRiseTermErrors({});
+    setEditingRiseTermIndex(null);
+
+    // Fetch ContractRiseTerms if we have a contract ID (edit mode)
+    const contractId = initialData?.Id || initialData?.id;
+    if (contractId) {
+      fetchContractRiseTerms(contractId);
+    } else {
+      // New contract - use existing riseTerms from state
+      // (which should be empty for new contracts)
+    }
+
+    setRiseTermsDialogOpen(true);
+  };
+
   const handleCloseRiseTermsDialog = () => {
     setRiseTermsDialogOpen(false);
     setRiseTermForm({ monthsInterval: "", risePercent: "", sequenceNo: "" });
@@ -719,7 +1085,20 @@ function ContractsForm({
 
   const paymentTermOptions = [1, 2, 3, 4, 6, 12];
   const increaseIntervalOptions = [1, 2, 3, 4, 6, 12, 15, 24];
-  const govtShareOptions = ["A", "C", "NA"];
+  const hasRentInTerm = String(form.term || "")
+    .toLowerCase()
+    .includes("rent");
+  const activeNatureOptions = useMemo(() => {
+    const isActive = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const isDeleted = (v) =>
+      v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+
+    return (natures || []).filter((item) => {
+      const name = item?.name ?? item?.Name ?? item?.natureName ?? item?.NatureName ?? "";
+      return Boolean(String(name).trim()) && isActive(item?.status) && !isDeleted(item?.isDeleted);
+    });
+  }, [natures]);
 
   // Shared compact styling to keep all inputs/lookups consistent and simple
   const labelSx = { fontSize: "1rem" };
@@ -729,14 +1108,21 @@ function ContractsForm({
   };
   const selectSx = {
     fontSize: "1rem",
+    minHeight: "45px",
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
     // Keep a fixed control height whether empty or filled
-    "& .MuiOutlinedInput-root": {
+    "&.MuiInputBase-root": {
+      minHeight: "45px",
+    },
+    "&.MuiOutlinedInput-root": {
       minHeight: "45px",
     },
     "& .MuiSelect-select": {
       fontSize: "1rem",
       padding: "12px 32px 12px 12px",
-      minHeight: "45px",
+      minHeight: "45px !important",
       display: "flex",
       alignItems: "center",
       boxSizing: "border-box",
@@ -747,13 +1133,21 @@ function ContractsForm({
   return (
     <>
       <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-        <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700 }}>
-          {initialData ? "Edit Contract" : "New Contract"}
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} mt={1}>
-            {/* ContractNo */}
-            <Grid item xs={12} sm={6} md={4}>
+        <DialogTitle sx={{ py: 2 }}>
+          <MDBox
+            sx={{
+              width: "100%",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 1,
+              flexWrap: { xs: "wrap", md: "nowrap" },
+            }}
+          >
+            <MDTypography variant="h5" fontWeight="bold">
+              {initialData ? "Edit Contract" : "New Contract"}
+            </MDTypography>
+            <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
               <MDInput
                 label="Contract No"
                 type="text"
@@ -762,12 +1156,35 @@ function ContractsForm({
                 fullWidth
                 size="small"
                 required
-                error={!!errors.contractNo}
-                helperText={errors.contractNo}
+                error={!!errors.contractNo || isContractNoMissing}
+                helperText={
+                  errors.contractNo || (isContractNoMissing ? "Contract No is required" : "")
+                }
                 sx={inputSx}
               />
-            </Grid>
-
+            </MDBox>
+          </MDBox>
+        </DialogTitle>
+        <DialogContent sx={{ position: "relative" }}>
+          {formLoading && (
+            <MDBox
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: "rgba(255, 255, 255, 0.8)",
+                zIndex: 1000,
+              }}
+            >
+              <CurrencyLoading size={50} />
+            </MDBox>
+          )}
+          <Grid container spacing={2} mt={1}>
             {/* Command, Base, Class - First Row */}
             <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth error={!!errors.cmdId}>
@@ -835,7 +1252,7 @@ function ContractsForm({
             </Grid>
 
             {/* Group ID */}
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={12} sm={6} md={3}>
               <MDBox display="flex" alignItems="center" gap={1}>
                 <FormControl size="small" fullWidth error={!!errors.grpId} sx={{ flex: 1 }}>
                   <InputLabel id="grp-label" sx={labelSx}>
@@ -850,8 +1267,8 @@ function ContractsForm({
                     sx={selectSx}
                   >
                     {filteredPropertyGroups.map((pg) => (
-                      <MenuItem key={pg.id} value={pg.id} sx={menuItemSx}>
-                        {pg.gId}
+                      <MenuItem key={pg.Id || pg.id} value={pg.Id || pg.id} sx={menuItemSx}>
+                        {pg.GId || pg.gId}
                       </MenuItem>
                     ))}
                   </Select>
@@ -873,6 +1290,59 @@ function ContractsForm({
             </Grid>
 
             {/* TenantNo */}
+            {/* Area (Read-only from selected property group) */}
+            <Grid item xs={12} sm={6} md={3}>
+              <MDInput
+                label="Area"
+                type="number"
+                value={selectedGroupArea}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* Rate (Read-only from selected property group) */}
+            <Grid item xs={12} sm={6} md={3}>
+              <MDInput
+                label="Rate"
+                type="number"
+                value={selectedGroupRate}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* % Rate (Read-only from Rental Value Rate by cmd/base/class) */}
+            <Grid item xs={12} sm={6} md={3}>
+              <MDInput
+                label="% Rate"
+                type="number"
+                value={selectedRentalValuePercentRate}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* VA Area */}
+            <Grid item xs={12} sm={6} md={3}>
+              <MDInput
+                label="VA Area"
+                type="number"
+                value={form.vaArea}
+                onChange={(e) => handleChange("vaArea", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
+
+            {/* TenantNo */}
             <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth error={!!errors.tenantNo}>
                 <InputLabel id="tenant-label" sx={labelSx}>
@@ -891,41 +1361,16 @@ function ContractsForm({
                     </MenuItem>
                   ))}
                 </Select>
+                {errors.tenantNo && <FormHelperText>{errors.tenantNo}</FormHelperText>}
               </FormControl>
-            </Grid>
-
-            {/* Tenant Name (Read-only) */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Tenant Name"
-                type="text"
-                value={
-                  form.tenantNo
-                    ? tenants.find((t) => t.tenantNo === form.tenantNo)?.ownerName || ""
-                    : ""
-                }
-                fullWidth
-                size="small"
-                disabled
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* Tenant Address (Read-only) */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Tenant Address"
-                type="text"
-                value={
-                  form.tenantNo
-                    ? tenants.find((t) => t.tenantNo === form.tenantNo)?.address || ""
-                    : ""
-                }
-                fullWidth
-                size="small"
-                disabled
-                sx={inputSx}
-              />
+              <MDBox mt={0.75} px={0.25}>
+                <MDTypography variant="caption" color="text" sx={{ display: "block" }}>
+                  Tenant Name: {hasTenantSelection ? selectedTenant?.ownerName || "-" : "-"}
+                </MDTypography>
+                <MDTypography variant="caption" color="text" sx={{ display: "block" }}>
+                  Tenant Address: {hasTenantSelection ? selectedTenant?.address || "-" : "-"}
+                </MDTypography>
+              </MDBox>
             </Grid>
 
             {/* BusinessName */}
@@ -946,18 +1391,42 @@ function ContractsForm({
 
             {/* NatureOfBusiness */}
             <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Nature of Business"
-                type="text"
-                value={form.natureOfBusiness}
-                onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
-                fullWidth
-                size="small"
-                required
-                error={!!errors.natureOfBusiness}
-                helperText={errors.natureOfBusiness}
-                sx={inputSx}
-              />
+              <FormControl size="small" fullWidth required error={!!errors.natureOfBusiness}>
+                <InputLabel id="nature-of-business-label" sx={labelSx}>
+                  Nature of Business
+                </InputLabel>
+                <Select
+                  labelId="nature-of-business-label"
+                  value={form.natureOfBusiness || ""}
+                  label="Nature of Business"
+                  onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
+                  sx={selectSx}
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        maxHeight: 280,
+                      },
+                    },
+                  }}
+                >
+                  {activeNatureOptions.map((nature) => {
+                    const natureName =
+                      nature?.name ??
+                      nature?.Name ??
+                      nature?.natureName ??
+                      nature?.NatureName ??
+                      "";
+                    return (
+                      <MenuItem key={natureName} value={natureName} sx={menuItemSx}>
+                        {natureName}
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+                {errors.natureOfBusiness && (
+                  <FormHelperText>{errors.natureOfBusiness}</FormHelperText>
+                )}
+              </FormControl>
             </Grid>
 
             {/* ContractStartDate */}
@@ -1054,26 +1523,17 @@ function ContractsForm({
               />
             </Grid>
 
-            {/* PaymentTermMonths */}
+            {/* SDRateMonths */}
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
-                <InputLabel id="payment-term-label" sx={labelSx}>
-                  Payment Term Months
-                </InputLabel>
-                <Select
-                  labelId="payment-term-label"
-                  value={form.paymentTermMonths || ""}
-                  label="Payment Term Months"
-                  onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
-                  sx={selectSx}
-                >
-                  {paymentTermOptions.map((option) => (
-                    <MenuItem key={option} value={option} sx={menuItemSx}>
-                      {option}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <MDInput
+                label="SD Rate Months"
+                type="number"
+                value={form.sdRateMonths}
+                onChange={(e) => handleChange("sdRateMonths", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
             </Grid>
 
             {/* Term */}
@@ -1098,48 +1558,27 @@ function ContractsForm({
                   <MenuItem value="Rent + Profit" sx={menuItemSx}>
                     Rent + Profit
                   </MenuItem>
-                  <MenuItem value="Rent/Profit" sx={menuItemSx}>
-                    Rent/Profit
+                  <MenuItem value="Rent or Profit" sx={menuItemSx}>
+                    Rent or Profit
                   </MenuItem>
                 </Select>
               </FormControl>
             </Grid>
 
-            {/* IncreaseRatePercent */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Increase Rate Percent %"
-                type="number"
-                value={form.increaseRatePercent}
-                onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* IncreaseIntervalMonths */}
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="increase-interval-label" sx={labelSx}>
-                  Increase Interval Months
-                </InputLabel>
-                <Select
-                  labelId="increase-interval-label"
-                  value={form.increaseIntervalMonths || ""}
-                  label="Increase Interval Months"
-                  onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
-                  sx={selectSx}
-                >
-                  {increaseIntervalOptions.map((option) => (
-                    <MenuItem key={option} value={option} sx={menuItemSx}>
-                      {option}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
+            {/* IncreaseRatePercent (only when Term contains "Rent") */}
+            {hasRentInTerm && (
+              <Grid item xs={12} sm={6} md={4}>
+                <MDInput
+                  label="Increase Rate Percent %"
+                  type="number"
+                  value={form.increaseRatePercent}
+                  onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                  fullWidth
+                  size="small"
+                  sx={inputSx}
+                />
+              </Grid>
+            )}
             {/* Rise Terms */}
             <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth error={!!errors.riseTermType}>
@@ -1153,46 +1592,72 @@ function ContractsForm({
                   onChange={(e) => handleChange("riseTermType", e.target.value)}
                   sx={selectSx}
                 >
-                  <MenuItem value="Standard" sx={menuItemSx}>
-                    Standard
+                  <MenuItem value="Uniform" sx={menuItemSx}>
+                    Uniform
                   </MenuItem>
                   <MenuItem value="Fixed Date" sx={menuItemSx}>
                     Fixed Date
                   </MenuItem>
-                  <MenuItem value="Variable Increase" sx={menuItemSx}>
-                    Variable Increase
+                  <MenuItem value="Increase" sx={menuItemSx}>
+                    Increase
                   </MenuItem>
                 </Select>
               </FormControl>
             </Grid>
 
-            {/* Rise Year (shown when Standard is selected) */}
-            {form.riseTermType === "Standard" && (
+            {/* IncreaseIntervalMonths (show only when Term contains "Rent" and Rise Term is not Increase) */}
+            {hasRentInTerm && form.riseTermType !== "Increase" && (
               <Grid item xs={12} sm={6} md={4}>
-                <FormControl size="small" fullWidth error={!!errors.riseyear}>
-                  <InputLabel id="rise-year-label" sx={labelSx}>
-                    Rise Year
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="increase-interval-label" sx={labelSx}>
+                    Increase Interval Months
                   </InputLabel>
                   <Select
-                    labelId="rise-year-label"
-                    value={form.riseyear || ""}
-                    label="Rise Year"
-                    onChange={(e) => handleChange("riseyear", e.target.value)}
+                    labelId="increase-interval-label"
+                    value={form.increaseIntervalMonths || ""}
+                    label="Increase Interval Months"
+                    onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
                     sx={selectSx}
                   >
-                    {Array.from({ length: 50 }, (_, i) => {
-                      const year = new Date().getFullYear() - 10 + i;
-                      return (
-                        <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
-                          {year}
-                        </MenuItem>
-                      );
-                    })}
+                    {increaseIntervalOptions.map((option) => (
+                      <MenuItem key={option} value={option} sx={menuItemSx}>
+                        {option}
+                      </MenuItem>
+                    ))}
                   </Select>
-                  {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
                 </FormControl>
               </Grid>
             )}
+
+            {/* Rise Year (hidden when Uniform or Increase is selected) */}
+            {form.riseTermType &&
+              form.riseTermType !== "Uniform" &&
+              form.riseTermType !== "Increase" && (
+                <Grid item xs={12} sm={6} md={4}>
+                  <FormControl size="small" fullWidth error={!!errors.riseyear}>
+                    <InputLabel id="rise-year-label" sx={labelSx}>
+                      Rise Year
+                    </InputLabel>
+                    <Select
+                      labelId="rise-year-label"
+                      value={form.riseyear || ""}
+                      label="Rise Year"
+                      onChange={(e) => handleChange("riseyear", e.target.value)}
+                      sx={selectSx}
+                    >
+                      {Array.from({ length: 50 }, (_, i) => {
+                        const year = new Date().getFullYear() - 10 + i;
+                        return (
+                          <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
+                            {year}
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                    {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
+                  </FormControl>
+                </Grid>
+              )}
 
             {/* Rise Date (shown when Fixed Date is selected) */}
             {form.riseTermType === "Fixed Date" && (
@@ -1212,37 +1677,40 @@ function ContractsForm({
               </Grid>
             )}
 
-            {/* Variable Increase Add Icon (shown when Variable Increase is selected) */}
-            {form.riseTermType === "Variable Increase" && (
+            {/* Increase Add Icon (shown when Increase is selected) */}
+            {form.riseTermType === "Increase" && (
               <Grid item xs={12} sm={6} md={4}>
                 <MDBox display="flex" alignItems="center" gap={1}>
-                  <MDInput
-                    label="Variable Increase"
-                    value={
-                      riseTerms.length > 0 ? `${riseTerms.length} term(s) configured` : "No terms"
-                    }
-                    fullWidth
-                    size="small"
-                    InputProps={{ readOnly: true }}
-                    sx={{ flex: 1, ...inputSx }}
-                  />
+                  <MDBox
+                    sx={{
+                      flex: 1,
+                      cursor: "pointer",
+                      position: "relative",
+                    }}
+                    onClick={handleOpenRiseTermsDialog}
+                  >
+                    <MDInput
+                      label="Increase"
+                      value={
+                        riseTerms.length > 0
+                          ? `${riseTerms.length} term(s) configured`
+                          : "Click for terms"
+                      }
+                      fullWidth
+                      size="small"
+                      InputProps={{ readOnly: true }}
+                      sx={{
+                        ...inputSx,
+                        pointerEvents: "none",
+                        "& .MuiInputBase-input": {
+                          cursor: "pointer",
+                        },
+                      }}
+                    />
+                  </MDBox>
                   <IconButton
                     color="primary"
-                    onClick={() => {
-                      setRiseTermForm({
-                        monthsInterval: "",
-                        risePercent: "",
-                        sequenceNo: getNextRiseSequenceNo(),
-                      });
-                      setRiseTermForm({
-                        monthsInterval: "",
-                        risePercent: "",
-                        sequenceNo: getNextRiseSequenceNo(),
-                      });
-                      setRiseTermErrors({});
-                      setEditingRiseTermIndex(null);
-                      setRiseTermsDialogOpen(true);
-                    }}
+                    onClick={handleOpenRiseTermsDialog}
                     title="Add Rise Terms"
                     sx={{
                       minWidth: "40px",
@@ -1256,60 +1724,20 @@ function ContractsForm({
               </Grid>
             )}
 
-            {/* SDRateMonths */}
+            {/* PaymentTermMonths */}
             <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="SD Rate Months"
-                type="number"
-                value={form.sdRateMonths}
-                onChange={(e) => handleChange("sdRateMonths", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* SecurityDepositAmount */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Security Deposit Amount (Rs)"
-                type="number"
-                value={form.securityDepositAmount}
-                onChange={(e) => handleChange("securityDepositAmount", e.target.value)}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* RentalValue */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Rental Value"
-                type="number"
-                value={form.rentalValue}
-                onChange={(e) => handleChange("rentalValue", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* GovtShareCondition */}
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.govtShareCondition}>
-                <InputLabel id="govt-share-label" sx={labelSx}>
-                  Govt Share Condition
+              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
+                <InputLabel id="payment-term-label" sx={labelSx}>
+                  Payment Term Months
                 </InputLabel>
                 <Select
-                  labelId="govt-share-label"
-                  value={form.govtShareCondition || ""}
-                  label="Govt Share Condition"
-                  onChange={(e) => handleChange("govtShareCondition", e.target.value)}
+                  labelId="payment-term-label"
+                  value={form.paymentTermMonths || ""}
+                  label="Payment Term Months"
+                  onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
                   sx={selectSx}
                 >
-                  {govtShareOptions.map((option) => (
+                  {paymentTermOptions.map((option) => (
                     <MenuItem key={option} value={option} sx={menuItemSx}>
                       {option}
                     </MenuItem>
@@ -1318,17 +1746,106 @@ function ContractsForm({
               </FormControl>
             </Grid>
 
-            {/* PAFShare */}
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="PAF Share (%)"
-                type="number"
-                value={form.pafShare || ""}
-                onChange={(e) => handleChange("pafShare", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
+            {/* Auto-calculated summary (display-only, separated from editable fields) */}
+            <Grid item xs={12}>
+              <MDBox
+                sx={{
+                  mt: 0.5,
+                  mb: 0.5,
+                  px: 2,
+                  py: 1.5,
+                  border: "1px solid #d0d0d0",
+                  borderLeft: "4px solid #2E7D32",
+                  borderRadius: "8px",
+                  backgroundColor: "#f8f9fa",
+                }}
+              >
+                <MDBox
+                  sx={{
+                    mb: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 1,
+                  }}
+                >
+                  <MDTypography variant="button" fontWeight="bold">
+                    Auto Calculated Values
+                  </MDTypography>
+                  <Chip
+                    label={viabilityLabel}
+                    size="small"
+                    color={viabilityLabel === "Viable" ? "success" : "error"}
+                    sx={{ fontWeight: 700 }}
+                  />
+                </MDBox>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      Security Deposit Amount (Rs)
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {form.securityDepositAmount || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      Formula: SD Rate Months x Initial Rent PM
+                    </MDTypography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      Rental Value
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {form.rentalValue || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      {rentalValueFormulaText}
+                    </MDTypography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      Govt Share
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {form.govtShare || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      {govtShareFormulaText}
+                    </MDTypography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      PAF Share
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {form.pafShare || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      {pafShareFormulaText}
+                    </MDTypography>
+                  </Grid>
+                </Grid>
+              </MDBox>
             </Grid>
 
             {/* Status */}
@@ -2007,6 +2524,8 @@ function ContractsForm({
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
                               {getField("govtSharePA", "GovtSharePA", [
+                                "govtShare",
+                                "GovtShare",
                                 "govtShareCondition",
                                 "GovtShareCondition",
                               ])}
@@ -2088,7 +2607,11 @@ function ContractsForm({
                   onChange={(e) => handleRiseTermChange("monthsInterval", e.target.value)}
                   sx={selectSx}
                 >
-                  {[12, 24, 36, 48, 60, 72, 84, 96].map((value) => (
+                  {[
+                    6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114,
+                    120, 126, 132, 138, 144, 150, 156, 162, 168, 174, 180, 186, 192, 198, 204, 210,
+                    216, 222, 228, 234, 240, 246, 252, 258, 264, 270, 276, 282, 288, 294, 300,
+                  ].map((value) => (
                     <MenuItem key={value} value={value.toString()} sx={menuItemSx}>
                       {value}
                     </MenuItem>
@@ -2250,10 +2773,13 @@ ContractsForm.propTypes = {
   classes: PropTypes.array.isRequired,
   propertyGroups: PropTypes.array.isRequired,
   tenants: PropTypes.array.isRequired,
+  natures: PropTypes.array,
   onPropertyGroupsRefresh: PropTypes.func,
 };
 
 export default function Contracts() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [openForm, setOpenForm] = useState(false);
   const [currentContract, setCurrentContract] = useState(null);
   const [rows, setRows] = useState([]);
@@ -2270,6 +2796,7 @@ export default function Contracts() {
   const [classes, setClasses] = useState([]);
   const [propertyGroups, setPropertyGroups] = useState([]);
   const [tenants, setTenants] = useState([]);
+  const [natures, setNatures] = useState([]);
   const [userIPAddress, setUserIPAddress] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
@@ -2281,7 +2808,50 @@ export default function Contracts() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [groupByColumns, setGroupByColumns] = useState(["grpId"]);
+  const [commandFilterId, setCommandFilterId] = useState("");
+  const [baseFilterId, setBaseFilterId] = useState("");
+  const [classFilterId, setClassFilterId] = useState("");
   const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [selectedContractDetails, setSelectedContractDetails] = useState(null);
+  const [contractDetailsRiseTerms, setContractDetailsRiseTerms] = useState([]);
+  const [loadingContractDetailsRiseTerms, setLoadingContractDetailsRiseTerms] = useState(false);
+
+  const selectSx = {
+    fontSize: "1rem",
+    "& .MuiOutlinedInput-root": {
+      minHeight: "45px",
+    },
+    "& .MuiSelect-select": {
+      fontSize: "1rem",
+      padding: "12px 32px 12px 12px",
+      minHeight: "45px",
+      display: "flex",
+      alignItems: "center",
+      boxSizing: "border-box",
+      ...(darkMode ? { color: "#ffffff !important" } : {}),
+    },
+    ...(darkMode
+      ? {
+          "& .MuiInputLabel-root": {
+            color: "#ffffff !important",
+          },
+          "& .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(255, 255, 255, 0.3) !important",
+          },
+          "&:hover .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(255, 255, 255, 0.5) !important",
+          },
+          "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(255, 255, 255, 0.7) !important",
+          },
+          "& .MuiSvgIcon-root": {
+            color: "#ffffff !important",
+          },
+        }
+      : {}),
+  };
 
   const fetchContracts = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
@@ -2349,6 +2919,16 @@ export default function Contracts() {
       setTenants(response);
     } catch (error) {
       console.error("Error fetching tenants:", error);
+    }
+  };
+
+  const fetchNatures = async () => {
+    try {
+      const response = await api.list("nature");
+      setNatures(Array.isArray(response) ? response : []);
+    } catch (error) {
+      console.error("Error fetching natures:", error);
+      setNatures([]);
     }
   };
 
@@ -2426,6 +3006,7 @@ export default function Contracts() {
     if (classes.length === 0) fetchClasses();
     if (propertyGroups.length === 0) fetchPropertyGroups();
     if (tenants.length === 0) fetchTenants();
+    if (natures.length === 0) fetchNatures();
   }, [
     openForm,
     commands.length,
@@ -2433,6 +3014,7 @@ export default function Contracts() {
     classes.length,
     propertyGroups.length,
     tenants.length,
+    natures.length,
   ]);
 
   // Fetch user IP address on component mount
@@ -2445,6 +3027,11 @@ export default function Contracts() {
     fetchContracts(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
 
+  // Reset expanded state when grouping keys change.
+  useEffect(() => {
+    setExpandedGroups(new Set());
+  }, [groupByColumns]);
+
   const handleOpenForm = () => {
     setCurrentContract(null);
     setOpenForm(true);
@@ -2453,7 +3040,7 @@ export default function Contracts() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditContract = (id) => {
-    const contract = rows.find((row) => row.id === id);
+    const contract = rows.find((row) => (row.Id || row.id) === id);
     setCurrentContract(contract);
     setOpenForm(true);
   };
@@ -2461,6 +3048,54 @@ export default function Contracts() {
   const handleDeleteContract = (id) => {
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
+  };
+
+  const handleViewDetails = async (rowData) => {
+    setSelectedContractDetails(rowData);
+    setDetailsDialogOpen(true);
+    setContractDetailsRiseTerms([]);
+    setLoadingContractDetailsRiseTerms(true);
+
+    // Fetch ContractRiseTerms if contract has an ID
+    const contractId = rowData?.Id || rowData?.id;
+    if (contractId) {
+      try {
+        const response = await contractApi.getContractRiseTermsByContractId(contractId);
+        const data = Array.isArray(response) ? response : response?.data || [];
+
+        // Filter out deleted records and normalize data
+        const normalizedRiseTerms = data
+          .filter((t) => !t.IsDeleted && t.IsDeleted !== true)
+          .map((t) => {
+            const monthsInterval = t.MonthsInterval ?? null;
+            const risePercent = t.RisePercent ?? null;
+            const sequenceNo = t.SequenceNo ?? null;
+            const id = t.Id ?? null;
+
+            if (monthsInterval === null || risePercent === null || sequenceNo === null) {
+              return null;
+            }
+
+            return {
+              id: id ? Number(id) : null,
+              monthsInterval: String(monthsInterval),
+              risePercent: String(risePercent),
+              sequenceNo: String(sequenceNo),
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => Number(a.sequenceNo) - Number(b.sequenceNo));
+
+        setContractDetailsRiseTerms(normalizedRiseTerms);
+      } catch (error) {
+        console.error("Error fetching ContractRiseTerms for details:", error);
+        setContractDetailsRiseTerms([]);
+      } finally {
+        setLoadingContractDetailsRiseTerms(false);
+      }
+    } else {
+      setLoadingContractDetailsRiseTerms(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -2496,8 +3131,10 @@ export default function Contracts() {
         userIPAddress: userIPAddress || "unknown",
       };
 
-      if (currentContract && currentContract.id) {
-        await contractApi.update(currentContract.id, dataWithIP);
+      // Check for contract ID in both PascalCase and camelCase
+      const contractId = currentContract?.Id || currentContract?.id;
+      if (currentContract && contractId) {
+        await contractApi.update(contractId, dataWithIP);
       } else {
         await contractApi.create(dataWithIP);
       }
@@ -2683,100 +3320,188 @@ export default function Contracts() {
     }
   };
 
+  const formatDateDDMMMYYYY = (dateValue) => {
+    if (!dateValue) return "";
+    const raw = String(dateValue).trim();
+    if (!raw) return "";
+
+    const monthShort = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+
+    try {
+      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+      let day = "";
+      let month = "";
+      let year = "";
+
+      // yyyy-mm-dd
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        [year, month, day] = datePart.split("-");
+      }
+      // dd-mm-yyyy
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+        [day, month, year] = datePart.split("-");
+      } else {
+        const parsed = new Date(raw);
+        if (!Number.isFinite(parsed.getTime())) return raw;
+        day = String(parsed.getDate()).padStart(2, "0");
+        month = String(parsed.getMonth() + 1).padStart(2, "0");
+        year = String(parsed.getFullYear());
+      }
+
+      const monthIndex = Number(month) - 1;
+      const monthText = monthShort[monthIndex] || month;
+      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+    } catch {
+      return raw;
+    }
+  };
+
+  const contractsExportCellFormatter = ({ value, column }) => {
+    const colId = String(column?.id || "").toLowerCase();
+    if (
+      colId === "contractstartdate" ||
+      colId === "contractenddate" ||
+      colId === "commercialoperationdate" ||
+      colId === "risedate"
+    ) {
+      return formatDateDDMMMYYYY(value);
+    }
+    return value;
+  };
+
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
-    { Header: "ID", accessor: "id", align: "center", width: "56px" },
-    { Header: "Contract No", accessor: "contractNo", align: "left" },
-    // Backend now sends names directly (no mapping)
-    { Header: "Command", accessor: "cmdName", align: "left" },
-    { Header: "Base", accessor: "baseName", align: "left" },
-    { Header: "Class", accessor: "className", align: "left" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "72px", showInTable: true },
+    { Header: "ID", accessor: "id", align: "center", width: "56px", showInTable: true },
+    { Header: "Contract No", accessor: "contractNo", align: "left", showInTable: true },
     {
-      Header: "Group",
-      accessor: "grpName",
-      align: "left",
+      Header: "As Of Today",
+      accessor: "asOfToday",
+      align: "center",
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
+      Cell: () => <Icon sx={{ color: "success.main", fontSize: "1.25rem" }}>arrow_upward</Icon>,
+    },
+    {
+      Header: "Viability",
+      accessor: "feasible",
+      align: "center",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
-        if (row.original.isGroupRow) {
-          // eslint-disable-next-line react/prop-types
-          const groupKey = row.original.groupKey;
-          const isExpanded = expandedGroups.has(groupKey);
-          return (
-            <MDBox display="flex" alignItems="center" gap={1}>
-              <IconButton
-                size="small"
-                onClick={() => {
-                  const newExpanded = new Set(expandedGroups);
-                  if (isExpanded) {
-                    newExpanded.delete(groupKey);
-                  } else {
-                    newExpanded.add(groupKey);
-                  }
-                  setExpandedGroups(newExpanded);
-                }}
-                sx={{ padding: "4px" }}
-              >
-                <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
-              </IconButton>
-              <MDTypography variant="body2" fontWeight="medium">
-                {/* eslint-disable-next-line react/prop-types */}
-                {row.original.grpName || row.original.gId || ""}
-              </MDTypography>
-            </MDBox>
-          );
-        }
-        // eslint-disable-next-line react/prop-types
-        return row.original.grpName || row.original.gId || "-";
+        const rowData = row?.original || {};
+        const fromPayload = String(value || rowData.Feasible || "")
+          .trim()
+          .toLowerCase();
+        const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
+        const govt = Number(rowData.GovtShare ?? 0);
+        const paf = Number(rowData.PAFShare ?? 0);
+        const label = hasPayloadValue
+          ? fromPayload === "viable"
+            ? "Viable"
+            : "Unviable"
+          : govt > paf
+          ? "Viable"
+          : "Unviable";
+        return <Chip label={label} size="small" color={label === "Viable" ? "success" : "error"} />;
       },
+    },
+    // Backend now sends names directly (no mapping)
+    { Header: "Command", accessor: "cmdName", align: "left", showInTable: true },
+    { Header: "Base", accessor: "baseName", align: "left", showInTable: true },
+    { Header: "Class", accessor: "className", align: "left", showInTable: true },
+    {
+      Header: "Grouping ID",
+      accessor: "grpId",
+      align: "left",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => value || row?.original?.GId || "-",
     },
     {
       Header: "Total Area",
       accessor: "totalArea",
       align: "right",
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        if (row.original.isGroupRow) {
-          // eslint-disable-next-line react/prop-types
-          const totalArea = row.original.totalArea || 0;
-          return (
-            <MDTypography variant="body2" fontWeight="medium">
-              {totalArea ? Number(totalArea).toLocaleString() : "-"}
-            </MDTypography>
-          );
-        }
-        return "-";
+        const totalArea = row.original?.TotalArea ?? 0;
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {totalArea ? Number(totalArea).toLocaleString() : "-"}
+          </MDTypography>
+        );
+      },
+    },
+    {
+      Header: "Rate",
+      accessor: "groupRate",
+      align: "right",
+      showInTable: false,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const groupRate =
+          value ||
+          row?.original?.GroupRate ||
+          row?.original?.groupRate ||
+          row?.original?.TotalRate ||
+          row?.original?.totalRate ||
+          0;
+        return groupRate || groupRate === 0 ? Number(groupRate).toLocaleString() : "-";
       },
     },
     {
       Header: "Location",
       accessor: "location",
       align: "left",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        if (row.original.isGroupRow) {
-          // eslint-disable-next-line react/prop-types
-          const location = row.original.location || "";
-          return (
-            <MDTypography variant="body2" fontWeight="medium">
-              {location || "-"}
-            </MDTypography>
-          );
-        }
-        return "-";
+        const location = row.original?.Location || "";
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {location || "-"}
+          </MDTypography>
+        );
       },
     },
-    { Header: "Unit", accessor: "unitName", align: "left" },
+    {
+      Header: "Unit",
+      accessor: "unitName",
+      align: "left",
+      showInTable: false,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const unitName = value || row.original?.UnitName || row.original?.UoM || "";
+        return unitName || "-";
+      },
+    },
     {
       Header: "Tenant No",
       accessor: "tenantNo",
       align: "left",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
-        const tenantNo = value || row.original?.tenantNo || "";
+        const tenantNo = value || row.original?.TenantNo || "";
         // Find tenant from tenants list
         const tenant = tenants.find((t) => t.tenantNo === tenantNo);
         if (tenant) {
@@ -2802,12 +3527,18 @@ export default function Contracts() {
         return tenantNo || "-";
       },
     },
-    { Header: "Business Name", accessor: "businessName", align: "left" },
-    { Header: "Nature of Business", accessor: "natureOfBusiness", align: "left" },
+    { Header: "Business Name", accessor: "businessName", align: "left", showInTable: false },
+    {
+      Header: "Nature of Business",
+      accessor: "natureOfBusiness",
+      align: "left",
+      showInTable: false,
+    },
     {
       Header: "Contract Start Date",
       accessor: "contractStartDate",
       align: "left",
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => formatDateDDMMYYYY(value),
     },
@@ -2815,6 +3546,7 @@ export default function Contracts() {
       Header: "Contract End Date",
       accessor: "contractEndDate",
       align: "left",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => formatDateDDMMYYYY(value),
     },
@@ -2822,6 +3554,7 @@ export default function Contracts() {
       Header: "Commercial Operation Date",
       accessor: "commercialOperationDate",
       align: "left",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? formatDateDDMMYYYY(value) : "-"),
     },
@@ -2829,6 +3562,7 @@ export default function Contracts() {
       Header: "Initial Rent PM",
       accessor: "initialRentPM",
       align: "right",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
@@ -2836,15 +3570,22 @@ export default function Contracts() {
       Header: "Initial Rent PA",
       accessor: "initialRentPA",
       align: "right",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
-    { Header: "Payment Term Months", accessor: "paymentTermMonths", align: "right" },
-    { Header: "Term", accessor: "term", align: "left" },
+    {
+      Header: "Payment Term Months",
+      accessor: "paymentTermMonths",
+      align: "right",
+      showInTable: false,
+    },
+    { Header: "Term", accessor: "term", align: "left", showInTable: false },
     {
       Header: "Increase Rate %",
       accessor: "increaseRatePercent",
       align: "right",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? `${value}%` : "-"),
     },
@@ -2852,12 +3593,14 @@ export default function Contracts() {
       Header: "Increase Interval Months",
       accessor: "increaseIntervalMonths",
       align: "right",
+      showInTable: false,
     },
-    { Header: "SD Rate Months", accessor: "sdRateMonths", align: "right" },
+    { Header: "SD Rate Months", accessor: "sdRateMonths", align: "right", showInTable: false },
     {
       Header: "Security Deposit Amount (Rs)",
       accessor: "securityDepositAmount",
       align: "right",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
@@ -2865,33 +3608,70 @@ export default function Contracts() {
       Header: "Rental Value",
       accessor: "rentalValue",
       align: "right",
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
-    { Header: "Govt Share Condition", accessor: "govtShareCondition", align: "left" },
     {
-      Header: "PAF Share %",
+      Header: "VA Area",
+      accessor: "vaArea",
+      align: "right",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const vaArea = value || row?.original?.VaArea || 0;
+        return vaArea || vaArea === 0 ? Number(vaArea).toLocaleString() : "-";
+      },
+    },
+    {
+      Header: "Govt Share",
+      accessor: "govtShare",
+      align: "right",
+      showInTable: false,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const finalValue = value;
+        return finalValue || finalValue === 0 ? Number(finalValue).toLocaleString() : "-";
+      },
+    },
+    {
+      Header: "PAF Share",
       accessor: "pafShare",
       align: "right",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? `${value}%` : "-"),
+      Cell: ({ value }) => (value || value === 0 ? Number(value).toLocaleString() : "-"),
     },
     {
       Header: "Attachments",
       accessor: "attachments",
       align: "left",
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const hasId = row?.original?.id;
+        const rowData = row?.original || {};
+        const hasId = rowData?.Id;
+        const rawIsAttachment = rowData?.IsAttachment;
+        const countValue =
+          rowData?.AttachmentCount ?? rowData?.AttachmentsCount ?? rowData?.FilesCount;
+        const hasAttachments =
+          rawIsAttachment === true ||
+          rawIsAttachment === 1 ||
+          rawIsAttachment === "1" ||
+          String(rawIsAttachment || "")
+            .trim()
+            .toLowerCase() === "true" ||
+          Number(countValue || 0) > 0;
         return hasId ? (
           <IconButton
             size="small"
-            color="primary"
+            color={hasAttachments ? "success" : "error"}
             // eslint-disable-next-line react/prop-types
             onClick={() => handleViewAttachments(row.original)}
             // eslint-disable-next-line react/prop-types
-            disabled={attachmentLoading && attachmentLoadingId === row?.original?.id}
+            disabled={attachmentLoading && attachmentLoadingId === row?.original?.Id}
             title="View attachments"
           >
             <Icon>visibility</Icon>
@@ -2911,43 +3691,196 @@ export default function Contracts() {
     { Header: "Remarks", accessor: "remarks", align: "left" },
   ];
 
-  // Group contracts by grpId
+  const groupingColumnOptions = [
+    { label: "Group ID", value: "grpId" },
+    { label: "Command", value: "cmdName" },
+    { label: "Base", value: "baseName" },
+    { label: "Class", value: "className" },
+    { label: "Tenant No", value: "tenantNo" },
+    { label: "Business Name", value: "businessName" },
+    { label: "Nature of Business", value: "natureOfBusiness" },
+    { label: "Status", value: "status" },
+    { label: "Term", value: "term" },
+  ];
+
+  const gridFilterOptions = useMemo(() => {
+    const commandMap = new Map();
+    const baseMap = new Map();
+    const classMap = new Map();
+
+    (rows || []).forEach((row) => {
+      const cmdName = String(row?.CmdName || "").trim();
+      const baseName = String(row?.BaseName || "").trim();
+      const className = String(row?.ClassName || "").trim();
+
+      if (cmdName) commandMap.set(cmdName.toLowerCase(), cmdName);
+      if (baseName) baseMap.set(baseName.toLowerCase(), baseName);
+      if (className) classMap.set(className.toLowerCase(), className);
+    });
+
+    return {
+      commands: Array.from(commandMap.values()).sort((a, b) => a.localeCompare(b)),
+      bases: Array.from(baseMap.values()).sort((a, b) => a.localeCompare(b)),
+      classes: Array.from(classMap.values()).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [rows]);
+
+  // Group contracts by selected grouping columns.
   const groupedData = useMemo(() => {
-    // Normalize rows
-    const normalizedRows = rows.map((row) => ({
-      ...row,
-      cmdName: row.cmdName || row.cmdname || row.commandName || "",
-      baseName: row.baseName || row.basename || row.baseNameText || "",
-      className: row.className || row.classname || row.classNameText || "",
-      grpName: row.grpName || row.grpname || row.groupName || row.gId || "",
-      grpId: row.grpId || row.gId || "",
-      unitName: row.unitName || row.unitname || row.uomName || row.uoM || row.uoMName || "",
-    }));
+    // Use only PascalCase (strict API response format) - create camelCase aliases for accessors
+    const normalizedRows = rows.map((row) => {
+      // Look up property grouping to get Area, Rate, Location, and UoM
+      const grpId = row.GrpId || row.GId || "";
+      const propertyGrouping = allPropertyGroupings.find(
+        (pg) => String(pg.GId || "") === String(grpId) || Number(pg.Id) === Number(grpId)
+      );
 
-    // Group by grpId
+      return {
+        ...row,
+        id: row.Id,
+        contractNo: row.ContractNo || "",
+        feasible: row.Feasible || "",
+        cmdName: row.CmdName || "",
+        baseName: row.BaseName || "",
+        className: row.ClassName || "",
+        grpName: row.GrpName || row.GId || "",
+        grpId: row.GrpId || row.GId || "",
+        // Get from property grouping if available, otherwise from row
+        totalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
+        totalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        location: propertyGrouping?.Location ?? row.Location ?? "",
+        unitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
+        tenantNo: row.TenantNo || "",
+        businessName: row.BusinessName || "",
+        natureOfBusiness: row.NatureOfBusiness || "",
+        contractStartDate: row.ContractStartDate || "",
+        contractEndDate: row.ContractEndDate || "",
+        commercialOperationDate: row.CommercialOperationDate || "",
+        initialRentPM: row.InitialRentPM || "",
+        initialRentPA: row.InitialRentPA || "",
+        paymentTermMonths: row.PaymentTermMonths || "",
+        term: row.Term || "",
+        increaseRatePercent: row.IncreaseRatePercent || "",
+        increaseIntervalMonths: row.IncreaseIntervalMonths || "",
+        sdRateMonths: row.SDRateMonths || "",
+        securityDepositAmount: row.SecurityDepositAmount || "",
+        rentalValue: row.RentalValue || "",
+        govtShare: row.GovtShare || 0,
+        pafShare: row.PAFShare || 0,
+        status: row.Status,
+        remarks: row.Remarks || "",
+        vaArea: row.VaArea || 0,
+        groupRate: row.GroupRate ?? propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        // Also set PascalCase versions for direct access
+        TotalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
+        TotalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        GroupRate: row.GroupRate ?? propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        Location: propertyGrouping?.Location ?? row.Location ?? "",
+        UnitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
+        UoM: propertyGrouping?.UoM ?? row.UoM ?? "",
+        VaArea: row.VaArea || 0,
+      };
+    });
+
+    // Apply Command/Base/Class filters before grouping.
+    const selectedCommandName = String(commandFilterId || "")
+      .trim()
+      .toLowerCase();
+    const selectedBaseName = String(baseFilterId || "")
+      .trim()
+      .toLowerCase();
+    const selectedClassName = String(classFilterId || "")
+      .trim()
+      .toLowerCase();
+
+    const filteredRows = normalizedRows.filter((row) => {
+      const cmdName = String(row.cmdName || "").toLowerCase();
+      const baseName = String(row.baseName || "").toLowerCase();
+      const className = String(row.className || "").toLowerCase();
+
+      const matchesCommand = !selectedCommandName || cmdName === selectedCommandName;
+      const matchesBase = !selectedBaseName || baseName === selectedBaseName;
+      const matchesClass = !selectedClassName || className === selectedClassName;
+
+      return matchesCommand && matchesBase && matchesClass;
+    });
+
+    // If no grouping selected, return plain rows.
+    if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
+      return filteredRows.map((row) => ({
+        ...row,
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditContract(row.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteContract(row.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+            <IconButton
+              size="small"
+              color="primary"
+              onClick={() => handleViewDetails(row)}
+              title="View Details"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>visibility</Icon>
+            </IconButton>
+          </MDBox>
+        ),
+      }));
+    }
+
     const groups = new Map();
-    normalizedRows.forEach((row) => {
-      const grpId = row.grpId || row.gId || "";
-      if (!grpId) {
-        // If no group, add as individual row
-        if (!groups.has("_no_group")) {
-          groups.set("_no_group", { grpId: "", grpName: "", rows: [] });
-        }
-        groups.get("_no_group").rows.push(row);
-        return;
-      }
+    filteredRows.forEach((row) => {
+      const groupValues = groupByColumns.map((col) => {
+        const raw = row?.[col];
+        if (raw === null || raw === undefined || raw === "") return "-";
+        if (typeof raw === "boolean") return raw ? "Active" : "Inactive";
+        return String(raw);
+      });
+      const groupKey = groupValues.join(" || ");
+      const groupLabel = groupByColumns
+        .map((col, idx) => {
+          const colLabel = groupingColumnOptions.find((o) => o.value === col)?.label || col;
+          return `${colLabel}: ${groupValues[idx]}`;
+        })
+        .join(" | ");
 
-      const groupKey = grpId;
       if (!groups.has(groupKey)) {
-        // Find property grouping to get area and location
+        // Use property-group metadata when grouping includes grpId.
+        const grpId = row.GrpId || row.GId || "";
         const propertyGrouping = allPropertyGroupings.find(
-          (pg) => pg.gId === grpId || pg.id === Number(grpId)
+          (pg) => pg.GId === grpId || pg.Id === Number(grpId)
         );
         groups.set(groupKey, {
-          grpId: grpId,
-          grpName: propertyGrouping?.gId || row.grpName || grpId,
-          totalArea: propertyGrouping?.area || 0,
-          location: propertyGrouping?.location || "",
+          grpId: grpId || "",
+          grpName: propertyGrouping?.GId || row.GrpName || grpId || "",
+          groupLabel,
+          totalArea: propertyGrouping?.Area || 0,
+          totalRate: propertyGrouping?.Rate ?? 0,
+          location: propertyGrouping?.Location || "",
           rows: [],
         });
       }
@@ -2957,58 +3890,149 @@ export default function Contracts() {
     // Build result array
     const result = [];
     groups.forEach((group, groupKey) => {
-      if (groupKey === "_no_group") {
-        // Add ungrouped rows directly
-        group.rows.forEach((row) => {
-          result.push({
-            ...row,
-            actions: (
-              <MDBox
-                alignItems="left"
-                justifyContent="left"
-                sx={{
-                  backgroundColor: "#f8f9fa",
-                  gap: "2px",
-                  padding: "2px 2px",
-                  borderRadius: "2px",
-                }}
-              >
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => handleEditContract(row.id)}
-                  title="Edit"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>edit</Icon>
-                </IconButton>
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDeleteContract(row.id)}
-                  title="Delete"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>delete</Icon>
-                </IconButton>
-              </MDBox>
-            ),
-          });
-        });
-        return;
-      }
-
       const isExpanded = expandedGroups.has(groupKey);
+      const groupRows = group.rows;
 
-      // Add group row
-      result.push({
+      // Calculate sums for numeric fields
+      const numericSums = {
+        totalArea: 0,
+        totalRate: 0,
+        groupRate: 0,
+        initialRentPM: 0,
+        initialRentPA: 0,
+        paymentTermMonths: 0,
+        sdRateMonths: 0,
+        increaseRatePercent: 0,
+        increaseIntervalMonths: 0,
+        securityDepositAmount: 0,
+        rentalValue: 0,
+        govtShare: 0,
+        pafShare: 0,
+        vaArea: 0,
+        // PascalCase versions
+        TotalArea: 0,
+        TotalRate: 0,
+        GroupRate: 0,
+        InitialRentPM: 0,
+        InitialRentPA: 0,
+        PaymentTermMonths: 0,
+        SDRateMonths: 0,
+        IncreaseRatePercent: 0,
+        IncreaseIntervalMonths: 0,
+        SecurityDepositAmount: 0,
+        RentalValue: 0,
+        GovtShare: 0,
+        PAFShare: 0,
+        VaArea: 0,
+      };
+
+      groupRows.forEach((row) => {
+        // Sum numeric fields
+        numericSums.totalArea += Number(row.totalArea || row.TotalArea || 0);
+        numericSums.totalRate += Number(row.totalRate || row.TotalRate || 0);
+        numericSums.groupRate += Number(row.groupRate || row.GroupRate || 0);
+        numericSums.initialRentPM += Number(row.initialRentPM || row.InitialRentPM || 0);
+        numericSums.initialRentPA += Number(row.initialRentPA || row.InitialRentPA || 0);
+        numericSums.paymentTermMonths += Number(
+          row.paymentTermMonths || row.PaymentTermMonths || 0
+        );
+        numericSums.sdRateMonths += Number(row.sdRateMonths || row.SDRateMonths || 0);
+        numericSums.increaseRatePercent += Number(
+          row.increaseRatePercent || row.IncreaseRatePercent || 0
+        );
+        numericSums.increaseIntervalMonths += Number(
+          row.increaseIntervalMonths || row.IncreaseIntervalMonths || 0
+        );
+        numericSums.securityDepositAmount += Number(
+          row.securityDepositAmount || row.SecurityDepositAmount || 0
+        );
+        numericSums.rentalValue += Number(row.rentalValue || row.RentalValue || 0);
+        numericSums.govtShare += Number(row.govtShare || row.GovtShare || 0);
+        numericSums.pafShare += Number(row.pafShare || row.PAFShare || 0);
+        numericSums.vaArea += Number(row.vaArea || row.VaArea || 0);
+
+        // PascalCase versions
+        numericSums.TotalArea += Number(row.TotalArea || row.totalArea || 0);
+        numericSums.TotalRate += Number(row.TotalRate || row.totalRate || 0);
+        numericSums.GroupRate += Number(row.GroupRate || row.groupRate || 0);
+        numericSums.InitialRentPM += Number(row.InitialRentPM || row.initialRentPM || 0);
+        numericSums.InitialRentPA += Number(row.InitialRentPA || row.initialRentPA || 0);
+        numericSums.PaymentTermMonths += Number(
+          row.PaymentTermMonths || row.paymentTermMonths || 0
+        );
+        numericSums.SDRateMonths += Number(row.SDRateMonths || row.sdRateMonths || 0);
+        numericSums.IncreaseRatePercent += Number(
+          row.IncreaseRatePercent || row.increaseRatePercent || 0
+        );
+        numericSums.IncreaseIntervalMonths += Number(
+          row.IncreaseIntervalMonths || row.increaseIntervalMonths || 0
+        );
+        numericSums.SecurityDepositAmount += Number(
+          row.SecurityDepositAmount || row.securityDepositAmount || 0
+        );
+        numericSums.RentalValue += Number(row.RentalValue || row.rentalValue || 0);
+        numericSums.GovtShare += Number(row.GovtShare || row.govtShare || 0);
+        numericSums.PAFShare += Number(row.PAFShare || row.pafShare || 0);
+        numericSums.VaArea += Number(row.VaArea || row.vaArea || 0);
+      });
+
+      // Preserve values for grouped columns only
+      const groupedColumnValues = {};
+      groupByColumns.forEach((col) => {
+        const firstRowValue = group.rows[0]?.[col];
+        const firstRowValuePascal = group.rows[0]?.[col.charAt(0).toUpperCase() + col.slice(1)];
+        groupedColumnValues[col] = firstRowValue !== undefined ? firstRowValue : "";
+        // Also set PascalCase version if it exists
+        if (firstRowValuePascal !== undefined) {
+          groupedColumnValues[col.charAt(0).toUpperCase() + col.slice(1)] = firstRowValuePascal;
+        }
+      });
+
+      // Create group row with sums for numeric fields and blank for date/text fields
+      const groupRow = {
+        // Start with first row to get structure
         ...group.rows[0],
+        // Group label in Contract No (both PascalCase and camelCase)
+        ContractNo: group.groupLabel || "-",
+        contractNo: group.groupLabel || "-",
+        GrpName: group.grpName,
         grpName: group.grpName,
-        totalArea: group.totalArea,
-        location: group.location,
-        isGroupRow: true,
-        groupKey: groupKey,
-        groupRows: group.rows,
+        // Numeric fields - use sums
+        ...numericSums,
+        // Preserve grouped column values
+        ...groupedColumnValues,
+        // Date fields - set to blank
+        contractStartDate: "",
+        contractEndDate: "",
+        commercialOperationDate: "",
+        ContractStartDate: "",
+        ContractEndDate: "",
+        CommercialOperationDate: "",
+        // Text fields - set to blank (except grouped columns which are already set above)
+        tenantNo: "",
+        businessName: "",
+        natureOfBusiness: "",
+        term: "",
+        remarks: "",
+        location: "",
+        unitName: "",
+        TenantNo: "",
+        BusinessName: "",
+        NatureOfBusiness: "",
+        Term: "",
+        Remarks: "",
+        Location: "",
+        UnitName: "",
+        UoM: "",
+        // Status and other non-numeric, non-date fields
+        status: "",
+        Status: "",
+        feasible: "",
+        Feasible: "",
+        // Group metadata
+        IsGroupRow: true,
+        GroupKey: groupKey,
+        GroupRows: group.rows,
         actions: (
           <MDBox
             alignItems="left"
@@ -3039,14 +4063,18 @@ export default function Contracts() {
             </IconButton>
           </MDBox>
         ),
-      });
+      };
+
+      result.push(groupRow);
 
       // Add expanded rows if group is expanded
+      // Detail rows should show all original data (no aggregation)
       if (isExpanded) {
         group.rows.forEach((row) => {
           result.push({
             ...row,
-            isExpandedRow: true,
+            // Keep all original row data - no overrides needed
+            IsExpandedRow: true,
             actions: (
               <MDBox
                 alignItems="left"
@@ -3076,6 +4104,15 @@ export default function Contracts() {
                 >
                   <Icon>delete</Icon>
                 </IconButton>
+                <IconButton
+                  size="small"
+                  color="primary"
+                  onClick={() => handleViewDetails(row)}
+                  title="View Details"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>visibility</Icon>
+                </IconButton>
               </MDBox>
             ),
           });
@@ -3084,9 +4121,40 @@ export default function Contracts() {
     });
 
     return result;
-  }, [rows, allPropertyGroupings, expandedGroups]);
+  }, [
+    rows,
+    commandFilterId,
+    baseFilterId,
+    classFilterId,
+    allPropertyGroupings,
+    expandedGroups,
+    groupByColumns,
+  ]);
 
   const computedRows = groupedData;
+
+  // Filter columns to only show those with showInTable: true
+  const visibleColumns = columns.filter((col) => col.showInTable !== false);
+  const allColumns = columns; // Keep all columns for details dialog and export
+
+  // Get column IDs that should be hidden initially (columns with showInTable: false)
+  // React-table uses accessor as id if id is not provided
+  const initialHiddenColumnIds = useMemo(() => {
+    return columns
+      .filter((col) => col.showInTable === false)
+      .map((col) => {
+        // React-table generates id from accessor if id is not provided
+        // For columns with Cell functions, we need to ensure they have an id or accessor
+        if (col.id) return col.id;
+        if (col.accessor) return col.accessor;
+        // Fallback: try to generate from Header (not ideal but works)
+        if (typeof col.Header === "string") {
+          return col.Header.toLowerCase().replace(/\s+/g, "");
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }, [columns]);
 
   return (
     <DashboardLayout>
@@ -3206,9 +4274,149 @@ export default function Contracts() {
                   </MDBox>
                 )}
 
+                {/* Grouping + Command/Base/Class filter widgets */}
+                <MDBox
+                  px={2}
+                  pb={2}
+                  display="flex"
+                  justifyContent="space-between"
+                  alignItems="center"
+                  flexWrap="wrap"
+                  gap={1.5}
+                >
+                  <MDBox
+                    display="flex"
+                    alignItems="center"
+                    flexWrap="wrap"
+                    gap={1}
+                    width={{ xs: "100%", md: "auto" }}
+                  >
+                    <MDBox width={{ xs: "100%", sm: "190px" }}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel
+                          id="contracts-filter-command-label"
+                          sx={darkMode ? { color: "#ffffff !important" } : {}}
+                        >
+                          Command
+                        </InputLabel>
+                        <Select
+                          labelId="contracts-filter-command-label"
+                          value={commandFilterId}
+                          label="Command"
+                          onChange={(e) => setCommandFilterId(e.target.value)}
+                          sx={selectSx}
+                        >
+                          <MenuItem value="">All Commands</MenuItem>
+                          {gridFilterOptions.commands.map((cmdName) => (
+                            <MenuItem key={cmdName} value={cmdName}>
+                              {cmdName}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </MDBox>
+                    <MDBox width={{ xs: "100%", sm: "190px" }}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel
+                          id="contracts-filter-base-label"
+                          sx={darkMode ? { color: "#ffffff !important" } : {}}
+                        >
+                          Base
+                        </InputLabel>
+                        <Select
+                          labelId="contracts-filter-base-label"
+                          value={baseFilterId}
+                          label="Base"
+                          onChange={(e) => setBaseFilterId(e.target.value)}
+                          sx={selectSx}
+                        >
+                          <MenuItem value="">All Bases</MenuItem>
+                          {gridFilterOptions.bases.map((baseName) => (
+                            <MenuItem key={baseName} value={baseName}>
+                              {baseName}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </MDBox>
+                    <MDBox width={{ xs: "100%", sm: "190px" }}>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel
+                          id="contracts-filter-class-label"
+                          sx={darkMode ? { color: "#ffffff !important" } : {}}
+                        >
+                          Class
+                        </InputLabel>
+                        <Select
+                          labelId="contracts-filter-class-label"
+                          value={classFilterId}
+                          label="Class"
+                          onChange={(e) => setClassFilterId(e.target.value)}
+                          sx={selectSx}
+                        >
+                          <MenuItem value="">All Classes</MenuItem>
+                          {gridFilterOptions.classes.map((className) => (
+                            <MenuItem key={className} value={className}>
+                              {className}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </MDBox>
+                  </MDBox>
+
+                  <MDBox width={{ xs: "100%", md: "520px" }}>
+                    <Autocomplete
+                      multiple
+                      size="small"
+                      options={groupingColumnOptions}
+                      disableCloseOnSelect
+                      value={groupingColumnOptions.filter((opt) =>
+                        groupByColumns.includes(opt.value)
+                      )}
+                      isOptionEqualToValue={(option, value) => option.value === value.value}
+                      getOptionLabel={(option) => option.label}
+                      onChange={(event, newValue) => {
+                        setGroupByColumns((newValue || []).map((item) => item.value));
+                      }}
+                      renderInput={(params) => (
+                        <MDInput
+                          {...params}
+                          label="Group By Columns"
+                          placeholder="Select columns"
+                          sx={
+                            darkMode
+                              ? {
+                                  "& .MuiInputLabel-root": {
+                                    color: "#ffffff !important",
+                                  },
+                                  "& .MuiInputBase-input": {
+                                    color: "#ffffff !important",
+                                  },
+                                  "& .MuiOutlinedInput-notchedOutline": {
+                                    borderColor: "rgba(255, 255, 255, 0.3) !important",
+                                  },
+                                  "&:hover .MuiOutlinedInput-notchedOutline": {
+                                    borderColor: "rgba(255, 255, 255, 0.5) !important",
+                                  },
+                                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                                    borderColor: "rgba(255, 255, 255, 0.7) !important",
+                                  },
+                                  "& .MuiSvgIcon-root": {
+                                    color: "#ffffff !important",
+                                  },
+                                }
+                              : {}
+                          }
+                        />
+                      )}
+                    />
+                  </MDBox>
+                </MDBox>
+
                 <DataTable
                   table={{
-                    columns,
+                    columns: allColumns,
                     rows: computedRows,
                   }}
                   isSorted={false}
@@ -3225,6 +4433,10 @@ export default function Contracts() {
                   noEndBorder
                   canSearch
                   exportFileName="Contracts"
+                  exportCellFormatter={contractsExportCellFormatter}
+                  exportExcludeGroupParentsWhenExpanded
+                  exportAllColumns
+                  initialHiddenColumns={initialHiddenColumnIds}
                 />
 
                 {/* Server-side Pagination Footer */}
@@ -3306,6 +4518,7 @@ export default function Contracts() {
         classes={classes}
         propertyGroups={propertyGroups}
         tenants={tenants}
+        natures={natures}
         onPropertyGroupsRefresh={fetchPropertyGroups}
       />
       <Dialog
@@ -3469,6 +4682,277 @@ export default function Contracts() {
           </MDButton>
           <MDButton onClick={handleConfirmDelete} color="error">
             <Icon>delete</Icon>&nbsp;Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      {/* Contract Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={() => setDetailsDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDBox display="flex" justifyContent="space-between" alignItems="center">
+            <MDBox>
+              <MDTypography variant="h5" fontWeight="bold" sx={{ mb: 0.5 }}>
+                Contract Details
+              </MDTypography>
+              {selectedContractDetails && (
+                <MDTypography variant="body2" color="text" fontWeight="medium">
+                  Contract No:{" "}
+                  {selectedContractDetails.ContractNo || selectedContractDetails.contractNo || "-"}
+                </MDTypography>
+              )}
+            </MDBox>
+            <IconButton onClick={() => setDetailsDialogOpen(false)} size="small">
+              <Icon>close</Icon>
+            </IconButton>
+          </MDBox>
+        </DialogTitle>
+        <DialogContent dividers sx={{ maxHeight: "70vh", overflowY: "auto" }}>
+          {selectedContractDetails && (
+            <MDBox>
+              <Grid container spacing={2} sx={{ mt: 1 }}>
+                {allColumns
+                  .filter((col) => col.accessor !== "actions" && col.accessor !== "attachments")
+                  .map((col) => {
+                    const accessor = col.accessor;
+                    // Access value from both camelCase and PascalCase
+                    const rowData = selectedContractDetails;
+                    let value = rowData[accessor];
+
+                    // If not found in camelCase, try PascalCase
+                    if (value === undefined || value === null) {
+                      const pascalAccessor = accessor.charAt(0).toUpperCase() + accessor.slice(1);
+                      value = rowData[pascalAccessor];
+                    }
+
+                    // Also try accessing from original if available
+                    if ((value === undefined || value === null) && rowData.original) {
+                      value =
+                        rowData.original[accessor] ||
+                        rowData.original[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+                    }
+
+                    // Special handling for Rate field - use GroupRate
+                    if (accessor === "groupRate" || accessor === "totalRate") {
+                      value =
+                        rowData.GroupRate ||
+                        rowData.groupRate ||
+                        rowData.TotalRate ||
+                        rowData.totalRate ||
+                        value;
+                    }
+
+                    // Get the cell value using the column's Cell function if available
+                    let displayValue = value;
+                    if (col.Cell) {
+                      try {
+                        const cellProps = { value, row: { original: rowData.original || rowData } };
+                        displayValue = col.Cell(cellProps);
+                      } catch (e) {
+                        displayValue = value || "-";
+                      }
+                    } else {
+                      // Format based on type
+                      if (typeof value === "number") {
+                        displayValue = value.toLocaleString();
+                      } else if (value === null || value === undefined || value === "") {
+                        displayValue = "-";
+                      } else {
+                        displayValue = String(value);
+                      }
+                    }
+
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={accessor}>
+                        <MDBox
+                          sx={{
+                            p: 1.5,
+                            borderRadius: 1,
+                            backgroundColor: "rgba(0, 0, 0, 0.02)",
+                            border: "1px solid rgba(0, 0, 0, 0.05)",
+                            transition: "all 0.2s ease",
+                            "&:hover": {
+                              backgroundColor: "rgba(0, 0, 0, 0.04)",
+                              borderColor: "rgba(0, 0, 0, 0.1)",
+                            },
+                          }}
+                        >
+                          <MDTypography
+                            variant="caption"
+                            color="text"
+                            fontWeight="bold"
+                            sx={{ display: "block", mb: 0.5 }}
+                          >
+                            {col.Header}:
+                          </MDTypography>
+                          <MDTypography variant="body2" fontWeight="regular" color="text">
+                            {displayValue}
+                          </MDTypography>
+                        </MDBox>
+                      </Grid>
+                    );
+                  })}
+              </Grid>
+
+              {/* Rise Terms Section */}
+              {loadingContractDetailsRiseTerms ? (
+                <MDBox display="flex" justifyContent="center" py={3} mt={3}>
+                  <CurrencyLoading size={40} />
+                </MDBox>
+              ) : contractDetailsRiseTerms.length > 0 ? (
+                <MDBox mt={4}>
+                  <MDTypography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
+                    Existing Rise Terms
+                  </MDTypography>
+                  <Card
+                    sx={{
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                      borderRadius: 2,
+                    }}
+                  >
+                    <MDBox p={2}>
+                      <TableContainer
+                        sx={{
+                          maxHeight: "400px",
+                          overflowY: "auto",
+                          // Firefox
+                          scrollbarWidth: "thin",
+                          scrollbarColor: "#888 transparent",
+                          // Chrome/Safari/Edge
+                          "&::-webkit-scrollbar": {
+                            width: "8px",
+                            height: "8px",
+                          },
+                          "&::-webkit-scrollbar-track": {
+                            background: "transparent",
+                            borderRadius: "4px",
+                          },
+                          "&::-webkit-scrollbar-thumb": {
+                            backgroundColor: "#888",
+                            borderRadius: "4px",
+                            border: "2px solid transparent",
+                            backgroundClip: "padding-box",
+                            "&:hover": {
+                              backgroundColor: "#555",
+                            },
+                          },
+                        }}
+                      >
+                        <Table size="small" sx={{ borderCollapse: "collapse" }}>
+                          <TableHead
+                            sx={{
+                              position: "sticky",
+                              top: 0,
+                              zIndex: 1,
+                              backgroundColor: "#f5f5f5",
+                            }}
+                          >
+                            <TableRow>
+                              <TableCell
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: "0.875rem",
+                                  borderBottom: "2px solid #e0e0e0",
+                                  backgroundColor: "#f5f5f5",
+                                  padding: "12px 16px 12px 16px",
+                                  paddingRight: "4px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Sequence No
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: "0.875rem",
+                                  borderBottom: "2px solid #e0e0e0",
+                                  backgroundColor: "#f5f5f5",
+                                  padding: "12px 16px 12px 4px",
+                                  paddingLeft: "4px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Months Interval
+                              </TableCell>
+                              <TableCell
+                                align="right"
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: "0.875rem",
+                                  borderBottom: "2px solid #e0e0e0",
+                                  backgroundColor: "#f5f5f5",
+                                  padding: "12px 16px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Rise Percent (%)
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {contractDetailsRiseTerms.map((term, index) => (
+                              <TableRow
+                                key={term.id || index}
+                                sx={{
+                                  "&:hover": { backgroundColor: "rgba(0, 0, 0, 0.02)" },
+                                  "&:last-child td": {
+                                    borderBottom: "none",
+                                  },
+                                }}
+                              >
+                                <TableCell
+                                  sx={{
+                                    fontSize: "0.875rem",
+                                    borderBottom: "1px solid #e0e0e0",
+                                    padding: "8px 16px 8px 16px",
+                                    paddingRight: "4px",
+                                  }}
+                                >
+                                  <MDTypography variant="body2" fontWeight="medium">
+                                    {term.sequenceNo}
+                                  </MDTypography>
+                                </TableCell>
+                                <TableCell
+                                  sx={{
+                                    fontSize: "0.875rem",
+                                    borderBottom: "1px solid #e0e0e0",
+                                    padding: "8px 16px 8px 4px",
+                                    paddingLeft: "4px",
+                                  }}
+                                >
+                                  <MDTypography variant="body2">{term.monthsInterval}</MDTypography>
+                                </TableCell>
+                                <TableCell
+                                  align="right"
+                                  sx={{
+                                    fontSize: "0.875rem",
+                                    borderBottom: "1px solid #e0e0e0",
+                                    padding: "8px 16px",
+                                  }}
+                                >
+                                  <MDTypography variant="body2" fontWeight="bold" color="primary">
+                                    {term.risePercent}%
+                                  </MDTypography>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </MDBox>
+                  </Card>
+                </MDBox>
+              ) : null}
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
+            Close
           </MDButton>
         </DialogActions>
       </Dialog>

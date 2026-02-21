@@ -12,7 +12,6 @@ async function requestWithPagination(method, path, body) {
   const totalCount = res.headers.get("X-Total-Count");
   const pageNumber = res.headers.get("X-Page-Number");
   const pageSize = res.headers.get("X-Page-Size");
-
   if (totalCount !== null || pageNumber !== null || pageSize !== null) {
     return {
       data: Array.isArray(data) ? data : [data],
@@ -43,13 +42,9 @@ function create(data) {
       ? false
       : null;
 
-  const rentalProperty = {
+  const payload = {
     ...(data || {}),
     status: normalizedStatus,
-  };
-
-  const payload = {
-    rentalProperty,
     Action: "Create",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),
@@ -66,13 +61,9 @@ function update(id, data) {
       ? false
       : null;
 
-  const rentalProperty = {
+  const payload = {
     ...(data || {}),
     status: normalizedStatus,
-  };
-
-  const payload = {
-    rentalProperty,
     Action: "Update",
     ActionBy: "admin",
     ActionDate: new Date().toISOString(),

@@ -12,8 +12,11 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Card from "@mui/material/Card";
 import api from "../../../services/api.service"; // Assuming api service is available
+import { useMaterialUIController } from "context";
 
 function UnitsConfig() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
   const [commandOptions, setCommandOptions] = useState([]);
   const [allBaseOptions, setAllBaseOptions] = useState([]);
@@ -222,7 +225,22 @@ function UnitsConfig() {
       error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
       helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
       inputProps={field === "id" ? { readOnly: true } : {}}
-      sx={field === "id" ? { width: "50%" } : {}}
+      sx={{
+        ...(field === "id" ? { width: "50%" } : {}),
+        ...(darkMode
+          ? {
+              "& .MuiInputBase-input": {
+                color: "#000000 !important",
+              },
+              "& .MuiInputLabel-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}),
+      }}
     />
   );
 
@@ -235,6 +253,18 @@ function UnitsConfig() {
         onChange={(e) => handleChange("cmd", e.target.value)}
         size="small"
         fullWidth
+        sx={
+          darkMode
+            ? {
+                "& .MuiSelect-select": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}
+        }
       >
         {commandOptions.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
@@ -251,6 +281,18 @@ function UnitsConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>
@@ -263,6 +305,18 @@ function UnitsConfig() {
       onChange={(e) => handleChange("base", e.target.value)}
       size="small"
       fullWidth
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
     >
       {filteredBaseOptions.length > 0 ? (
         filteredBaseOptions.map((opt) => (

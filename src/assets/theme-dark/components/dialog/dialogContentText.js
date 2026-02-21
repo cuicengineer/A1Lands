@@ -27,7 +27,7 @@ const dialogContentText = {
   styleOverrides: {
     root: {
       fontSize: size.md,
-      color: rgba(white.main, 0.8),
+      color: "#000000", // Black text for better readability in dialogs
     },
   },
 };

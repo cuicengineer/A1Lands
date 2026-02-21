@@ -70,9 +70,31 @@ function NewContractForm({ open, handleClose }) {
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-      <DialogTitle>Add New A1 Contract</DialogTitle>
+      <DialogTitle sx={{ color: "#000000" }}>Add New A1 Contract</DialogTitle>
       <DialogContent>
-        <MDBox component="form" role="form">
+        <MDBox
+          component="form"
+          role="form"
+          sx={{
+            "& .MuiFormLabel-root": { color: "#000000 !important", opacity: 1 },
+            "& .MuiFormLabel-root.Mui-focused": { color: "#000000 !important", opacity: 1 },
+            "& .MuiFormLabel-root.MuiInputLabel-shrink": {
+              color: "#000000 !important",
+              opacity: 1,
+            },
+            "& .MuiInputLabel-root": { color: "#000000 !important", opacity: 1 },
+            "& .MuiInputLabel-root.Mui-focused": { color: "#000000 !important", opacity: 1 },
+            "& .MuiInputLabel-root.MuiInputLabel-shrink": {
+              color: "#000000 !important",
+              opacity: 1,
+            },
+            "& .MuiInputBase-input": { color: "#000000 !important" },
+            "& .MuiSelect-select": { color: "#000000 !important" },
+            "& .MuiSvgIcon-root": { color: "#000000 !important" },
+            "& .MuiFormHelperText-root": { color: "#000000 !important" },
+            "& .MuiTypography-root": { color: "#000000 !important" },
+          }}
+        >
           <Grid container spacing={3}>
             <Grid item xs={12} sm={6}>
               <MDInput

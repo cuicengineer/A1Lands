@@ -12,8 +12,8 @@ import "./styles.css";
 function A1Login() {
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState("alpha");
-  const [password, setPassword] = useState("alpha");
+  const [username, setUsername] = useState("ahq");
+  const [password, setPassword] = useState("abc@123");
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,8 +84,13 @@ function A1Login() {
               </div>
 
               <div className="welcome-section">
-                <h3></h3>
-                <p>Audit & Accounts Sub Branch</p>
+                <h1>
+                  <p>
+                    Audit & Accounts Sub Branch
+                    <br />
+                    Director of Central Non Public Fund
+                  </p>{" "}
+                </h1>
               </div>
 
               <form onSubmit={handleSubmit}>

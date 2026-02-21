@@ -12,7 +12,6 @@ async function requestWithPagination(method, path, body) {
   const totalCount = res.headers.get("X-Total-Count");
   const pageNumber = res.headers.get("X-Page-Number");
   const pageSize = res.headers.get("X-Page-Size");
-
   if (totalCount !== null || pageNumber !== null || pageSize !== null) {
     return {
       data: Array.isArray(data) ? data : [data],
@@ -75,6 +74,13 @@ function remove(id, data = {}) {
   return requestWithPagination("DELETE", `/api/Contracts/${id}`, payload);
 }
 
+// Get ContractRiseTerms by ContractID
+// Tries multiple endpoint patterns to match ContractRiseTermsController
+function getContractRiseTermsByContractId(contractId) {
+  // Try the standard pattern: /api/ContractRiseTerms/GetByContractId/{contractId}
+  return api.request("GET", `/api/ContractRiseTerms/ByContract/${contractId}`);
+}
+
 // Delete ContractRiseTerm by ID
 function deleteContractRiseTerm(riseTermId) {
   const payload = {
@@ -92,6 +98,7 @@ const contractApi = {
   create,
   update,
   remove,
+  getContractRiseTermsByContractId,
   deleteContractRiseTerm,
 };
 export default contractApi;
