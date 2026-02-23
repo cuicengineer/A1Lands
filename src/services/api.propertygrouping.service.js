@@ -1,4 +1,4 @@
-import api from "services/api.service";
+import api, { getActionBy } from "services/api.service";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -39,30 +39,33 @@ function get(id) {
   return requestWithPagination("GET", `/api/PropertyGroup/${id}`);
 }
 
-function create(data) {
+async function create(data) {
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Create",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return requestWithPagination("POST", `/api/PropertyGroup`, payload);
 }
 
-function update(id, data) {
+async function update(id, data) {
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Update",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return requestWithPagination("PUT", `/api/PropertyGroup/${id}`, payload);
 }
 
-function remove(id) {
-  const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
+async function remove(id) {
+  const actionBy = await getActionBy();
+  const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
   return requestWithPagination("DELETE", `/api/PropertyGroup/${id}`, payload);
 }
 
@@ -83,17 +86,19 @@ function notGroupedProperties(cmdId, baseId) {
   return requestWithPagination("GET", `/api/PropertyGroup/NotGroupedProperties?${params}`);
 }
 
-function removePropertyFromGroup(linkingId) {
-  const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
+async function removePropertyFromGroup(linkingId) {
+  const actionBy = await getActionBy();
+  const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
   return requestWithPagination("DELETE", `/api/PropertyGroup/Linking/${linkingId}`, payload);
 }
 
-function createPropertyGroupLinking(data) {
+async function createPropertyGroupLinking(data) {
   // Backend: [HttpPost("Linking")] CreatePropertyGroupLinking([FromBody] PropertyGroupLinking request)
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Create",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };

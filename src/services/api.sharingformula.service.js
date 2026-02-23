@@ -1,4 +1,4 @@
-import api from "services/api.service";
+import api, { getActionBy } from "services/api.service";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -39,32 +39,35 @@ function getById(id) {
 }
 
 // POST accepts single object or list of objects
-function create(data) {
+async function create(data) {
+  const actionBy = await getActionBy();
   // If data is an array, send as-is. If single object, wrap in array.
   const payload = Array.isArray(data) ? data : [data];
   const payloadWithAction = payload.map((item) => ({
     ...(item || {}),
     Action: "Create",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   }));
   return requestWithPagination("POST", `/api/SharingFormula`, payloadWithAction);
 }
 
-function update(id, data) {
+async function update(id, data) {
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Update",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return requestWithPagination("PUT", `/api/SharingFormula/${id}`, payload);
 }
 
-function remove(id) {
-  const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
+async function remove(id) {
+  const actionBy = await getActionBy();
+  const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
   return requestWithPagination("DELETE", `/api/SharingFormula/${id}`, payload);
 }
 

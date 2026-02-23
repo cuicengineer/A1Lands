@@ -8,12 +8,13 @@ import api from "services/api.service";
 const pafLogo = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
 
 import "./styles.css";
+import "assets/css/all.min.css";
 
 function A1Login() {
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState("ahq");
-  const [password, setPassword] = useState("abc@123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,13 +85,13 @@ function A1Login() {
               </div>
 
               <div className="welcome-section">
-                <h1>
+                <h3>
                   <p>
                     Audit & Accounts Sub Branch
                     <br />
                     Director of Central Non Public Fund
                   </p>{" "}
-                </h1>
+                </h3>
               </div>
 
               <form onSubmit={handleSubmit}>

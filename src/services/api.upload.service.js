@@ -1,4 +1,4 @@
-import api from "services/api.service";
+import api, { getActionBy } from "services/api.service";
 
 /**
  * Upload files to the server
@@ -12,11 +12,16 @@ async function uploadFiles(id, tableName, files) {
     throw new Error("No files provided for upload");
   }
 
+  // Get ActionBy with username and IP address
+  const actionBy = await getActionBy();
+
   // Create FormData for multipart/form-data
   const formData = new FormData();
   formData.append("id", id.toString());
   formData.append("tableName", tableName);
-  formData.append("Action", "Admin");
+  formData.append("Action", "Create");
+  formData.append("ActionBy", actionBy);
+  formData.append("ActionDate", new Date().toISOString());
 
   // Append each file to FormData ,
   //   03075832477.
@@ -49,7 +54,13 @@ async function getUploadedFiles(id, formName) {
 }
 
 async function deleteUploadedFile(fileId) {
-  const res = await api.requestRaw("DELETE", `/api/Upload/${fileId}`);
+  const actionBy = await getActionBy();
+  const payload = {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  };
+  const res = await api.requestRaw("DELETE", `/api/Upload/${fileId}`, payload);
   const contentType = res.headers.get("content-type");
   if (contentType && contentType.includes("application/json")) return await res.json();
   return await res.text();

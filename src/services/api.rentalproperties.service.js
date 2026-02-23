@@ -1,4 +1,4 @@
-import api from "services/api.service";
+import api, { getActionBy } from "services/api.service";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -34,7 +34,8 @@ function getAll(pageNumber = 1, pageSize = 50) {
   return requestWithPagination("GET", `/api/RentalProperties?${params}`);
 }
 
-function create(data) {
+async function create(data) {
+  const actionBy = await getActionBy();
   const normalizedStatus =
     data?.status === true || data?.status === 1 || data?.status === "1"
       ? true
@@ -46,14 +47,15 @@ function create(data) {
     ...(data || {}),
     status: normalizedStatus,
     Action: "Create",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return requestWithPagination("POST", `/api/RentalProperties`, payload);
 }
 
-function update(id, data) {
+async function update(id, data) {
+  const actionBy = await getActionBy();
   const normalizedStatus =
     data?.status === true || data?.status === 1 || data?.status === "1"
       ? true
@@ -65,15 +67,16 @@ function update(id, data) {
     ...(data || {}),
     status: normalizedStatus,
     Action: "Update",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return requestWithPagination("PUT", `/api/RentalProperties/${id}`, payload);
 }
 
-function remove(id) {
-  const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
+async function remove(id) {
+  const actionBy = await getActionBy();
+  const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
   return requestWithPagination("DELETE", `/api/RentalProperties/${id}`, payload);
 }
 

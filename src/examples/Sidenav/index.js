@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 
 // react-router-dom components
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 // prop-types is a library for typechecking of props.
 import PropTypes from "prop-types";
@@ -186,20 +186,43 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               icon={iconNode}
               active={isOpen}
               noCollapse={noCollapse}
-              onClick={handleClick} // 🔧 FIX
+              onClick={handleClick}
             />
           </Link>
         ) : path ? (
-          <NavLink key={key} to={path}>
+          <Link
+            key={key}
+            href={path}
+            sx={{ textDecoration: "none" }}
+            onClick={(e) => {
+              // Allow Ctrl+Click, Middle-click, and Right-click to open in new tab
+              if (e.ctrlKey || e.metaKey || e.button === 1 || e.button === 2) {
+                return; // Let browser handle it naturally
+              }
+              // Normal click: use React Router navigation
+              e.preventDefault();
+              navigate(path);
+              // Handle collapse toggle if needed
+              if (Array.isArray(collapse)) {
+                handleClick();
+              }
+            }}
+            onAuxClick={(e) => {
+              // Middle-click (button 1) - let browser handle it
+              if (e.button === 1) {
+                return;
+              }
+            }}
+          >
             <SidenavCollapse name={name} icon={iconNode} active={isOpen} />
-          </NavLink>
+          </Link>
         ) : (
           <SidenavCollapse
             key={key}
             name={name}
             icon={iconNode}
             active={isOpen}
-            onClick={handleClick} // 🔧 FIX
+            onClick={handleClick}
           />
         );
 
@@ -284,7 +307,11 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               <Icon sx={{ fontWeight: "bold" }}>{miniSidenav ? "menu_open" : "menu"}</Icon>
             </MDTypography>
           </MDBox>
-          <MDBox component={NavLink} to="/" display="flex" alignItems="center">
+          <MDBox
+            display="flex"
+            alignItems="center"
+            sx={{ textDecoration: "none", cursor: "default" }}
+          >
             {brand && <MDBox component="img" src={brand} alt="Brand" width="2rem" />}
             <MDBox
               width={!brandName && "100%"}
@@ -296,7 +323,10 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             </MDBox>
             <MDBox
               display={{ xs: "none", xl: "block" }}
-              onClick={toggleSidenavCollapse}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSidenavCollapse(e);
+              }}
               sx={{ cursor: "pointer", ml: "auto", zIndex: 1 }}
             >
               <MDTypography variant="h6" color="secondary">

@@ -1,0 +1,220 @@
+
+/* ================= RESET ================= */
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Poppins', sans-serif;}
+html,body{width:100%;height:100%;overflow:hidden; background: #fff;}
+
+.logo-symb{ width: 80px;}
+
+/* ================= BACKGROUND SLIDER ================= */
+.slider {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: url('../img/1.jpg') center / cover no-repeat;
+}
+.slide {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+
+    animation:
+        fade 16s infinite ease-in-out,
+        zoom 16s infinite linear;
+
+    animation-fill-mode: both;
+}
+
+.slide:nth-child(1) {
+    background-image: url('../img/1.jpg');
+    animation-delay: 0s;
+}
+.slide:first-child {
+    opacity: 1;
+}
+.slide:nth-child(2) {
+    background-image: url('../img/2.jpg');
+    animation-delay: 4s;
+}
+.slide:nth-child(3) {
+    background-image: url('../img/3.jpg');
+    animation-delay: 8s;
+}
+.slide:nth-child(4) {
+    background-image: url('../img/4.jpg');
+    animation-delay: 12s;
+}
+
+@keyframes fade {
+    0% { opacity: 0; }
+    10% { opacity: 1; }
+    25% { opacity: 1; }
+    35% { opacity: 0; }
+    100% { opacity: 0; }
+}
+
+
+@keyframes zoom {
+    from { transform: scale(1); }
+    to { transform: scale(1.08); }
+}
+.bg-overlay { 
+    position: absolute; inset: 0; 
+    background: linear-gradient(to right, rgba(0,0,0,0.3), rgba(0,0,0,0.1)); 
+    z-index: 1; 
+}
+
+/* ================= MAIN LAYOUT ================= */
+.page {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+/* ================= LOGIN BOX ================= */
+.left-side {
+    display: flex;
+    justify-content: center; 
+    align-items: center;    padding-left: 100px;
+}
+
+.login-card {
+   width: 440px;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(15px);
+    border-radius: 30px;
+    padding: 30px 50px 50px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+    transition: transform 0.3s ease;
+}
+
+/* Optional: Add a subtle pop to the icon when you hover the box */
+.login-card:hover {
+    transform: scale(1.03);
+}
+
+
+.brand { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+.brand-logo { 
+    width: 70px; height: 70px; background: #102a4d; border-radius: 50%; 
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 13px; font-weight: 500;
+}
+.brand-text h2 { color: #102a4d; font-size: 34px; font-weight: 600; line-height: 1.1; }
+.brand-text small { color: #666; font-size: 16px; }
+
+.welcome-section h3 { font-size: 20px; color: #555; font-weight: 500; }
+.welcome-section p { font-size: 14px; color: #888; margin-bottom: 25px;}
+
+.field-group { margin-bottom: 20px; }
+.field-group label { display: block; font-size: 12px; font-weight: 600; color: #222; margin-bottom: 4px; }
+.input-underline {
+    width: 100%; border: none; border-bottom: 1px solid #fefefe;
+    background: transparent; padding: 10px 0; font-size: 14px; transition: 0.3s;
+}
+.input-underline:focus { outline: none; border-bottom: 2px solid #3b82f6; }
+
+.btn-signin {
+    width: 100%; padding: 16px 20px; background: #3b82f6; color: white;
+    border: none; border-radius: 12px; font-size: 16px; font-weight: 500;
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; transition: 0.3s; margin-top: 15px;
+}
+.btn-signin:hover { background: #2563eb; transform: translateY(-2px); }
+
+/* ================= CENTERED HEX GRID ================= */
+.right-side {
+    display: flex;
+    justify-content: right; /* Horizontally center */
+    align-items: center;     /* Vertically center */
+    height: 100%;
+    overflow: visible;
+}
+
+.hex-grid {
+    display: flex;
+    gap: 8px;
+    padding: 40px; /* Added internal padding as requested */
+    margin-right: -40px; /* Slight offset for layout balance */
+}
+
+.hex-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Staggered offsets for interlocking */
+.c1 { transform: translateY(250px) translatex(50px); }
+.c2 { transform: translateY(165px) translatex(20px); }
+.c3 { transform:  translateY(80px) translatex(-10px); }
+.c4 { transform:  translateY(-5px) translatex(-40px); }
+
+.hex-box {
+    width: 190px;
+    height: 160px;
+    background: rgba(255, 255, 255, 0.6); 
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: 0.3s;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    
+    clip-path: polygon(
+        20% 0%, 80% 0%, 
+        100% 50%, 
+        80% 100%, 20% 100%, 
+        0% 50%
+    );
+}
+
+/* --- REPLACE YOUR EXISTING .hex-box i WITH THIS --- */
+.hex-box i {
+    font-size: 38px;
+    margin-bottom: 10px;
+    
+    /* Create the Gradient */
+    background: linear-gradient(135deg, #102a4d 0%, #3b82f6 100%);
+    
+    /* Clip the background to the icon shape */
+    -webkit-background-clip: text;
+    background-clip: text;
+    
+    /* Make the original icon color transparent so gradient shows through */
+    -webkit-text-fill-color: transparent;
+    
+    display: inline-block; /* Required for clipping to work correctly */
+    transition: transform 0.3s ease;
+}
+
+/* Optional: Add a subtle pop to the icon when you hover the box */
+.hex-box:hover i {
+    transform: scale(1.1);
+}
+.hex-box span { font-size: 11px; font-weight: 600; color: #102a4d; text-transform: uppercase; padding: 0 10px; line-height: 1.2; }
+
+.hex-box:hover:not(.blank) {
+    transform: scale(1.05);
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+    z-index: 10;
+}
+
+.hex-box.blank {
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(4px);
+}
+
+/* Responsive */
+@media (max-width: 1150px) {
+    .page { grid-template-columns: 1fr; }
+    .right-side { display: none; }
+}

@@ -18,7 +18,6 @@ import Select from "@mui/material/Select";
 import api from "../../../services/api.service";
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
-import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
 
 function UserMgmt() {
@@ -70,7 +69,13 @@ function UserMgmt() {
         const baseArr = Array.isArray(baseData) ? baseData : baseData?.items || [];
         const roleArr = Array.isArray(roleData) ? roleData : roleData?.items || [];
 
-        setTableRows(userArr);
+        // Normalize status once when loading - convert to 0 or 1
+        setTableRows(
+          userArr.map((u) => ({
+            ...u,
+            status: u.status === 1 || u.status === "1" || u.status === true ? 1 : 0,
+          }))
+        );
         setCommandOptions(commandArr.map((cmd) => ({ id: Number(cmd.id), name: cmd.name })));
         setBaseOptions(
           baseArr.map((base) => ({ id: Number(base.id), name: base.name, cmdId: Number(base.cmd) }))
@@ -127,7 +132,21 @@ function UserMgmt() {
     )
       return;
     setEditingRowId(id);
-    setEditDraft({ ...row });
+    // Store original row data - preserve all existing values including password placeholder
+    setEditDraft({
+      ...row,
+      password: "********", // Show placeholder to indicate password exists, user can change it
+      username: row.username || "",
+      pakNo: row.pakNo || "",
+      name: row.name || "",
+      rank: row.rank || "",
+      category: row.category || "",
+      cmdId: row.cmdId !== undefined && row.cmdId !== null ? Number(row.cmdId) : "",
+      baseId: row.baseId !== undefined && row.baseId !== null ? Number(row.baseId) : "",
+      unitId: row.unitId !== undefined && row.unitId !== null ? Number(row.unitId) : "",
+      levelId: row.levelId !== undefined && row.levelId !== null ? Number(row.levelId) : "",
+      status: row.status !== undefined && row.status !== null ? Number(row.status) : 1, // Ensure status is number
+    });
   };
 
   const PASSWORD_POLICY_TEXT =
@@ -145,31 +164,58 @@ function UserMgmt() {
   const validateForm = (draftToValidate, showAlert = false, mode = "add") => {
     const errs = {};
     const draft = draftToValidate;
-    if (!draft?.username || !String(draft.username).trim()) errs.username = "Username is required";
-    if (!draft?.pakNo || !String(draft.pakNo).trim()) errs.pakNo = "PakNo is required";
-    if (!draft?.name || !String(draft.name).trim()) errs.name = "Name is required";
-    const pwMsg = validatePasswordPolicy(draft?.password);
-    if (pwMsg) errs.password = pwMsg;
-    if (!draft?.rank || !String(draft.rank).trim()) errs.rank = "Rank is required";
-    if (!draft?.category || !String(draft.category).trim()) errs.category = "Category is required";
-    if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined)
+
+    // Validate all required fields
+    if (!draft?.username || !String(draft.username).trim()) {
+      errs.username = "Username is required";
+    }
+    if (!draft?.pakNo || !String(draft.pakNo).trim()) {
+      errs.pakNo = "PakNo is required";
+    }
+    if (!draft?.name || !String(draft.name).trim()) {
+      errs.name = "Name is required";
+    }
+    // Only validate password for "add" mode, not for "edit" mode (password is optional during edit)
+    if (mode === "add") {
+      const pwMsg = validatePasswordPolicy(draft?.password);
+      if (pwMsg) errs.password = pwMsg;
+    } else if (mode === "edit") {
+      // For edit mode, validate password only if user changed it (not placeholder)
+      const passwordValue = String(draft?.password || "").trim();
+      if (passwordValue && passwordValue !== "********" && passwordValue.length > 0) {
+        const pwMsg = validatePasswordPolicy(passwordValue);
+        if (pwMsg) errs.password = pwMsg;
+      }
+    }
+    if (!draft?.rank || !String(draft.rank).trim()) {
+      errs.rank = "Rank is required";
+    }
+    if (!draft?.category || !String(draft.category).trim()) {
+      errs.category = "Category is required";
+    }
+    if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined) {
       errs.cmdId = "Command is required";
+    }
     const ahqSelected = isAhqCommand(draft?.cmdId);
     if (
       mode !== "add" &&
       !ahqSelected &&
       (draft?.baseId === "" || draft?.baseId === null || draft?.baseId === undefined)
-    )
+    ) {
       errs.baseId = "Base is required";
+    }
     if (
       !ahqSelected &&
       (draft?.unitId === "" || draft?.unitId === null || draft?.unitId === undefined)
-    )
+    ) {
       errs.unitId = "Unit ID is required";
-    if (draft?.levelId === "" || draft?.levelId === null || draft?.levelId === undefined)
+    }
+    if (draft?.levelId === "" || draft?.levelId === null || draft?.levelId === undefined) {
       errs.levelId = "Level ID is required";
-    if (draft?.status === "" || draft?.status === null || draft?.status === undefined)
+    }
+    if (draft?.status === "" || draft?.status === null || draft?.status === undefined) {
       errs.status = "Status is required";
+    }
     setErrors(errs);
 
     if (showAlert && errs.password) {
@@ -194,7 +240,13 @@ function UserMgmt() {
       setEditDraft((draft) => {
         const updatedDraft = { ...draft, [field]: nextValue };
         if (field === "CmdId" || field === "cmdId") {
-          if (isAhqCommand(nextValue)) {
+          // Handle "None" selection (empty string)
+          if (nextValue === "" || nextValue === null || nextValue === undefined) {
+            updatedDraft.baseId = null;
+            updatedDraft.BaseId = null;
+            updatedDraft.unitId = null;
+            updatedDraft.levelId = null;
+          } else if (isAhqCommand(nextValue)) {
             updatedDraft.baseId = null;
             updatedDraft.BaseId = null;
             updatedDraft.unitId = null;
@@ -242,7 +294,13 @@ function UserMgmt() {
         levelId: computedLevelId,
       };
       const created = await api.create("User", payload);
-      setTableRows((prev) => [{ ...created, id: created.id }, ...prev]);
+      // Normalize status when adding new row
+      const normalizedCreated = {
+        ...created,
+        id: created.id,
+        status: created.status === 1 || created.status === "1" || created.status === true ? 1 : 0,
+      };
+      setTableRows((prev) => [normalizedCreated, ...prev]);
     } catch (e) {
       console.error("Save failed", e);
     }
@@ -259,20 +317,51 @@ function UserMgmt() {
     try {
       if (editingRowId && editDraft) {
         const ahqSelected = isAhqCommand(editDraft.cmdId);
+
+        // Build payload - include all required fields
         const payload = {
           id: editDraft.id,
-          ...editDraft,
-          status: Number(editDraft.status),
+          username: String(editDraft.username || "").trim(),
+          pakNo: String(editDraft.pakNo || "").trim(),
+          name: String(editDraft.name || "").trim(),
+          rank: String(editDraft.rank || "").trim(),
+          category: String(editDraft.category || "").trim(),
+          status: Number(editDraft.status) === 1 ? 1 : 0, // Ensure status is 1 or 0
           cmdId: Number(editDraft.cmdId),
           baseId: ahqSelected ? null : editDraft.baseId ? Number(editDraft.baseId) : null,
           unitId: ahqSelected ? null : editDraft.unitId ? Number(editDraft.unitId) : null,
           levelId: ahqSelected ? 1 : editDraft.levelId ? Number(editDraft.levelId) : null,
         };
+
+        // Only include password if user actually entered a new one (not the placeholder)
+        const passwordValue = String(editDraft.password || "").trim();
+        if (passwordValue && passwordValue !== "********" && passwordValue.length > 0) {
+          payload.password = passwordValue;
+        }
+
         const updated = await api.update("User", editingRowId, payload);
         setTableRows((prev) =>
-          prev.map((r) =>
-            r.id === editingRowId ? { ...(updated || editDraft), id: (updated || editDraft).id } : r
-          )
+          prev.map((r) => {
+            if (r.id === editingRowId) {
+              const updatedRow = updated || editDraft;
+              // Use the payload status value (which we know is correct: 0 or 1)
+              // Normalize API response status if it's in a different format
+              const normalizedStatus =
+                payload.status !== undefined
+                  ? payload.status
+                  : updatedRow.status === 1 ||
+                    updatedRow.status === "1" ||
+                    updatedRow.status === true
+                  ? 1
+                  : 0;
+              return {
+                ...updatedRow,
+                id: updatedRow.id,
+                status: normalizedStatus,
+              };
+            }
+            return r;
+          })
         );
       }
     } catch (e) {
@@ -327,7 +416,7 @@ function UserMgmt() {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
         return isEditing
-          ? renderCommandSelect("cmdId", Number(draft.cmdId), false)
+          ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
           : commandOptions.find((cmd) => cmd.id === Number(value))?.name || value;
       },
     },
@@ -341,7 +430,12 @@ function UserMgmt() {
         const ahqSelected = isAhqCommand(draft?.cmdId);
         if (ahqSelected) return "-";
         return isEditing
-          ? renderBaseSelect("baseId", Number(draft.baseId), Number(draft.cmdId), false)
+          ? renderBaseSelect(
+              "baseId",
+              draft.baseId ? Number(draft.baseId) : "",
+              Number(draft.cmdId),
+              false
+            )
           : baseOptions.find((base) => base.id === Number(value))?.name || value;
       },
     },
@@ -363,16 +457,41 @@ function UserMgmt() {
           : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(value))?.label || value || "-";
       },
     },
-    { Header: "Status", accessor: "status", align: "center" },
+    {
+      Header: "Status",
+      accessor: "status",
+      align: "center",
+      Cell: ({ cell: { value, row } }) => {
+        const isEditing = editingRowId === row.original.id;
+        const draft = isEditing ? editDraft : row.original;
+        // Get status directly from row.original
+        const statusValue = isEditing
+          ? draft.status
+          : row.original?.status !== undefined
+          ? row.original.status
+          : value;
+        if (isEditing) {
+          return renderStatusSelect("status", draft.status);
+        }
+        const statusLabel = Number(statusValue) === 0 ? "InActive" : "Active";
+        const backgroundColor = statusLabel === "InActive" ? "#f44336" : "#4caf50"; // Red for InActive, Green for Active
+        return (
+          <MDBox
+            sx={{
+              display: "inline-block",
+              padding: "4px 12px",
+              borderRadius: "4px",
+              backgroundColor: backgroundColor,
+              color: "#ffffff",
+              fontWeight: 500,
+            }}
+          >
+            {statusLabel}
+          </MDBox>
+        );
+      },
+    },
   ];
-
-  const renderStatusBadge = (status) => {
-    return (
-      <MDBox ml={-1}>
-        <StatusBadge value={status} inactiveLabel="Inactive" inactiveColor="error" />
-      </MDBox>
-    );
-  };
 
   const renderInput = (field, value, isRequired = false, isReadOnly = false) => {
     return (
@@ -451,44 +570,67 @@ function UserMgmt() {
     </MDInput>
   );
 
-  const renderStatusSelect = (field, value) => (
-    <MDInput
-      select
-      value={value}
-      onChange={(e) => handleChange(field, e.target.value)}
-      size="small"
-      fullWidth
-      sx={{
-        "& .MuiInputBase-root": { minHeight: "45px" },
-        "& .MuiSelect-select": {
-          minHeight: "45px",
-          display: "flex",
-          alignItems: "center",
-          paddingTop: 0,
-          paddingBottom: 0,
-          ...(darkMode ? { color: "#000000 !important" } : {}),
-        },
-        ...(darkMode
-          ? {
-              "& .MuiInputLabel-root": {
-                color: "#000000 !important",
-              },
-              "& .MuiSvgIcon-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}),
-      }}
-    >
-      <MenuItem value={1}>Active</MenuItem>
-      <MenuItem value={0}>Inactive</MenuItem>
-    </MDInput>
-  );
+  const renderStatusSelect = (field, value) => {
+    // Normalize value to 1 or 0 (number) to match MenuItem values
+    let normalizedValue;
+    if (value === null || value === undefined || value === "") {
+      normalizedValue = 1; // Default to Active
+    } else if (typeof value === "boolean") {
+      normalizedValue = value ? 1 : 0;
+    } else {
+      const numValue = Number(value);
+      // Explicitly check for 0 and 1 - if numValue is 0, keep it as 0, if it's 1, keep it as 1, otherwise default to 1
+      if (numValue === 0) {
+        normalizedValue = 0;
+      } else if (numValue === 1) {
+        normalizedValue = 1;
+      } else {
+        normalizedValue = 1; // Default to Active for any other value
+      }
+    }
+
+    return (
+      <MDInput
+        select
+        value={normalizedValue}
+        onChange={(e) => {
+          const selectedValue = Number(e.target.value);
+          handleChange(field, selectedValue);
+        }}
+        size="small"
+        fullWidth
+        sx={{
+          "& .MuiInputBase-root": { minHeight: "45px" },
+          "& .MuiSelect-select": {
+            minHeight: "45px",
+            display: "flex",
+            alignItems: "center",
+            paddingTop: 0,
+            paddingBottom: 0,
+            ...(darkMode ? { color: "#000000 !important" } : {}),
+          },
+          ...(darkMode
+            ? {
+                "& .MuiInputLabel-root": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}),
+        }}
+      >
+        <MenuItem value={1}>Active</MenuItem>
+        <MenuItem value={0}>Inactive</MenuItem>
+      </MDInput>
+    );
+  };
 
   const renderCommandSelect = (field, value, disabled = false) => (
     <MDInput
       select
-      value={value}
+      value={value || ""}
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
@@ -515,6 +657,7 @@ function UserMgmt() {
           : {}),
       }}
     >
+      <MenuItem value="">None</MenuItem>
       {commandOptions.map((opt) => (
         <MenuItem key={opt.id} value={opt.id}>
           {opt.name}
@@ -528,7 +671,7 @@ function UserMgmt() {
     return (
       <MDInput
         select
-        value={value}
+        value={value || ""}
         onChange={(e) => handleChange(field, e.target.value)}
         size="small"
         fullWidth
@@ -555,6 +698,7 @@ function UserMgmt() {
             : {}),
         }}
       >
+        <MenuItem value="">None</MenuItem>
         {filteredBases.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
             {opt.name}
@@ -621,18 +765,25 @@ function UserMgmt() {
         __disabledRow: isSuperuser,
         id: r.id,
         username: isEditing ? renderInput("username", draft.username, true, false) : r.username,
-        password: isEditing ? renderInput("password", draft.password, true) : "********",
+        password: isEditing
+          ? renderInput("password", draft.password || "********", false)
+          : "********",
         pakNo: isEditing ? renderInput("pakNo", draft.pakNo, false, false) : r.pakNo,
         name: isEditing ? renderInput("name", draft.name, false, false) : r.name,
         rank: isEditing ? renderInput("rank", draft.rank, false, false) : r.rank,
         category: isEditing ? renderCategorySelect("category", draft.category, false) : r.category,
         cmdId: isEditing
-          ? renderCommandSelect("cmdId", Number(draft.cmdId), false)
+          ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
           : commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
         baseId: isAhqCommand(draft?.cmdId)
           ? "-"
           : isEditing
-          ? renderBaseSelect("baseId", Number(draft.baseId), Number(draft.cmdId), false)
+          ? renderBaseSelect(
+              "baseId",
+              draft.baseId ? Number(draft.baseId) : "",
+              Number(draft.cmdId),
+              false
+            )
           : baseOptions.find((base) => base.id === Number(r.baseId))?.name || r.baseId,
         unitId: isAhqCommand(draft?.cmdId)
           ? "-"
@@ -649,8 +800,25 @@ function UserMgmt() {
             r.levelId ||
             "-",
         status: isEditing
-          ? renderStatusSelect("Status", draft.status)
-          : renderStatusBadge(r.status),
+          ? renderStatusSelect("status", draft.status)
+          : (() => {
+              const statusLabel = Number(r.status) === 0 ? "InActive" : "Active";
+              const backgroundColor = statusLabel === "InActive" ? "#f44336" : "#4caf50"; // Red for InActive, Green for Active
+              return (
+                <MDBox
+                  sx={{
+                    display: "inline-block",
+                    padding: "4px 12px",
+                    borderRadius: "4px",
+                    backgroundColor: backgroundColor,
+                    color: "#ffffff",
+                    fontWeight: 500,
+                  }}
+                >
+                  {statusLabel}
+                </MDBox>
+              );
+            })(),
         actions: isSuperuser ? (
           <MDBox />
         ) : isEditing ? (

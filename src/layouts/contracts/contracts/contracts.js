@@ -30,7 +30,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
-import api from "services/api.service";
+import api, { getActionBy } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
@@ -412,7 +412,7 @@ function ContractsForm({
             .includes("rent") && {
             increaseRatePercent: "",
             increaseIntervalMonths: "",
-          }),
+        }),
       };
 
       // If start date changes and end date is now invalid, clear end date
@@ -618,8 +618,8 @@ function ContractsForm({
         !hasRentInTerm || form.riseTermType === "Increase"
           ? null
           : form.increaseIntervalMonths
-          ? Number(form.increaseIntervalMonths)
-          : null,
+        ? Number(form.increaseIntervalMonths)
+        : null,
       sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
       securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
       rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
@@ -1145,7 +1145,7 @@ function ContractsForm({
             }}
           >
             <MDTypography variant="h5" fontWeight="bold">
-              {initialData ? "Edit Contract" : "New Contract"}
+          {initialData ? "Edit Contract" : "New Contract"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
               <MDInput
@@ -1398,8 +1398,8 @@ function ContractsForm({
                 <Select
                   labelId="nature-of-business-label"
                   value={form.natureOfBusiness || ""}
-                  label="Nature of Business"
-                  onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
+                label="Nature of Business"
+                onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
                   sx={selectSx}
                   MenuProps={{
                     PaperProps: {
@@ -1567,17 +1567,17 @@ function ContractsForm({
 
             {/* IncreaseRatePercent (only when Term contains "Rent") */}
             {hasRentInTerm && (
-              <Grid item xs={12} sm={6} md={4}>
-                <MDInput
-                  label="Increase Rate Percent %"
-                  type="number"
-                  value={form.increaseRatePercent}
-                  onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-                  fullWidth
-                  size="small"
-                  sx={inputSx}
-                />
-              </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="Increase Rate Percent %"
+                type="number"
+                value={form.increaseRatePercent}
+                onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                fullWidth
+                size="small"
+                sx={inputSx}
+              />
+            </Grid>
             )}
             {/* Rise Terms */}
             <Grid item xs={12} sm={6} md={4}>
@@ -1633,31 +1633,31 @@ function ContractsForm({
             {form.riseTermType &&
               form.riseTermType !== "Uniform" &&
               form.riseTermType !== "Increase" && (
-                <Grid item xs={12} sm={6} md={4}>
-                  <FormControl size="small" fullWidth error={!!errors.riseyear}>
-                    <InputLabel id="rise-year-label" sx={labelSx}>
-                      Rise Year
-                    </InputLabel>
-                    <Select
-                      labelId="rise-year-label"
-                      value={form.riseyear || ""}
-                      label="Rise Year"
-                      onChange={(e) => handleChange("riseyear", e.target.value)}
-                      sx={selectSx}
-                    >
-                      {Array.from({ length: 50 }, (_, i) => {
-                        const year = new Date().getFullYear() - 10 + i;
-                        return (
-                          <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
-                            {year}
-                          </MenuItem>
-                        );
-                      })}
-                    </Select>
-                    {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
-                  </FormControl>
-                </Grid>
-              )}
+              <Grid item xs={12} sm={6} md={4}>
+                <FormControl size="small" fullWidth error={!!errors.riseyear}>
+                  <InputLabel id="rise-year-label" sx={labelSx}>
+                    Rise Year
+                  </InputLabel>
+                  <Select
+                    labelId="rise-year-label"
+                    value={form.riseyear || ""}
+                    label="Rise Year"
+                    onChange={(e) => handleChange("riseyear", e.target.value)}
+                    sx={selectSx}
+                  >
+                    {Array.from({ length: 50 }, (_, i) => {
+                      const year = new Date().getFullYear() - 10 + i;
+                      return (
+                        <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
+                          {year}
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                  {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
+                </FormControl>
+              </Grid>
+            )}
 
             {/* Rise Date (shown when Fixed Date is selected) */}
             {form.riseTermType === "Fixed Date" && (
@@ -1689,16 +1689,16 @@ function ContractsForm({
                     }}
                     onClick={handleOpenRiseTermsDialog}
                   >
-                    <MDInput
-                      label="Increase"
-                      value={
+                  <MDInput
+                    label="Increase"
+                    value={
                         riseTerms.length > 0
                           ? `${riseTerms.length} term(s) configured`
                           : "Click for terms"
-                      }
-                      fullWidth
-                      size="small"
-                      InputProps={{ readOnly: true }}
+                    }
+                    fullWidth
+                    size="small"
+                    InputProps={{ readOnly: true }}
                       sx={{
                         ...inputSx,
                         pointerEvents: "none",
@@ -1706,7 +1706,7 @@ function ContractsForm({
                           cursor: "pointer",
                         },
                       }}
-                    />
+                  />
                   </MDBox>
                   <IconButton
                     color="primary"
@@ -1774,7 +1774,7 @@ function ContractsForm({
                   </MDTypography>
                   <Chip
                     label={viabilityLabel}
-                    size="small"
+                size="small"
                     color={viabilityLabel === "Viable" ? "success" : "error"}
                     sx={{ fontWeight: 700 }}
                   />
@@ -3039,10 +3039,19 @@ export default function Contracts() {
 
   const handleCloseForm = () => setOpenForm(false);
 
-  const handleEditContract = (id) => {
-    const contract = rows.find((row) => (row.Id || row.id) === id);
+  const handleEditContract = async (id) => {
+    try {
+      // Fetch contract data from API by ID instead of using local storage/table data
+      setLoading(true);
+      const contract = await api.get("Contracts", id);
     setCurrentContract(contract);
     setOpenForm(true);
+    } catch (error) {
+      console.error("Error fetching contract:", error);
+      alert("Failed to load contract data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteContract = (id) => {
@@ -3103,7 +3112,7 @@ export default function Contracts() {
       try {
         // Include IP address in delete request body
         const deleteData = {
-          ActionBy: "admin",
+          ActionBy: await getActionBy(),
           ActionDate: new Date().toISOString(),
           userIPAddress: userIPAddress || "unknown",
         };
@@ -3399,9 +3408,9 @@ export default function Contracts() {
       accessor: "feasible",
       align: "center",
       showInTable: true,
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+          // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
         const fromPayload = String(value || rowData.Feasible || "")
           .trim()
@@ -3428,7 +3437,7 @@ export default function Contracts() {
       accessor: "grpId",
       align: "left",
       showInTable: true,
-      // eslint-disable-next-line react/prop-types
+        // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => value || row?.original?.GId || "-",
     },
     {
@@ -3440,11 +3449,11 @@ export default function Contracts() {
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
         const totalArea = row.original?.TotalArea ?? 0;
-        return (
-          <MDTypography variant="body2" fontWeight="medium">
-            {totalArea ? Number(totalArea).toLocaleString() : "-"}
-          </MDTypography>
-        );
+          return (
+            <MDTypography variant="body2" fontWeight="medium">
+              {totalArea ? Number(totalArea).toLocaleString() : "-"}
+            </MDTypography>
+          );
       },
     },
     {
@@ -3474,11 +3483,11 @@ export default function Contracts() {
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
         const location = row.original?.Location || "";
-        return (
-          <MDTypography variant="body2" fontWeight="medium">
-            {location || "-"}
-          </MDTypography>
-        );
+          return (
+            <MDTypography variant="body2" fontWeight="medium">
+              {location || "-"}
+            </MDTypography>
+          );
       },
     },
     {
@@ -3731,9 +3740,9 @@ export default function Contracts() {
     const normalizedRows = rows.map((row) => {
       // Look up property grouping to get Area, Rate, Location, and UoM
       const grpId = row.GrpId || row.GId || "";
-      const propertyGrouping = allPropertyGroupings.find(
+        const propertyGrouping = allPropertyGroupings.find(
         (pg) => String(pg.GId || "") === String(grpId) || Number(pg.Id) === Number(grpId)
-      );
+        );
 
       return {
         ...row,
@@ -3808,36 +3817,36 @@ export default function Contracts() {
     // If no grouping selected, return plain rows.
     if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
       return filteredRows.map((row) => ({
-        ...row,
-        actions: (
-          <MDBox
-            alignItems="left"
-            justifyContent="left"
-            sx={{
-              backgroundColor: "#f8f9fa",
-              gap: "2px",
-              padding: "2px 2px",
-              borderRadius: "2px",
-            }}
-          >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditContract(row.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteContract(row.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            ...row,
+            actions: (
+              <MDBox
+                alignItems="left"
+                justifyContent="left"
+                sx={{
+                  backgroundColor: "#f8f9fa",
+                  gap: "2px",
+                  padding: "2px 2px",
+                  borderRadius: "2px",
+                }}
+              >
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => handleEditContract(row.id)}
+                  title="Edit"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>edit</Icon>
+                </IconButton>
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteContract(row.id)}
+                  title="Delete"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
             <IconButton
               size="small"
               color="primary"
@@ -3847,8 +3856,8 @@ export default function Contracts() {
             >
               <Icon>visibility</Icon>
             </IconButton>
-          </MDBox>
-        ),
+              </MDBox>
+            ),
       }));
     }
 

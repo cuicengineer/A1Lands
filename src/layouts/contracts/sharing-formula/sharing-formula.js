@@ -18,11 +18,11 @@ import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import DataTable from "examples/Tables/DataTable";
 import CurrencyLoading from "components/CurrencyLoading";
-import StatusBadge from "components/StatusBadge";
+import MDBadge from "components/MDBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import PropTypes from "prop-types";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
 
 function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases, initialData }) {
@@ -60,6 +60,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
 
   useEffect(() => {
     if (!open) {
+      // Reset form when dialog closes
       setForm({
         applicableDate: "",
         cmdId: "",
@@ -78,9 +79,21 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   // Populate form when editing
   useEffect(() => {
     if (open && initialData) {
-      // Convert status to boolean if it's a string
+      // Convert status to boolean if it's a string (strictly PascalCase)
       let statusValue = true;
-      if (initialData.status !== undefined) {
+      if (initialData.Status !== undefined) {
+        if (typeof initialData.Status === "boolean") {
+          statusValue = initialData.Status;
+        } else if (typeof initialData.Status === "string") {
+          statusValue =
+            initialData.Status === "true" ||
+            initialData.Status === "True" ||
+            initialData.Status === "1";
+        } else {
+          statusValue = Boolean(initialData.Status);
+        }
+      } else if (initialData.status !== undefined) {
+        // Fallback for camelCase (shouldn't happen but just in case)
         if (typeof initialData.status === "boolean") {
           statusValue = initialData.status;
         } else if (typeof initialData.status === "string") {
@@ -93,18 +106,97 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
         }
       }
 
+      // Format date for date input (YYYY-MM-DD format)
+      let formattedDate = "";
+      if (initialData.ApplicableDate) {
+        try {
+          const date = new Date(initialData.ApplicableDate);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            formattedDate = `${year}-${month}-${day}`;
+          }
+        } catch (e) {
+          // If date parsing fails, try to extract from string
+          if (typeof initialData.ApplicableDate === "string") {
+            formattedDate = initialData.ApplicableDate.split("T")[0] || "";
+          }
+        }
+      } else if (initialData.applicableDate) {
+        // Fallback for camelCase
+        try {
+          const date = new Date(initialData.applicableDate);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            formattedDate = `${year}-${month}-${day}`;
+          }
+        } catch (e) {
+          if (typeof initialData.applicableDate === "string") {
+            formattedDate = initialData.applicableDate.split("T")[0] || "";
+          }
+        }
+      }
+
+      // Get classIds - handle both single value and array (strictly PascalCase)
+      let classIdsArray = [];
+      if (initialData.ClassId !== undefined && initialData.ClassId !== null) {
+        if (Array.isArray(initialData.ClassId)) {
+          classIdsArray = initialData.ClassId.map((id) => Number(id));
+        } else {
+          classIdsArray = [Number(initialData.ClassId)];
+        }
+      } else if (initialData.classId !== undefined && initialData.classId !== null) {
+        // Fallback for camelCase
+        if (Array.isArray(initialData.classId)) {
+          classIdsArray = initialData.classId.map((id) => Number(id));
+        } else {
+          classIdsArray = [Number(initialData.classId)];
+        }
+      }
+
       setForm({
-        applicableDate: initialData.applicableDate || initialData.ApplicableDate || "",
-        cmdId: initialData.cmdId || initialData.CmdId || "",
-        baseId: initialData.baseId || initialData.BaseId || "",
-        classIds:
-          initialData.classId || initialData.ClassId
-            ? [initialData.classId || initialData.ClassId]
-            : [],
-        baseShare: initialData.baseRate || initialData.BaseRate || initialData.baseShare || "",
-        commandShare: initialData.racRate || initialData.RACRate || initialData.commandShare || "",
-        ahqShare: initialData.ahqRate || initialData.AHQRate || initialData.ahqShare || "",
-        description: initialData.description || initialData.Description || "",
+        applicableDate: formattedDate,
+        cmdId:
+          initialData.CmdId !== undefined && initialData.CmdId !== null
+            ? String(initialData.CmdId)
+            : initialData.cmdId !== undefined && initialData.cmdId !== null
+            ? String(initialData.cmdId)
+            : "",
+        baseId:
+          initialData.BaseId !== undefined && initialData.BaseId !== null
+            ? String(initialData.BaseId)
+            : initialData.baseId !== undefined && initialData.baseId !== null
+            ? String(initialData.baseId)
+            : "",
+        classIds: classIdsArray.map((id) => String(id)),
+        baseShare:
+          initialData.BaseRate !== undefined && initialData.BaseRate !== null
+            ? String(initialData.BaseRate)
+            : initialData.baseRate !== undefined && initialData.baseRate !== null
+            ? String(initialData.baseRate)
+            : initialData.baseShare !== undefined && initialData.baseShare !== null
+            ? String(initialData.baseShare)
+            : "",
+        commandShare:
+          initialData.RACRate !== undefined && initialData.RACRate !== null
+            ? String(initialData.RACRate)
+            : initialData.racRate !== undefined && initialData.racRate !== null
+            ? String(initialData.racRate)
+            : initialData.commandShare !== undefined && initialData.commandShare !== null
+            ? String(initialData.commandShare)
+            : "",
+        ahqShare:
+          initialData.AHQRate !== undefined && initialData.AHQRate !== null
+            ? String(initialData.AHQRate)
+            : initialData.ahqRate !== undefined && initialData.ahqRate !== null
+            ? String(initialData.ahqRate)
+            : initialData.ahqShare !== undefined && initialData.ahqShare !== null
+            ? String(initialData.ahqShare)
+            : "",
+        description: initialData.Description || initialData.description || "",
         status: statusValue,
       });
     }
@@ -493,14 +585,42 @@ export default function SharingFormula() {
   };
 
   const handleEditRecord = (id) => {
-    const record = tableRows.find((r) => r.id === id);
+    // Handle both PascalCase and camelCase for ID lookup
+    // Find the original record from tableRows (raw API data)
+    const record = tableRows.find(
+      (r) => (r.Id || r.id) === id || Number(r.Id || r.id) === Number(id)
+    );
     if (record) {
-      setCurrentRecord(record);
+      // Ensure we pass the original record with all PascalCase fields preserved
+      setCurrentRecord({
+        ...record,
+        // Ensure all fields are present in PascalCase
+        Id: record.Id || record.id,
+        ApplicableDate: record.ApplicableDate || record.applicableDate,
+        CmdId: record.CmdId || record.cmdId,
+        BaseId: record.BaseId || record.baseId,
+        ClassId: record.ClassId || record.classId,
+        BaseRate: record.BaseRate || record.baseRate || record.baseShare,
+        RACRate: record.RACRate || record.racRate || record.commandShare,
+        AHQRate: record.AHQRate || record.ahqRate || record.ahqShare,
+        Description: record.Description || record.description,
+        Status:
+          record.Status !== undefined
+            ? record.Status
+            : record.status !== undefined
+            ? record.status
+            : true,
+      });
       setOpenForm(true);
     }
   };
 
   const handleDeleteRecord = async (id) => {
+    // Block delete for operator users
+    if (isOperatorUser()) {
+      alert("Operator users are not allowed to delete records.");
+      return;
+    }
     if (window.confirm("Are you sure you want to delete this sharing formula?")) {
       try {
         await sharingFormulaApi.remove(id);
@@ -565,7 +685,7 @@ export default function SharingFormula() {
         // eslint-disable-next-line react/prop-types
         if (row.original.isExpandedRow) {
           // eslint-disable-next-line react/prop-types
-          const recordId = row.original.id;
+          const recordId = row.original.Id || row.original.id;
           return (
             <MDBox
               alignItems="left"
@@ -583,6 +703,7 @@ export default function SharingFormula() {
                 onClick={() => handleEditRecord(recordId)}
                 title="Edit"
                 sx={{ padding: "1px" }}
+                disabled={isOperatorUser()}
               >
                 <Icon>edit</Icon>
               </IconButton>
@@ -592,6 +713,7 @@ export default function SharingFormula() {
                 onClick={() => handleDeleteRecord(recordId)}
                 title="Delete"
                 sx={{ padding: "1px" }}
+                disabled={isOperatorUser()}
               >
                 <Icon>delete</Icon>
               </IconButton>
@@ -783,10 +905,33 @@ export default function SharingFormula() {
       align: "center",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        // Helper function to render status badge (same format as class.js)
+        const renderStatusBadge = (status) => {
+          const s = String(status ?? "")
+            .trim()
+            .toLowerCase();
+
+          let label = "Inactive";
+          if (status === 1 || status === "1" || s === "true" || status === true || s === "active") {
+            label = "Active";
+          }
+          return (
+            <MDBox ml={-1}>
+              <MDBadge
+                badgeContent={label}
+                color={label === "Active" ? "success" : "dark"}
+                variant="gradient"
+                size="sm"
+              />
+            </MDBox>
+          );
+        };
+
         // eslint-disable-next-line react/prop-types
         if (row.original.isExpandedRow) {
           // eslint-disable-next-line react/prop-types
-          return <StatusBadge value={row.original.status ?? value} />;
+          const statusValue = row.original.Status ?? value;
+          return renderStatusBadge(statusValue);
         }
         // eslint-disable-next-line react/prop-types
         if (
@@ -797,24 +942,23 @@ export default function SharingFormula() {
           // eslint-disable-next-line react/prop-types
           Array.isArray(row.original.statuses)
         ) {
-          // Display multiple statuses if group has different statuses
+          // Only display status if all child rows have the same status
+          // If statuses array has more than 1 unique value, child rows have different statuses
           // eslint-disable-next-line react/prop-types
           if (row.original.statuses.length > 1) {
-            return (
-              <MDBox display="flex" gap={0.5} justifyContent="center" alignItems="center">
-                {/* eslint-disable-next-line react/prop-types */}
-                {row.original.statuses.map((status, index) => (
-                  <StatusBadge key={index} value={status} />
-                ))}
-              </MDBox>
-            );
+            return ""; // Show blank if child rows have different statuses
             // eslint-disable-next-line react/prop-types
           } else if (row.original.statuses.length === 1) {
+            // All child rows have the same status, display it
             // eslint-disable-next-line react/prop-types
-            return <StatusBadge value={row.original.statuses[0]} />;
+            const statusValue = row.original.statuses[0];
+            return renderStatusBadge(statusValue);
           }
+          // If statuses array is empty, show blank
+          return "";
         }
-        return <StatusBadge value={value} />;
+        const statusValue = value;
+        return renderStatusBadge(statusValue);
       },
     },
   ];

@@ -18,7 +18,7 @@ Coded by www.creative-tim.com
   you can customize the states for the different components here.
 */
 
-import { createContext, useContext, useReducer, useMemo } from "react";
+import { createContext, useContext, useReducer, useMemo, useEffect } from "react";
 
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
@@ -29,51 +29,125 @@ const MaterialUI = createContext();
 // Setting custom name for the context which is visible on react dev tools
 MaterialUI.displayName = "MaterialUIContext";
 
+// Helper function to get user ID from localStorage
+const getUserId = () => {
+  try {
+    const auth = localStorage.getItem("auth");
+    if (auth) {
+      const authData = JSON.parse(auth);
+      return authData?.userId || authData?.id || authData?.userID || null;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+};
+
+// Helper function to get storage key for user preferences
+const getStorageKey = () => {
+  const userId = getUserId();
+  return userId ? `ui_preferences_${userId}` : "ui_preferences_guest";
+};
+
+// Helper function to load preferences from localStorage
+const loadPreferencesFromStorage = (defaultState) => {
+  try {
+    const storageKey = getStorageKey();
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Merge saved preferences with defaults (saved takes precedence)
+      return { ...defaultState, ...parsed };
+    }
+  } catch (e) {
+    // ignore errors, use defaults
+  }
+  return defaultState;
+};
+
+// Helper function to save preferences to localStorage
+const savePreferencesToStorage = (state) => {
+  try {
+    const storageKey = getStorageKey();
+    const userId = getUserId();
+    // Only save if user is logged in
+    if (userId) {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    }
+  } catch (e) {
+    // ignore storage errors
+  }
+};
+
 // Material Dashboard 2 React reducer
 function reducer(state, action) {
+  let newState;
   switch (action.type) {
     case "MINI_SIDENAV": {
-      return { ...state, miniSidenav: action.value };
+      newState = { ...state, miniSidenav: action.value };
+      break;
     }
     case "TRANSPARENT_SIDENAV": {
-      return { ...state, transparentSidenav: action.value };
+      newState = { ...state, transparentSidenav: action.value };
+      break;
     }
     case "WHITE_SIDENAV": {
-      return { ...state, whiteSidenav: action.value };
+      newState = { ...state, whiteSidenav: action.value };
+      break;
     }
     case "SIDENAV_COLOR": {
-      return { ...state, sidenavColor: action.value };
+      newState = { ...state, sidenavColor: action.value };
+      break;
     }
     case "TRANSPARENT_NAVBAR": {
-      return { ...state, transparentNavbar: action.value };
+      newState = { ...state, transparentNavbar: action.value };
+      break;
     }
     case "FIXED_NAVBAR": {
-      return { ...state, fixedNavbar: action.value };
+      newState = { ...state, fixedNavbar: action.value };
+      break;
     }
     case "OPEN_CONFIGURATOR": {
-      return { ...state, openConfigurator: action.value };
+      newState = { ...state, openConfigurator: action.value };
+      break;
     }
     case "DIRECTION": {
-      return { ...state, direction: action.value };
+      newState = { ...state, direction: action.value };
+      break;
     }
     case "LAYOUT": {
-      return { ...state, layout: action.value };
+      newState = { ...state, layout: action.value };
+      break;
     }
     case "DARKMODE": {
-      return { ...state, darkMode: action.value };
+      newState = { ...state, darkMode: action.value };
+      break;
     }
     case "SET_HAS_USER_MANUALLY_TOGGLED_SIDENAV": {
-      return { ...state, hasUserManuallyToggledSidenav: action.value };
+      newState = { ...state, hasUserManuallyToggledSidenav: action.value };
+      break;
+    }
+    case "LOAD_PREFERENCES": {
+      // Load preferences from storage
+      newState = action.value;
+      break;
     }
     default: {
       throw new Error(`Unhandled action type: ${action.type}`);
     }
   }
+
+  // Save to localStorage whenever state changes (except for initial load)
+  if (action.type !== "LOAD_PREFERENCES") {
+    savePreferencesToStorage(newState);
+  }
+
+  return newState;
 }
 
 // Material Dashboard 2 React context provider
 function MaterialUIControllerProvider({ children }) {
-  const initialState = {
+  const defaultState = {
     miniSidenav: false,
     transparentSidenav: false,
     whiteSidenav: false,
@@ -87,7 +161,38 @@ function MaterialUIControllerProvider({ children }) {
     hasUserManuallyToggledSidenav: false,
   };
 
+  // Load preferences from localStorage on initialization
+  const initialState = loadPreferencesFromStorage(defaultState);
+
   const [controller, dispatch] = useReducer(reducer, initialState);
+
+  // Load preferences when user logs in (when auth changes)
+  useEffect(() => {
+    const checkAuthAndLoadPreferences = () => {
+      const userId = getUserId();
+      if (userId) {
+        const loaded = loadPreferencesFromStorage(defaultState);
+        // Dispatch to load preferences (this won't trigger save since it's LOAD_PREFERENCES)
+        dispatch({ type: "LOAD_PREFERENCES", value: loaded });
+      }
+    };
+
+    // Listen for storage changes (in case user logs in another tab or auth changes)
+    const handleStorageChange = (e) => {
+      if (e.key === "auth") {
+        // User logged in/out, reload preferences
+        setTimeout(checkAuthAndLoadPreferences, 100);
+      } else if (e.key?.startsWith("ui_preferences_")) {
+        // Preferences changed in another tab
+        setTimeout(checkAuthAndLoadPreferences, 100);
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [defaultState]); // Include defaultState to avoid stale closure
 
   const value = useMemo(() => [controller, dispatch], [controller, dispatch]);
 

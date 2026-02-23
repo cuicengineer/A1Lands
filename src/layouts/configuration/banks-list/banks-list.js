@@ -26,7 +26,7 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
 import { useMaterialUIController } from "context";
@@ -100,6 +100,11 @@ function BanksList() {
   };
 
   const handleEditBank = (id) => {
+    // Block edit for operator users
+    if (isOperatorUser()) {
+      alert("Operator users are not allowed to edit records.");
+      return;
+    }
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -137,6 +142,11 @@ function BanksList() {
   };
 
   const handleSave = async () => {
+    // Block save for operator users if editing (not creating new)
+    if (isOperatorUser() && editingRowId && editingRowId !== "__new__") {
+      alert("Operator users are not allowed to edit records.");
+      return;
+    }
     if (editingRowId === "__new__" && newRowDraft) {
       // Mandatory validation only for Create New (as requested)
       const ok = validateNewRow();
@@ -192,6 +202,11 @@ function BanksList() {
   };
 
   const handleDeleteBank = (id) => {
+    // Block delete for operator users
+    if (isOperatorUser()) {
+      alert("Operator users are not allowed to delete records.");
+      return;
+    }
     if (editingRowId) return;
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
@@ -203,6 +218,13 @@ function BanksList() {
   };
 
   const handleConfirmDelete = async () => {
+    // Block delete for operator users
+    if (isOperatorUser()) {
+      alert("Operator users are not allowed to delete records.");
+      setDeleteDialogOpen(false);
+      setRecordToDelete(null);
+      return;
+    }
     if (!recordToDelete) return;
     try {
       await api.remove("BankLists", recordToDelete);
@@ -409,6 +431,7 @@ function BanksList() {
               onClick={() => handleEditBank(r.id)}
               title="Edit"
               sx={{ padding: "1px" }}
+              disabled={isOperatorUser()}
             >
               <Icon>edit</Icon>
             </IconButton>
@@ -418,6 +441,7 @@ function BanksList() {
               onClick={() => handleDeleteBank(r.id)}
               title="Delete"
               sx={{ padding: "1px" }}
+              disabled={isOperatorUser()}
             >
               <Icon>delete</Icon>
             </IconButton>

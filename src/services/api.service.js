@@ -131,6 +131,97 @@ function isOperatorUser() {
   return getCurrentUserRole().toLowerCase() === "operator";
 }
 
+// Helper function to get logged-in username
+function getLoggedInUsername() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return "unknown";
+    const obj = JSON.parse(raw);
+    return String(
+      obj?.username || obj?.Username || obj?.userName || obj?.unique_name || obj?.name || "unknown"
+    ).trim();
+  } catch (e) {
+    return "unknown";
+  }
+}
+
+// Cache for IP address to avoid multiple fetches
+let cachedIPAddress = null;
+let ipFetchPromise = null;
+
+// Helper function to get user's IP address
+async function getUserIPAddress() {
+  // Return cached IP if available
+  if (cachedIPAddress) {
+    return cachedIPAddress;
+  }
+
+  // If fetch is already in progress, return the promise
+  if (ipFetchPromise) {
+    return ipFetchPromise;
+  }
+
+  // Start fetching IP
+  ipFetchPromise = (async () => {
+    try {
+      // Try multiple IP services for reliability
+      const ipServices = [
+        { url: "https://api.ipify.org?format=json", extract: (data) => data.ip },
+        {
+          url: "https://api.ip.sb/ip",
+          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
+        },
+        { url: "https://api.myip.com", extract: (data) => data.ip || data.query },
+        {
+          url: "https://ipapi.co/ip/",
+          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
+        },
+      ];
+
+      for (const service of ipServices) {
+        try {
+          const response = await fetch(service.url, { method: "GET" });
+          if (response.ok) {
+            const contentType = response.headers.get("content-type");
+            let data;
+            if (contentType && contentType.includes("application/json")) {
+              data = await response.json();
+            } else {
+              data = await response.text();
+            }
+            const ip = service.extract(data);
+            if (ip && typeof ip === "string" && ip.trim().length > 0) {
+              cachedIPAddress = ip.trim();
+              return cachedIPAddress;
+            }
+          }
+        } catch (e) {
+          // Try next service
+          continue;
+        }
+      }
+      // Fallback: set to unknown if all services fail
+      cachedIPAddress = "unknown";
+      return cachedIPAddress;
+    } catch (error) {
+      console.error("Error fetching IP address:", error);
+      cachedIPAddress = "unknown";
+      return cachedIPAddress;
+    } finally {
+      ipFetchPromise = null;
+    }
+  })();
+
+  return ipFetchPromise;
+}
+
+// Helper function to get ActionBy value in format: "username (IP_ADDRESS)"
+async function getActionBy() {
+  const username = getLoggedInUsername();
+  const ip = await getUserIPAddress();
+  return `${username} (${ip})`;
+}
+
 let refreshPromise = null;
 
 async function refreshAccessToken() {
@@ -296,30 +387,33 @@ function get(entity, id) {
   return request("GET", `/api/${entity}/${id}`);
 }
 
-function create(entity, data) {
+async function create(entity, data) {
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Create",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return request("POST", `/api/${entity}`, payload);
 }
 
-function update(entity, id, data) {
+async function update(entity, id, data) {
+  const actionBy = await getActionBy();
   const payload = {
     ...(data || {}),
     Action: "Update",
-    ActionBy: "admin",
+    ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
   return request("PUT", `/api/${entity}/${id}`, payload);
 }
 
-function remove(entity, id) {
-  const payload = { Action: "Delete", ActionBy: "admin", ActionDate: new Date().toISOString() };
+async function remove(entity, id) {
+  const actionBy = await getActionBy();
+  const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
   return request("DELETE", `/api/${entity}/${id}`, payload);
 }
 
@@ -343,5 +437,11 @@ const api = {
   request,
   requestRaw,
   refreshAccessToken,
+  isOperatorUser,
+  getCurrentUserRole,
+  getActionBy,
+  getLoggedInUsername,
+  getUserIPAddress,
 };
 export default api;
+export { isOperatorUser, getCurrentUserRole, getActionBy, getLoggedInUsername, getUserIPAddress };
