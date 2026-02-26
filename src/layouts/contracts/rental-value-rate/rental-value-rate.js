@@ -71,18 +71,32 @@ function RentalValueRateForm({
 
   useEffect(() => {
     if (initialData) {
+      // Handle both camelCase and PascalCase for all fields
+      const applicableDateValue =
+        initialData.applicableDate ||
+        initialData.ApplicableDate ||
+        initialData.applicationDate ||
+        initialData.ApplicationDate ||
+        "";
+      const dateValue = applicableDateValue
+        ? typeof applicableDateValue === "string"
+          ? applicableDateValue.split("T")[0]
+          : applicableDateValue
+        : "";
+
       setForm({
-        applicableDate: initialData.applicableDate
-          ? initialData.applicableDate.split("T")[0]
-          : initialData.applicationDate
-          ? initialData.applicationDate.split("T")[0]
-          : "",
-        cmdId: initialData.cmdId || "",
-        baseId: initialData.baseId || "",
-        classId: initialData.classId || "",
-        rate: initialData.rate || "",
-        description: initialData.description || "",
-        status: initialData.status !== undefined ? initialData.status : true,
+        applicableDate: dateValue,
+        cmdId: initialData.cmdId || initialData.CmdId || "",
+        baseId: initialData.baseId || initialData.BaseId || "",
+        classId: initialData.classId || initialData.ClassId || "",
+        rate: initialData.rate || initialData.Rate || "",
+        description: initialData.description || initialData.Description || "",
+        status:
+          initialData.status !== undefined
+            ? initialData.status
+            : initialData.Status !== undefined
+            ? initialData.Status
+            : true,
       });
     } else {
       setForm({
@@ -824,18 +838,63 @@ export default function RentalValueRate() {
     }
   };
 
-  // Format date for display
-  const formatDateDDMMYYYY = (dateString) => {
-    if (!dateString) return "-";
+  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  const formatDateDDMMMYYYY = (dateString) => {
+    if (!dateString) return "";
+    const raw = String(dateString).trim();
+    if (!raw) return "";
+
+    const monthShort = [
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
+    ];
+
     try {
-      const date = new Date(dateString);
-      const day = String(date.getDate()).padStart(2, "0");
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const year = date.getFullYear();
-      return `${day}-${month}-${year}`;
+      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+      let day = "";
+      let month = "";
+      let year = "";
+
+      // yyyy-mm-dd
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        [year, month, day] = datePart.split("-");
+      }
+      // dd-mm-yyyy
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+        [day, month, year] = datePart.split("-");
+      } else {
+        const parsed = new Date(raw);
+        if (!Number.isFinite(parsed.getTime())) return raw;
+        day = String(parsed.getDate()).padStart(2, "0");
+        month = String(parsed.getMonth() + 1).padStart(2, "0");
+        year = String(parsed.getFullYear());
+      }
+
+      const monthIndex = Number(month) - 1;
+      const monthText = monthShort[monthIndex] || month;
+      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
     } catch (e) {
       return dateString;
     }
+  };
+
+  // Excel export cell formatter to format dates as dd-mmm-yyyy
+  const exportCellFormatter = ({ value, column }) => {
+    const colId = String(column?.id || "").toLowerCase();
+    if (colId === "applicabledate" || colId === "applicationdate") {
+      return formatDateDDMMMYYYY(value);
+    }
+    return value;
   };
 
   const columns = [
@@ -852,7 +911,7 @@ export default function RentalValueRate() {
       width: "60px",
     },
     {
-      Header: "Sno",
+      Header: "S.No",
       accessor: "sno",
       align: "center",
       width: "60px",
@@ -870,9 +929,16 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        // Support both field names for backward compatibility
-        const dateValue = value || row.original.applicationDate;
-        return formatDateDDMMYYYY(dateValue);
+        // Support both camelCase and PascalCase field names
+        const rowData = row?.original || {};
+        const dateValue =
+          value ||
+          rowData.applicableDate ||
+          rowData.ApplicableDate ||
+          rowData.applicationDate ||
+          rowData.ApplicationDate ||
+          "";
+        return formatDateDDMMMYYYY(dateValue);
       },
     },
     {
@@ -928,9 +994,10 @@ export default function RentalValueRate() {
     },
   ];
 
-  const computedRows = tableRows.map((row) => {
+  const computedRows = tableRows.map((row, index) => {
     // Normalize id and foreign keys (handle both camelCase and PascalCase)
     const normalizedId = row?.id ?? row?.Id;
+    const sno = (pageNumber - 1) * pageSize + index + 1;
     const classId = row.classId ?? row.ClassId;
     const cmdId = row.cmdId ?? row.CmdId;
     const baseId = row.baseId ?? row.BaseId;
@@ -939,6 +1006,7 @@ export default function RentalValueRate() {
     const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
     const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
 
+    // Check IsAttachment field (handle both camelCase and PascalCase)
     const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
     const countValue =
       row?.attachmentCount ??
@@ -947,7 +1015,8 @@ export default function RentalValueRate() {
       row?.AttachmentCount ??
       row?.AttachmentsCount ??
       row?.FilesCount;
-    const hasAttachmentByCount = Number(countValue || 0) > 0;
+
+    // Determine if attachments exist
     const hasAttachmentData =
       rawIsAttachment === true ||
       rawIsAttachment === 1 ||
@@ -955,11 +1024,12 @@ export default function RentalValueRate() {
       String(rawIsAttachment || "")
         .trim()
         .toLowerCase() === "true" ||
-      hasAttachmentByCount;
+      Number(countValue || 0) > 0;
 
     return {
       ...row,
       id: normalizedId,
+      sno: sno,
       cmdId: cmdId,
       baseId: baseId,
       classId: classId,
@@ -969,6 +1039,12 @@ export default function RentalValueRate() {
       rate: row.rate ?? row.Rate ?? 0,
       description: row.description ?? row.Description ?? "",
       status: row.status ?? row.Status ?? true,
+      applicableDate:
+        row.applicableDate ??
+        row.ApplicableDate ??
+        row.applicationDate ??
+        row.ApplicationDate ??
+        "",
       attachments: (
         <IconButton
           size="small"
@@ -1101,6 +1177,7 @@ export default function RentalValueRate() {
                   noEndBorder
                   canSearch
                   exportFileName="Rental-Value-Rate"
+                  exportCellFormatter={exportCellFormatter}
                 />
               </MDBox>
             </Card>

@@ -15,5 +15,8 @@ Coded by www.creative-tim.com
 
 export default {
   labels: ["M", "T", "W", "T", "F", "S", "S"],
-  datasets: { label: "Sales", data: [50, 20, 10, 22, 50, 10, 40] },
+  datasets: {
+    label: "Sales",
+    data: [2000000, 3000000, 1000000, 4000000, 5000000, 2000000, 6000000],
+  }, // Round millions: 2M, 3M, 1M, 4M, 5M, 2M, 6M
 };

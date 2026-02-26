@@ -412,7 +412,7 @@ function ContractsForm({
             .includes("rent") && {
             increaseRatePercent: "",
             increaseIntervalMonths: "",
-        }),
+          }),
       };
 
       // If start date changes and end date is now invalid, clear end date
@@ -618,8 +618,8 @@ function ContractsForm({
         !hasRentInTerm || form.riseTermType === "Increase"
           ? null
           : form.increaseIntervalMonths
-        ? Number(form.increaseIntervalMonths)
-        : null,
+          ? Number(form.increaseIntervalMonths)
+          : null,
       sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
       securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
       rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
@@ -1145,7 +1145,7 @@ function ContractsForm({
             }}
           >
             <MDTypography variant="h5" fontWeight="bold">
-          {initialData ? "Edit Contract" : "New Contract"}
+              {initialData ? "Edit Contract" : "New Contract"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
               <MDInput
@@ -1329,10 +1329,22 @@ function ContractsForm({
               />
             </Grid>
 
+            {/* UoM (Read-only from selected property group) */}
+            <Grid item xs={12} sm={6} md={3}>
+              <MDInput
+                label="UoM"
+                value={selectedGroupUoM}
+                fullWidth
+                size="small"
+                InputProps={{ readOnly: true }}
+                sx={inputSx}
+              />
+            </Grid>
+
             {/* VA Area */}
             <Grid item xs={12} sm={6} md={3}>
               <MDInput
-                label="VA Area"
+                label="CA Area"
                 type="number"
                 value={form.vaArea}
                 onChange={(e) => handleChange("vaArea", e.target.value)}
@@ -1398,8 +1410,8 @@ function ContractsForm({
                 <Select
                   labelId="nature-of-business-label"
                   value={form.natureOfBusiness || ""}
-                label="Nature of Business"
-                onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
+                  label="Nature of Business"
+                  onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
                   sx={selectSx}
                   MenuProps={{
                     PaperProps: {
@@ -1567,17 +1579,17 @@ function ContractsForm({
 
             {/* IncreaseRatePercent (only when Term contains "Rent") */}
             {hasRentInTerm && (
-            <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Increase Rate Percent %"
-                type="number"
-                value={form.increaseRatePercent}
-                onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
-            </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <MDInput
+                  label="Increase Rate Percent %"
+                  type="number"
+                  value={form.increaseRatePercent}
+                  onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                  fullWidth
+                  size="small"
+                  sx={inputSx}
+                />
+              </Grid>
             )}
             {/* Rise Terms */}
             <Grid item xs={12} sm={6} md={4}>
@@ -1633,31 +1645,31 @@ function ContractsForm({
             {form.riseTermType &&
               form.riseTermType !== "Uniform" &&
               form.riseTermType !== "Increase" && (
-              <Grid item xs={12} sm={6} md={4}>
-                <FormControl size="small" fullWidth error={!!errors.riseyear}>
-                  <InputLabel id="rise-year-label" sx={labelSx}>
-                    Rise Year
-                  </InputLabel>
-                  <Select
-                    labelId="rise-year-label"
-                    value={form.riseyear || ""}
-                    label="Rise Year"
-                    onChange={(e) => handleChange("riseyear", e.target.value)}
-                    sx={selectSx}
-                  >
-                    {Array.from({ length: 50 }, (_, i) => {
-                      const year = new Date().getFullYear() - 10 + i;
-                      return (
-                        <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
-                          {year}
-                        </MenuItem>
-                      );
-                    })}
-                  </Select>
-                  {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
-                </FormControl>
-              </Grid>
-            )}
+                <Grid item xs={12} sm={6} md={4}>
+                  <FormControl size="small" fullWidth error={!!errors.riseyear}>
+                    <InputLabel id="rise-year-label" sx={labelSx}>
+                      Rise Year
+                    </InputLabel>
+                    <Select
+                      labelId="rise-year-label"
+                      value={form.riseyear || ""}
+                      label="Rise Year"
+                      onChange={(e) => handleChange("riseyear", e.target.value)}
+                      sx={selectSx}
+                    >
+                      {Array.from({ length: 50 }, (_, i) => {
+                        const year = new Date().getFullYear() - 10 + i;
+                        return (
+                          <MenuItem key={year} value={year.toString()} sx={menuItemSx}>
+                            {year}
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                    {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
+                  </FormControl>
+                </Grid>
+              )}
 
             {/* Rise Date (shown when Fixed Date is selected) */}
             {form.riseTermType === "Fixed Date" && (
@@ -1689,16 +1701,16 @@ function ContractsForm({
                     }}
                     onClick={handleOpenRiseTermsDialog}
                   >
-                  <MDInput
-                    label="Increase"
-                    value={
+                    <MDInput
+                      label="Increase"
+                      value={
                         riseTerms.length > 0
                           ? `${riseTerms.length} term(s) configured`
                           : "Click for terms"
-                    }
-                    fullWidth
-                    size="small"
-                    InputProps={{ readOnly: true }}
+                      }
+                      fullWidth
+                      size="small"
+                      InputProps={{ readOnly: true }}
                       sx={{
                         ...inputSx,
                         pointerEvents: "none",
@@ -1706,7 +1718,7 @@ function ContractsForm({
                           cursor: "pointer",
                         },
                       }}
-                  />
+                    />
                   </MDBox>
                   <IconButton
                     color="primary"
@@ -1774,7 +1786,7 @@ function ContractsForm({
                   </MDTypography>
                   <Chip
                     label={viabilityLabel}
-                size="small"
+                    size="small"
                     color={viabilityLabel === "Viable" ? "success" : "error"}
                     sx={{ fontWeight: 700 }}
                   />
@@ -2660,46 +2672,10 @@ function ContractsForm({
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Sequence No
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Months Interval
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "left",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Rise Percent
-                        </th>
-                        <th
-                          style={{
-                            padding: "12px",
-                            textAlign: "center",
-                            fontSize: "0.875rem",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Actions
-                        </th>
+                        <th>Sequence No</th>
+                        <th>Months Interval</th>
+                        <th>Rise Percent</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3044,8 +3020,8 @@ export default function Contracts() {
       // Fetch contract data from API by ID instead of using local storage/table data
       setLoading(true);
       const contract = await api.get("Contracts", id);
-    setCurrentContract(contract);
-    setOpenForm(true);
+      setCurrentContract(contract);
+      setOpenForm(true);
     } catch (error) {
       console.error("Error fetching contract:", error);
       alert("Failed to load contract data. Please try again.");
@@ -3312,41 +3288,25 @@ export default function Contracts() {
     }
   };
 
-  // Helper function to format date as dd-mm-yyyy
-  const formatDateDDMMYYYY = (dateValue) => {
-    if (!dateValue) return "";
-    try {
-      // Handle ISO date string (with or without time)
-      const dateStr = dateValue.split("T")[0]; // Get YYYY-MM-DD part
-      const [year, month, day] = dateStr.split("-");
-      if (year && month && day) {
-        return `${day}-${month}-${year}`;
-      }
-      // If already in dd-mm-yyyy format, return as is
-      return dateValue;
-    } catch {
-      return dateValue || "";
-    }
-  };
-
+  // Import centralized date formatter
   const formatDateDDMMMYYYY = (dateValue) => {
     if (!dateValue) return "";
     const raw = String(dateValue).trim();
     if (!raw) return "";
 
     const monthShort = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
     ];
 
     try {
@@ -3408,9 +3368,9 @@ export default function Contracts() {
       accessor: "feasible",
       align: "center",
       showInTable: true,
-        // eslint-disable-next-line react/prop-types
+      // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-          // eslint-disable-next-line react/prop-types
+        // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
         const fromPayload = String(value || rowData.Feasible || "")
           .trim()
@@ -3437,7 +3397,7 @@ export default function Contracts() {
       accessor: "grpId",
       align: "left",
       showInTable: true,
-        // eslint-disable-next-line react/prop-types
+      // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => value || row?.original?.GId || "-",
     },
     {
@@ -3449,11 +3409,11 @@ export default function Contracts() {
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
         const totalArea = row.original?.TotalArea ?? 0;
-          return (
-            <MDTypography variant="body2" fontWeight="medium">
-              {totalArea ? Number(totalArea).toLocaleString() : "-"}
-            </MDTypography>
-          );
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {totalArea ? Number(totalArea).toLocaleString() : "-"}
+          </MDTypography>
+        );
       },
     },
     {
@@ -3483,11 +3443,28 @@ export default function Contracts() {
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
         const location = row.original?.Location || "";
-          return (
-            <MDTypography variant="body2" fontWeight="medium">
-              {location || "-"}
-            </MDTypography>
-          );
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {location || "-"}
+          </MDTypography>
+        );
+      },
+    },
+    {
+      Header: "UoM",
+      accessor: "uoM",
+      align: "left",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        const uoM = value || rowData.UoM || rowData.unitName || rowData.UnitName || "";
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {uoM || "-"}
+          </MDTypography>
+        );
       },
     },
     {
@@ -3549,7 +3526,7 @@ export default function Contracts() {
       align: "left",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatDateDDMMYYYY(value),
+      Cell: ({ value }) => formatDateDDMMMYYYY(value),
     },
     {
       Header: "Contract End Date",
@@ -3557,7 +3534,7 @@ export default function Contracts() {
       align: "left",
       showInTable: false,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatDateDDMMYYYY(value),
+      Cell: ({ value }) => formatDateDDMMMYYYY(value),
     },
     {
       Header: "Commercial Operation Date",
@@ -3565,7 +3542,7 @@ export default function Contracts() {
       align: "left",
       showInTable: false,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? formatDateDDMMYYYY(value) : "-"),
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : "-"),
     },
     {
       Header: "Initial Rent PM",
@@ -3622,7 +3599,7 @@ export default function Contracts() {
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
     {
-      Header: "VA Area",
+      Header: "CA Area",
       accessor: "vaArea",
       align: "right",
       showInTable: true,
@@ -3740,15 +3717,31 @@ export default function Contracts() {
     const normalizedRows = rows.map((row) => {
       // Look up property grouping to get Area, Rate, Location, and UoM
       const grpId = row.GrpId || row.GId || "";
-        const propertyGrouping = allPropertyGroupings.find(
+      const propertyGrouping = allPropertyGroupings.find(
         (pg) => String(pg.GId || "") === String(grpId) || Number(pg.Id) === Number(grpId)
-        );
+      );
+
+      // Calculate Viability (same logic as Cell function)
+      const fromPayload = String(row.Feasible || "")
+        .trim()
+        .toLowerCase();
+      const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
+      const govt = Number(row.GovtShare ?? 0);
+      const paf = Number(row.PAFShare ?? 0);
+      const feasibleValue = hasPayloadValue
+        ? fromPayload === "viable"
+          ? "Viable"
+          : "Unviable"
+        : govt > paf
+        ? "Viable"
+        : "Unviable";
 
       return {
         ...row,
         id: row.Id,
         contractNo: row.ContractNo || "",
-        feasible: row.Feasible || "",
+        feasible: feasibleValue,
+        asOfToday: "Active", // Text value for Excel export
         cmdName: row.CmdName || "",
         baseName: row.BaseName || "",
         className: row.ClassName || "",
@@ -3759,6 +3752,7 @@ export default function Contracts() {
         totalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         location: propertyGrouping?.Location ?? row.Location ?? "",
         unitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
+        uoM: propertyGrouping?.UoM ?? row.UoM ?? row.UnitName ?? "",
         tenantNo: row.TenantNo || "",
         businessName: row.BusinessName || "",
         natureOfBusiness: row.NatureOfBusiness || "",
@@ -3817,36 +3811,36 @@ export default function Contracts() {
     // If no grouping selected, return plain rows.
     if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
       return filteredRows.map((row) => ({
-            ...row,
-            actions: (
-              <MDBox
-                alignItems="left"
-                justifyContent="left"
-                sx={{
-                  backgroundColor: "#f8f9fa",
-                  gap: "2px",
-                  padding: "2px 2px",
-                  borderRadius: "2px",
-                }}
-              >
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => handleEditContract(row.id)}
-                  title="Edit"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>edit</Icon>
-                </IconButton>
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDeleteContract(row.id)}
-                  title="Delete"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>delete</Icon>
-                </IconButton>
+        ...row,
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditContract(row.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteContract(row.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
             <IconButton
               size="small"
               color="primary"
@@ -3856,8 +3850,8 @@ export default function Contracts() {
             >
               <Icon>visibility</Icon>
             </IconButton>
-              </MDBox>
-            ),
+          </MDBox>
+        ),
       }));
     }
 
@@ -4852,8 +4846,8 @@ export default function Contracts() {
                         }}
                       >
                         <Table size="small" sx={{ borderCollapse: "collapse" }}>
-                          <TableHead
-                            sx={{
+                          <thead
+                            style={{
                               position: "sticky",
                               top: 0,
                               zIndex: 1,
@@ -4901,7 +4895,7 @@ export default function Contracts() {
                                 Rise Percent (%)
                               </TableCell>
                             </TableRow>
-                          </TableHead>
+                          </thead>
                           <TableBody>
                             {contractDetailsRiseTerms.map((term, index) => (
                               <TableRow

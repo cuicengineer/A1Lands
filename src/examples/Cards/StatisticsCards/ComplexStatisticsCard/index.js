@@ -25,7 +25,12 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 function ComplexStatisticsCard({ color, title, count, percentage, icon }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   return (
     <Card>
       <MDBox display="flex" justifyContent="space-between" pt={1} px={2}>
@@ -47,20 +52,48 @@ function ComplexStatisticsCard({ color, title, count, percentage, icon }) {
           </Icon>
         </MDBox>
         <MDBox textAlign="right" lineHeight={1.25}>
-          <MDTypography variant="button" fontWeight="light" color="text">
+          <MDTypography
+            variant="button"
+            fontWeight="bold"
+            sx={{
+              color: darkMode ? "#ffffff !important" : "#000000 !important",
+              fontSize: "0.95rem !important",
+              fontWeight: "700 !important",
+            }}
+          >
             {title}
           </MDTypography>
-          <MDTypography variant="h4">{count}</MDTypography>
+          <MDTypography
+            variant="h4"
+            sx={{
+              color: darkMode ? "#ffffff !important" : "inherit",
+            }}
+          >
+            {count}
+          </MDTypography>
         </MDBox>
       </MDBox>
       <Divider />
       <MDBox pb={2} px={2}>
-        <MDTypography component="p" variant="button" color="text" display="flex">
+        <MDTypography
+          component="p"
+          variant="button"
+          display="flex"
+          sx={{
+            color: darkMode ? "#ffffff !important" : "#000000 !important",
+            fontSize: "0.875rem !important",
+            fontWeight: "600 !important",
+          }}
+        >
           <MDTypography
             component="span"
             variant="button"
             fontWeight="bold"
             color={percentage.color}
+            sx={{
+              fontSize: "0.875rem !important",
+              fontWeight: "700 !important",
+            }}
           >
             {percentage.amount}
           </MDTypography>

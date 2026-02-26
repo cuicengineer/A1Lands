@@ -69,6 +69,7 @@ import AgreementProvInvoice from "layouts/contracts/agreement-prov-invoice/agree
 import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-rate";
 import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
+import SummaryOfA1Activities from "layouts/dashboard/summary";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -84,8 +85,24 @@ const routes = [
     name: "Dashboard",
     key: "dashboard",
     icon: <Icon fontSize="small">dashboard</Icon>,
-    route: "/dashboard",
-    component: <Dashboard />,
+    collapse: [
+      {
+        type: "collapse",
+        name: "KPI",
+        key: "dashboard-main",
+        icon: <Icon fontSize="small">dashboard</Icon>,
+        route: "/dashboard",
+        component: <Dashboard />,
+      },
+      {
+        type: "collapse",
+        name: "Summary Chart",
+        key: "dashboard-summary",
+        icon: <Icon fontSize="small">assessment</Icon>,
+        route: "/dashboard/summary",
+        component: <SummaryOfA1Activities />,
+      },
+    ],
   },
   {
     type: "collapse",

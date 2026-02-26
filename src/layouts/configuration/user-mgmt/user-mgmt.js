@@ -412,6 +412,7 @@ function UserMgmt() {
       Header: "Command",
       accessor: "cmdId",
       align: "left",
+      // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
@@ -424,6 +425,7 @@ function UserMgmt() {
       Header: "Base",
       accessor: "baseId",
       align: "left",
+      // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
@@ -444,6 +446,7 @@ function UserMgmt() {
       Header: "Level ID",
       accessor: "levelId",
       align: "left",
+      // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
@@ -461,37 +464,47 @@ function UserMgmt() {
       Header: "Status",
       accessor: "status",
       align: "center",
+      // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
-        // Get status directly from row.original
-        const statusValue = isEditing
-          ? draft.status
-          : row.original?.status !== undefined
-          ? row.original.status
-          : value;
         if (isEditing) {
           return renderStatusSelect("status", draft.status);
         }
-        const statusLabel = Number(statusValue) === 0 ? "InActive" : "Active";
-        const backgroundColor = statusLabel === "InActive" ? "#f44336" : "#4caf50"; // Red for InActive, Green for Active
-        return (
-          <MDBox
-            sx={{
-              display: "inline-block",
-              padding: "4px 12px",
-              borderRadius: "4px",
-              backgroundColor: backgroundColor,
-              color: "#ffffff",
-              fontWeight: 500,
-            }}
-          >
-            {statusLabel}
-          </MDBox>
-        );
+        // Get status value - prefer row.original.status, fallback to value
+        // The status in row.original should be the raw number (0 or 1) from computedRows
+        const statusValue = row.original?.status !== undefined ? row.original.status : value;
+        // Ensure status is properly converted to number for comparison
+        const numStatus = typeof statusValue === "number" ? statusValue : Number(statusValue);
+        return renderStatusBadge(numStatus);
       },
     },
   ];
+
+  const renderStatusBadge = (status) => {
+    // Convert to number for consistent comparison
+    let numStatus = typeof status === "number" ? status : Number(status);
+
+    // Handle NaN, null, undefined - treat as 0 (Inactive)
+    if (isNaN(numStatus) || status === null || status === undefined) {
+      numStatus = 0;
+    }
+
+    // Explicitly check: if status is 0 (after conversion), show Inactive
+    // Otherwise (1 or any other value), show Active
+    const label = numStatus === 0 ? "Inactive" : "Active";
+
+    return (
+      <MDBox ml={-1}>
+        <MDBadge
+          badgeContent={label}
+          color={label === "Active" ? "success" : "dark"}
+          variant="gradient"
+          size="sm"
+        />
+      </MDBox>
+    );
+  };
 
   const renderInput = (field, value, isRequired = false, isReadOnly = false) => {
     return (
@@ -799,26 +812,7 @@ function UserMgmt() {
           : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(r.levelId))?.label ||
             r.levelId ||
             "-",
-        status: isEditing
-          ? renderStatusSelect("status", draft.status)
-          : (() => {
-              const statusLabel = Number(r.status) === 0 ? "InActive" : "Active";
-              const backgroundColor = statusLabel === "InActive" ? "#f44336" : "#4caf50"; // Red for InActive, Green for Active
-              return (
-                <MDBox
-                  sx={{
-                    display: "inline-block",
-                    padding: "4px 12px",
-                    borderRadius: "4px",
-                    backgroundColor: backgroundColor,
-                    color: "#ffffff",
-                    fontWeight: 500,
-                  }}
-                >
-                  {statusLabel}
-                </MDBox>
-              );
-            })(),
+        status: isEditing ? renderStatusSelect("status", draft.status) : r.status, // Keep raw status value, let Cell function render it
         actions: isSuperuser ? (
           <MDBox />
         ) : isEditing ? (
@@ -917,6 +911,9 @@ function UserMgmt() {
                     paddingLeft: "6px !important",
                     paddingRight: "6px !important",
                   },
+                "& .MuiTable-root th:nth-of-type(2)": {
+                  whiteSpace: "nowrap !important",
+                },
               }}
             >
               <DataTable
@@ -958,12 +955,14 @@ function UserMgmt() {
 
 UserMgmt.propTypes = {
   cell: PropTypes.shape({
+    value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool]),
     row: PropTypes.shape({
       original: PropTypes.shape({
         id: PropTypes.number,
         pakNo: PropTypes.string,
         cmdId: PropTypes.number,
         baseId: PropTypes.number,
+        status: PropTypes.oneOfType([PropTypes.number, PropTypes.string, PropTypes.bool]),
       }),
     }),
   }),

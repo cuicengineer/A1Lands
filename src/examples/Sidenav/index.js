@@ -44,7 +44,7 @@ import {
 } from "context";
 
 // Images
-import adminProfile from "assets/images/bruce-mars.jpg";
+import adminProfile from "assets/images/bruce-mars.PNG";
 
 function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const [controller, dispatch] = useMaterialUIController();

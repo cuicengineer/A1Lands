@@ -52,7 +52,7 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
         color={darkMode ? "#ffffff !important" : "#111111 !important"}
         opacity={1}
         sx={({ typography: { size, fontWeightBold } }) => ({
-          fontSize: "16px",
+          fontSize: "14px !important",
           fontWeight: fontWeightBold,
           textTransform: "none",
           cursor: "grab",
@@ -60,9 +60,36 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
           "&:active": {
             cursor: "grabbing",
           },
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent:
+            align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start",
+          gap: "4px",
+          color: darkMode ? "#ffffff !important" : "#111111 !important",
         })}
       >
-        {children}
+        <MDBox
+          sx={{
+            display: "inline-block",
+            whiteSpace: "nowrap",
+            color: darkMode ? "#ffffff !important" : "inherit",
+          }}
+        >
+          {children}
+        </MDBox>
+        {filterNode && (
+          <MDBox
+            sx={{
+              cursor: "default",
+              userSelect: "none",
+              display: "inline-flex",
+              alignItems: "flex-start",
+              marginTop: "2px",
+            }}
+          >
+            {filterNode}
+          </MDBox>
+        )}
         {sorted && (
           <MDBox
             position="absolute"
@@ -89,23 +116,6 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
             >
               <Icon>arrow_drop_down</Icon>
             </MDBox>
-          </MDBox>
-        )}
-        {filterNode && (
-          <MDBox
-            position="absolute"
-            // Place the filter icon directly below the sort arrows
-            top={18}
-            right={align !== "right" ? "16px" : 0}
-            left={align === "right" ? "-5px" : "unset"}
-            sx={{
-              cursor: "default",
-              userSelect: "none",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            {filterNode}
           </MDBox>
         )}
       </MDBox>

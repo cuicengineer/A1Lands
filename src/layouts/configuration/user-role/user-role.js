@@ -157,11 +157,11 @@ function UserRole() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
-    { Header: "Id", accessor: "id", align: "left", width: "6%" },
-    { Header: "Role Name", accessor: "roleName", align: "left", width: "20%" },
-    { Header: "Description", accessor: "description", align: "left", width: "28%" },
-    { Header: "Status", accessor: "status", align: "center", width: "10%" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "80px" },
+    { Header: "Id", accessor: "id", align: "left", width: "60px" },
+    { Header: "Role Name", accessor: "roleName", align: "left", width: "150px" },
+    { Header: "Description", accessor: "description", align: "left", minWidth: "200px" },
+    { Header: "Status", accessor: "status", align: "center", width: "100px" },
   ];
 
   const renderStatusBadge = (status) => {
@@ -384,8 +384,9 @@ function UserRole() {
               sx={{
                 overflowX: "auto",
                 "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
+                  tableLayout: "auto",
+                  width: "auto",
+                  minWidth: "100%",
                 },
                 "& .MuiTableCell-root": {
                   whiteSpace: "normal !important",
@@ -404,7 +405,7 @@ function UserRole() {
                 "& .MuiTable-root th": {
                   fontSize: "1.15rem !important",
                   fontWeight: "700 !important",
-                  padding: "12px 10px !important",
+                  padding: "4px 4px !important",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
@@ -428,29 +429,6 @@ function UserRole() {
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                },
-                "& .MuiTable-root td:nth-of-type(3) > *": {
-                  display: "block",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
                 },
               }}
             >

@@ -29,6 +29,9 @@ import ReportsLineChart from "examples/Charts/LineCharts/ReportsLineChart";
 import DefaultLineChart from "examples/Charts/LineCharts/DefaultLineChart";
 import ComplexStatisticsCard from "examples/Cards/StatisticsCards/ComplexStatisticsCard";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 // Data
 import reportsBarChartData from "layouts/dashboard/data/reportsBarChartData";
 import reportsLineChartData from "layouts/dashboard/data/reportsLineChartData";
@@ -38,16 +41,18 @@ import Projects from "layouts/dashboard/components/Projects";
 import OrdersOverview from "layouts/dashboard/components/OrdersOverview";
 
 function Dashboard() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const { sales, tasks } = reportsLineChartData;
 
   // Dummy "A1 Land Activities" widgets (top)
   const a1AnnualRent = {
     labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Annual Rent", data: [24500, 32500, 73500, 82500, 20500] },
+    datasets: { label: "Annual Rent", data: [2000000, 3000000, 4000000, 5000000, 6000000] }, // Round millions: 2M, 3M, 4M, 5M, 6M
   };
   const a1GovtShare = {
     labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Govt Share", data: [12500, 52500, 67500, 55000, 9500] },
+    datasets: { label: "Govt Share", data: [1000000, 2000000, 3000000, 4000000, 5000000] }, // Round millions: 1M, 2M, 3M, 4M, 5M
   };
   const a1PafShare = {
     labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
@@ -67,7 +72,14 @@ function Dashboard() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox py={3}>
+      <MDBox
+        py={3}
+        sx={{
+          "& .MuiTypography-root": {
+            color: darkMode ? "#ffffff !important" : "inherit",
+          },
+        }}
+      >
         <Grid container spacing={2} mb={4}>
           <Grid item xs={12} md={6}>
             <MDBox mb={1}>
@@ -160,7 +172,11 @@ function Dashboard() {
                 <ReportsBarChart
                   color="info"
                   title="Daily New Contracts"
-                  description="Directorate of NPF"
+                  description={
+                    <>
+                      (<strong>+5%</strong>) increase
+                    </>
+                  }
                   date="campaign sent 2 days ago"
                   chart={reportsBarChartData}
                 />

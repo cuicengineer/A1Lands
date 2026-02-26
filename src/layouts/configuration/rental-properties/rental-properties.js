@@ -495,14 +495,14 @@ function RentalProperties() {
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
     {
-      Header: "Property Type",
+      Header: "Type",
       accessor: "propertyTypeName",
       align: "left",
       width: "12%",
       Cell: ({ value }) => value || "-",
     },
     {
-      Header: "Property ID",
+      Header: "Property",
       accessor: "pId",
       align: "left",
       width: "8%",
@@ -543,7 +543,7 @@ function RentalProperties() {
       },
     },
     {
-      Header: "Attachments",
+      Header: "Attach",
       accessor: "attachments",
       align: "center",
       width: "8%",

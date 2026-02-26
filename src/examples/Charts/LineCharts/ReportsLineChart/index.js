@@ -41,6 +41,9 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 // ReportsLineChart configurations
 import configs from "examples/Charts/LineCharts/ReportsLineChart/configs";
 
@@ -56,6 +59,8 @@ ChartJS.register(
 );
 
 function ReportsLineChart({ color, title, description, date, chart }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const { data, options } = configs(chart.labels || [], chart.datasets || {});
 
   return (
@@ -79,10 +84,24 @@ function ReportsLineChart({ color, title, description, date, chart }) {
           [chart, color]
         )}
         <MDBox pt={3} pb={1} px={1}>
-          <MDTypography variant="h6" textTransform="capitalize">
+          <MDTypography
+            variant="h6"
+            textTransform="capitalize"
+            sx={{
+              color: darkMode ? "#ffffff !important" : "inherit",
+            }}
+          >
             {title}
           </MDTypography>
-          <MDTypography component="div" variant="button" color="text" fontWeight="light">
+          <MDTypography
+            component="div"
+            variant="button"
+            color="text"
+            fontWeight="light"
+            sx={{
+              color: darkMode ? "#ffffff !important" : "inherit",
+            }}
+          >
             {description}
           </MDTypography>
           <Divider />

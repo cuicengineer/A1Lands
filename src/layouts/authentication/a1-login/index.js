@@ -84,14 +84,11 @@ function A1Login() {
                 </div>
               </div>
 
-              <div className="welcome-section">
-                <h3>
-                  <p>
-                    Audit & Accounts Sub Branch
-                    <br />
-                    Director of Central Non Public Fund
-                  </p>{" "}
-                </h3>
+              <div className="brand-text">
+                <h4>
+                  <p>Directorate of Central Non Public Fund</p>
+                </h4>
+                <p>Audit & Accounts Sub Branch</p> <br></br>
               </div>
 
               <form onSubmit={handleSubmit}>

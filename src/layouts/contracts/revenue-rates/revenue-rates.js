@@ -950,6 +950,67 @@ export default function RevenueRates() {
     value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]),
   };
 
+  // Excel export cell formatter to format dates as dd-mmm-yyyy
+  const exportCellFormatter = ({ value, column, row }) => {
+    const colId = String(column?.id || "").toLowerCase();
+    if (colId === "applicabledate" || colId === "applicationdate") {
+      // Use the same date formatting logic as in the Cell renderer
+      if (!value) return "";
+      const raw = String(value).trim();
+      if (!raw) return "";
+
+      const monthShort = [
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec",
+      ];
+
+      try {
+        const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+        let day = "";
+        let month = "";
+        let year = "";
+
+        // yyyy-mm-dd
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          [year, month, day] = datePart.split("-");
+        }
+        // dd-mm-yyyy
+        else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+          [day, month, year] = datePart.split("-");
+        } else {
+          const parsed = new Date(raw);
+          if (!Number.isFinite(parsed.getTime())) return raw;
+          day = String(parsed.getDate()).padStart(2, "0");
+          month = String(parsed.getMonth() + 1).padStart(2, "0");
+          year = String(parsed.getFullYear());
+        }
+
+        const monthIndex = Number(month) - 1;
+        const monthText = monthShort[monthIndex] || month;
+        return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+      } catch {
+        return raw;
+      }
+    }
+    // For Property column, use propertyName instead of propertyId
+    const accessor = String(column?.accessor || "").toLowerCase();
+    if (colId === "propertyid" || accessor === "propertyid" || colId === "property") {
+      const rowData = row || {};
+      return rowData.propertyName || value || "";
+    }
+    return value;
+  };
+
   const columns = [
     {
       Header: "Actions",
@@ -995,7 +1056,53 @@ export default function RevenueRates() {
         // Handle both camelCase and PascalCase - use value from accessor first, then fallback
         const dateValue =
           value ?? row?.original?.applicableDate ?? row?.original?.ApplicableDate ?? null;
-        return dateValue ? new Date(dateValue).toLocaleDateString() : "";
+        // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+        if (!dateValue) return "";
+        const raw = String(dateValue).trim();
+        if (!raw) return "";
+
+        const monthShort = [
+          "jan",
+          "feb",
+          "mar",
+          "apr",
+          "may",
+          "jun",
+          "jul",
+          "aug",
+          "sep",
+          "oct",
+          "nov",
+          "dec",
+        ];
+
+        try {
+          const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+          let day = "";
+          let month = "";
+          let year = "";
+
+          // yyyy-mm-dd
+          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+            [year, month, day] = datePart.split("-");
+          }
+          // dd-mm-yyyy
+          else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+            [day, month, year] = datePart.split("-");
+          } else {
+            const parsed = new Date(raw);
+            if (!Number.isFinite(parsed.getTime())) return raw;
+            day = String(parsed.getDate()).padStart(2, "0");
+            month = String(parsed.getMonth() + 1).padStart(2, "0");
+            year = String(parsed.getFullYear());
+          }
+
+          const monthIndex = Number(month) - 1;
+          const monthText = monthShort[monthIndex] || month;
+          return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+        } catch {
+          return "";
+        }
       },
     },
     {
@@ -1066,11 +1173,13 @@ export default function RevenueRates() {
     const normalizedId = row?.id ?? row?.Id;
     const propertyId = row.propertyId ?? row.PropertyId;
     const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
+    const propertyName = prop ? prop.pId ?? prop.pid ?? prop.PId ?? "" : "";
 
     return {
       ...row,
       id: normalizedId,
       propertyId: propertyId,
+      propertyName: propertyName,
       rate: row.rate ?? row.Rate ?? 0,
       applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
       status: row.status ?? row.Status ?? true,
@@ -1227,6 +1336,7 @@ export default function RevenueRates() {
                   noEndBorder
                   canSearch
                   exportFileName="Revenue-Rates"
+                  exportCellFormatter={exportCellFormatter}
                 />
 
                 {/* Server-side Pagination Footer */}

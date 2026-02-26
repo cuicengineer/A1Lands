@@ -32,6 +32,32 @@ function configs(labels, datasets) {
     backgroundColors.push(dark.main);
   }
 
+  // Custom plugin to add percentage labels
+  const percentageLabelPlugin = {
+    id: "percentageLabel",
+    afterDatasetsDraw: (chart) => {
+      const ctx = chart.ctx;
+      const data = chart.data.datasets[0].data;
+      const total = data.reduce((a, b) => a + b, 0);
+
+      chart.data.datasets.forEach((dataset, i) => {
+        const meta = chart.getDatasetMeta(i);
+        meta.data.forEach((element, index) => {
+          const percentage = ((data[index] / total) * 100).toFixed(1);
+          const position = element.tooltipPosition();
+
+          ctx.save();
+          ctx.fillStyle = "#000000";
+          ctx.font = "bold 14px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${percentage}%`, position.x, position.y);
+          ctx.restore();
+        });
+      });
+    },
+  };
+
   return {
     data: {
       labels,
@@ -42,7 +68,8 @@ function configs(labels, datasets) {
           cutout: 0,
           tension: 0.9,
           pointRadius: 2,
-          borderWidth: 2,
+          borderWidth: 3,
+          borderColor: "#ffffff",
           backgroundColor: backgroundColors,
           fill: false,
           data: datasets.data,
@@ -56,12 +83,35 @@ function configs(labels, datasets) {
         legend: {
           display: false,
         },
+        tooltip: {
+          enabled: true,
+          backgroundColor: "rgba(0, 0, 0, 0.8)",
+          padding: 12,
+          titleFont: {
+            size: 14,
+            weight: "bold",
+          },
+          bodyFont: {
+            size: 13,
+          },
+          cornerRadius: 8,
+          displayColors: true,
+        },
+      },
+      animation: {
+        animateRotate: true,
+        animateScale: true,
+        duration: 1000,
+        easing: "easeOutQuart",
       },
       interaction: {
         intersect: false,
         mode: "index",
       },
+      onResize: null,
+      onHover: null,
     },
+    plugins: [percentageLabelPlugin],
   };
 }
 

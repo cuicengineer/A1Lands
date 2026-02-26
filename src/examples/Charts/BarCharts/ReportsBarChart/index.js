@@ -39,12 +39,17 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 // ReportsBarChart configurations
 import configs from "examples/Charts/BarCharts/ReportsBarChart/configs";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 function ReportsBarChart({ color, title, description, date, chart }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const { data, options } = configs(chart.labels || [], chart.datasets || {});
 
   return (
@@ -62,16 +67,34 @@ function ReportsBarChart({ color, title, description, date, chart }) {
               mt={-5}
               height="12.5rem"
             >
-              <Bar data={data} options={options} redraw />
+              <Bar data={data} options={options} />
             </MDBox>
           ),
           [color, chart]
         )}
         <MDBox>
-          <MDTypography variant="h5" sx={{ lineHeight: 2.2, mb: 1.25 }}>
+          <MDTypography
+            variant="h5"
+            sx={{
+              lineHeight: 2.2,
+              mb: 1.25,
+              color: darkMode ? "#ffffff !important" : "#000000 !important",
+              fontSize: "1.5rem !important",
+              fontWeight: "700 !important",
+            }}
+          >
             {title}
           </MDTypography>
-          <MDTypography variant="button" color="text" sx={{ lineHeight: 1.1, mb: 0.25 }}>
+          <MDTypography
+            variant="button"
+            sx={{
+              lineHeight: 1.1,
+              mb: 0.25,
+              color: darkMode ? "#ffffff !important" : "#000000 !important",
+              fontSize: "0.875rem !important",
+              fontWeight: "600 !important",
+            }}
+          >
             {description}
           </MDTypography>
         </MDBox>

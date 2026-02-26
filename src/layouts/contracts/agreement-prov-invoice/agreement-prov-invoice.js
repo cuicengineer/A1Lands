@@ -19,6 +19,7 @@ import PropTypes from "prop-types";
 import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import { useMaterialUIController } from "context";
+import jsPDF from "jspdf";
 
 export default function AgreementProvInvoice() {
   const [controller] = useMaterialUIController();
@@ -223,22 +224,325 @@ export default function AgreementProvInvoice() {
     }
   };
 
-  // Format date for display
-  const formatDateDDMMYYYY = (dateString) => {
+  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  const formatDateDDMMMYYYY = (dateString) => {
     if (!dateString) return "-";
+    const raw = String(dateString).trim();
+    if (!raw) return "-";
+
+    const monthShort = [
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
+    ];
+
     try {
-      const date = new Date(dateString);
-      const day = String(date.getDate()).padStart(2, "0");
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const year = date.getFullYear();
-      return `${day}-${month}-${year}`;
+      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+      let day = "";
+      let month = "";
+      let year = "";
+
+      // yyyy-mm-dd
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        [year, month, day] = datePart.split("-");
+      }
+      // dd-mm-yyyy
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+        [day, month, year] = datePart.split("-");
+      } else {
+        const parsed = new Date(raw);
+        if (!Number.isFinite(parsed.getTime())) return raw;
+        day = String(parsed.getDate()).padStart(2, "0");
+        month = String(parsed.getMonth() + 1).padStart(2, "0");
+        year = String(parsed.getFullYear());
+      }
+
+      const monthIndex = Number(month) - 1;
+      const monthText = monthShort[monthIndex] || month;
+      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
     } catch (e) {
       return dateString;
     }
   };
 
+  // Generate PDF for a contract row
+  const generatePDF = (rowData) => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    let yPos = margin;
+
+    // Helper function to format date
+    const formatDate = (dateString) => {
+      if (!dateString) return "";
+      try {
+        const date = new Date(dateString);
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        return `${day}-${month}-${year}`;
+      } catch (e) {
+        return dateString;
+      }
+    };
+
+    // Helper function to format currency
+    const formatCurrency = (value) => {
+      if (!value) return "0";
+      return Number(value).toLocaleString("en-US");
+    };
+
+    // Load and add PAF Logo to top right corner
+    const addLogoToPDF = () => {
+      return new Promise((resolve) => {
+        const logoPath = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            // Logo dimensions and position - smaller size to avoid text collision
+            const logoWidth = 18; // Reduced size for better fit
+            const logoHeight = (img.height / img.width) * logoWidth; // Maintain aspect ratio
+            const logoX = pageWidth - margin - logoWidth - 5; // Position further right with small gap from edge
+            const logoY = margin + 2; // Align top edge with invoice date text
+
+            // Convert image to base64 and add to PDF
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0);
+            const imgData = canvas.toDataURL("image/png");
+
+            doc.addImage(imgData, "PNG", logoX, logoY, logoWidth, logoHeight);
+            resolve();
+          } catch (error) {
+            console.error("Error adding logo to PDF:", error);
+            resolve(); // Continue even if logo fails
+          }
+        };
+        img.onerror = () => {
+          console.error("Error loading logo image");
+          resolve(); // Continue even if logo fails
+        };
+        img.src = logoPath;
+      });
+    };
+
+    // Get contract data (handle both PascalCase and camelCase)
+    const contractNo = rowData.ContractNo || rowData.contractNo || "";
+    const businessName = rowData.BusinessName || rowData.businessName || "";
+    const tenantNo = rowData.TenantNo || rowData.tenantNo || "";
+    const contractStartDate = rowData.ContractStartDate || rowData.contractStartDate || "";
+    const contractEndDate = rowData.ContractEndDate || rowData.contractEndDate || "";
+    const commercialOpDate =
+      rowData.CommercialOperationDate || rowData.commercialOperationDate || "";
+    const initialRentPM = rowData.InitialRentPM || rowData.initialRentPM || 0;
+    const initialRentPA = rowData.InitialRentPA || rowData.initialRentPA || 0;
+    const natureOfBusiness = rowData.NatureOfBusiness || rowData.natureOfBusiness || "";
+    const cmdName = rowData.CmdName || rowData.cmdName || "";
+    const baseName = rowData.BaseName || rowData.baseName || "";
+    const className = rowData.ClassName || rowData.className || "";
+    const term = rowData.Term || rowData.term || "";
+    const paymentTermMonths = rowData.PaymentTermMonths || rowData.paymentTermMonths || "";
+    const uoM = rowData.UoM || rowData.uoM || rowData.UnitName || rowData.unitName || "";
+    const increaseIntervalMonths =
+      rowData.IncreaseIntervalMonths || rowData.increaseIntervalMonths || "";
+    const riseDate = rowData.RiseDate || rowData.riseDate || "";
+
+    // Build PDF content function
+    const buildPDFContent = () => {
+      // Top Left Section - Title "Sales Invoice"
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("Sales Invoice", margin, margin + 8);
+
+      // Top Left Section - Client/Vendor Information (below title)
+      let yPos = margin + 18;
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      const clientInfo = `${contractNo}-${businessName}`;
+      doc.text(clientInfo, margin, yPos);
+      yPos += 6;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const tenantInfo = tenantNo ? `Tenant: ${tenantNo}` : "";
+      if (tenantInfo) {
+        doc.text(tenantInfo, margin, yPos);
+        yPos += 5;
+      }
+
+      // Top Right Section - Invoice Details (dates and number)
+      // Position text to the left of the logo (logo is 18mm wide + gap to prevent collision)
+      const logoWidth = 18;
+      const logoGap = 5; // Gap between logo and page edge
+      const textLogoGap = 10; // Gap between text and logo to prevent collision
+      const rightX = pageWidth - margin - logoWidth - logoGap - textLogoGap - 40; // Leave sufficient space for logo
+      yPos = margin + 2; // Start slightly below top to align with text baseline
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const invoiceDate = formatDate(commercialOpDate || contractStartDate);
+      doc.text(`Invoice date: ${invoiceDate}`, rightX, yPos);
+      yPos += 5;
+      doc.text(`Due date: ${invoiceDate}`, rightX, yPos);
+      yPos += 5;
+      doc.text(`Invoice number: ${contractNo}`, rightX, yPos);
+
+      // Top Right Section - Sender/Billing Entity Information (below invoice details)
+      yPos += 8;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("General Admin Fund - Air HQs", rightX, yPos);
+      yPos += 5;
+      doc.setFont("helvetica", "normal");
+      doc.text("Directorate of CNPF", rightX, yPos);
+      yPos += 5;
+      doc.text("Air Headquarters, Islamabad, Pakistan", rightX, yPos);
+      yPos += 5;
+      doc.text("Contact No: 051-9505187 Ext 5187, 5183, 5193, 5197", rightX, yPos);
+
+      // Top Right Section - Bank Account Details (below sender info)
+      yPos += 8;
+      doc.setLineWidth(0.1);
+      doc.line(rightX, yPos, rightX + 60, yPos);
+      yPos += 5;
+      doc.text("Title of Account = General Admin Fund", rightX, yPos);
+      yPos += 5;
+      doc.text("IBAN = XXXXXXXXXXXXXXXXXXXXXXXX", rightX, yPos);
+      yPos += 5;
+      doc.text("Bank = Allied Bank E-9, PAF Complex Islamabad", rightX, yPos);
+
+      // Middle Section - Terms of Contract Agreement
+      yPos = 70;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("Terms of Contract Agreement======>=======>", margin, yPos);
+      yPos += 10;
+
+      // Left Column
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const leftColX = margin;
+      doc.text(`Formation: ${baseName || cmdName || ""}`, leftColX, yPos);
+      yPos += 5;
+      doc.text(`CSD: ${formatDate(contractStartDate)}`, leftColX, yPos);
+      yPos += 5;
+      doc.text(`Business-CMO: ${businessName}`, leftColX, yPos);
+      yPos += 5;
+      doc.text(`CED: ${formatDate(contractEndDate)}`, leftColX, yPos);
+
+      // Right Column
+      yPos = 80;
+      const rightColX = pageWidth / 2 + 20;
+      doc.text(`Initial Rent-M: ${formatCurrency(initialRentPM)}`, rightColX, yPos);
+      yPos += 5;
+      doc.text(`Role-Type: Host`, rightColX, yPos);
+      yPos += 5;
+      doc.text(`Class: ${className || ""}`, rightColX, yPos);
+      yPos += 5;
+      const payTerm = paymentTermMonths ? `${paymentTermMonths}M-Start` : "";
+      doc.text(`Pay Term: ${payTerm}`, rightColX, yPos);
+      yPos += 5;
+      const incInterval = riseDate
+        ? formatDate(riseDate)
+        : increaseIntervalMonths
+        ? `${increaseIntervalMonths}M`
+        : "";
+      doc.text(`Inc-Interval: ${incInterval}`, rightColX, yPos);
+      yPos += 5;
+      doc.text(`UoM: ${uoM}`, rightColX, yPos);
+      yPos += 5;
+      doc.text(`DPC(%): 0.02`, rightColX, yPos);
+
+      // Bottom Section - Itemized Charges Table
+      yPos = 130;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("Item", margin, yPos);
+      doc.text("PM", margin + 40, yPos);
+      doc.text("Unit price", margin + 70, yPos);
+      doc.text("Total", margin + 120, yPos);
+
+      yPos += 8;
+      doc.setLineWidth(0.1);
+      doc.line(margin, yPos, pageWidth - margin, yPos);
+
+      yPos += 6;
+      doc.setFont("helvetica", "normal");
+      doc.text("MR Monthly Rent", margin, yPos);
+      const pmMonths = paymentTermMonths || 12;
+      doc.text(String(pmMonths), margin + 40, yPos);
+      doc.text(formatCurrency(initialRentPM), margin + 70, yPos);
+      const totalRent = Number(initialRentPM) * Number(pmMonths);
+      doc.text(formatCurrency(totalRent), margin + 120, yPos);
+
+      // Summary calculations - align to right
+      yPos += 15;
+      doc.setFont("helvetica", "bold");
+      const totalX = pageWidth - margin - 50; // Right align
+      doc.text(`Total: ${formatCurrency(totalRent)}`, totalX, yPos);
+    };
+
+    // Load logo first, then build content and open PDF
+    addLogoToPDF().then(() => {
+      buildPDFContent();
+      // Open PDF in new window for viewing (user can then download or save using browser controls)
+      doc.output("dataurlnewwindow");
+    });
+  };
+
+  // Excel export cell formatter to format dates as dd-mmm-yyyy
+  const exportCellFormatter = ({ value, column }) => {
+    const colId = String(column?.id || "").toLowerCase();
+    if (
+      colId === "contractstartdate" ||
+      colId === "contractenddate" ||
+      colId === "applicabledate" ||
+      colId === "applicationdate"
+    ) {
+      return formatDateDDMMMYYYY(value);
+    }
+    return value;
+  };
+
   // Define table columns with Cell functions to handle both PascalCase and camelCase
   const columns = [
+    {
+      Header: "View PDF",
+      accessor: "generatePdf",
+      align: "center",
+      width: "100px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        return (
+          <IconButton
+            onClick={() => generatePDF(rowData)}
+            size="large"
+            sx={{
+              color: "#1976d2",
+              "&:hover": {
+                backgroundColor: "rgba(25, 118, 210, 0.1)",
+              },
+            }}
+          >
+            <Icon fontSize="large">picture_as_pdf</Icon>
+          </IconButton>
+        );
+      },
+    },
     {
       Header: "Contract No",
       accessor: "contractNo",
@@ -281,7 +585,7 @@ export default function AgreementProvInvoice() {
         // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
         const dateValue = rowData.ContractStartDate || rowData.contractStartDate || value;
-        return formatDateDDMMYYYY(dateValue);
+        return formatDateDDMMMYYYY(dateValue);
       },
     },
     {
@@ -293,7 +597,7 @@ export default function AgreementProvInvoice() {
         // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
         const dateValue = rowData.ContractEndDate || rowData.contractEndDate || value;
-        return formatDateDDMMYYYY(dateValue);
+        return formatDateDDMMMYYYY(dateValue);
       },
     },
     {
@@ -685,6 +989,7 @@ export default function AgreementProvInvoice() {
                   isSorted={true}
                   noEndBorder
                   exportFileName="Agreement-Prov-Invoice"
+                  exportCellFormatter={exportCellFormatter}
                 />
               </MDBox>
             </Card>

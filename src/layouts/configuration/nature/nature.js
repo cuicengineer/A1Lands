@@ -174,11 +174,11 @@ function NatureConfig() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
-    { Header: "Id", accessor: "id", align: "left", width: "6%" },
-    { Header: "Name", accessor: "name", align: "left", width: "18%" },
-    { Header: "Description", accessor: "description", align: "left", width: "24%" },
-    { Header: "Status", accessor: "status", align: "center", width: "8%" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "60px" },
+    { Header: "Id", accessor: "id", align: "left", width: "50px" },
+    { Header: "Name", accessor: "name", align: "left", width: "150px" },
+    { Header: "Description", accessor: "description", align: "left", minWidth: "200px" },
+    { Header: "Status", accessor: "status", align: "center", width: "100px" },
   ];
 
   const renderInput = (field, value, type = "text", mandatory = false) => (
@@ -408,8 +408,9 @@ function NatureConfig() {
               sx={{
                 overflowX: "auto",
                 "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
+                  tableLayout: "auto",
+                  width: "auto",
+                  minWidth: "100%",
                 },
                 "& .MuiTableCell-root": {
                   whiteSpace: "normal !important",
@@ -428,14 +429,14 @@ function NatureConfig() {
                 "& .MuiTable-root th": {
                   fontSize: "1.15rem !important",
                   fontWeight: "700 !important",
-                  padding: "12px 10px !important",
+                  padding: "8px 6px !important",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
                   borderBottom: "1px solid #d0d0d0",
                 },
                 "& .MuiTable-root td": {
-                  padding: "10px 10px !important",
+                  padding: "8px 6px !important",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",
@@ -452,29 +453,6 @@ function NatureConfig() {
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                },
-                "& .MuiTable-root td:nth-of-type(3) > *": {
-                  display: "block",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
                 },
               }}
             >

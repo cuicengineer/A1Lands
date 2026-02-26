@@ -30,13 +30,19 @@ import Icon from "@mui/material/Icon";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 
+// Material Dashboard 2 React contexts
+import { useMaterialUIController } from "context";
+
 // PieChart configurations
 import configs from "examples/Charts/PieChart/configs";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
 function PieChart({ icon, title, description, height, chart }) {
-  const { data, options } = configs(chart.labels || [], chart.datasets || {});
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
+  const chartConfig = configs(chart.labels || [], chart.datasets || {});
+  const { data, options, plugins } = chartConfig;
 
   const renderChart = (
     <MDBox py={2} pr={2} pl={icon.component ? 1 : 2}>
@@ -61,9 +67,28 @@ function PieChart({ icon, title, description, height, chart }) {
             </MDBox>
           )}
           <MDBox mt={icon.component ? -2 : 0}>
-            {title && <MDTypography variant="h6">{title}</MDTypography>}
+            {title && (
+              <MDTypography
+                variant="h6"
+                sx={{
+                  color: darkMode ? "#ffffff !important" : "#000000 !important",
+                  fontSize: "1.25rem !important",
+                  fontWeight: "700 !important",
+                }}
+              >
+                {title}
+              </MDTypography>
+            )}
             <MDBox mb={2}>
-              <MDTypography component="div" variant="button" color="text">
+              <MDTypography
+                component="div"
+                variant="button"
+                sx={{
+                  color: darkMode ? "#ffffff !important" : "#000000 !important",
+                  fontSize: "0.875rem !important",
+                  fontWeight: "600 !important",
+                }}
+              >
                 {description}
               </MDTypography>
             </MDBox>
@@ -73,10 +98,10 @@ function PieChart({ icon, title, description, height, chart }) {
       {useMemo(
         () => (
           <MDBox height={height}>
-            <Pie data={data} options={options} redraw />
+            <Pie data={data} options={options} plugins={plugins} />
           </MDBox>
         ),
-        [chart, height]
+        [chart, height, data, options, plugins]
       )}
     </MDBox>
   );

@@ -353,6 +353,8 @@ function DataTable({
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  // Ref to store pagination info for S.No column calculation
+  const pageInfoRef = useRef({ pageIndex: 0, pageSize: 10 });
   const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 10;
   const entries = entriesPerPage.entries
     ? entriesPerPage.entries.map((el) => el.toString())
@@ -382,21 +384,117 @@ function DataTable({
   };
 
   const baseColumns = useMemo(() => table.columns, [table]);
-  const columns = useMemo(() => {
-    if (!isOperatorUser()) return baseColumns;
-    // Hide Action(s) column entirely for Operator users
-    return (baseColumns || []).filter((c) => {
+
+  // Function to check if a column is Actions column
+  const isActionsColumn = useCallback((column) => {
+    const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
+    const accessor =
+      typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
+    return (
+      header === "actions" || header === "action" || accessor === "actions" || accessor === "action"
+    );
+  }, []);
+
+  // Function to check if S.No column already exists
+  const hasSNoColumn = useCallback((cols) => {
+    return (cols || []).some((c) => {
       const header = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
       const accessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
-      return (
-        header !== "actions" &&
-        header !== "action" &&
-        accessor !== "actions" &&
-        accessor !== "action"
-      );
+      return header === "s.no" || header === "sno" || accessor === "sno" || accessor === "s.no";
     });
-  }, [baseColumns]);
+  }, []);
+
+  // List of excluded files that should NOT have S.No column (based on exportFileName)
+  const excludedFiles = [
+    "Property-Type",
+    "Banks-List",
+    "Rental-Value-Rate",
+    "Govt-Share-Rate",
+    "Sharing-Formula",
+  ];
+  const shouldExcludeSNo = useMemo(() => {
+    if (!exportFileName) return false;
+    const fileName = String(exportFileName);
+    return excludedFiles.includes(fileName);
+  }, [exportFileName]);
+
+  // Add S.No column after Actions column (if Actions exists and S.No doesn't)
+  const columnsWithSNo = useMemo(() => {
+    if (!baseColumns || baseColumns.length === 0) return baseColumns;
+
+    // Skip S.No for excluded files
+    if (shouldExcludeSNo) return baseColumns;
+
+    // Check if Actions column exists and S.No doesn't
+    const hasActions = baseColumns.some(isActionsColumn);
+    const hasSNo = hasSNoColumn(baseColumns);
+
+    if (!hasActions || hasSNo) return baseColumns;
+
+    // Find Actions column index
+    const actionsIndex = baseColumns.findIndex(isActionsColumn);
+    if (actionsIndex === -1) return baseColumns;
+
+    // Create S.No column - will calculate serial number in Cell function
+    const snoColumn = {
+      Header: "S.No",
+      accessor: "sno",
+      align: "center",
+      width: "60px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // Use ref to get current pagination state (updated after table instance is created)
+        const { pageIndex, pageSize } = pageInfoRef.current;
+        // eslint-disable-next-line react/prop-types
+        const serialNumber = pageIndex * pageSize + row.index + 1;
+        return <MDBox sx={{ textAlign: "center", fontSize: "0.875rem" }}>{serialNumber}</MDBox>;
+      },
+    };
+
+    // Insert S.No after Actions
+    const newColumns = [...baseColumns];
+    newColumns.splice(actionsIndex + 1, 0, snoColumn);
+    return newColumns;
+  }, [baseColumns, isActionsColumn, hasSNoColumn, shouldExcludeSNo]);
+
+  const columns = useMemo(() => {
+    if (!isOperatorUser()) return columnsWithSNo;
+    // Hide Action(s) column entirely for Operator users
+    return (columnsWithSNo || []).filter((c) => !isActionsColumn(c));
+  }, [columnsWithSNo, isActionsColumn, isOperatorUser]);
   const data = useMemo(() => table.rows, [table]);
+
+  // Function to detect if a column is an "Id" column
+  const isIdColumn = useCallback((column) => {
+    const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
+    const accessor =
+      typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
+    const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";
+    // Match "id", "Id", "ID" exactly (case-insensitive after conversion)
+    return header === "id" || accessor === "id" || id === "id";
+  }, []);
+
+  // Automatically hide Id columns by default
+  const autoHiddenColumns = useMemo(() => {
+    const idColumnIds = [];
+    (baseColumns || []).forEach((col) => {
+      if (isIdColumn(col)) {
+        // Use column.id if available, otherwise try to generate from accessor or Header
+        const colId = col.id || col.accessor || (typeof col.Header === "string" ? col.Header : "");
+        if (colId) {
+          idColumnIds.push(String(colId));
+        }
+      }
+    });
+    return idColumnIds;
+  }, [baseColumns, isIdColumn]);
+
+  // Merge auto-hidden Id columns with initialHiddenColumns
+  const mergedHiddenColumns = useMemo(() => {
+    const initial = Array.isArray(initialHiddenColumns) ? initialHiddenColumns : [];
+    // Combine and deduplicate
+    return [...new Set([...initial, ...autoHiddenColumns])];
+  }, [initialHiddenColumns, autoHiddenColumns]);
 
   const filterTypes = useMemo(
     () => ({
@@ -406,6 +504,7 @@ function DataTable({
         const allowed = new Set(filterValue);
         const colId = Array.isArray(id) ? id[0] : id;
         return rowsToFilter.filter((row) => {
+          // eslint-disable-next-line react/prop-types
           const token = normalizeValueToken(row.values?.[colId], { id: colId });
           return allowed.has(token);
         });
@@ -439,7 +538,7 @@ function DataTable({
       initialState: {
         pageIndex: currentPageIndex,
         pageSize: currentPageSize,
-        hiddenColumns: Array.isArray(initialHiddenColumns) ? initialHiddenColumns : [],
+        hiddenColumns: mergedHiddenColumns,
       },
       defaultColumn,
       filterTypes,
@@ -454,6 +553,7 @@ function DataTable({
         if (!searchValue) return rows;
 
         return rows.filter((row) =>
+          // eslint-disable-next-line react/prop-types
           columnIds.some((id) => extractText(row.values?.[id]).toLowerCase().includes(searchValue))
         );
       },
@@ -495,6 +595,9 @@ function DataTable({
   const globalFilter = state?.globalFilter ?? "";
   const columnOrder = state?.columnOrder ?? [];
 
+  // Update page info ref for S.No column calculation
+  pageInfoRef.current = { pageIndex, pageSize };
+
   // Column selector dropdown
   const [columnsAnchorEl, setColumnsAnchorEl] = useState(null);
   const [columnsSearch, setColumnsSearch] = useState("");
@@ -512,6 +615,8 @@ function DataTable({
         accessor === "action"
       )
         return false;
+      // Include S.No column in selectable columns for export
+      if (header === "s.no" || accessor === "sno") return true;
       return Boolean(c?.id);
     });
   }, [allColumns]);
@@ -547,6 +652,14 @@ function DataTable({
 
   const exportToExcel = async () => {
     try {
+      // Find S.No column if it exists
+      const snoColumn = allColumns.find((c) => {
+        const header = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
+        const accessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
+        const id = typeof c?.id === "string" ? c.id.trim().toLowerCase() : "";
+        return header === "s.no" || accessor === "sno" || id === "sno";
+      });
+
       // If exportAllColumns is true, export all columns regardless of visibility
       // Otherwise, only export visible columns
       const colsToExport = exportAllColumns
@@ -555,6 +668,18 @@ function DataTable({
             const currentHidden = Array.isArray(hiddenColumns) ? hiddenColumns : [];
             return selectableColumns.filter((c) => !currentHidden.includes(c.id));
           })();
+
+      // Always include S.No column in export if it exists (even if hidden)
+      const finalColsToExport =
+        snoColumn &&
+        !colsToExport.find((c) => {
+          const cHeader = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
+          const cAccessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
+          const cId = typeof c?.id === "string" ? c.id.trim().toLowerCase() : "";
+          return cHeader === "s.no" || cAccessor === "sno" || cId === "sno";
+        })
+          ? [snoColumn, ...colsToExport]
+          : colsToExport;
 
       // Export filtered/sorted rows (not just current page)
       let exportRows = (rows || []).slice();
@@ -565,7 +690,7 @@ function DataTable({
         }
       }
 
-      const dataForSheet = exportRows.map((r) => {
+      const dataForSheet = exportRows.map((r, index) => {
         // Ensure row values are computed
         try {
           prepareRow(r);
@@ -574,14 +699,30 @@ function DataTable({
         }
 
         const obj = {};
-        colsToExport.forEach((c) => {
+        finalColsToExport.forEach((c) => {
           const headerLabel =
             typeof c.Header === "string"
               ? c.Header === "Actions"
                 ? "Action"
                 : c.Header
               : String(c.id || "");
-          const rawValue = extractText(r.values?.[c.id]);
+
+          // Calculate S.No value for export
+          let rawValue;
+          const cHeader = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
+          const cAccessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
+          const cId = typeof c?.id === "string" ? c.id.trim().toLowerCase() : "";
+          const isSNoColumn =
+            snoColumn &&
+            (cHeader === "s.no" || cAccessor === "sno" || cId === "sno" || c.id === snoColumn.id);
+
+          if (isSNoColumn) {
+            // Calculate serial number: index + 1 (since we're exporting all rows, not paginated)
+            rawValue = index + 1;
+          } else {
+            rawValue = extractText(r.values?.[c.id]);
+          }
+
           obj[headerLabel] =
             typeof exportCellFormatter === "function"
               ? exportCellFormatter({
@@ -1100,7 +1241,7 @@ function DataTable({
         sx={{
           tableLayout: "fixed",
           whiteSpace: "nowrap",
-          "& th": { padding: "4px 8px", fontSize: "0.875rem" },
+          "& th": { padding: "4px 8px", fontSize: "14px !important" },
           "& td": { padding: "4px 8px", fontSize: "0.875rem" },
         }}
       >
@@ -1141,14 +1282,29 @@ function DataTable({
         <TableBody {...getTableBodyProps()}>
           {page.map((row, key) => {
             prepareRow(row);
+            // Check for custom row styling
+            // eslint-disable-next-line react/prop-types
+            const customRowStyle = row?.original?.__rowStyle || {};
+            // eslint-disable-next-line react/prop-types
+            const customRowClassName = row?.original?.__rowClassName || "";
+            const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
+            const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
+
             return (
               <TableRow
                 key={key}
+                // eslint-disable-next-line react/prop-types
                 {...row.getRowProps()}
-                sx={{ backgroundColor: key % 2 === 0 ? "#f0f0f0" : "#ffffff" }}
+                className={customRowClassName}
+                sx={{
+                  backgroundColor: rowBgColor,
+                  ...customRowStyle,
+                }}
               >
+                {/* eslint-disable-next-line react/prop-types */}
                 {row.cells.map((cell, idx) => {
                   const isEvenRow = key % 2 === 0;
+                  // eslint-disable-next-line react/prop-types
                   const isDisabledRow = Boolean(row?.original?.__disabledRow);
                   return (
                     <DataTableBodyCell

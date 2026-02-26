@@ -229,10 +229,10 @@ function PropertyType() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
-    { Header: "Sno", accessor: "sno", align: "center", width: "6%" },
-    { Header: "Name", accessor: "name", align: "left", width: "18%" },
-    { Header: "Status", accessor: "status", align: "center", width: "8%" },
+    { Header: "Actions", accessor: "actions", align: "center", minWidth: "50px" },
+    { Header: "S.No", accessor: "sno", align: "center", minWidth: "45px" },
+    { Header: "Name", accessor: "name", align: "left", minWidth: "100px" },
+    { Header: "Status", accessor: "status", align: "center", minWidth: "80px" },
   ];
 
   const renderInput = (field, value, type = "text", mandatory = false) => (
@@ -457,8 +457,9 @@ function PropertyType() {
               sx={{
                 overflowX: "auto",
                 "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
+                  tableLayout: "auto",
+                  width: "auto",
+                  minWidth: "100%",
                 },
                 "& .MuiTableCell-root": {
                   whiteSpace: "normal !important",
@@ -477,20 +478,32 @@ function PropertyType() {
                 "& .MuiTable-root th": {
                   fontSize: "12px !important",
                   fontWeight: "700 !important",
-                  padding: "12px 10px !important",
+                  padding: "6px 4px !important",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
                   borderBottom: "1px solid #d0d0d0",
                 },
+                "& .MuiTable-root th:first-of-type": {
+                  padding: "6px 2px !important",
+                },
+                "& .MuiTable-root th:nth-of-type(2)": {
+                  padding: "6px 2px !important",
+                },
                 "& .MuiTable-root td": {
-                  padding: "10px 10px !important",
+                  padding: "6px 4px !important",
                   whiteSpace: "normal",
                   wordBreak: "break-word",
                   overflowWrap: "anywhere",
                   hyphens: "auto",
                   maxWidth: "100%",
                   borderBottom: "1px solid #e0e0e0",
+                },
+                "& .MuiTable-root td:first-of-type": {
+                  padding: "6px 2px !important",
+                },
+                "& .MuiTable-root td:nth-of-type(2)": {
+                  padding: "6px 2px !important",
                 },
               }}
             >

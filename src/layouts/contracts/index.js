@@ -26,7 +26,7 @@ function Contracts() {
 
   // Placeholder for columns and rows data
   const columns = [
-    { Header: "Sno", accessor: "sno", align: "left" },
+    { Header: "S.No", accessor: "sno", align: "left" },
     { Header: "Class", accessor: "class", align: "left" },
     { Header: "Cmd", accessor: "cmd", align: "left" },
     { Header: "Unit", accessor: "unit", align: "left" },

@@ -2312,7 +2312,7 @@ export default function PropertyGrouping() {
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
     {
-      Header: "Linked Property",
+      Header: "Link Prop",
       accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
       width: "10%",
@@ -3361,7 +3361,7 @@ export default function PropertyGrouping() {
                         },
                       }}
                     >
-                      <TableHead>
+                      <thead>
                         <TableRow>
                           <TableCell
                             sx={{
@@ -3501,7 +3501,7 @@ export default function PropertyGrouping() {
                               padding: "8px 8px",
                             }}
                           >
-                            VA Area
+                            CA Area
                           </TableCell>
                           <TableCell
                             sx={{
@@ -3644,20 +3644,54 @@ export default function PropertyGrouping() {
                             Remarks
                           </TableCell>
                         </TableRow>
-                      </TableHead>
+                      </thead>
                       <TableBody>
                         {activeContracts.map((contract, index) => {
+                          // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
                           const formatDate = (dateValue) => {
                             if (!dateValue) return "-";
+                            const raw = String(dateValue).trim();
+                            if (!raw) return "-";
+
+                            const monthShort = [
+                              "jan",
+                              "feb",
+                              "mar",
+                              "apr",
+                              "may",
+                              "jun",
+                              "jul",
+                              "aug",
+                              "sep",
+                              "oct",
+                              "nov",
+                              "dec",
+                            ];
+
                             try {
-                              const date = new Date(dateValue);
-                              return isNaN(date.getTime())
-                                ? "-"
-                                : date.toLocaleDateString("en-GB", {
-                                    day: "2-digit",
-                                    month: "short",
-                                    year: "numeric",
-                                  });
+                              const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+                              let day = "";
+                              let month = "";
+                              let year = "";
+
+                              // yyyy-mm-dd
+                              if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                                [year, month, day] = datePart.split("-");
+                              }
+                              // dd-mm-yyyy
+                              else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+                                [day, month, year] = datePart.split("-");
+                              } else {
+                                const parsed = new Date(raw);
+                                if (!Number.isFinite(parsed.getTime())) return raw;
+                                day = String(parsed.getDate()).padStart(2, "0");
+                                month = String(parsed.getMonth() + 1).padStart(2, "0");
+                                year = String(parsed.getFullYear());
+                              }
+
+                              const monthIndex = Number(month) - 1;
+                              const monthText = monthShort[monthIndex] || month;
+                              return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
                             } catch {
                               return "-";
                             }

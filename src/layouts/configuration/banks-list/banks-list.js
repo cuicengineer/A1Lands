@@ -240,7 +240,7 @@ function BanksList() {
 
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
-    { Header: "Sno", accessor: "sno", align: "center", width: "6%" },
+    { Header: "S.No", accessor: "sno", align: "center", width: "6%" },
     { Header: "Name", accessor: "name", align: "left", width: "18%" },
     { Header: "Code", accessor: "code", align: "left", width: "10%" },
     { Header: "Address", accessor: "address", align: "left", width: "24%" },

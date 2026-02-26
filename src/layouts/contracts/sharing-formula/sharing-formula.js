@@ -661,17 +661,63 @@ export default function SharingFormula() {
   };
 
   // Format date for display
-  const formatDateDDMMYYYY = (dateString) => {
-    if (!dateString) return "-";
+  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  const formatDateDDMMMYYYY = (dateString) => {
+    if (!dateString) return "";
+    const raw = String(dateString).trim();
+    if (!raw) return "";
+
+    const monthShort = [
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
+    ];
+
     try {
-      const date = new Date(dateString);
-      const day = String(date.getDate()).padStart(2, "0");
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const year = date.getFullYear();
-      return `${day}-${month}-${year}`;
+      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+      let day = "";
+      let month = "";
+      let year = "";
+
+      // yyyy-mm-dd
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        [year, month, day] = datePart.split("-");
+      }
+      // dd-mm-yyyy
+      else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+        [day, month, year] = datePart.split("-");
+      } else {
+        const parsed = new Date(raw);
+        if (!Number.isFinite(parsed.getTime())) return raw;
+        day = String(parsed.getDate()).padStart(2, "0");
+        month = String(parsed.getMonth() + 1).padStart(2, "0");
+        year = String(parsed.getFullYear());
+      }
+
+      const monthIndex = Number(month) - 1;
+      const monthText = monthShort[monthIndex] || month;
+      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
     } catch (e) {
       return dateString;
     }
+  };
+
+  // Excel export cell formatter to format dates as dd-mmm-yyyy
+  const exportCellFormatter = ({ value, column }) => {
+    const colId = String(column?.id || "").toLowerCase();
+    if (colId === "applicabledate" || colId === "applicationdate") {
+      return formatDateDDMMMYYYY(value);
+    }
+    return value;
   };
 
   const columns = [
@@ -749,7 +795,7 @@ export default function SharingFormula() {
       },
     },
     {
-      Header: "Sno",
+      Header: "S.No",
       accessor: "sno",
       align: "center",
       width: "60px",
@@ -769,7 +815,7 @@ export default function SharingFormula() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => {
-        return formatDateDDMMYYYY(value);
+        return formatDateDDMMMYYYY(value);
       },
     },
     {
@@ -1198,6 +1244,7 @@ export default function SharingFormula() {
                   canSearch
                   pagination={{ variant: "gradient", color: "info" }}
                   exportFileName="Sharing-Formula"
+                  exportCellFormatter={exportCellFormatter}
                 />
               </MDBox>
             </Card>

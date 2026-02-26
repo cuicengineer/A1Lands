@@ -75,7 +75,7 @@ function LandCategories() {
   };
 
   const columns = [
-    { Header: "Sno", accessor: "sno", align: "left", width: "10%" },
+    { Header: "S.No", accessor: "sno", align: "left", width: "10%" },
     { Header: "Class", accessor: "class", align: "left" },
     { Header: "Status", accessor: "status", align: "left" },
     { Header: "Actions", accessor: "actions", align: "center" },
