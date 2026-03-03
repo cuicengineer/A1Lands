@@ -364,7 +364,7 @@ function AddUserForm({
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
-              Command
+              RAC
             </MDTypography>
             {renderCommandSelect("cmdId", newRowDraft?.cmdId)}
           </MDBox>

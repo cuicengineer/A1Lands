@@ -437,7 +437,8 @@ function UserRole() {
                 isSorted={false}
                 canSearch
                 page={pageIndex}
-                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
+                pageSize={pageSize}
+                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
                 onPageChange={(page) => setPageIndex(page)}
                 onEntriesPerPageChange={(value) => {
                   setPageSize(value);

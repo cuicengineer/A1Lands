@@ -44,7 +44,7 @@ function NatureConfig() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(5);
+  const [pageSize, setPageSize] = useState(20);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
@@ -462,9 +462,10 @@ function NatureConfig() {
                 canSearch={true}
                 page={pageIndex}
                 entriesPerPage={{
-                  defaultValue: pageSize,
+                  defaultValue: 20,
                   entries: [5, 10, 15, 20, 25],
                 }}
+                pageSize={pageSize}
                 onPageChange={(page) => setPageIndex(page)}
                 onEntriesPerPageChange={(value) => {
                   setPageSize(value);

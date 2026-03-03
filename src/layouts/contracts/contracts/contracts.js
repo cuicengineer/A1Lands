@@ -696,7 +696,8 @@ function ContractsForm({
   // Use only PascalCase (strict API response format)
   const selectedGroupArea = selectedPropertyGroup?.Area ?? "";
   const selectedGroupRate = selectedPropertyGroup?.Rate ?? "";
-  const selectedGroupLocation = selectedPropertyGroup?.Location ?? "";
+  const selectedGroupLocation =
+    selectedPropertyGroup?.Location ?? selectedPropertyGroup?.location ?? "";
   const selectedGroupUoM = selectedPropertyGroup?.UoM ?? "";
 
   const selectedRentalValueRateMeta = useMemo(() => {
@@ -1189,12 +1190,12 @@ function ContractsForm({
             <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth error={!!errors.cmdId}>
                 <InputLabel id="cmd-label" sx={labelSx}>
-                  Command
+                  RAC
                 </InputLabel>
                 <Select
                   labelId="cmd-label"
                   value={form.cmdId || ""}
-                  label="Command"
+                  label="RAC"
                   onChange={(e) => handleChange("cmdId", e.target.value)}
                   sx={selectSx}
                 >
@@ -1251,8 +1252,8 @@ function ContractsForm({
               </FormControl>
             </Grid>
 
-            {/* Group ID */}
-            <Grid item xs={12} sm={6} md={3}>
+            {/* Group ID - same row as Area, CA Area */}
+            <Grid item xs={12} sm={6} md={4}>
               <MDBox display="flex" alignItems="center" gap={1}>
                 <FormControl size="small" fullWidth error={!!errors.grpId} sx={{ flex: 1 }}>
                   <InputLabel id="grp-label" sx={labelSx}>
@@ -1287,62 +1288,33 @@ function ContractsForm({
                   <Icon>add</Icon>
                 </IconButton>
               </MDBox>
+              {form.grpId && (
+                <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
+                  Location: {selectedGroupLocation || "-"}
+                </MDTypography>
+              )}
             </Grid>
 
-            {/* TenantNo */}
-            {/* Area (Read-only from selected property group) */}
-            <Grid item xs={12} sm={6} md={3}>
-              <MDInput
-                label="Area"
-                type="number"
-                value={selectedGroupArea}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
+            {/* Area (Read-only) with UoM as read-only text beside - same row as Group ID, CA Area */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDBox display="flex" alignItems="flex-end" gap={1}>
+                <MDInput
+                  label="Area"
+                  type="number"
+                  value={selectedGroupArea}
+                  fullWidth
+                  size="small"
+                  InputProps={{ readOnly: true }}
+                  sx={inputSx}
+                />
+                <MDTypography variant="caption" color="text" sx={{ pb: 1, flexShrink: 0 }}>
+                  UoM: {selectedGroupUoM || "-"}
+                </MDTypography>
+              </MDBox>
             </Grid>
 
-            {/* Rate (Read-only from selected property group) */}
-            <Grid item xs={12} sm={6} md={3}>
-              <MDInput
-                label="Rate"
-                type="number"
-                value={selectedGroupRate}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* % Rate (Read-only from Rental Value Rate by cmd/base/class) */}
-            <Grid item xs={12} sm={6} md={3}>
-              <MDInput
-                label="% Rate"
-                type="number"
-                value={selectedRentalValuePercentRate}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* UoM (Read-only from selected property group) */}
-            <Grid item xs={12} sm={6} md={3}>
-              <MDInput
-                label="UoM"
-                value={selectedGroupUoM}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
-            </Grid>
-
-            {/* VA Area */}
-            <Grid item xs={12} sm={6} md={3}>
+            {/* CA Area - same row as Group ID, Area */}
+            <Grid item xs={12} sm={6} md={4}>
               <MDInput
                 label="CA Area"
                 type="number"
@@ -1505,7 +1477,7 @@ function ContractsForm({
               />
             </Grid>
 
-            {/* InitialRentPM */}
+            {/* Initial Rent PM, Initial Rent PA, Payment Term Months - same row */}
             <Grid item xs={12} sm={6} md={4}>
               <MDInput
                 label="Initial Rent PM (Rs)"
@@ -1521,7 +1493,6 @@ function ContractsForm({
               />
             </Grid>
 
-            {/* InitialRentPA */}
             <Grid item xs={12} sm={6} md={4}>
               <MDInput
                 label="Initial Rent PA (Rs)"
@@ -1535,17 +1506,68 @@ function ContractsForm({
               />
             </Grid>
 
-            {/* SDRateMonths */}
             <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="SD Rate Months"
-                type="number"
-                value={form.sdRateMonths}
-                onChange={(e) => handleChange("sdRateMonths", e.target.value)}
-                fullWidth
-                size="small"
-                sx={inputSx}
-              />
+              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
+                <InputLabel id="payment-term-label" sx={labelSx}>
+                  Payment Term Months
+                </InputLabel>
+                <Select
+                  labelId="payment-term-label"
+                  value={form.paymentTermMonths || ""}
+                  label="Payment Term Months"
+                  onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
+                  sx={selectSx}
+                >
+                  {paymentTermOptions.map((option) => (
+                    <MenuItem key={option} value={option} sx={menuItemSx}>
+                      {option}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Security Deposit Amount and SD Rate Months - same row */}
+            <Grid item xs={12} sm={6} md={6}>
+              <MDTypography
+                variant="caption"
+                color="black"
+                fontWeight="bold"
+                sx={{ display: "block" }}
+              >
+                Security Deposit Amount (Rs)
+              </MDTypography>
+              <MDTypography variant="h6" fontWeight="bold">
+                {form.securityDepositAmount || 0}
+              </MDTypography>
+              <MDTypography variant="caption" color="text">
+                Formula: SD Rate Months x Initial Rent PM
+              </MDTypography>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={6}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="sd-rate-months-label" sx={labelSx}>
+                  SD Rate Months
+                </InputLabel>
+                <Select
+                  labelId="sd-rate-months-label"
+                  value={
+                    [1, 2, 3, 9, 12].includes(Number(form.sdRateMonths))
+                      ? Number(form.sdRateMonths)
+                      : ""
+                  }
+                  label="SD Rate Months"
+                  onChange={(e) => handleChange("sdRateMonths", e.target.value)}
+                  sx={selectSx}
+                >
+                  {[1, 2, 3, 9, 12].map((n) => (
+                    <MenuItem key={n} value={n} sx={menuItemSx}>
+                      {n}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
 
             {/* Term */}
@@ -1577,68 +1599,67 @@ function ContractsForm({
               </FormControl>
             </Grid>
 
-            {/* IncreaseRatePercent (only when Term contains "Rent") */}
+            {/* Rise Terms, Increase Rate Percent %, Increase Interval Months - same row when Term is Rent */}
             {hasRentInTerm && (
-              <Grid item xs={12} sm={6} md={4}>
-                <MDInput
-                  label="Increase Rate Percent %"
-                  type="number"
-                  value={form.increaseRatePercent}
-                  onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-                  fullWidth
-                  size="small"
-                  sx={inputSx}
-                />
-              </Grid>
-            )}
-            {/* Rise Terms */}
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.riseTermType}>
-                <InputLabel id="rise-term-type-label" sx={labelSx}>
-                  Rise Terms
-                </InputLabel>
-                <Select
-                  labelId="rise-term-type-label"
-                  value={form.riseTermType || ""}
-                  label="Rise Terms"
-                  onChange={(e) => handleChange("riseTermType", e.target.value)}
-                  sx={selectSx}
-                >
-                  <MenuItem value="Uniform" sx={menuItemSx}>
-                    Uniform
-                  </MenuItem>
-                  <MenuItem value="Fixed Date" sx={menuItemSx}>
-                    Fixed Date
-                  </MenuItem>
-                  <MenuItem value="Increase" sx={menuItemSx}>
-                    Increase
-                  </MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {/* IncreaseIntervalMonths (show only when Term contains "Rent" and Rise Term is not Increase) */}
-            {hasRentInTerm && form.riseTermType !== "Increase" && (
-              <Grid item xs={12} sm={6} md={4}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel id="increase-interval-label" sx={labelSx}>
-                    Increase Interval Months
-                  </InputLabel>
-                  <Select
-                    labelId="increase-interval-label"
-                    value={form.increaseIntervalMonths || ""}
-                    label="Increase Interval Months"
-                    onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
-                    sx={selectSx}
-                  >
-                    {increaseIntervalOptions.map((option) => (
-                      <MenuItem key={option} value={option} sx={menuItemSx}>
-                        {option}
+              <>
+                <Grid item xs={12} sm={6} md={4}>
+                  <FormControl size="small" fullWidth error={!!errors.riseTermType}>
+                    <InputLabel id="rise-term-type-label" sx={labelSx}>
+                      Rise Terms
+                    </InputLabel>
+                    <Select
+                      labelId="rise-term-type-label"
+                      value={form.riseTermType || ""}
+                      label="Rise Terms"
+                      onChange={(e) => handleChange("riseTermType", e.target.value)}
+                      sx={selectSx}
+                    >
+                      <MenuItem value="Uniform" sx={menuItemSx}>
+                        Uniform
                       </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
+                      <MenuItem value="Fixed Date" sx={menuItemSx}>
+                        Fixed Date
+                      </MenuItem>
+                      <MenuItem value="Increase" sx={menuItemSx}>
+                        Increase
+                      </MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <MDInput
+                    label="Increase Rate Percent %"
+                    type="number"
+                    value={form.increaseRatePercent}
+                    onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                    fullWidth
+                    size="small"
+                    sx={inputSx}
+                  />
+                </Grid>
+                {form.riseTermType !== "Increase" && (
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="increase-interval-label" sx={labelSx}>
+                        Increase Interval Months
+                      </InputLabel>
+                      <Select
+                        labelId="increase-interval-label"
+                        value={form.increaseIntervalMonths || ""}
+                        label="Increase Interval Months"
+                        onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
+                        sx={selectSx}
+                      >
+                        {increaseIntervalOptions.map((option) => (
+                          <MenuItem key={option} value={option} sx={menuItemSx}>
+                            {option}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                )}
+              </>
             )}
 
             {/* Rise Year (hidden when Uniform or Increase is selected) */}
@@ -1736,28 +1757,6 @@ function ContractsForm({
               </Grid>
             )}
 
-            {/* PaymentTermMonths */}
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
-                <InputLabel id="payment-term-label" sx={labelSx}>
-                  Payment Term Months
-                </InputLabel>
-                <Select
-                  labelId="payment-term-label"
-                  value={form.paymentTermMonths || ""}
-                  label="Payment Term Months"
-                  onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
-                  sx={selectSx}
-                >
-                  {paymentTermOptions.map((option) => (
-                    <MenuItem key={option} value={option} sx={menuItemSx}>
-                      {option}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
             {/* Auto-calculated summary (display-only, separated from editable fields) */}
             <Grid item xs={12}>
               <MDBox
@@ -1792,22 +1791,6 @@ function ContractsForm({
                   />
                 </MDBox>
                 <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6} md={3}>
-                    <MDTypography
-                      variant="caption"
-                      color="black"
-                      fontWeight="bold"
-                      sx={{ display: "block" }}
-                    >
-                      Security Deposit Amount (Rs)
-                    </MDTypography>
-                    <MDTypography variant="h6" fontWeight="bold">
-                      {form.securityDepositAmount || 0}
-                    </MDTypography>
-                    <MDTypography variant="caption" color="text">
-                      Formula: SD Rate Months x Initial Rent PM
-                    </MDTypography>
-                  </Grid>
                   <Grid item xs={12} sm={6} md={3}>
                     <MDTypography
                       variant="caption"
@@ -1854,6 +1837,38 @@ function ContractsForm({
                     </MDTypography>
                     <MDTypography variant="caption" color="text">
                       {pafShareFormulaText}
+                    </MDTypography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      Rate
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {selectedGroupRate || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      From selected property group
+                    </MDTypography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      % Rate
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {selectedRentalValuePercentRate || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      From Rental Value Rate
                     </MDTypography>
                   </Grid>
                 </Grid>
@@ -3389,7 +3404,7 @@ export default function Contracts() {
       },
     },
     // Backend now sends names directly (no mapping)
-    { Header: "Command", accessor: "cmdName", align: "left", showInTable: true },
+    { Header: "RAC", accessor: "cmdName", align: "left", showInTable: true },
     { Header: "Base", accessor: "baseName", align: "left", showInTable: true },
     { Header: "Class", accessor: "className", align: "left", showInTable: true },
     {
@@ -4300,16 +4315,16 @@ export default function Contracts() {
                           id="contracts-filter-command-label"
                           sx={darkMode ? { color: "#ffffff !important" } : {}}
                         >
-                          Command
+                          RAC
                         </InputLabel>
                         <Select
                           labelId="contracts-filter-command-label"
                           value={commandFilterId}
-                          label="Command"
+                          label="RAC"
                           onChange={(e) => setCommandFilterId(e.target.value)}
                           sx={selectSx}
                         >
-                          <MenuItem value="">All Commands</MenuItem>
+                          <MenuItem value="">All RAC</MenuItem>
                           {gridFilterOptions.commands.map((cmdName) => (
                             <MenuItem key={cmdName} value={cmdName}>
                               {cmdName}
@@ -4424,9 +4439,10 @@ export default function Contracts() {
                   }}
                   isSorted={false}
                   entriesPerPage={{
-                    defaultValue: pageSize,
+                    defaultValue: 20,
                     entries: [10, 25, 50, 100],
                   }}
+                  pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -4447,62 +4463,61 @@ export default function Contracts() {
                   <MDBox
                     display="flex"
                     flexDirection={{ xs: "column", sm: "row" }}
-                    justifyContent="space-between"
+                    justifyContent="flex-start"
                     alignItems={{ xs: "flex-start", sm: "center" }}
                     p={3}
+                    gap={2}
                   >
-                    <MDBox mb={{ xs: 3, sm: 0 }}>
+                    <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
                       <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        Showing {(pageNumber - 1) * pageSize + 1} to{" "}
                         {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
                       </MDTypography>
-                    </MDBox>
+                      {Math.ceil(totalCount / pageSize) > 1 && (
+                        <MDPagination variant="gradient" color="info">
+                          {pageNumber > 1 && (
+                            <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
+                              <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                            </MDPagination>
+                          )}
 
-                    {Math.ceil(totalCount / pageSize) > 1 && (
-                      <MDPagination variant="gradient" color="info">
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                          </MDPagination>
-                        )}
-
-                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                          .filter((p) => {
-                            const totalPages = Math.ceil(totalCount / pageSize);
-                            return (
-                              p === 1 ||
-                              p === totalPages ||
-                              (p >= pageNumber - 2 && p <= pageNumber + 2)
-                            );
-                          })
-                          .map((p, idx, arr) => {
-                            const prev = arr[idx - 1];
-                            const showEllipsis = prev && p - prev > 1;
-                            return (
-                              <React.Fragment key={p}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    <Icon>more_horiz</Icon>
+                          {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
+                            .filter((p) => {
+                              const totalPages = Math.ceil(totalCount / pageSize);
+                              return (
+                                p === 1 ||
+                                p === totalPages ||
+                                (p >= pageNumber - 2 && p <= pageNumber + 2)
+                              );
+                            })
+                            .map((p, idx, arr) => {
+                              const prev = arr[idx - 1];
+                              const showEllipsis = prev && p - prev > 1;
+                              return (
+                                <React.Fragment key={p}>
+                                  {showEllipsis && (
+                                    <MDPagination item disabled>
+                                      <Icon>more_horiz</Icon>
+                                    </MDPagination>
+                                  )}
+                                  <MDPagination
+                                    item
+                                    onClick={() => setPageNumber(p)}
+                                    active={p === pageNumber}
+                                  >
+                                    {p}
                                   </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  onClick={() => setPageNumber(p)}
-                                  active={p === pageNumber}
-                                >
-                                  {p}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
+                                </React.Fragment>
+                              );
+                            })}
 
-                        {pageNumber < Math.ceil(totalCount / pageSize) && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
+                          {pageNumber < Math.ceil(totalCount / pageSize) && (
+                            <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
+                              <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                            </MDPagination>
+                          )}
+                        </MDPagination>
+                      )}
+                    </MDBox>
                   </MDBox>
                 )}
               </MDBox>

@@ -80,7 +80,7 @@ function A1Login() {
                 <img className="logo-symb" src={pafLogo} alt="PAF Logo" />
                 <div className="brand-text">
                   <h2>A1 LMS</h2>
-                  <small>Land Mgmt System</small>
+                  <small>Land Activities Mgmt System</small>
                 </div>
               </div>
 
@@ -88,7 +88,10 @@ function A1Login() {
                 <h4>
                   <p>Directorate of Central Non Public Fund</p>
                 </h4>
-                <p>Audit & Accounts Sub Branch</p> <br></br>
+                <p>
+                  <h5> Audit & Accounts Sub Branch ,</h5>
+                </p>{" "}
+                <br></br>
               </div>
 
               <form onSubmit={handleSubmit}>

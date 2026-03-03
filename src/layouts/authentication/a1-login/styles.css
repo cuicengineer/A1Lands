@@ -349,3 +349,6 @@
     padding-left: 0;
   }
 }
+
+.brand-text h4 p { font-size: 18px; }
+.brand-text h5 p { font-size: 15px; }

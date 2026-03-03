@@ -45,7 +45,7 @@ function BanksList() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -550,9 +550,10 @@ function BanksList() {
                 canSearch={true}
                 page={pageNumber - 1}
                 entriesPerPage={{
-                  defaultValue: pageSize,
+                  defaultValue: 20,
                   entries: [10, 25, 50, 100],
                 }}
+                pageSize={pageSize}
                 onPageChange={(page) => {
                   setPageNumber(page + 1);
                 }}

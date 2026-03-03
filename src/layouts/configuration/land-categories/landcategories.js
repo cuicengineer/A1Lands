@@ -225,7 +225,7 @@ function LandCategories() {
               table={{ columns, rows: computedRows }}
               isSorted={false}
               canSearch={true}
-              entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
+              entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}
               noEndBorder
             />

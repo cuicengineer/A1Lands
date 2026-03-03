@@ -459,7 +459,7 @@ function ClassConfig() {
               <DataTable
                 table={{ columns, rows: computedRows }}
                 isSorted={false}
-                entriesPerPage={{ defaultValue: 5, entries: [5, 10, 15, 20, 25] }}
+                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
                 showTotalEntries
                 noEndBorder
                 canSearch

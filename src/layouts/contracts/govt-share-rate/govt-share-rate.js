@@ -10,6 +10,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
+import MDPagination from "components/MDPagination";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
@@ -371,7 +372,7 @@ function GovtShareRateForm({
 
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth required error={!!errors.cmdId}>
-              <InputLabel id="cmd-label">Command</InputLabel>
+              <InputLabel id="cmd-label">RAC</InputLabel>
               <Select
                 labelId="cmd-label"
                 value={form.cmdId}
@@ -1043,7 +1044,7 @@ export default function GovtShareRate() {
       },
     },
     {
-      Header: "Command",
+      Header: "RAC",
       accessor: "cmdName",
       align: "left",
       // eslint-disable-next-line react/prop-types
@@ -1264,9 +1265,10 @@ export default function GovtShareRate() {
                   }}
                   isSorted={false}
                   entriesPerPage={{
-                    defaultValue: pageSize,
+                    defaultValue: 20,
                     entries: [10, 25, 50, 100],
                   }}
+                  pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -1278,6 +1280,78 @@ export default function GovtShareRate() {
                   exportFileName="Govt-Share-Rate"
                   exportCellFormatter={exportCellFormatter}
                 />
+
+                {/* Server-side Pagination Footer */}
+                <MDBox
+                  display="flex"
+                  flexDirection={{ xs: "column", sm: "row" }}
+                  justifyContent="flex-start"
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                  p={3}
+                  gap={2}
+                >
+                  <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
+                    <MDTypography variant="button" color="secondary" fontWeight="regular">
+                      {(() => {
+                        const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+                        return displayTotal === 0
+                          ? "0 of 0 entries"
+                          : `${Math.min(
+                              pageNumber * pageSize,
+                              displayTotal
+                            )} of ${displayTotal} entries`;
+                      })()}
+                    </MDTypography>
+                    {(() => {
+                      const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+                      return displayTotal > 0 && Math.ceil(displayTotal / pageSize) > 1;
+                    })() && (
+                      <MDPagination variant="gradient" color="info">
+                        {pageNumber > 1 && (
+                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
+                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                          </MDPagination>
+                        )}
+
+                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
+                          .filter((page) => {
+                            const totalPages = Math.ceil(totalCount / pageSize);
+                            return (
+                              page === 1 ||
+                              page === totalPages ||
+                              (page >= pageNumber - 2 && page <= pageNumber + 2)
+                            );
+                          })
+                          .map((page, index, array) => {
+                            const prevPage = array[index - 1];
+                            const showEllipsis = prevPage && page - prevPage > 1;
+                            return (
+                              <React.Fragment key={page}>
+                                {showEllipsis && (
+                                  <MDPagination item disabled>
+                                    ...
+                                  </MDPagination>
+                                )}
+                                <MDPagination
+                                  item
+                                  active={page === pageNumber}
+                                  onClick={() => setPageNumber(page)}
+                                >
+                                  {page}
+                                </MDPagination>
+                              </React.Fragment>
+                            );
+                          })}
+
+                        {pageNumber < Math.ceil(totalCount / pageSize) && (
+                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
+                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                          </MDPagination>
+                        )}
+                      </MDPagination>
+                    )}
+                  </MDBox>
+                </MDBox>
               </MDBox>
             </Card>
           </Grid>

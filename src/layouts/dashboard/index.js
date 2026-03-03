@@ -86,7 +86,7 @@ function Dashboard() {
               <ReportsBarChart
                 color="info"
                 title="Annual Rent"
-                description="PAF All Commands"
+                description="PAF All RAC"
                 date="Updated just now"
                 chart={a1AnnualRent}
               />

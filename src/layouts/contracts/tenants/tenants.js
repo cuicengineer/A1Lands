@@ -134,7 +134,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
       </DialogTitle>
       <DialogContent>
         <Grid container spacing={3} mt={1}>
-          {/* TenantNo */}
+          {/* TenantNo and BusinessName - same row */}
           <Grid item xs={12} sm={6}>
             <MDInput
               label="Tenant No"
@@ -158,55 +158,6 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
             />
           </Grid>
 
-          {/* OwnerName */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Owner Name"
-              type="text"
-              value={form.ownerName}
-              onChange={(e) => handleChange("ownerName", e.target.value)}
-              fullWidth
-              size="small"
-              required={isAddMode}
-              error={Boolean(errors.ownerName)}
-              helperText={errors.ownerName}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1.1rem",
-                  padding: "12px 14px",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1.1rem",
-                },
-              }}
-            />
-          </Grid>
-
-          {/* Prefix */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Prefix"
-              type="text"
-              value={form.prefix}
-              onChange={(e) => handleChange("prefix", e.target.value)}
-              fullWidth
-              size="small"
-              required={isAddMode}
-              error={Boolean(errors.prefix)}
-              helperText={errors.prefix}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1.1rem",
-                  padding: "12px 14px",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1.1rem",
-                },
-              }}
-            />
-          </Grid>
-
-          {/* BusinessName */}
           <Grid item xs={12} sm={6}>
             <MDInput
               label="Business Name"
@@ -218,6 +169,57 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               required={isAddMode}
               error={Boolean(errors.businessName)}
               helperText={errors.businessName}
+              sx={{
+                "& .MuiInputBase-input": {
+                  fontSize: "1.1rem",
+                  padding: "12px 14px",
+                },
+                "& .MuiInputLabel-root": {
+                  fontSize: "1.1rem",
+                },
+              }}
+            />
+          </Grid>
+
+          {/* Prefix first, then Owner Name */}
+          <Grid item xs={12} sm={2}>
+            <FormControl fullWidth size="small" required={isAddMode} error={Boolean(errors.prefix)}>
+              <InputLabel>Prefix</InputLabel>
+              <Select
+                value={form.prefix}
+                label="Prefix"
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1.1rem",
+                    padding: "12px 14px",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1.1rem",
+                  },
+                }}
+                onChange={(e) => handleChange("prefix", e.target.value)}
+              >
+                <MenuItem value="">Select</MenuItem>
+                <MenuItem value="Mr">Mr</MenuItem>
+                <MenuItem value="Mrs">Mrs</MenuItem>
+                <MenuItem value="Miss">Miss</MenuItem>
+                <MenuItem value="M/S">M/S</MenuItem>
+              </Select>
+              {errors.prefix && <FormHelperText>{errors.prefix}</FormHelperText>}
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} sm={10}>
+            <MDInput
+              label="Owner Name"
+              type="text"
+              value={form.ownerName}
+              onChange={(e) => handleChange("ownerName", e.target.value)}
+              fullWidth
+              size="small"
+              required={isAddMode}
+              error={Boolean(errors.ownerName)}
+              helperText={errors.ownerName}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -256,16 +258,10 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
 
           {/* Province */}
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Province"
-              type="text"
-              value={form.province}
-              onChange={(e) => handleChange("province", e.target.value)}
+            <FormControl
               fullWidth
               size="small"
               required={isAddMode}
-              error={Boolean(errors.province)}
-              helperText={errors.province}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -275,7 +271,24 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                   fontSize: "1.1rem",
                 },
               }}
-            />
+              error={Boolean(errors.province)}
+            >
+              <InputLabel>Province</InputLabel>
+              <Select
+                value={form.province}
+                label="Province"
+                onChange={(e) => handleChange("province", e.target.value)}
+              >
+                <MenuItem value="">Select</MenuItem>
+                <MenuItem value="Federal Capital">Federal Capital</MenuItem>
+                <MenuItem value="Punjab">Punjab</MenuItem>
+                <MenuItem value="Sindh">Sindh</MenuItem>
+                <MenuItem value="Balochistan">Balochistan</MenuItem>
+                <MenuItem value="GB">GB</MenuItem>
+                <MenuItem value="Kashmir">Kashmir</MenuItem>
+              </Select>
+              {errors.province && <FormHelperText>{errors.province}</FormHelperText>}
+            </FormControl>
           </Grid>
 
           {/* City */}

@@ -60,6 +60,9 @@ function RevenueRatesForm({
 
   useEffect(() => {
     if (initialData) {
+      const propId = initialData.propertyId ?? initialData.PropertyId ?? null;
+      const isPropertyDash =
+        propId === 0 || propId === null || propId === undefined || propId === "";
       const selectedProp = (rentalProperties || []).find(
         (p) => Number(p.id) === Number(initialData.propertyId)
       );
@@ -71,11 +74,14 @@ function RevenueRatesForm({
         selectedProp?.baseId ??
         selectedProp?.baseid ??
         "";
+      const cmdIdValue = isPropertyDash ? 0 : resolvedCmdId ? Number(resolvedCmdId) : "";
+      const baseIdValue = isPropertyDash ? 0 : resolvedBaseId ? Number(resolvedBaseId) : "";
+      const propertyIdValue = isPropertyDash ? 0 : initialData.propertyId || "";
 
       setForm({
-        cmdId: resolvedCmdId ? Number(resolvedCmdId) : "",
-        baseId: resolvedBaseId ? Number(resolvedBaseId) : "",
-        propertyId: initialData.propertyId || "",
+        cmdId: cmdIdValue,
+        baseId: baseIdValue,
+        propertyId: propertyIdValue,
         applicableDate: initialData.applicableDate || "",
         rate: initialData.rate || "",
         attachments: initialData.attachments || "",
@@ -151,7 +157,7 @@ function RevenueRatesForm({
         next.baseId = "";
         next.propertyId = "";
       } else if (field === "baseId") {
-        next.propertyId = "";
+        next.propertyId = value === 0 || value === "0" ? 0 : "";
       }
 
       return next;
@@ -170,23 +176,44 @@ function RevenueRatesForm({
         ""
     );
 
+  const isBothAll =
+    (form.cmdId === 0 || form.cmdId === "0") && (form.baseId === 0 || form.baseId === "0");
+
+  useEffect(() => {
+    if (isBothAll && form.propertyId !== 0 && form.propertyId !== "0") {
+      setForm((prev) => ({ ...prev, propertyId: 0 }));
+    }
+  }, [isBothAll, form.propertyId]);
+
   const filteredBaseOptions = useMemo(() => {
-    const selectedCmdId = Number(form.cmdId || 0);
-    if (!selectedCmdId) return [];
-    return (baseOptions || []).filter((b) => Number(b?.cmdId) === selectedCmdId);
+    if (form.cmdId === 0 || form.cmdId === "0") return baseOptions || [];
+    const numCmdId = Number(form.cmdId || 0);
+    if (!numCmdId) return [];
+    return (baseOptions || []).filter((b) => Number(b?.cmdId) === numCmdId);
   }, [baseOptions, form.cmdId]);
 
   const filteredRentalProperties = useMemo(() => {
-    const selectedCmdId = Number(form.cmdId || 0);
-    const selectedBaseId = Number(form.baseId || 0);
+    const isCmdAll = form.cmdId === 0 || form.cmdId === "0";
+    const isBaseAll = form.baseId === 0 || form.baseId === "0";
+    const numCmdId = Number(form.cmdId || 0);
+    const numBaseId = Number(form.baseId || 0);
     return (rentalProperties || []).filter((p) => {
       const cmdId = Number(p?.cmdId ?? p?.cmdid ?? p?.commandId ?? 0);
       const baseId = Number(p?.baseId ?? p?.baseid ?? 0);
-      if (selectedCmdId && cmdId !== selectedCmdId) return false;
-      if (selectedBaseId && baseId !== selectedBaseId) return false;
+      if (!isCmdAll && numCmdId && cmdId !== numCmdId) return false;
+      if (!isBaseAll && numBaseId && baseId !== numBaseId) return false;
       return true;
     });
   }, [rentalProperties, form.cmdId, form.baseId]);
+
+  const selectedProperty = useMemo(() => {
+    const propId = form.propertyId ?? "";
+    if (propId === 0 || propId === "0" || propId === "") return null;
+    return (rentalProperties || []).find((p) => Number(p.id) === Number(propId)) ?? null;
+  }, [rentalProperties, form.propertyId]);
+
+  const selectedArea = selectedProperty?.area ?? selectedProperty?.Area ?? "";
+  const selectedUoM = selectedProperty?.uoM ?? selectedProperty?.UoM ?? "";
 
   const handleFileSelect = (event) => {
     const files = Array.from(event.target.files);
@@ -253,6 +280,11 @@ function RevenueRatesForm({
   };
 
   const handleSave = async () => {
+    const applicableDate = String(form.applicableDate ?? "").trim();
+    if (!applicableDate) {
+      alert("Applicable Date is required.");
+      return;
+    }
     // First save the form data
     await onSubmit(form);
 
@@ -285,11 +317,11 @@ function RevenueRatesForm({
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
               <InputLabel id="cmd-label" sx={{ fontSize: "1.1rem" }}>
-                Command
+                RAC
               </InputLabel>
               <Select
                 labelId="cmd-label"
-                value={form.cmdId || ""}
+                value={form.cmdId ?? ""}
                 label="Command"
                 onChange={(e) => handleChange("cmdId", e.target.value)}
                 sx={{
@@ -303,6 +335,9 @@ function RevenueRatesForm({
                   },
                 }}
               >
+                <MenuItem key="All" value={0} sx={{ fontSize: "1.1rem" }}>
+                  All
+                </MenuItem>
                 {commandOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
                     {getOptionLabel(option)}
@@ -320,10 +355,10 @@ function RevenueRatesForm({
               </InputLabel>
               <Select
                 labelId="base-label"
-                value={form.baseId || ""}
+                value={form.baseId ?? ""}
                 label="Base"
                 onChange={(e) => handleChange("baseId", e.target.value)}
-                disabled={!form.cmdId}
+                disabled={form.cmdId === "" || form.cmdId == null}
                 sx={{
                   fontSize: "1.1rem",
                   "& .MuiSelect-select": {
@@ -335,6 +370,9 @@ function RevenueRatesForm({
                   },
                 }}
               >
+                <MenuItem key="All" value={0} sx={{ fontSize: "1.1rem" }}>
+                  All
+                </MenuItem>
                 {filteredBaseOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
                     {getOptionLabel(option)}
@@ -345,16 +383,17 @@ function RevenueRatesForm({
           </Grid>
 
           {/* PropertyId Dropdown */}
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12}>
             <FormControl size="small" fullWidth>
               <InputLabel id="property-label" sx={{ fontSize: "1.1rem" }}>
                 Property
               </InputLabel>
               <Select
                 labelId="property-label"
-                value={form.propertyId || ""}
+                value={form.propertyId ?? ""}
                 label="Property"
                 onChange={(e) => handleChange("propertyId", e.target.value)}
+                disabled={isBothAll}
                 MenuProps={{
                   PaperProps: {
                     style: {
@@ -380,6 +419,11 @@ function RevenueRatesForm({
                   },
                 }}
               >
+                {isBothAll && (
+                  <MenuItem key="prop-0" value={0} sx={{ fontSize: "1.1rem" }}>
+                    —
+                  </MenuItem>
+                )}
                 {filteredRentalProperties.map((option) => (
                   <MenuItem
                     key={option.id}
@@ -391,20 +435,22 @@ function RevenueRatesForm({
                 ))}
               </Select>
             </FormControl>
+            {selectedProperty && (
+              <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
+                Area: {selectedArea || "-"} · UoM: {selectedUoM || "-"}
+              </MDTypography>
+            )}
           </Grid>
 
-          {/* ApplicableDate */}
+          {/* RevenueRate */}
           <Grid item xs={12} sm={6}>
             <MDInput
-              label="Applicable Date"
-              type="date"
-              value={form.applicableDate}
-              onChange={(e) => handleChange("applicableDate", e.target.value)}
+              label="Revenue Rate"
+              type="number"
+              value={form.rate}
+              onChange={(e) => handleChange("rate", e.target.value)}
               fullWidth
               size="small"
-              InputLabelProps={{
-                shrink: true,
-              }}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -417,15 +463,18 @@ function RevenueRatesForm({
             />
           </Grid>
 
-          {/* RevenueRate */}
+          {/* ApplicableDate */}
           <Grid item xs={12} sm={6}>
             <MDInput
-              label="Revenue Rate"
-              type="number"
-              value={form.rate}
-              onChange={(e) => handleChange("rate", e.target.value)}
+              label="Applicable Date *"
+              type="date"
+              value={form.applicableDate}
+              onChange={(e) => handleChange("applicableDate", e.target.value)}
               fullWidth
               size="small"
+              InputLabelProps={{
+                shrink: true,
+              }}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -578,7 +627,7 @@ function RevenueRatesForm({
               >
                 <MDBox display="flex" alignItems="center">
                   <Icon sx={{ color: "info.main", mr: 1, fontSize: "1.5rem" }}>info</Icon>
-                  <MDTypography variant="body2" color="info.dark" sx={{ fontSize: "1rem" }}>
+                  <MDTypography variant="body2" sx={{ fontSize: "1rem", color: "white" }}>
                     <strong>Note:</strong> Attachment files will be uploaded after saving this form.
                   </MDTypography>
                 </MDBox>
@@ -925,12 +974,27 @@ export default function RevenueRates() {
 
   const handleSubmit = async (data) => {
     try {
+      const isBothAll =
+        (data.cmdId === 0 || data.cmdId === "0") && (data.baseId === 0 || data.baseId === "0");
       const formattedData = {
-        propertyId: Number(data.propertyId),
+        cmdId:
+          data.cmdId === 0 || data.cmdId === "0"
+            ? 0
+            : data.cmdId !== "" && data.cmdId != null
+            ? Number(data.cmdId)
+            : null,
+        baseId:
+          data.baseId === 0 || data.baseId === "0"
+            ? 0
+            : data.baseId !== "" && data.baseId != null
+            ? Number(data.baseId)
+            : null,
+        propertyId: isBothAll ? 0 : Number(data.propertyId) || null,
         applicableDate: data.applicableDate || null,
         rate: data.rate ? Number(data.rate) : null,
         attachments: data.attachments || null,
         status: data.status !== undefined ? Boolean(data.status) : true,
+        DeactiveDate: currentRevenueRate ? new Date().toISOString() : null,
       };
       if (currentRevenueRate) {
         await revenueRatesApi.update(currentRevenueRate.id, formattedData);
@@ -1033,19 +1097,55 @@ export default function RevenueRates() {
       },
     },
     {
-      Header: "Command",
+      Header: "RAC",
       accessor: "cmdName",
       align: "left",
+      Cell: ({ value, row }) => {
+        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        const isPropertyDash =
+          propId === 0 || propId === null || propId === undefined || propId === "";
+        return isPropertyDash ? "All" : value ?? "-";
+      },
     },
     {
       Header: "Base",
       accessor: "baseName",
       align: "left",
+      Cell: ({ value, row }) => {
+        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        const isPropertyDash =
+          propId === 0 || propId === null || propId === undefined || propId === "";
+        return isPropertyDash ? "All" : value ?? "-";
+      },
     },
     {
       Header: "Class",
       accessor: "className",
       align: "left",
+      Cell: ({ value, row }) => {
+        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        const isPropertyDash =
+          propId === 0 || propId === null || propId === undefined || propId === "";
+        return isPropertyDash ? "All" : value ?? "-";
+      },
+    },
+    {
+      Header: "Area · UoM",
+      accessor: "areaUoM",
+      align: "left",
+      Cell: ({ row }) => {
+        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        const isPropertyDash =
+          propId === 0 || propId === null || propId === undefined || propId === "";
+        if (isPropertyDash) return "-";
+        const property = rentalProperties.find((p) => Number(p.id) === Number(propId));
+        const area = property?.area ?? property?.Area ?? "";
+        const uoM = property?.uoM ?? property?.UoM ?? "";
+        const areaStr = area ? Number(area).toLocaleString() : "";
+        const uoMStr = uoM || "";
+        if (!areaStr && !uoMStr) return "-";
+        return [areaStr, uoMStr].filter(Boolean).join(" · ");
+      },
     },
     {
       Header: "Applicable Date",
@@ -1166,6 +1266,55 @@ export default function RevenueRates() {
       align: "left",
       Cell: StatusCell,
     },
+    {
+      Header: "Deactive Date",
+      accessor: "deactiveDate",
+      align: "left",
+      Cell: ({ value, row }) => {
+        const dateValue =
+          value ?? row?.original?.deactiveDate ?? row?.original?.DeactiveDate ?? null;
+        if (!dateValue) return "";
+        const raw = String(dateValue).trim();
+        if (!raw) return "";
+
+        const monthShort = [
+          "jan",
+          "feb",
+          "mar",
+          "apr",
+          "may",
+          "jun",
+          "jul",
+          "aug",
+          "sep",
+          "oct",
+          "nov",
+          "dec",
+        ];
+        try {
+          const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+          let day = "";
+          let month = "";
+          let year = "";
+          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+            [year, month, day] = datePart.split("-");
+          } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+            [day, month, year] = datePart.split("-");
+          } else {
+            const parsed = new Date(raw);
+            if (!Number.isFinite(parsed.getTime())) return raw;
+            day = String(parsed.getDate()).padStart(2, "0");
+            month = String(parsed.getMonth() + 1).padStart(2, "0");
+            year = String(parsed.getFullYear());
+          }
+          const monthIndex = Number(month) - 1;
+          const monthText = monthShort[monthIndex] || month;
+          return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+        } catch {
+          return raw;
+        }
+      },
+    },
   ];
 
   const computedRows = tableRows.map((row) => {
@@ -1182,6 +1331,7 @@ export default function RevenueRates() {
       propertyName: propertyName,
       rate: row.rate ?? row.Rate ?? 0,
       applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
+      deactiveDate: row.deactiveDate ?? row.DeactiveDate ?? null,
       status: row.status ?? row.Status ?? true,
       cmdName:
         row.cmdName ??
@@ -1324,9 +1474,10 @@ export default function RevenueRates() {
                   }}
                   isSorted={false}
                   entriesPerPage={{
-                    defaultValue: pageSize,
+                    defaultValue: 20,
                     entries: [10, 25, 50, 100],
                   }}
+                  pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -1340,22 +1491,30 @@ export default function RevenueRates() {
                 />
 
                 {/* Server-side Pagination Footer */}
-                {totalCount > 0 && (
-                  <MDBox
-                    display="flex"
-                    flexDirection={{ xs: "column", sm: "row" }}
-                    justifyContent="space-between"
-                    alignItems={{ xs: "flex-start", sm: "center" }}
-                    p={3}
-                  >
-                    <MDBox mb={{ xs: 3, sm: 0 }}>
-                      <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        Showing {(pageNumber - 1) * pageSize + 1} to{" "}
-                        {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
-                      </MDTypography>
-                    </MDBox>
-
-                    {Math.ceil(totalCount / pageSize) > 1 && (
+                <MDBox
+                  display="flex"
+                  flexDirection={{ xs: "column", sm: "row" }}
+                  justifyContent="flex-start"
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                  p={3}
+                  gap={2}
+                >
+                  <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
+                    <MDTypography variant="button" color="secondary" fontWeight="regular">
+                      {(() => {
+                        const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+                        return displayTotal === 0
+                          ? "0 of 0 entries"
+                          : `${Math.min(
+                              pageNumber * pageSize,
+                              displayTotal
+                            )} of ${displayTotal} entries`;
+                      })()}
+                    </MDTypography>
+                    {(() => {
+                      const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+                      return displayTotal > 0 && Math.ceil(displayTotal / pageSize) > 1;
+                    })() && (
                       <MDPagination variant="gradient" color="info">
                         {pageNumber > 1 && (
                           <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
@@ -1401,7 +1560,7 @@ export default function RevenueRates() {
                       </MDPagination>
                     )}
                   </MDBox>
-                )}
+                </MDBox>
               </MDBox>
             </Card>
           </Grid>

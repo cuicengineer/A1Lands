@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -54,6 +54,7 @@ function PropertyGroupingForm({
   bases,
   classes,
   allPropertyGroupings = [],
+  onGroupIdBlur,
 }) {
   const isEditMode = Boolean(initialData);
   const normalizePropertyIds = (data) => {
@@ -114,6 +115,40 @@ function PropertyGroupingForm({
   const [notGroupedProperties, setNotGroupedProperties] = useState([]);
   const [propertyRevenueRates, setPropertyRevenueRates] = useState(new Map()); // Cache revenue rates by property ID
   const [linkedPropertiesForEdit, setLinkedPropertiesForEdit] = useState([]); // Linked properties for edit mode
+
+  const formatApplicableDate = (rawDate) => {
+    if (!rawDate) return "-";
+    const raw = String(rawDate).trim();
+    const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+    const months = [
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
+    ];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      const [y, m, d] = datePart.split("-");
+      return `${d}-${months[Number(m) - 1] || m}-${y}`;
+    }
+    if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+      const [d, m, y] = datePart.split("-");
+      return `${d}-${months[Number(m) - 1] || m}-${y}`;
+    }
+    const parsed = new Date(raw);
+    if (Number.isFinite(parsed.getTime())) {
+      const m = months[parsed.getMonth()];
+      return `${String(parsed.getDate()).padStart(2, "0")}-${m}-${parsed.getFullYear()}`;
+    }
+    return raw;
+  };
 
   const getPropertyLabel = (propertyId) => {
     const idKey = String(propertyId);
@@ -834,36 +869,10 @@ function PropertyGroupingForm({
     onSubmit(form);
   };
 
-  // Fetch active contracts by Group ID
-  const fetchActiveContractsByGroupId = async (groupId) => {
-    if (!groupId || !groupId.trim()) {
-      setActiveContracts([]);
-      return;
-    }
-
-    setLoadingContracts(true);
-    try {
-      // Call API endpoint to search contracts by group name
-      const response = await contractApi.searchByGrpName(groupId.trim());
-
-      // Handle response - could be array or object with data property
-      const contracts = response?.data || (Array.isArray(response) ? response : []);
-
-      setActiveContracts(contracts);
-      setContractsDialogOpen(true);
-    } catch (error) {
-      console.error("Error fetching contracts by Group ID:", error);
-      setActiveContracts([]);
-      alert("Error fetching contracts. Please try again.");
-    } finally {
-      setLoadingContracts(false);
-    }
-  };
-
-  // Handle Group ID blur (when user finishes entering)
+  // Handle Group ID blur (when user finishes entering) - delegates to parent
   const handleGroupIdBlur = () => {
-    if (form.gId && form.gId.trim()) {
-      fetchActiveContractsByGroupId(form.gId.trim());
+    if (form.gId && form.gId.trim() && onGroupIdBlur) {
+      onGroupIdBlur(form.gId.trim());
     }
   };
 
@@ -1094,7 +1103,7 @@ function PropertyGroupingForm({
                     fontSize: "1rem",
                   }}
                 >
-                  Command
+                  RAC
                 </InputLabel>
                 <Select
                   labelId="command-label"
@@ -1265,7 +1274,7 @@ function PropertyGroupingForm({
             </Grid>
 
             {/* Property */}
-            <Grid item xs={10} sm={6}>
+            <Grid item xs={12} sm={6}>
               <FormControl
                 size="small"
                 fullWidth
@@ -1386,10 +1395,10 @@ function PropertyGroupingForm({
               </FormControl>
             </Grid>
 
-            {/* GroupID with reduced width - swapped position */}
+            {/* Group ID */}
             <Grid item xs={12} sm={6}>
               <MDInput
-                label="GroupID"
+                label="Group ID"
                 type="text"
                 value={form.gId}
                 onChange={(e) => handleChange("gId", e.target.value)}
@@ -1400,18 +1409,14 @@ function PropertyGroupingForm({
                 error={!isEditMode && Boolean(errors.gId)}
                 helperText={!isEditMode ? errors.gId : ""}
                 sx={{
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                  },
-                  "& .MuiInputLabel-root": {
-                    fontSize: "1rem",
-                  },
+                  "& .MuiInputBase-input": { fontSize: "1rem" },
+                  "& .MuiInputLabel-root": { fontSize: "1rem" },
                 }}
               />
             </Grid>
 
             {/* Address */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12}>
               <MDInput
                 label="Address"
                 type="text"
@@ -1434,8 +1439,8 @@ function PropertyGroupingForm({
               />
             </Grid>
 
-            {/* Total Area */}
-            <Grid item xs={12} sm={6}>
+            {/* Total Area, UoM, Rate - same row */}
+            <Grid item xs={12} sm={4}>
               <MDInput
                 label="Total Area"
                 type="number"
@@ -1455,28 +1460,7 @@ function PropertyGroupingForm({
               />
             </Grid>
 
-            {/* Rate (read-only) */}
-            <Grid item xs={12} sm={6}>
-              <MDInput
-                label="Rate"
-                type="number"
-                value={form.rate || 0}
-                size="small"
-                InputProps={{ readOnly: true }}
-                fullWidth
-                sx={{
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                  },
-                  "& .MuiInputLabel-root": {
-                    fontSize: "1rem",
-                  },
-                }}
-              />
-            </Grid>
-
-            {/* UoM (read-only) */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={4}>
               <MDInput
                 label="UoM"
                 type="text"
@@ -1495,14 +1479,35 @@ function PropertyGroupingForm({
               />
             </Grid>
 
+            <Grid item xs={12} sm={4}>
+              <MDInput
+                label="Rate"
+                type="number"
+                value={form.rate || 0}
+                size="small"
+                InputProps={{ readOnly: true }}
+                fullWidth
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1rem",
+                  },
+                }}
+              />
+            </Grid>
+
             {/* Remarks */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={8}>
               <MDInput
                 label="Remarks"
                 type="text"
                 value={form.remarks}
                 onChange={(e) => handleChange("remarks", e.target.value)}
                 fullWidth
+                multiline
+                rows={3}
                 size="small"
                 required={!isEditMode}
                 error={!isEditMode && Boolean(errors.remarks)}
@@ -1519,12 +1524,12 @@ function PropertyGroupingForm({
             </Grid>
 
             {/* Status */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={4}>
               <FormControl
                 size="small"
                 fullWidth
                 sx={{
-                  minWidth: "120px",
+                  minWidth: "90px",
                 }}
               >
                 <InputLabel
@@ -1575,72 +1580,51 @@ function PropertyGroupingForm({
               </FormControl>
             </Grid>
 
-            {/* Property Information Section - Only show when adding new group */}
+            {/* Current Revenue Rate - display only, when properties selected */}
             {!isEditMode && form.property && form.property.length > 0 && (
               <Grid item xs={12}>
                 <MDBox
                   sx={{
-                    mt: 2,
                     p: 2,
-                    backgroundColor: "#f5f5f5",
+                    backgroundColor: "#fafafa",
                     borderRadius: 1,
-                    border: "1px solid #e0e0e0",
+                    border: "1px solid #e8e8e8",
                   }}
                 >
-                  <MDTypography variant="h6" fontWeight="medium" sx={{ mb: 1.5 }}>
-                    Selected Properties Information
-                  </MDTypography>
-                  <TableContainer
-                    component={Paper}
-                    sx={{
-                      boxShadow: "none",
-                      maxHeight: "200px",
-                      overflowY: "auto",
-                    }}
+                  <MDTypography
+                    variant="caption"
+                    fontWeight="medium"
+                    color="text"
+                    sx={{ display: "block", mb: 1 }}
                   >
-                    <Table size="small" sx={{ "& .MuiTableCell-root": { padding: "4px 8px" } }}>
-                      <TableBody>
-                        {form.property.map((propertyId) => {
-                          const property = getPropertyById(propertyId);
-                          if (!property) return null;
-
-                          const propertyName = getPropertyLabel(propertyId);
-                          const propertyRate = property.Rate || property.rate || 0;
-                          const cachedRevenueRate = propertyRevenueRates.get(Number(propertyId));
-
-                          // Determine rate source
-                          let displayRate = Number(propertyRate) || 0;
-                          let rateSource = "Property";
-
-                          if (
-                            Number(propertyRate) === 0 &&
-                            cachedRevenueRate &&
-                            cachedRevenueRate.rate > 0
-                          ) {
-                            displayRate = cachedRevenueRate.rate;
-                            rateSource = "Revenue Rate";
-                          } else if (Number(propertyRate) > 0) {
-                            rateSource = "verify Revenue Rate";
-                          }
-
-                          return (
-                            <TableRow key={propertyId}>
-                              <TableCell sx={{ fontSize: "0.75rem", padding: "4px 8px" }}>
-                                {propertyName}
-                              </TableCell>
-                              <TableCell sx={{ fontSize: "0.75rem", padding: "4px 8px" }}>
-                                {displayRate.toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}{" "}
-                                ({rateSource})
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                    Current Revenue Rate (per property)
+                  </MDTypography>
+                  <MDBox component="ul" sx={{ m: 0, pl: 2.5, fontSize: "0.9rem" }}>
+                    {form.property.map((propertyId) => {
+                      const property = getPropertyById(propertyId);
+                      if (!property) return null;
+                      const propertyName = getPropertyLabel(propertyId);
+                      const displayRate = getPropertyRateNumber(property, propertyId);
+                      const rawDate =
+                        property?.ApplicableDate ??
+                        property?.applicableDate ??
+                        propertyRevenueRates.get(Number(propertyId))?.applicableDate ??
+                        propertyRevenueRates.get(Number(propertyId))?.ApplicableDate ??
+                        "";
+                      const appliedDateStr = formatApplicableDate(rawDate);
+                      return (
+                        <MDBox component="li" key={propertyId} sx={{ mb: 0.5 }}>
+                          {propertyName}:{" "}
+                          {displayRate.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                          {" · Applied: "}
+                          {appliedDateStr}
+                        </MDBox>
+                      );
+                    })}
+                  </MDBox>
                 </MDBox>
               </Grid>
             )}
@@ -1671,6 +1655,7 @@ PropertyGroupingForm.propTypes = {
   bases: PropTypes.array.isRequired,
   classes: PropTypes.array.isRequired,
   allPropertyGroupings: PropTypes.array,
+  onGroupIdBlur: PropTypes.func,
 };
 
 export { PropertyGroupingForm };
@@ -1713,6 +1698,8 @@ export default function PropertyGrouping() {
   const [linkedPropertiesPageSize, setLinkedPropertiesPageSize] = useState(100);
   const [linkedPropertiesTotalCount, setLinkedPropertiesTotalCount] = useState(0);
 
+  const allPropertyGroupingsFetchedForOpenRef = useRef(false);
+
   const fetchPropertyGroupings = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
     try {
@@ -1736,45 +1723,34 @@ export default function PropertyGrouping() {
     }
   };
 
-  // Fetch all property groupings for duplicate validation
+  // Fetch all property groupings for duplicate validation (single API call)
   const fetchAllPropertyGroupings = async () => {
     try {
-      // Fetch all pages because backend may cap page size regardless of requested size.
-      const firstResponse = await propertyGroupingApi.list(1, 1000);
-      if (firstResponse && firstResponse.pagination) {
-        const firstPageData = firstResponse.data || [];
-        const totalCount = Number(firstResponse.pagination.totalCount || 0);
-        const serverPageSize = Number(
-          firstResponse.pagination.pageSize || firstPageData.length || 1
-        );
-        const totalPages =
-          totalCount > 0 && serverPageSize > 0 ? Math.ceil(totalCount / serverPageSize) : 1;
-
-        if (totalPages <= 1) {
-          setAllPropertyGroupings(firstPageData);
-          return;
-        }
-
-        const pagePromises = [];
-        for (let page = 2; page <= totalPages; page += 1) {
-          pagePromises.push(propertyGroupingApi.list(page, serverPageSize));
-        }
-
-        const remainingResponses = await Promise.allSettled(pagePromises);
-        const allData = [...firstPageData];
-        remainingResponses.forEach((result) => {
-          if (result.status !== "fulfilled") return;
-          const value = result.value;
-          if (value && value.pagination) {
-            allData.push(...(value.data || []));
-          } else if (Array.isArray(value)) {
-            allData.push(...value);
+      const response = await propertyGroupingApi.list(1, 10000);
+      if (response && response.pagination) {
+        const data = response.data || [];
+        const totalCount = Number(response.pagination.totalCount || 0);
+        // If backend capped our request and there are more records, fall back to multi-page fetch
+        if (totalCount > 0 && data.length < totalCount) {
+          const serverPageSize = Number(response.pagination.pageSize || data.length || 1);
+          const totalPages = serverPageSize > 0 ? Math.ceil(totalCount / serverPageSize) : 1;
+          if (totalPages > 1) {
+            const pagePromises = [];
+            for (let page = 2; page <= totalPages; page += 1) {
+              pagePromises.push(propertyGroupingApi.list(page, serverPageSize));
+            }
+            const rest = await Promise.allSettled(pagePromises);
+            const allData = [...data];
+            rest.forEach((r) => {
+              if (r.status === "fulfilled" && r.value?.data) allData.push(...r.value.data);
+            });
+            setAllPropertyGroupings(allData);
+            return;
           }
-        });
-
-        setAllPropertyGroupings(allData);
+        }
+        setAllPropertyGroupings(data);
       } else {
-        setAllPropertyGroupings(Array.isArray(firstResponse) ? firstResponse : []);
+        setAllPropertyGroupings(Array.isArray(response) ? response : []);
       }
     } catch (error) {
       console.error("Error fetching all property groupings:", error);
@@ -1830,10 +1806,20 @@ export default function PropertyGrouping() {
     if (commands.length === 0) fetchCommands();
     // Note: bases list for the form is fetched inside PropertyGroupingForm (allBases)
     if (classes.length === 0) fetchClasses();
-    if (rentalProperties.length === 0) fetchRentalProperties();
-    // Fetch all property groupings for duplicate validation
+    // Only fetch rentalProperties for Edit mode; Add New uses notGroupedProperties (fetched by form when RAC/Base selected)
+    if (currentPropertyGrouping && rentalProperties.length === 0) fetchRentalProperties();
+  }, [openForm, currentPropertyGrouping, commands.length, classes.length, rentalProperties.length]);
+
+  // Fetch all property groupings for duplicate validation - separate effect, run only once per form open (guards against Strict Mode double-invoke)
+  useEffect(() => {
+    if (!openForm) {
+      allPropertyGroupingsFetchedForOpenRef.current = false;
+      return;
+    }
+    if (allPropertyGroupingsFetchedForOpenRef.current) return;
+    allPropertyGroupingsFetchedForOpenRef.current = true;
     fetchAllPropertyGroupings();
-  }, [openForm, commands.length, classes.length, rentalProperties.length]);
+  }, [openForm]);
 
   // Linked Properties dialog may need rentalProperties for name fallback
   useEffect(() => {
@@ -2294,7 +2280,7 @@ export default function PropertyGrouping() {
       width: "10%",
     },
     { Header: "ID", accessor: "id", align: "left", width: "5%" },
-    { Header: "Command", accessor: "cmdName", align: "left", width: "12%" },
+    { Header: "RAC", accessor: "cmdName", align: "left", width: "12%" },
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
     { Header: "Group ID", accessor: "gId", align: "left", width: "8%" },
@@ -2868,9 +2854,10 @@ export default function PropertyGrouping() {
                   table={{ columns, rows: computedRows }}
                   isSorted={false}
                   entriesPerPage={{
-                    defaultValue: pageSize,
+                    defaultValue: 20,
                     entries: [10, 25, 50, 100],
                   }}
+                  pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -2888,59 +2875,59 @@ export default function PropertyGrouping() {
                   <MDBox
                     display="flex"
                     flexDirection={{ xs: "column", sm: "row" }}
-                    justifyContent="space-between"
+                    justifyContent="flex-start"
                     alignItems={{ xs: "flex-start", sm: "center" }}
                     p={3}
+                    gap={2}
                   >
-                    <MDBox mb={{ xs: 3, sm: 0 }}>
+                    <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
                       <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        Showing {(pageNumber - 1) * pageSize + 1} to{" "}
                         {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
                       </MDTypography>
-                    </MDBox>
-                    {Math.ceil(totalCount / pageSize) > 1 && (
-                      <MDPagination variant="gradient" color="info">
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                          </MDPagination>
-                        )}
-                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                          .filter((page) => {
-                            const totalPages = Math.ceil(totalCount / pageSize);
-                            return (
-                              page === 1 ||
-                              page === totalPages ||
-                              (page >= pageNumber - 2 && page <= pageNumber + 2)
-                            );
-                          })
-                          .map((page, index, array) => {
-                            const prevPage = array[index - 1];
-                            const showEllipsis = prevPage && page - prevPage > 1;
-                            return (
-                              <React.Fragment key={page}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    <Icon>more_horiz</Icon>
+                      {Math.ceil(totalCount / pageSize) > 1 && (
+                        <MDPagination variant="gradient" color="info">
+                          {pageNumber > 1 && (
+                            <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
+                              <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                            </MDPagination>
+                          )}
+                          {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
+                            .filter((page) => {
+                              const totalPages = Math.ceil(totalCount / pageSize);
+                              return (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= pageNumber - 2 && page <= pageNumber + 2)
+                              );
+                            })
+                            .map((page, index, array) => {
+                              const prevPage = array[index - 1];
+                              const showEllipsis = prevPage && page - prevPage > 1;
+                              return (
+                                <React.Fragment key={page}>
+                                  {showEllipsis && (
+                                    <MDPagination item disabled>
+                                      <Icon>more_horiz</Icon>
+                                    </MDPagination>
+                                  )}
+                                  <MDPagination
+                                    item
+                                    onClick={() => setPageNumber(page)}
+                                    active={page === pageNumber}
+                                  >
+                                    {page}
                                   </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  onClick={() => setPageNumber(page)}
-                                  active={page === pageNumber}
-                                >
-                                  {page}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
-                        {pageNumber < Math.ceil(totalCount / pageSize) && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
+                                </React.Fragment>
+                              );
+                            })}
+                          {pageNumber < Math.ceil(totalCount / pageSize) && (
+                            <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
+                              <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                            </MDPagination>
+                          )}
+                        </MDPagination>
+                      )}
+                    </MDBox>
                   </MDBox>
                 )}
               </MDBox>
@@ -2975,6 +2962,7 @@ export default function PropertyGrouping() {
         bases={bases}
         classes={classes}
         allPropertyGroupings={allPropertyGroupings}
+        onGroupIdBlur={handleViewActiveContractsForGroup}
       />
       {/* Linked Properties Dialog */}
       <Dialog
@@ -3134,7 +3122,6 @@ export default function PropertyGrouping() {
                     </MDTypography>
                   </MDBox>
                   <MDTypography variant="caption" color="secondary">
-                    Showing {(linkedPropertiesPageNumber - 1) * linkedPropertiesPageSize + 1} to{" "}
                     {Math.min(
                       linkedPropertiesPageNumber * linkedPropertiesPageSize,
                       linkedPropertiesTotalCount

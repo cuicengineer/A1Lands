@@ -491,7 +491,7 @@ function RentalProperties() {
     { Header: "Actions", accessor: "actions", align: "center", width: "10%" },
     { Header: "Is Active", accessor: "status", align: "center", width: "8%", Cell: StatusBadge },
     { Header: "Id", accessor: "id", align: "left", width: "5%" },
-    { Header: "Command", accessor: "cmdName", align: "left", width: "12%" },
+    { Header: "RAC", accessor: "cmdName", align: "left", width: "12%" },
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
     {
@@ -811,9 +811,10 @@ function RentalProperties() {
                 }}
                 isSorted={false}
                 entriesPerPage={{
-                  defaultValue: pageSize,
+                  defaultValue: 20,
                   entries: [10, 25, 50, 100],
                 }}
+                pageSize={pageSize}
                 onEntriesPerPageChange={(value) => {
                   setPageSize(value);
                   setPageNumber(1);
@@ -831,62 +832,61 @@ function RentalProperties() {
               <MDBox
                 display="flex"
                 flexDirection={{ xs: "column", sm: "row" }}
-                justifyContent="space-between"
+                justifyContent="flex-start"
                 alignItems={{ xs: "flex-start", sm: "center" }}
                 p={3}
+                gap={2}
               >
-                <MDBox mb={{ xs: 3, sm: 0 }}>
+                <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
                   <MDTypography variant="button" color="secondary" fontWeight="regular">
-                    Showing {(pageNumber - 1) * pageSize + 1} to{" "}
                     {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
                   </MDTypography>
-                </MDBox>
+                  {Math.ceil(totalCount / pageSize) > 1 && (
+                    <MDPagination variant="gradient" color="info">
+                      {pageNumber > 1 && (
+                        <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
+                          <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                        </MDPagination>
+                      )}
 
-                {Math.ceil(totalCount / pageSize) > 1 && (
-                  <MDPagination variant="gradient" color="info">
-                    {pageNumber > 1 && (
-                      <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                        <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                      </MDPagination>
-                    )}
-
-                    {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                      .filter((p) => {
-                        const totalPages = Math.ceil(totalCount / pageSize);
-                        return (
-                          p === 1 ||
-                          p === totalPages ||
-                          (p >= pageNumber - 2 && p <= pageNumber + 2)
-                        );
-                      })
-                      .map((p, idx, arr) => {
-                        const prev = arr[idx - 1];
-                        const showEllipsis = prev && p - prev > 1;
-                        return (
-                          <>
-                            {showEllipsis && (
-                              <MDPagination item disabled>
-                                <Icon>more_horiz</Icon>
+                      {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
+                        .filter((p) => {
+                          const totalPages = Math.ceil(totalCount / pageSize);
+                          return (
+                            p === 1 ||
+                            p === totalPages ||
+                            (p >= pageNumber - 2 && p <= pageNumber + 2)
+                          );
+                        })
+                        .map((p, idx, arr) => {
+                          const prev = arr[idx - 1];
+                          const showEllipsis = prev && p - prev > 1;
+                          return (
+                            <>
+                              {showEllipsis && (
+                                <MDPagination item disabled>
+                                  <Icon>more_horiz</Icon>
+                                </MDPagination>
+                              )}
+                              <MDPagination
+                                item
+                                onClick={() => setPageNumber(p)}
+                                active={p === pageNumber}
+                              >
+                                {p}
                               </MDPagination>
-                            )}
-                            <MDPagination
-                              item
-                              onClick={() => setPageNumber(p)}
-                              active={p === pageNumber}
-                            >
-                              {p}
-                            </MDPagination>
-                          </>
-                        );
-                      })}
+                            </>
+                          );
+                        })}
 
-                    {pageNumber < Math.ceil(totalCount / pageSize) && (
-                      <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                        <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                      </MDPagination>
-                    )}
-                  </MDPagination>
-                )}
+                      {pageNumber < Math.ceil(totalCount / pageSize) && (
+                        <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
+                          <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                        </MDPagination>
+                      )}
+                    </MDPagination>
+                  )}
+                </MDBox>
               </MDBox>
             )}
           </MDBox>

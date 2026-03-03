@@ -88,7 +88,7 @@ function SummaryOfA1Activities() {
             border: darkMode ? "3px solid rgba(255, 255, 255, 0.2)" : "3px solid #87CEEB",
             borderRadius: "12px",
             padding: 3,
-            backgroundColor: darkMode ? "#1a1a1a" : "#ffffff",
+            backgroundColor: darkMode ? "#1a1a1a" : "#d9dde3",
           }}
         >
           <Grid container spacing={2}>
@@ -134,107 +134,17 @@ function SummaryOfA1Activities() {
                   { key: "hb", label: "HB", data: summaryData.hb, icon: "home", color: "dark" },
                 ].map((item) => (
                   <Grid item xs={12} sm={6} md={2} key={item.key}>
-                    <MDBox
-                      mb={1.5}
-                      sx={{
-                        position: "relative",
-                        transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
-                        "&:hover": {
-                          transform: "translateY(-12px) scale(1.02)",
-                          "& .statistics-card": {
-                            boxShadow: darkMode
-                              ? "0 20px 40px rgba(0, 0, 0, 0.6)"
-                              : "0 20px 40px rgba(0, 0, 0, 0.2)",
-                          },
-                          "& .gradient-overlay": {
-                            opacity: 1,
-                          },
-                        },
-                      }}
-                    >
-                      <MDBox
-                        className="statistics-card"
-                        sx={{
-                          position: "relative",
-                          overflow: "hidden",
-                          "& .MuiCard-root": {
-                            borderRadius: "20px",
-                            boxShadow: darkMode
-                              ? "0 8px 24px rgba(0, 0, 0, 0.5)"
-                              : "0 8px 24px rgba(0, 0, 0, 0.12)",
-                            transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
-                            background: darkMode
-                              ? "linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%)"
-                              : "linear-gradient(145deg, #ffffff 0%, #f5f7fa 100%)",
-                            border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
-                            position: "relative",
-                            overflow: "hidden",
-                            color: darkMode ? "#ffffff" : "inherit",
-                            "&::before": {
-                              content: '""',
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: "4px",
-                              background: `linear-gradient(90deg, ${
-                                item.color === "info"
-                                  ? "#2196f3, #42a5f5"
-                                  : item.color === "primary"
-                                  ? "#1976d2, #42a5f5"
-                                  : item.color === "success"
-                                  ? "#4caf50, #66bb6a"
-                                  : item.color === "warning"
-                                  ? "#ff9800, #ffb74d"
-                                  : item.color === "error"
-                                  ? "#f44336, #ef5350"
-                                  : "#424242, #616161"
-                              })`,
-                              zIndex: 1,
-                            },
-                          },
+                    <MDBox mb={1.5}>
+                      <ComplexStatisticsCard
+                        color={item.color}
+                        icon={item.icon}
+                        title={item.label}
+                        count={item.data.value}
+                        percentage={{
+                          color: "info",
+                          amount: `Total Worth: ${item.data.amount.toFixed(2)} Mil`,
                         }}
-                      >
-                        <MDBox
-                          className="gradient-overlay"
-                          sx={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            background: `linear-gradient(135deg, ${
-                              item.color === "info"
-                                ? "rgba(33, 150, 243, 0.15)"
-                                : item.color === "primary"
-                                ? "rgba(25, 118, 210, 0.15)"
-                                : item.color === "success"
-                                ? "rgba(76, 175, 80, 0.15)"
-                                : item.color === "warning"
-                                ? "rgba(255, 152, 0, 0.15)"
-                                : item.color === "error"
-                                ? "rgba(244, 67, 54, 0.15)"
-                                : "rgba(66, 66, 66, 0.15)"
-                            } 0%, rgba(255, 255, 255, 0.05) 100%)`,
-                            opacity: 0.8,
-                            transition: "opacity 0.4s ease-in-out",
-                            pointerEvents: "none",
-                            zIndex: 0,
-                          }}
-                        />
-                        <MDBox sx={{ position: "relative", zIndex: 1 }}>
-                          <ComplexStatisticsCard
-                            color={item.color}
-                            icon={item.icon}
-                            title={item.label}
-                            count={item.data.value}
-                            percentage={{
-                              color: "info",
-                              amount: `Total Worth: ${item.data.amount.toFixed(2)} Mil`,
-                            }}
-                          />
-                        </MDBox>
-                      </MDBox>
+                      />
                     </MDBox>
                   </Grid>
                 ))}
@@ -280,100 +190,18 @@ function SummaryOfA1Activities() {
 
                   return (
                     <Grid item xs={12} sm={6} md={3} key={index}>
-                      <MDBox
-                        mb={1.5}
-                        sx={{
-                          position: "relative",
-                          transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
-                          "&:hover": {
-                            transform: "translateY(-12px) scale(1.02)",
-                            "& .statistics-card": {
-                              boxShadow: darkMode
-                                ? "0 20px 40px rgba(0, 0, 0, 0.6)"
-                                : "0 20px 40px rgba(0, 0, 0, 0.2)",
-                            },
-                            "& .gradient-overlay": {
-                              opacity: 1,
-                            },
-                          },
-                        }}
-                      >
-                        <MDBox
-                          className="statistics-card"
-                          sx={{
-                            position: "relative",
-                            overflow: "hidden",
-                            "& .MuiCard-root": {
-                              borderRadius: "20px",
-                              boxShadow: darkMode
-                                ? "0 8px 24px rgba(0, 0, 0, 0.5)"
-                                : "0 8px 24px rgba(0, 0, 0, 0.12)",
-                              transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
-                              background: darkMode
-                                ? "linear-gradient(145deg, #2a2a2a 0%, #1f1f1f 100%)"
-                                : "linear-gradient(145deg, #ffffff 0%, #f5f7fa 100%)",
-                              border: darkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
-                              position: "relative",
-                              overflow: "hidden",
-                              color: darkMode ? "#ffffff" : "inherit",
-                              "&::before": {
-                                content: '""',
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                height: "4px",
-                                background: `linear-gradient(90deg, ${
-                                  color === "success"
-                                    ? "#4caf50, #66bb6a"
-                                    : color === "error"
-                                    ? "#f44336, #ef5350"
-                                    : color === "warning"
-                                    ? "#ff9800, #ffb74d"
-                                    : "#2196f3, #42a5f5"
-                                })`,
-                                zIndex: 1,
-                              },
-                            },
+                      <MDBox mb={1.5}>
+                        <ComplexStatisticsCard
+                          color={color}
+                          icon={icon}
+                          title={status.label}
+                          count={status.count}
+                          percentage={{
+                            color: percentageColor,
+                            amount: percentageAmount,
+                            label: percentageLabel,
                           }}
-                        >
-                          <MDBox
-                            className="gradient-overlay"
-                            sx={{
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              background: `linear-gradient(135deg, ${
-                                color === "success"
-                                  ? "rgba(76, 175, 80, 0.15)"
-                                  : color === "error"
-                                  ? "rgba(244, 67, 54, 0.15)"
-                                  : color === "warning"
-                                  ? "rgba(255, 152, 0, 0.15)"
-                                  : "rgba(33, 150, 243, 0.15)"
-                              } 0%, rgba(255, 255, 255, 0.05) 100%)`,
-                              opacity: 0.8,
-                              transition: "opacity 0.4s ease-in-out",
-                              pointerEvents: "none",
-                              zIndex: 0,
-                            }}
-                          />
-                          <MDBox sx={{ position: "relative", zIndex: 1 }}>
-                            <ComplexStatisticsCard
-                              color={color}
-                              icon={icon}
-                              title={status.label}
-                              count={status.count}
-                              percentage={{
-                                color: percentageColor,
-                                amount: percentageAmount,
-                                label: percentageLabel,
-                              }}
-                            />
-                          </MDBox>
-                        </MDBox>
+                        />
                       </MDBox>
                     </Grid>
                   );

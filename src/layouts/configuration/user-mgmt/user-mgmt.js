@@ -42,7 +42,7 @@ function UserMgmt() {
   const [errors, setErrors] = useState({});
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(5);
+  const [pageSize, setPageSize] = useState(20);
 
   const isAhqCommand = (cmdId) => {
     const command = commandOptions.find((c) => Number(c.id) === Number(cmdId));
@@ -128,7 +128,7 @@ function UserMgmt() {
     if (
       String(row.username || "")
         .trim()
-        .toLowerCase() === "superuser"
+        .toLowerCase() === "ahq"
     )
       return;
     setEditingRowId(id);
@@ -386,7 +386,7 @@ function UserMgmt() {
       row &&
       String(row.username || "")
         .trim()
-        .toLowerCase() === "superuser"
+        .toLowerCase() === "ahq"
     )
       return;
     if (window.confirm(`Are you sure you want to delete user with Id ${id}?`)) {
@@ -409,7 +409,7 @@ function UserMgmt() {
     { Header: "Rank", accessor: "rank", align: "left" },
     { Header: "Category", accessor: "category", align: "left" },
     {
-      Header: "Command",
+      Header: "RAC",
       accessor: "cmdId",
       align: "left",
       // eslint-disable-next-line react/prop-types
@@ -773,7 +773,7 @@ function UserMgmt() {
       const isSuperuser =
         String(r.username || "")
           .trim()
-          .toLowerCase() === "superuser";
+          .toLowerCase() === "ahq";
       rows.push({
         __disabledRow: isSuperuser,
         id: r.id,
@@ -921,7 +921,8 @@ function UserMgmt() {
                 isSorted={false}
                 canSearch
                 page={pageIndex}
-                entriesPerPage={{ defaultValue: pageSize, entries: [5, 10, 15, 20, 25] }}
+                pageSize={pageSize}
+                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
                 onPageChange={(page) => setPageIndex(page)}
                 onEntriesPerPageChange={(value) => {
                   setPageSize(value);

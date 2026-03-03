@@ -343,6 +343,7 @@ function DataTable({
   isSorted,
   noEndBorder,
   page: controlledPageIndex,
+  pageSize: controlledPageSize,
   onPageChange,
   onEntriesPerPageChange,
   exportFileName,
@@ -354,8 +355,8 @@ function DataTable({
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   // Ref to store pagination info for S.No column calculation
-  const pageInfoRef = useRef({ pageIndex: 0, pageSize: 10 });
-  const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 10;
+  const pageInfoRef = useRef({ pageIndex: 0, pageSize: 20 });
+  const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 20;
   const entries = entriesPerPage.entries
     ? entriesPerPage.entries.map((el) => el.toString())
     : ["5", "10", "15", "20", "25"];
@@ -523,12 +524,14 @@ function DataTable({
   // Use controlled state if provided, otherwise use internal state
   const isControlled = controlledPageIndex !== undefined;
   const [internalPageIndex, setInternalPageIndex] = useState(0);
-  const [internalPageSize, setInternalPageSize] = useState(defaultValue || 10);
+  const [internalPageSize, setInternalPageSize] = useState(defaultValue || 20);
 
   const currentPageIndex = isControlled ? controlledPageIndex : internalPageIndex;
   const currentPageSize =
     isControlled && onEntriesPerPageChange
-      ? entriesPerPage.defaultValue || defaultValue || 10
+      ? controlledPageSize !== undefined && controlledPageSize !== null
+        ? controlledPageSize
+        : entriesPerPage.defaultValue || defaultValue || 20
       : internalPageSize;
 
   const tableInstance = useTable(
@@ -1079,37 +1082,6 @@ function DataTable({
                 </Icon>
               </IconButton>
             </Tooltip>
-
-            {/* Pagination moved to top toolbar (beside Search) */}
-            {pageOptions.length > 1 && (
-              <MDPagination
-                variant={pagination.variant ? pagination.variant : "gradient"}
-                color={pagination.color ? pagination.color : "info"}
-                sx={{ ml: 1 }}
-              >
-                {canPreviousPage && (
-                  <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
-                    <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                  </MDPagination>
-                )}
-                {renderPagination.length > 6 ? (
-                  <MDBox width="5rem" mx={1}>
-                    <MDInput
-                      inputProps={{ type: "number", min: 1, max: customizedPageOptions.length }}
-                      value={customizedPageOptions[pageIndex]}
-                      onChange={(handleInputPagination, handleInputPaginationValue)}
-                    />
-                  </MDBox>
-                ) : (
-                  renderPagination
-                )}
-                {canNextPage && (
-                  <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
-                    <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                  </MDPagination>
-                )}
-              </MDPagination>
-            )}
           </MDBox>
         </MDBox>
       ) : null}
@@ -1327,15 +1299,46 @@ function DataTable({
       <MDBox
         display="flex"
         flexDirection={{ xs: "column", sm: "row" }}
-        justifyContent="space-between"
+        justifyContent="flex-start"
         alignItems={{ xs: "flex-start", sm: "center" }}
         p={!showTotalEntries && pageOptions.length === 1 ? 0 : 3}
+        gap={2}
       >
         {showTotalEntries && (
-          <MDBox mb={{ xs: 3, sm: 0 }}>
+          <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
             <MDTypography variant="button" color="secondary" fontWeight="regular">
-              Showing {entriesStart} to {entriesEnd} of {rows.length} entries
+              {rows.length === 0
+                ? "0 of 0 entries"
+                : `${Math.min(entriesEnd, rows.length)} of ${rows.length} entries`}
             </MDTypography>
+            {pageOptions.length > 1 && (
+              <MDPagination
+                variant={pagination.variant ? pagination.variant : "gradient"}
+                color={pagination.color ? pagination.color : "info"}
+              >
+                {canPreviousPage && (
+                  <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
+                    <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                  </MDPagination>
+                )}
+                {renderPagination.length > 6 ? (
+                  <MDBox width="5rem" mx={1}>
+                    <MDInput
+                      inputProps={{ type: "number", min: 1, max: customizedPageOptions.length }}
+                      value={customizedPageOptions[pageIndex]}
+                      onChange={(handleInputPagination, handleInputPaginationValue)}
+                    />
+                  </MDBox>
+                ) : (
+                  renderPagination
+                )}
+                {canNextPage && (
+                  <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
+                    <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                  </MDPagination>
+                )}
+              </MDPagination>
+            )}
           </MDBox>
         )}
       </MDBox>
@@ -1345,7 +1348,7 @@ function DataTable({
 
 // Setting default values for the props of DataTable
 DataTable.defaultProps = {
-  entriesPerPage: { defaultValue: 10, entries: [5, 10, 15, 20, 25] },
+  entriesPerPage: { defaultValue: 20, entries: [5, 10, 15, 20, 25] },
   canSearch: false,
   showTotalEntries: true,
   pagination: { variant: "gradient", color: "info" },
@@ -1381,6 +1384,7 @@ DataTable.propTypes = {
   isSorted: PropTypes.bool,
   noEndBorder: PropTypes.bool,
   page: PropTypes.number,
+  pageSize: PropTypes.number,
   onPageChange: PropTypes.func,
   onEntriesPerPageChange: PropTypes.func,
   exportFileName: PropTypes.string,

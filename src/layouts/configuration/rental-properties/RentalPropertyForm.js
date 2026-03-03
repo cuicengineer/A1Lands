@@ -404,7 +404,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
   };
 
   const fields = [
-    { label: "Command", key: "cmdId", type: "select", options: commands, mandatory: true },
+    { label: "RAC", key: "cmdId", type: "select", options: commands, mandatory: true },
     { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
     { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
     {
@@ -417,7 +417,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
     { label: "Property ID", key: "pId", mandatory: isAddMode },
     { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS, mandatory: isAddMode },
     { label: "Area", key: "area", type: "number", mandatory: isAddMode },
-    { label: "Location", key: "location", mandatory: isAddMode },
+    { label: "Location", key: "location", grid: { xs: 12, sm: 8 }, mandatory: isAddMode },
     { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 }, mandatory: isAddMode },
     {
       label: "Status",

@@ -210,14 +210,6 @@ const routes = [
         route: "/contracts/sharing-formula",
         component: <SharingFormula />,
       },
-      {
-        type: "collapse",
-        name: "Tenants",
-        key: "tenants",
-        icon: <Icon fontSize="small">people</Icon>,
-        route: "/contracts/tenants",
-        component: <Tenants />,
-      },
       // {
       //   type: "collapse",
       //   name: "Profit Sharing",
@@ -279,6 +271,14 @@ const routes = [
         icon: <Icon fontSize="small">receipt</Icon>,
         route: "/contracts/agreement-prov-invoice",
         component: <AgreementProvInvoice />,
+      },
+      {
+        type: "collapse",
+        name: "Tenants",
+        key: "tenants",
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/contracts/tenants",
+        component: <Tenants />,
       },
       // {
       //   type: "collapse",

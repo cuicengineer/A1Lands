@@ -308,7 +308,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
 
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth required error={!!errors.cmdId}>
-              <InputLabel id="cmd-label">Command</InputLabel>
+              <InputLabel id="cmd-label">RAC</InputLabel>
               <Select
                 labelId="cmd-label"
                 value={form.cmdId}
@@ -418,7 +418,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
 
           <Grid item xs={12} sm={6}>
             <MDInput
-              label="Command Share %"
+              label="RAC Share %"
               type="number"
               value={form.commandShare}
               onChange={(e) => handleChange("commandShare", e.target.value)}
@@ -517,7 +517,7 @@ export default function SharingFormula() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
@@ -819,7 +819,7 @@ export default function SharingFormula() {
       },
     },
     {
-      Header: "Command",
+      Header: "RAC",
       accessor: "cmdName",
       align: "left",
       // eslint-disable-next-line react/prop-types
@@ -1226,10 +1226,11 @@ export default function SharingFormula() {
                   }}
                   isSorted={false}
                   entriesPerPage={{
-                    defaultValue: pageSize,
+                    defaultValue: 20,
                     entries: [10, 25, 50, 100],
                   }}
                   page={pageNumber - 1}
+                  pageSize={pageSize}
                   onPageChange={(newPage) => {
                     setPageNumber(newPage + 1);
                     fetchSharingFormulas(newPage + 1, pageSize);

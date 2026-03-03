@@ -513,9 +513,10 @@ function PropertyType() {
                 canSearch={true}
                 page={pageNumber - 1}
                 entriesPerPage={{
-                  defaultValue: pageSize,
+                  defaultValue: 20,
                   entries: [10, 25, 50, 100],
                 }}
+                pageSize={pageSize}
                 onPageChange={(page) => {
                   setPageNumber(page + 1);
                 }}
