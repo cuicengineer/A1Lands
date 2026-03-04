@@ -44,6 +44,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
+import jsPDF from "jspdf";
 
 function ContractsForm({
   open,
@@ -125,7 +126,7 @@ function ContractsForm({
     if (!token) return "";
     if (token.includes("uniform")) return "Uniform";
     if (token.includes("fixed")) return "Fixed Date";
-    if (token.includes("increase")) return "Increase";
+    if (token.includes("increase") || token.includes("variable")) return "Variable";
     // Fallback: return original trimmed value so it at least shows in the UI if it matches exactly
     return String(value).trim();
   };
@@ -448,8 +449,8 @@ function ContractsForm({
       setErrors((prev) => ({ ...prev, [field]: "" }));
     }
 
-    // Clear rise terms when switching away from Increase
-    if (field === "riseTermType" && value !== "Increase") {
+    // Clear rise terms when switching away from Variable
+    if (field === "riseTermType" && value !== "Variable") {
       setRiseTerms([]);
     }
 
@@ -579,6 +580,17 @@ function ContractsForm({
           "Commercial Operation Date must be on or before Contract End Date";
       }
     }
+    if (form.riseTermType === "Fixed Date") {
+      if (!form.risedate?.trim()) {
+        newErrors.risedate = "Rise Date is required";
+      } else if (form.contractStartDate && form.contractEndDate) {
+        if (form.risedate < form.contractStartDate) {
+          newErrors.risedate = "Rise Date must be on or after Contract Start Date";
+        } else if (form.risedate > form.contractEndDate) {
+          newErrors.risedate = "Rise Date must be on or before Contract End Date";
+        }
+      }
+    }
     if (!form.initialRentPM) newErrors.initialRentPM = "Initial Rent PM is required";
     // initialRentPA is auto-calculated, no validation needed
     if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term Months is required";
@@ -615,7 +627,7 @@ function ContractsForm({
       increaseRatePercent:
         hasRentInTerm && form.increaseRatePercent ? Number(form.increaseRatePercent) : null,
       increaseIntervalMonths:
-        !hasRentInTerm || form.riseTermType === "Increase"
+        !hasRentInTerm || form.riseTermType === "Variable"
           ? null
           : form.increaseIntervalMonths
           ? Number(form.increaseIntervalMonths)
@@ -625,12 +637,13 @@ function ContractsForm({
       rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
       govtShare: form.govtShare ? Number(form.govtShare) : null,
       pafShare: form.pafShare ? Number(form.pafShare) : null,
-      feasible: Number(form.govtShare || 0) > Number(form.pafShare || 0) ? "Viable" : "Unviable",
+      feasible:
+        Number(form.initialRentPA || 0) > Number(form.govtShare || 0) ? "Unviable" : "Viable",
       status: form.status,
       remarks: form.remarks?.trim() || null,
       riseTermType: form.riseTermType || null,
       riseyear:
-        form.riseTermType === "Increase" || form.riseTermType === "Uniform"
+        form.riseTermType === "Variable" || form.riseTermType === "Uniform"
           ? null
           : form.riseyear
           ? Number(form.riseyear)
@@ -644,8 +657,8 @@ function ContractsForm({
       GroupRate: Number(selectedGroupRate) || null,
       RentalValueRate: Number(selectedRentalValuePercentRate) || null,
       VaArea: form.vaArea ? Number(form.vaArea) : null,
-      // If Increase is selected, include contractRiseTerms
-      ...(form.riseTermType === "Increase" && {
+      // If Variable is selected, include contractRiseTerms
+      ...(form.riseTermType === "Variable" && {
         contractRiseTerms:
           riseTerms.length > 0
             ? riseTerms.map((term) => {
@@ -784,7 +797,7 @@ function ContractsForm({
     const percent = Number(selectedRentalValuePercentRate) || 0;
     const calculated = Number(((area * rate * percent) / 100).toFixed(6));
     if (!form.contractStartDate) {
-      return "Formula: Rental Value = Area x Revenue Rate x (% Rental Value Rate / 100). Select Contract Start Date to apply the correct % Rate.";
+      return "Formula: Rental Value = Area x Revenue Rate x (Rental Value Rate %). Select Contract Start Date to apply the correct % Rate.";
     }
     const appDateInfo = selectedRentalValueRateMeta.applicationDate
       ? ` | % Rate App Date: ${String(selectedRentalValueRateMeta.applicationDate).split("T")[0]}`
@@ -915,10 +928,10 @@ function ContractsForm({
   }, [form.rentalValue, form.govtShare]);
 
   const viabilityLabel = useMemo(() => {
+    const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
-    const pafShare = Number(form.pafShare) || 0;
-    return govtShare > pafShare ? "Viable" : "Unviable";
-  }, [form.govtShare, form.pafShare]);
+    return initialRentPA > govtShare ? "Unviable" : "Viable";
+  }, [form.initialRentPA, form.govtShare]);
 
   // Rise Terms handlers
   const getNextRiseSequenceNo = () => {
@@ -1477,7 +1490,7 @@ function ContractsForm({
               />
             </Grid>
 
-            {/* Initial Rent PM, Initial Rent PA, Payment Term Months - same row */}
+            {/* Initial Rent PM, Payment Term Months - same row */}
             <Grid item xs={12} sm={6} md={4}>
               <MDInput
                 label="Initial Rent PM (Rs)"
@@ -1494,22 +1507,9 @@ function ContractsForm({
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-              <MDInput
-                label="Initial Rent PA (Rs)"
-                type="number"
-                value={form.initialRentPA}
-                onChange={(e) => handleChange("initialRentPA", e.target.value)}
-                fullWidth
-                size="small"
-                InputProps={{ readOnly: true }}
-                sx={inputSx}
-              />
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
                 <InputLabel id="payment-term-label" sx={labelSx}>
-                  Payment Term Months
+                  Payment Term (Months)
                 </InputLabel>
                 <Select
                   labelId="payment-term-label"
@@ -1535,7 +1535,7 @@ function ContractsForm({
                 fontWeight="bold"
                 sx={{ display: "block" }}
               >
-                Security Deposit Amount (Rs)
+                Security Deposit (Rs)
               </MDTypography>
               <MDTypography variant="h6" fontWeight="bold">
                 {form.securityDepositAmount || 0}
@@ -1548,7 +1548,7 @@ function ContractsForm({
             <Grid item xs={12} sm={6} md={6}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="sd-rate-months-label" sx={labelSx}>
-                  SD Rate Months
+                  SD Rate (Months)
                 </InputLabel>
                 <Select
                   labelId="sd-rate-months-label"
@@ -1620,24 +1620,26 @@ function ContractsForm({
                       <MenuItem value="Fixed Date" sx={menuItemSx}>
                         Fixed Date
                       </MenuItem>
-                      <MenuItem value="Increase" sx={menuItemSx}>
-                        Increase
+                      <MenuItem value="Variable" sx={menuItemSx}>
+                        Variable
                       </MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={12} sm={6} md={4}>
-                  <MDInput
-                    label="Increase Rate Percent %"
-                    type="number"
-                    value={form.increaseRatePercent}
-                    onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
-                    fullWidth
-                    size="small"
-                    sx={inputSx}
-                  />
-                </Grid>
-                {form.riseTermType !== "Increase" && (
+                {form.riseTermType !== "Fixed Date" && (
+                  <Grid item xs={12} sm={6} md={4}>
+                    <MDInput
+                      label="Increase Rate Percent %"
+                      type="number"
+                      value={form.increaseRatePercent}
+                      onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
+                      fullWidth
+                      size="small"
+                      sx={inputSx}
+                    />
+                  </Grid>
+                )}
+                {form.riseTermType !== "Variable" && form.riseTermType !== "Fixed Date" && (
                   <Grid item xs={12} sm={6} md={4}>
                     <FormControl size="small" fullWidth>
                       <InputLabel id="increase-interval-label" sx={labelSx}>
@@ -1662,10 +1664,23 @@ function ContractsForm({
               </>
             )}
 
-            {/* Rise Year (hidden when Uniform or Increase is selected) */}
-            {form.riseTermType &&
-              form.riseTermType !== "Uniform" &&
-              form.riseTermType !== "Increase" && (
+            {/* Rise Date then Rise Year (when Fixed Date is selected) */}
+            {form.riseTermType === "Fixed Date" && (
+              <>
+                <Grid item xs={12} sm={6} md={4}>
+                  <MDInput
+                    label="Rise Date"
+                    type="date"
+                    value={form.risedate}
+                    onChange={(e) => handleChange("risedate", e.target.value)}
+                    fullWidth
+                    size="small"
+                    error={!!errors.risedate}
+                    helperText={errors.risedate}
+                    InputLabelProps={{ shrink: true }}
+                    sx={inputSx}
+                  />
+                </Grid>
                 <Grid item xs={12} sm={6} md={4}>
                   <FormControl size="small" fullWidth error={!!errors.riseyear}>
                     <InputLabel id="rise-year-label" sx={labelSx}>
@@ -1690,28 +1705,11 @@ function ContractsForm({
                     {errors.riseyear && <FormHelperText>{errors.riseyear}</FormHelperText>}
                   </FormControl>
                 </Grid>
-              )}
-
-            {/* Rise Date (shown when Fixed Date is selected) */}
-            {form.riseTermType === "Fixed Date" && (
-              <Grid item xs={12} sm={6} md={4}>
-                <MDInput
-                  label="Rise Date"
-                  type="date"
-                  value={form.risedate}
-                  onChange={(e) => handleChange("risedate", e.target.value)}
-                  fullWidth
-                  size="small"
-                  error={!!errors.risedate}
-                  helperText={errors.risedate}
-                  InputLabelProps={{ shrink: true }}
-                  sx={inputSx}
-                />
-              </Grid>
+              </>
             )}
 
-            {/* Increase Add Icon (shown when Increase is selected) */}
-            {form.riseTermType === "Increase" && (
+            {/* Variable Add Icon (shown when Variable is selected) */}
+            {form.riseTermType === "Variable" && (
               <Grid item xs={12} sm={6} md={4}>
                 <MDBox display="flex" alignItems="center" gap={1}>
                   <MDBox
@@ -1723,7 +1721,7 @@ function ContractsForm({
                     onClick={handleOpenRiseTermsDialog}
                   >
                     <MDInput
-                      label="Increase"
+                      label="Variable"
                       value={
                         riseTerms.length > 0
                           ? `${riseTerms.length} term(s) configured`
@@ -1778,19 +1776,41 @@ function ContractsForm({
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 1,
+                    flexWrap: "wrap",
                   }}
                 >
                   <MDTypography variant="button" fontWeight="bold">
                     Auto Calculated Values
                   </MDTypography>
-                  <Chip
-                    label={viabilityLabel}
-                    size="small"
-                    color={viabilityLabel === "Viable" ? "success" : "error"}
-                    sx={{ fontWeight: 700 }}
-                  />
+                  <MDBox display="flex" flexDirection="column" alignItems="flex-end">
+                    <Chip
+                      label={viabilityLabel}
+                      size="small"
+                      color={viabilityLabel === "Viable" ? "success" : "error"}
+                      sx={{ fontWeight: 700 }}
+                    />
+                    <MDTypography variant="caption" color="text" sx={{ mt: 0.5 }}>
+                      Govt Share ≥ Initial Rent PA = Viable
+                    </MDTypography>
+                  </MDBox>
                 </MDBox>
                 <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <MDTypography
+                      variant="caption"
+                      color="black"
+                      fontWeight="bold"
+                      sx={{ display: "block" }}
+                    >
+                      Initial Rent PA
+                    </MDTypography>
+                    <MDTypography variant="h6" fontWeight="bold">
+                      {form.initialRentPA || 0}
+                    </MDTypography>
+                    <MDTypography variant="caption" color="text">
+                      Initial Rent PM × 12
+                    </MDTypography>
+                  </Grid>
                   <Grid item xs={12} sm={6} md={3}>
                     <MDTypography
                       variant="caption"
@@ -1814,7 +1834,7 @@ function ContractsForm({
                       fontWeight="bold"
                       sx={{ display: "block" }}
                     >
-                      Govt Share
+                      Govt Share (Rs)
                     </MDTypography>
                     <MDTypography variant="h6" fontWeight="bold">
                       {form.govtShare || 0}
@@ -1830,7 +1850,7 @@ function ContractsForm({
                       fontWeight="bold"
                       sx={{ display: "block" }}
                     >
-                      PAF Share
+                      PAF Share (Rs)
                     </MDTypography>
                     <MDTypography variant="h6" fontWeight="bold">
                       {form.pafShare || 0}
@@ -3371,7 +3391,7 @@ export default function Contracts() {
     { Header: "ID", accessor: "id", align: "center", width: "56px", showInTable: true },
     { Header: "Contract No", accessor: "contractNo", align: "left", showInTable: true },
     {
-      Header: "As Of Today",
+      Header: "Current Rent PA",
       accessor: "asOfToday",
       align: "center",
       showInTable: true,
@@ -3591,14 +3611,14 @@ export default function Contracts() {
       Cell: ({ value }) => (value ? `${value}%` : "-"),
     },
     {
-      Header: "Increase Interval Months",
+      Header: "Increase Interval (Months)",
       accessor: "increaseIntervalMonths",
       align: "right",
       showInTable: false,
     },
     { Header: "SD Rate Months", accessor: "sdRateMonths", align: "right", showInTable: false },
     {
-      Header: "Security Deposit Amount (Rs)",
+      Header: "Security Deposit (Rs)",
       accessor: "securityDepositAmount",
       align: "right",
       showInTable: false,
@@ -3626,7 +3646,7 @@ export default function Contracts() {
       },
     },
     {
-      Header: "Govt Share",
+      Header: "Govt Share (Rs)",
       accessor: "govtShare",
       align: "right",
       showInTable: false,
@@ -3637,7 +3657,7 @@ export default function Contracts() {
       },
     },
     {
-      Header: "PAF Share",
+      Header: "PAF Share (Rs)",
       accessor: "pafShare",
       align: "right",
       showInTable: false,
@@ -4154,6 +4174,275 @@ export default function Contracts() {
   // Filter columns to only show those with showInTable: true
   const visibleColumns = columns.filter((col) => col.showInTable !== false);
   const allColumns = columns; // Keep all columns for details dialog and export
+
+  const getUserId = () => {
+    try {
+      const raw = localStorage.getItem("auth");
+      if (!raw) return "Unknown";
+      const obj = JSON.parse(raw);
+      return (
+        obj?.username ||
+        obj?.Username ||
+        obj?.userName ||
+        obj?.userId ||
+        obj?.UserId ||
+        obj?.unique_name ||
+        obj?.UniqueName ||
+        "Unknown"
+      );
+    } catch {
+      return "Unknown";
+    }
+  };
+
+  const generateContractDetailsPDF = () => {
+    if (!selectedContractDetails) return;
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const lineHeight = 5;
+    const boxGap = 4;
+    const colWidth = (pageWidth - 2 * margin - 2 * boxGap) / 3;
+    const boxPadding = 3;
+    const boxMinHeight = 10;
+
+    const addWatermarks = () => {
+      const totalPages = doc.internal.getNumberOfPages();
+      const userId = getUserId();
+      const ip = userIPAddress || "Unknown";
+      doc.setTextColor(180, 180, 180, 0.4);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      for (let p = 1; p <= totalPages; p += 1) {
+        doc.setPage(p);
+        doc.text(`IP: ${ip}`, pageWidth - margin - 30, pageHeight - 8);
+        doc.text(`User: ${userId}`, margin, pageHeight - 8);
+      }
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+    };
+
+    const getDisplayValue = (col, rowData) => {
+      const accessor = col.accessor;
+      let value = rowData[accessor];
+      if (value === undefined || value === null) {
+        const pascal = accessor.charAt(0).toUpperCase() + accessor.slice(1);
+        value = rowData[pascal];
+      }
+      if ((value === undefined || value === null) && rowData.original) {
+        value =
+          rowData.original[accessor] ||
+          rowData.original[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+      }
+      if (accessor === "groupRate" || accessor === "totalRate") {
+        value =
+          rowData.GroupRate || rowData.groupRate || rowData.TotalRate || rowData.totalRate || value;
+      }
+      if (accessor === "grpId") return value || rowData?.GId || "-";
+      if (accessor === "asOfToday") return "Active";
+      if (accessor === "feasible") {
+        const fromPayload = String(value || rowData?.Feasible || "")
+          .trim()
+          .toLowerCase();
+        if (fromPayload === "viable" || fromPayload === "unviable")
+          return fromPayload === "viable" ? "Viable" : "Unviable";
+        const govt = Number(rowData?.GovtShare ?? 0);
+        const paf = Number(rowData?.PAFShare ?? 0);
+        return govt > paf ? "Viable" : "Unviable";
+      }
+      if (accessor === "totalArea") {
+        const v = rowData?.TotalArea ?? value ?? 0;
+        return v ? Number(v).toLocaleString() : "-";
+      }
+      if (accessor === "location") return rowData?.Location || value || "-";
+      if (accessor === "uoM") return value || rowData?.UoM || rowData?.unitName || "-";
+      if (accessor === "unitName") return value || rowData?.UnitName || rowData?.UoM || "-";
+      if (accessor === "tenantNo") {
+        const tn = value || rowData?.TenantNo || "";
+        const tenant = tenants.find((t) => (t.tenantNo || t.TenantNo) === tn);
+        if (tenant) {
+          const parts = [tn];
+          if (tenant.ownerName || tenant.OwnerName)
+            parts.push(tenant.ownerName || tenant.OwnerName);
+          if (tenant.address || tenant.Address) parts.push(tenant.address || tenant.Address);
+          return parts.join(" - ");
+        }
+        return tn || "-";
+      }
+      const dateCols = [
+        "contractStartDate",
+        "contractEndDate",
+        "commercialOperationDate",
+        "risedate",
+      ];
+      if (dateCols.includes(accessor)) return formatDateDDMMMYYYY(value) || "-";
+      const numCols = [
+        "initialRentPM",
+        "initialRentPA",
+        "groupRate",
+        "rentalValue",
+        "vaArea",
+        "govtShare",
+        "pafShare",
+        "securityDepositAmount",
+      ];
+      if (numCols.includes(accessor)) {
+        const v = value ?? rowData?.[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+        return v !== undefined && v !== null && v !== "" ? Number(v).toLocaleString() : "-";
+      }
+      if (accessor === "increaseRatePercent") return value ? `${value}%` : "-";
+      if (accessor === "status")
+        return value === true || value === 1 || value === "Active" ? "Active" : "Inactive";
+      if (value === null || value === undefined || value === "") return "-";
+      return String(value);
+    };
+
+    const detailsColumns = allColumns.filter(
+      (col) =>
+        col.accessor !== "actions" &&
+        col.accessor !== "attachments" &&
+        typeof col.Header === "string"
+    );
+
+    let yPos = margin;
+
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("Contract Details", margin, yPos);
+    yPos += lineHeight + 2;
+    const contractNo =
+      selectedContractDetails.ContractNo || selectedContractDetails.contractNo || "-";
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Contract No: ${contractNo}`, margin, yPos);
+    yPos += lineHeight + 6;
+
+    const drawFieldBox = (x, y, label, value, align = "left") => {
+      const innerWidth = colWidth - 2 * boxPadding;
+      const valueLines = doc.splitTextToSize(String(value || "-"), innerWidth);
+      const contentHeight = lineHeight + 2 + valueLines.length * lineHeight;
+      const boxHeight = Math.max(boxMinHeight, contentHeight + 2 * boxPadding);
+
+      doc.setDrawColor(220, 220, 220);
+      doc.setLineWidth(0.2);
+      doc.rect(x, y, colWidth, boxHeight);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      doc.text(label, x + boxPadding, y + boxPadding + 4);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      let valY = y + boxPadding + 4 + lineHeight + 2;
+      const tx =
+        align === "right"
+          ? x + colWidth - boxPadding
+          : align === "center"
+          ? x + colWidth / 2
+          : x + boxPadding;
+      valueLines.forEach((line) => {
+        doc.text(line, tx, valY, { align });
+        valY += lineHeight;
+      });
+
+      return boxHeight + boxGap;
+    };
+
+    let currentRowY = yPos;
+    let maxRowHeight = 0;
+    let colIndex = 0;
+
+    detailsColumns.forEach((col) => {
+      const x = margin + colIndex * (colWidth + boxGap);
+      const displayVal = getDisplayValue(col, selectedContractDetails);
+      const align = col.align === "right" ? "right" : col.align === "center" ? "center" : "left";
+      const boxH = drawFieldBox(x, currentRowY, `${col.Header}:`, displayVal, align);
+
+      maxRowHeight = Math.max(maxRowHeight, boxH);
+      colIndex += 1;
+
+      if (colIndex >= 3) {
+        colIndex = 0;
+        currentRowY += maxRowHeight;
+        maxRowHeight = 0;
+
+        if (currentRowY > pageHeight - 35) {
+          doc.addPage();
+          currentRowY = margin;
+        }
+      }
+    });
+
+    if (colIndex > 0) currentRowY += maxRowHeight;
+    yPos = currentRowY + 4;
+
+    if (contractDetailsRiseTerms.length > 0) {
+      if (yPos + 40 > pageHeight - 20) {
+        doc.addPage();
+        yPos = margin;
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Existing Rise Terms", margin, yPos);
+      yPos += lineHeight + 6;
+
+      const thHeight = 9;
+      const tdHeight = 8;
+      const seqWidth = 45;
+      const monthsWidth = 50;
+      const riseWidth = pageWidth - 2 * margin - seqWidth - monthsWidth;
+
+      doc.setFillColor(245, 245, 245);
+      doc.rect(margin, yPos, seqWidth, thHeight, "F");
+      doc.rect(margin + seqWidth, yPos, monthsWidth, thHeight, "F");
+      doc.rect(margin + seqWidth + monthsWidth, yPos, riseWidth, thHeight, "F");
+
+      doc.setDrawColor(224, 224, 224);
+      doc.setLineWidth(0.3);
+      doc.rect(margin, yPos, seqWidth + monthsWidth + riseWidth, thHeight);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("Sequence No", margin + 4, yPos + 6);
+      doc.text("Months Interval", margin + seqWidth + 4, yPos + 6);
+      doc.text("Rise Percent (%)", margin + seqWidth + monthsWidth + riseWidth - 4, yPos + 6, {
+        align: "right",
+      });
+      yPos += thHeight;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      contractDetailsRiseTerms.forEach((term) => {
+        if (yPos + tdHeight > pageHeight - 25) {
+          doc.addPage();
+          yPos = margin;
+        }
+        doc.setDrawColor(224, 224, 224);
+        doc.setLineWidth(0.1);
+        doc.rect(margin, yPos, seqWidth, tdHeight);
+        doc.rect(margin + seqWidth, yPos, monthsWidth, tdHeight);
+        doc.rect(margin + seqWidth + monthsWidth, yPos, riseWidth, tdHeight);
+
+        doc.text(String(term.sequenceNo || ""), margin + 4, yPos + 5.5);
+        doc.text(String(term.monthsInterval || ""), margin + seqWidth + 4, yPos + 5.5);
+        doc.text(
+          `${term.risePercent || ""}%`,
+          margin + seqWidth + monthsWidth + riseWidth - 4,
+          yPos + 5.5,
+          { align: "right" }
+        );
+        yPos += tdHeight;
+      });
+    }
+
+    addWatermarks();
+    const fileName = `Contract-Details-${contractNo.replace(/\s/g, "-")}.pdf`;
+    doc.save(fileName);
+  };
 
   // Get column IDs that should be hidden initially (columns with showInTable: false)
   // React-table uses accessor as id if id is not provided
@@ -4969,6 +5258,14 @@ export default function Contracts() {
           )}
         </DialogContent>
         <DialogActions>
+          <MDButton
+            onClick={generateContractDetailsPDF}
+            color="info"
+            variant="gradient"
+            disabled={!selectedContractDetails}
+          >
+            <Icon>picture_as_pdf</Icon>&nbsp;Export to PDF
+          </MDButton>
           <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
             Close
           </MDButton>
