@@ -145,81 +145,38 @@ function getLoggedInUsername() {
   }
 }
 
-// Cache for IP address to avoid multiple fetches
-let cachedIPAddress = null;
-let ipFetchPromise = null;
-
-// Helper function to get user's IP address
-async function getUserIPAddress() {
-  // Return cached IP if available
-  if (cachedIPAddress) {
-    return cachedIPAddress;
+// Get user's IP address from session (auth stored in localStorage).
+// No external API calls - IP is provided by backend at login/refresh and stored in user session.
+function getUserIPAddress() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return "";
+    const obj = JSON.parse(raw);
+    const ip = String(
+      obj?.userIP ||
+        obj?.UserIP ||
+        obj?.clientIP ||
+        obj?.ClientIP ||
+        obj?.ClientIp ||
+        obj?.clientIp ||
+        obj?.ipAddress ||
+        obj?.IpAddress ||
+        obj?.ip ||
+        obj?.IP ||
+        obj?.Ip ||
+        ""
+    ).trim();
+    return ip || "";
+  } catch (e) {
+    return "";
   }
-
-  // If fetch is already in progress, return the promise
-  if (ipFetchPromise) {
-    return ipFetchPromise;
-  }
-
-  // Start fetching IP
-  ipFetchPromise = (async () => {
-    try {
-      // Try multiple IP services for reliability
-      const ipServices = [
-        { url: "https://api.ipify.org?format=json", extract: (data) => data.ip },
-        {
-          url: "https://api.ip.sb/ip",
-          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
-        },
-        { url: "https://api.myip.com", extract: (data) => data.ip || data.query },
-        {
-          url: "https://ipapi.co/ip/",
-          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
-        },
-      ];
-
-      for (const service of ipServices) {
-        try {
-          const response = await fetch(service.url, { method: "GET" });
-          if (response.ok) {
-            const contentType = response.headers.get("content-type");
-            let data;
-            if (contentType && contentType.includes("application/json")) {
-              data = await response.json();
-            } else {
-              data = await response.text();
-            }
-            const ip = service.extract(data);
-            if (ip && typeof ip === "string" && ip.trim().length > 0) {
-              cachedIPAddress = ip.trim();
-              return cachedIPAddress;
-            }
-          }
-        } catch (e) {
-          // Try next service
-          continue;
-        }
-      }
-      // Fallback: set to unknown if all services fail
-      cachedIPAddress = "unknown";
-      return cachedIPAddress;
-    } catch (error) {
-      console.error("Error fetching IP address:", error);
-      cachedIPAddress = "unknown";
-      return cachedIPAddress;
-    } finally {
-      ipFetchPromise = null;
-    }
-  })();
-
-  return ipFetchPromise;
 }
 
 // Helper function to get ActionBy value in format: "username (IP_ADDRESS)"
-async function getActionBy() {
+function getActionBy() {
   const username = getLoggedInUsername();
-  const ip = await getUserIPAddress();
-  return `${username} (${ip})`;
+  const ip = getUserIPAddress();
+  return `${username} (${ip || "session"})`;
 }
 
 let refreshPromise = null;
@@ -267,6 +224,16 @@ async function refreshAccessToken() {
       throw new Error("Refresh response did not include access token");
     }
     storeAccessToken(nextToken);
+    // Merge user context (including IP) from refresh response into auth - no external API calls
+    if (data && typeof data === "object") {
+      try {
+        const existing = JSON.parse(localStorage.getItem("auth") || "{}");
+        const merged = { ...existing, ...data };
+        localStorage.setItem("auth", JSON.stringify(merged));
+      } catch (e) {
+        // ignore
+      }
+    }
     return nextToken;
   })();
 
@@ -348,6 +315,30 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
   }
 
   return res;
+}
+
+// Fetch user context (including IP) from our backend - no external IP APIs (ipapi.co, etc.).
+// Backend sees client IP from the request and returns it. Call on app load when authenticated.
+async function fetchAndUpdateUserContext() {
+  const token = getStoredAccessToken();
+  if (!token) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/Login/me`, {
+      method: "GET",
+      headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
+      credentials: "include",
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data === "object") {
+        const existing = JSON.parse(localStorage.getItem("auth") || "{}");
+        const merged = { ...existing, ...data };
+        localStorage.setItem("auth", JSON.stringify(merged));
+      }
+    }
+  } catch (e) {
+    // Endpoint may not exist; rely on login/refresh to provide IP
+  }
 }
 
 async function requestRaw(method, path, body, headers = {}, requestOptions = {}) {
@@ -437,6 +428,7 @@ const api = {
   request,
   requestRaw,
   refreshAccessToken,
+  fetchAndUpdateUserContext,
   isOperatorUser,
   getCurrentUserRole,
   getActionBy,
@@ -444,4 +436,11 @@ const api = {
   getUserIPAddress,
 };
 export default api;
-export { isOperatorUser, getCurrentUserRole, getActionBy, getLoggedInUsername, getUserIPAddress };
+export {
+  isOperatorUser,
+  getCurrentUserRole,
+  getActionBy,
+  getLoggedInUsername,
+  getUserIPAddress,
+  fetchAndUpdateUserContext,
+};

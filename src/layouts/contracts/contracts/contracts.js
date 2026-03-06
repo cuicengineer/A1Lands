@@ -30,7 +30,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
-import api, { getActionBy } from "services/api.service";
+import api, { getActionBy, getUserIPAddress } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
@@ -2808,7 +2808,6 @@ export default function Contracts() {
   const [propertyGroups, setPropertyGroups] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [natures, setNatures] = useState([]);
-  const [userIPAddress, setUserIPAddress] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
@@ -2943,53 +2942,6 @@ export default function Contracts() {
     }
   };
 
-  // Fetch user's IP address
-  const fetchUserIPAddress = async () => {
-    try {
-      // Try multiple IP services for reliability
-      const ipServices = [
-        { url: "https://api.ipify.org?format=json", extract: (data) => data.ip },
-        {
-          url: "https://api.ip.sb/ip",
-          extract: (data) => (typeof data === "string" ? data : data.ip),
-        },
-        { url: "https://api.myip.com", extract: (data) => data.ip || data.query },
-        {
-          url: "https://ipapi.co/ip/",
-          extract: (data) => (typeof data === "string" ? data.trim() : data.ip),
-        },
-      ];
-
-      for (const service of ipServices) {
-        try {
-          const response = await fetch(service.url, { method: "GET" });
-          if (response.ok) {
-            const contentType = response.headers.get("content-type");
-            let data;
-            if (contentType && contentType.includes("application/json")) {
-              data = await response.json();
-            } else {
-              data = await response.text();
-            }
-            const ip = service.extract(data);
-            if (ip && typeof ip === "string" && ip.trim().length > 0) {
-              setUserIPAddress(ip.trim());
-              return;
-            }
-          }
-        } catch (e) {
-          // Try next service
-          continue;
-        }
-      }
-      // Fallback: set to unknown if all services fail
-      setUserIPAddress("unknown");
-    } catch (error) {
-      console.error("Error fetching IP address:", error);
-      setUserIPAddress("unknown");
-    }
-  };
-
   // Fetch all property groupings for grouping display
   useEffect(() => {
     const fetchAllPropertyGroupings = async () => {
@@ -3027,11 +2979,6 @@ export default function Contracts() {
     tenants.length,
     natures.length,
   ]);
-
-  // Fetch user IP address on component mount
-  useEffect(() => {
-    fetchUserIPAddress();
-  }, []);
 
   // Load current page from backend
   useEffect(() => {
@@ -3125,7 +3072,7 @@ export default function Contracts() {
         const deleteData = {
           ActionBy: await getActionBy(),
           ActionDate: new Date().toISOString(),
-          userIPAddress: userIPAddress || "unknown",
+          userIPAddress: getUserIPAddress() || "session",
         };
         await contractApi.remove(recordToDelete, deleteData);
         await fetchContracts(pageNumber, pageSize);
@@ -3145,10 +3092,10 @@ export default function Contracts() {
 
   const handleSubmit = async (data) => {
     try {
-      // Add IP address to the payload
+      // Add IP address to the payload (from user session)
       const dataWithIP = {
         ...data,
-        userIPAddress: userIPAddress || "unknown",
+        userIPAddress: getUserIPAddress() || "session",
       };
 
       // Check for contract ID in both PascalCase and camelCase
@@ -4210,7 +4157,7 @@ export default function Contracts() {
     const addWatermarks = () => {
       const totalPages = doc.internal.getNumberOfPages();
       const userId = getUserId();
-      const ip = userIPAddress || "Unknown";
+      const ip = getUserIPAddress() || "session";
       doc.setTextColor(180, 180, 180, 0.4);
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");

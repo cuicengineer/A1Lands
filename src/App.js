@@ -45,6 +45,7 @@ import createCache from "@emotion/cache";
 
 // Material Dashboard 2 React routes
 import routes from "routes";
+import api from "services/api.service";
 
 // Material Dashboard 2 React contexts
 import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "context";
@@ -108,6 +109,13 @@ export default function App() {
   useEffect(() => {
     document.documentElement.scrollTop = 0;
     document.scrollingElement.scrollTop = 0;
+  }, [pathname]);
+
+  // Fetch user context (including IP) from backend when authenticated - no external IP APIs
+  useEffect(() => {
+    if (hasAccessToken() && pathname && !pathname.startsWith("/") && !pathname.startsWith("/authentication") && !pathname.startsWith("/login") && !pathname.startsWith("/sign-in")) {
+      api.fetchAndUpdateUserContext().catch(() => {});
+    }
   }, [pathname]);
 
   // Logout only on inactivity of 5 minutes.
