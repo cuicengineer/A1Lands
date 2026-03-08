@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -15,6 +15,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
 import Chip from "@mui/material/Chip";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -26,6 +27,7 @@ import PropTypes from "prop-types";
 import api from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
+import { format, parseISO, isValid } from "date-fns";
 
 function GovtShareRateForm({
   open,
@@ -40,6 +42,7 @@ function GovtShareRateForm({
 }) {
   const [form, setForm] = useState({
     applicableDate: "",
+    deactiveDate: "",
     cmdId: "",
     baseId: "",
     classId: "",
@@ -86,8 +89,16 @@ function GovtShareRateForm({
           : String(applicableDateRaw).split("T")[0]
         : "";
 
+      const deactiveDateRaw = initialData.DeactiveDate ?? initialData.deactiveDate ?? "";
+      const deactiveDate = deactiveDateRaw
+        ? typeof deactiveDateRaw === "string"
+          ? deactiveDateRaw.split("T")[0]
+          : String(deactiveDateRaw).split("T")[0]
+        : "";
+
       setForm({
         applicableDate: applicableDate,
+        deactiveDate: deactiveDate,
         cmdId: initialData.CmdId || initialData.cmdId || "",
         baseId: initialData.BaseId || initialData.baseId || "",
         classId: initialData.ClassId || initialData.classId || "",
@@ -103,6 +114,7 @@ function GovtShareRateForm({
     } else {
       setForm({
         applicableDate: "",
+        deactiveDate: "",
         cmdId: "",
         baseId: "",
         classId: "",
@@ -159,7 +171,15 @@ function GovtShareRateForm({
     if (field === "description" && value.length > 250) {
       return;
     }
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "applicableDate" && next.deactiveDate && value) {
+        const appTs = new Date(value).getTime();
+        const deactTs = new Date(next.deactiveDate).getTime();
+        if (deactTs <= appTs) next.deactiveDate = "";
+      }
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }));
     }
@@ -229,6 +249,10 @@ function GovtShareRateForm({
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
+    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
+    if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
+      newErrors.deactiveDate = "Deactive Date must be after Application Date";
+    }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
     if (!form.baseId) newErrors.baseId = "Base is required";
     if (!form.classId) newErrors.classId = "Class is required";
@@ -281,6 +305,7 @@ function GovtShareRateForm({
 
     const payload = {
       applicableDate: form.applicableDate,
+      deactiveDate: form.deactiveDate,
       cmdId: Number(form.cmdId),
       baseId: Number(form.baseId),
       classId: Number(form.classId),
@@ -327,6 +352,28 @@ function GovtShareRateForm({
     }
   };
 
+  const applicableDateInputRef = useRef(null);
+  const deactiveDateInputRef = useRef(null);
+
+  const toDisplayDate = (isoStr) => {
+    if (!isoStr || typeof isoStr !== "string") return "";
+    const trimmed = isoStr.trim();
+    if (!trimmed) return "";
+    try {
+      const d = parseISO(trimmed);
+      return isValid(d) ? format(d, "dd-MMM-yyyy") : trimmed;
+    } catch {
+      return trimmed;
+    }
+  };
+
+  const openDatePicker = (ref) => {
+    if (ref?.current) {
+      if (ref.current.showPicker) ref.current.showPicker();
+      else ref.current.click();
+    }
+  };
+
   const inputSx = {
     "& .MuiInputBase-input": {
       fontSize: "1rem",
@@ -355,19 +402,97 @@ function GovtShareRateForm({
       <DialogContent>
         <Grid container spacing={3} mt={1}>
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Application Date"
-              type="date"
-              value={form.applicableDate}
-              onChange={(e) => handleChange("applicableDate", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.applicableDate}
-              helperText={errors.applicableDate}
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={applicableDateInputRef}
+                value={form.applicableDate || ""}
+                onChange={(e) => handleChange("applicableDate", e.target.value)}
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Application Date"
+                type="text"
+                value={toDisplayDate(form.applicableDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.applicableDate}
+                helperText={errors.applicableDate}
+                onClick={() => openDatePicker(applicableDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={deactiveDateInputRef}
+                value={form.deactiveDate || ""}
+                onChange={(e) => handleChange("deactiveDate", e.target.value)}
+                min={
+                  form.applicableDate
+                    ? (() => {
+                        const d = new Date(form.applicableDate);
+                        d.setDate(d.getDate() + 1);
+                        return d.toISOString().split("T")[0];
+                      })()
+                    : undefined
+                }
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Deactive Date *"
+                type="text"
+                value={toDisplayDate(form.deactiveDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.deactiveDate}
+                helperText={errors.deactiveDate}
+                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                onClick={() => openDatePicker(deactiveDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -791,6 +916,7 @@ export default function GovtShareRate() {
       record.ApplicationDate ??
       record.applicationDate ??
       null;
+    const deactiveDateRaw = record.DeactiveDate ?? record.deactiveDate ?? null;
     const cmdId = record.CmdId ?? record.cmdId ?? "";
     const baseId = record.BaseId ?? record.baseId ?? "";
     const classId = record.ClassId ?? record.classId ?? "";
@@ -811,6 +937,16 @@ export default function GovtShareRate() {
         ? typeof applicableDateRaw === "string"
           ? applicableDateRaw.split("T")[0]
           : String(applicableDateRaw).split("T")[0]
+        : "",
+      DeactiveDate: deactiveDateRaw
+        ? typeof deactiveDateRaw === "string"
+          ? deactiveDateRaw.split("T")[0]
+          : String(deactiveDateRaw).split("T")[0]
+        : "",
+      deactiveDate: deactiveDateRaw
+        ? typeof deactiveDateRaw === "string"
+          ? deactiveDateRaw.split("T")[0]
+          : String(deactiveDateRaw).split("T")[0]
         : "",
       CmdId: cmdId || "",
       cmdId: cmdId || "",
@@ -941,26 +1077,25 @@ export default function GovtShareRate() {
     }
   };
 
-  // Format date for display
-  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
   const formatDateDDMMMYYYY = (dateString) => {
     if (!dateString) return "";
     const raw = String(dateString).trim();
     if (!raw) return "";
 
     const monthShort = [
-      "jan",
-      "feb",
-      "mar",
-      "apr",
-      "may",
-      "jun",
-      "jul",
-      "aug",
-      "sep",
-      "oct",
-      "nov",
-      "dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     try {
@@ -995,7 +1130,7 @@ export default function GovtShareRate() {
   // Excel export cell formatter to format dates as dd-mmm-yyyy
   const exportCellFormatter = ({ value, column }) => {
     const colId = String(column?.id || "").toLowerCase();
-    if (colId === "applicabledate" || colId === "applicationdate") {
+    if (colId === "applicabledate" || colId === "applicationdate" || colId === "deactivedate") {
       return formatDateDDMMMYYYY(value);
     }
     return value;
@@ -1041,6 +1176,16 @@ export default function GovtShareRate() {
           row.original?.ApplicationDate ||
           row.original?.applicationDate;
         return formatDateDDMMMYYYY(dateValue);
+      },
+    },
+    {
+      Header: "Deactive Date",
+      accessor: "deactiveDate",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const dateValue = value || row.original?.DeactiveDate || row.original?.deactiveDate;
+        return formatDateDDMMMYYYY(dateValue) || "-";
       },
     },
     {

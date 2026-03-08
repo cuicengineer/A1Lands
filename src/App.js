@@ -113,7 +113,14 @@ export default function App() {
 
   // Fetch user context (including IP) from backend when authenticated - no external IP APIs
   useEffect(() => {
-    if (hasAccessToken() && pathname && !pathname.startsWith("/") && !pathname.startsWith("/authentication") && !pathname.startsWith("/login") && !pathname.startsWith("/sign-in")) {
+    if (
+      hasAccessToken() &&
+      pathname &&
+      !pathname.startsWith("/") &&
+      !pathname.startsWith("/authentication") &&
+      !pathname.startsWith("/login") &&
+      !pathname.startsWith("/sign-in")
+    ) {
       api.fetchAndUpdateUserContext().catch(() => {});
     }
   }, [pathname]);

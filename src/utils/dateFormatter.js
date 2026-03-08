@@ -1,5 +1,5 @@
 /**
- * Format date to dd-mmm-yyyy format (e.g., 10-feb-2026)
+ * Format date to dd-MMM-yyyy format (e.g., 10-Feb-2026)
  * This is used for display purposes only in table grids, forms, and popups
  * @param {string|Date} dateValue - Date value to format
  * @returns {string} Formatted date string or empty string if invalid
@@ -10,18 +10,18 @@ export const formatDateDDMMMYYYY = (dateValue) => {
   if (!raw) return "";
 
   const monthShort = [
-    "jan",
-    "feb",
-    "mar",
-    "apr",
-    "may",
-    "jun",
-    "jul",
-    "aug",
-    "sep",
-    "oct",
-    "nov",
-    "dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
 
   try {
@@ -52,4 +52,3 @@ export const formatDateDDMMMYYYY = (dateValue) => {
     return raw;
   }
 };
-

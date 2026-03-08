@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -16,6 +16,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -26,6 +27,7 @@ import PropTypes from "prop-types";
 import api from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
+import { format, parseISO, isValid } from "date-fns";
 
 function RentalValueRateForm({
   open,
@@ -39,6 +41,7 @@ function RentalValueRateForm({
 }) {
   const [form, setForm] = useState({
     applicableDate: "",
+    deactiveDate: "",
     cmdId: "",
     baseId: "",
     classId: "",
@@ -85,8 +88,16 @@ function RentalValueRateForm({
           : applicableDateValue
         : "";
 
+      const deactiveDateValue = initialData.deactiveDate ?? initialData.DeactiveDate ?? "";
+      const deactiveStr = deactiveDateValue
+        ? typeof deactiveDateValue === "string"
+          ? deactiveDateValue.split("T")[0]
+          : String(deactiveDateValue).split("T")[0]
+        : "";
+
       setForm({
         applicableDate: dateValue,
+        deactiveDate: deactiveStr,
         cmdId: initialData.cmdId || initialData.CmdId || "",
         baseId: initialData.baseId || initialData.BaseId || "",
         classId: initialData.classId || initialData.ClassId || "",
@@ -154,7 +165,15 @@ function RentalValueRateForm({
   };
 
   const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "applicableDate" && next.deactiveDate && value) {
+        const appTs = new Date(value).getTime();
+        const deactTs = new Date(next.deactiveDate).getTime();
+        if (deactTs <= appTs) next.deactiveDate = "";
+      }
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }));
     }
@@ -224,6 +243,10 @@ function RentalValueRateForm({
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
+    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
+    if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
+      newErrors.deactiveDate = "Deactive Date must be after Application Date";
+    }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
     if (!form.baseId) newErrors.baseId = "Base is required";
     if (!form.classId) newErrors.classId = "Class is required";
@@ -242,6 +265,7 @@ function RentalValueRateForm({
 
     const payload = {
       applicableDate: form.applicableDate,
+      deactiveDate: form.deactiveDate,
       cmdId: Number(form.cmdId),
       baseId: Number(form.baseId),
       classId: Number(form.classId),
@@ -275,6 +299,28 @@ function RentalValueRateForm({
     }
   };
 
+  const applicableDateInputRef = useRef(null);
+  const deactiveDateInputRef = useRef(null);
+
+  const toDisplayDate = (isoStr) => {
+    if (!isoStr || typeof isoStr !== "string") return "";
+    const trimmed = isoStr.trim();
+    if (!trimmed) return "";
+    try {
+      const d = parseISO(trimmed);
+      return isValid(d) ? format(d, "dd-MMM-yyyy") : trimmed;
+    } catch {
+      return trimmed;
+    }
+  };
+
+  const openDatePicker = (ref) => {
+    if (ref?.current) {
+      if (ref.current.showPicker) ref.current.showPicker();
+      else ref.current.click();
+    }
+  };
+
   const inputSx = {
     "& .MuiInputBase-input": {
       fontSize: "1rem",
@@ -303,19 +349,97 @@ function RentalValueRateForm({
       <DialogContent>
         <Grid container spacing={3} mt={1}>
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Application Date"
-              type="date"
-              value={form.applicableDate}
-              onChange={(e) => handleChange("applicableDate", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.applicableDate}
-              helperText={errors.applicableDate}
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={applicableDateInputRef}
+                value={form.applicableDate || ""}
+                onChange={(e) => handleChange("applicableDate", e.target.value)}
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Application Date"
+                type="text"
+                value={toDisplayDate(form.applicableDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.applicableDate}
+                helperText={errors.applicableDate}
+                onClick={() => openDatePicker(applicableDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={deactiveDateInputRef}
+                value={form.deactiveDate || ""}
+                onChange={(e) => handleChange("deactiveDate", e.target.value)}
+                min={
+                  form.applicableDate
+                    ? (() => {
+                        const d = new Date(form.applicableDate);
+                        d.setDate(d.getDate() + 1);
+                        return d.toISOString().split("T")[0];
+                      })()
+                    : undefined
+                }
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Deactive Date *"
+                type="text"
+                value={toDisplayDate(form.deactiveDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.deactiveDate}
+                helperText={errors.deactiveDate}
+                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                onClick={() => openDatePicker(deactiveDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -722,6 +846,7 @@ export default function RentalValueRate() {
     // Handle both camelCase and PascalCase for all fields
     const applicableDate = record.applicableDate ?? record.ApplicableDate ?? null;
     const applicationDate = record.applicationDate ?? record.ApplicationDate ?? null;
+    const deactiveDate = record.deactiveDate ?? record.DeactiveDate ?? null;
     const cmdId = record.cmdId ?? record.CmdId ?? "";
     const baseId = record.baseId ?? record.BaseId ?? "";
     const classId = record.classId ?? record.ClassId ?? "";
@@ -740,6 +865,11 @@ export default function RentalValueRate() {
         ? typeof applicationDate === "string"
           ? applicationDate.split("T")[0]
           : applicationDate
+        : "",
+      deactiveDate: deactiveDate
+        ? typeof deactiveDate === "string"
+          ? deactiveDate.split("T")[0]
+          : String(deactiveDate).split("T")[0]
         : "",
       cmdId: cmdId || "",
       baseId: baseId || "",
@@ -839,25 +969,25 @@ export default function RentalValueRate() {
     }
   };
 
-  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
   const formatDateDDMMMYYYY = (dateString) => {
     if (!dateString) return "";
     const raw = String(dateString).trim();
     if (!raw) return "";
 
     const monthShort = [
-      "jan",
-      "feb",
-      "mar",
-      "apr",
-      "may",
-      "jun",
-      "jul",
-      "aug",
-      "sep",
-      "oct",
-      "nov",
-      "dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     try {
@@ -892,7 +1022,7 @@ export default function RentalValueRate() {
   // Excel export cell formatter to format dates as dd-mmm-yyyy
   const exportCellFormatter = ({ value, column }) => {
     const colId = String(column?.id || "").toLowerCase();
-    if (colId === "applicabledate" || colId === "applicationdate") {
+    if (colId === "applicabledate" || colId === "applicationdate" || colId === "deactivedate") {
       return formatDateDDMMMYYYY(value);
     }
     return value;
@@ -940,6 +1070,17 @@ export default function RentalValueRate() {
           rowData.ApplicationDate ||
           "";
         return formatDateDDMMMYYYY(dateValue);
+      },
+    },
+    {
+      Header: "Deactive Date",
+      accessor: "deactiveDate",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const rowData = row?.original || {};
+        const dateValue = value || rowData.deactiveDate || rowData.DeactiveDate || "";
+        return formatDateDDMMMYYYY(dateValue) || "-";
       },
     },
     {

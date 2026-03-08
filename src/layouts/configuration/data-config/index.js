@@ -11,6 +11,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Icon from "@mui/material/Icon";
 import { useMaterialUIController } from "context";
+import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 
 function DataConfig() {
   const [controller] = useMaterialUIController();
@@ -62,7 +63,12 @@ function DataConfig() {
     { Header: "Profit Sharing", accessor: "profitSharing", align: "left" },
     { Header: "User Accounts", accessor: "userAccounts", align: "left" },
     { Header: "Updated By", accessor: "updatedBy", align: "left" },
-    { Header: "Updated Date", accessor: "updatedDate", align: "left" },
+    {
+      Header: "Updated Date",
+      accessor: "updatedDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
   const handleAddNew = () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -20,6 +20,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
 import MDSnackbar from "components/MDSnackbar";
@@ -33,6 +34,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
+import { format, parseISO, isValid } from "date-fns";
 
 function RevenueRatesForm({
   open,
@@ -49,6 +51,7 @@ function RevenueRatesForm({
     baseId: "",
     propertyId: "",
     applicableDate: "",
+    deactiveDate: "",
     rate: "",
     attachments: "",
     status: true,
@@ -57,6 +60,28 @@ function RevenueRatesForm({
   const [isUploading, setIsUploading] = useState(false);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
+
+  const applicableDateInputRef = useRef(null);
+  const deactiveDateInputRef = useRef(null);
+
+  const toDisplayDate = (isoStr) => {
+    if (!isoStr || typeof isoStr !== "string") return "";
+    const trimmed = isoStr.trim();
+    if (!trimmed) return "";
+    try {
+      const d = parseISO(trimmed);
+      return isValid(d) ? format(d, "dd-MMM-yyyy") : trimmed;
+    } catch {
+      return trimmed;
+    }
+  };
+
+  const openDatePicker = (ref) => {
+    if (ref?.current) {
+      if (ref.current.showPicker) ref.current.showPicker();
+      else ref.current.click();
+    }
+  };
 
   useEffect(() => {
     if (initialData) {
@@ -78,11 +103,17 @@ function RevenueRatesForm({
       const baseIdValue = isPropertyDash ? 0 : resolvedBaseId ? Number(resolvedBaseId) : "";
       const propertyIdValue = isPropertyDash ? 0 : initialData.propertyId || "";
 
+      const rawDeactive = initialData.deactiveDate ?? initialData.DeactiveDate ?? "";
+      const deactiveDateValue =
+        rawDeactive && String(rawDeactive).trim()
+          ? String(rawDeactive).split("T")[0].slice(0, 10)
+          : "";
       setForm({
         cmdId: cmdIdValue,
         baseId: baseIdValue,
         propertyId: propertyIdValue,
         applicableDate: initialData.applicableDate || "",
+        deactiveDate: deactiveDateValue,
         rate: initialData.rate || "",
         attachments: initialData.attachments || "",
         status: initialData.status !== undefined ? initialData.status : true,
@@ -101,6 +132,7 @@ function RevenueRatesForm({
         baseId: "",
         propertyId: "",
         applicableDate: "",
+        deactiveDate: "",
         rate: "",
         attachments: "",
         status: true,
@@ -154,10 +186,17 @@ function RevenueRatesForm({
       };
 
       if (field === "cmdId") {
-        next.baseId = "";
-        next.propertyId = "";
+        const cmdIsAll = value === 0 || value === "0";
+        next.baseId = cmdIsAll ? 0 : "";
+        next.propertyId = cmdIsAll ? 0 : "";
       } else if (field === "baseId") {
         next.propertyId = value === 0 || value === "0" ? 0 : "";
+      } else if (field === "applicableDate") {
+        if (next.deactiveDate && value) {
+          const appTs = new Date(value).getTime();
+          const deactTs = new Date(next.deactiveDate).getTime();
+          if (deactTs <= appTs) next.deactiveDate = "";
+        }
       }
 
       return next;
@@ -178,12 +217,19 @@ function RevenueRatesForm({
 
   const isBothAll =
     (form.cmdId === 0 || form.cmdId === "0") && (form.baseId === 0 || form.baseId === "0");
+  const isBaseAll = form.baseId === 0 || form.baseId === "0";
 
   useEffect(() => {
     if (isBothAll && form.propertyId !== 0 && form.propertyId !== "0") {
       setForm((prev) => ({ ...prev, propertyId: 0 }));
     }
   }, [isBothAll, form.propertyId]);
+
+  useEffect(() => {
+    if (isBaseAll && form.propertyId !== 0 && form.propertyId !== "0") {
+      setForm((prev) => ({ ...prev, propertyId: 0 }));
+    }
+  }, [isBaseAll, form.propertyId]);
 
   const filteredBaseOptions = useMemo(() => {
     if (form.cmdId === 0 || form.cmdId === "0") return baseOptions || [];
@@ -285,6 +331,19 @@ function RevenueRatesForm({
       alert("Applicable Date is required.");
       return;
     }
+    const deactiveDate = String(form.deactiveDate ?? "").trim();
+    if (!deactiveDate) {
+      alert("Deactive Date is required.");
+      return;
+    }
+    if (applicableDate && deactiveDate) {
+      const appDate = new Date(applicableDate);
+      const deactDate = new Date(deactiveDate);
+      if (deactDate.getTime() <= appDate.getTime()) {
+        alert("Deactive Date must be greater than Applicable Date.");
+        return;
+      }
+    }
     // First save the form data
     await onSubmit(form);
 
@@ -358,7 +417,9 @@ function RevenueRatesForm({
                 value={form.baseId ?? ""}
                 label="Base"
                 onChange={(e) => handleChange("baseId", e.target.value)}
-                disabled={form.cmdId === "" || form.cmdId == null}
+                disabled={
+                  form.cmdId === "" || form.cmdId == null || form.cmdId === 0 || form.cmdId === "0"
+                }
                 sx={{
                   fontSize: "1.1rem",
                   "& .MuiSelect-select": {
@@ -382,18 +443,24 @@ function RevenueRatesForm({
             </FormControl>
           </Grid>
 
-          {/* PropertyId Dropdown */}
-          <Grid item xs={12}>
+          {/* Property and Revenue Rate - same row */}
+          <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
               <InputLabel id="property-label" sx={{ fontSize: "1.1rem" }}>
                 Property
               </InputLabel>
               <Select
                 labelId="property-label"
-                value={form.propertyId ?? ""}
+                value={isBaseAll ? 0 : form.propertyId ?? ""}
                 label="Property"
                 onChange={(e) => handleChange("propertyId", e.target.value)}
-                disabled={isBothAll}
+                disabled={isBaseAll}
+                renderValue={(v) => {
+                  if (isBaseAll) return "—";
+                  if (v === "" || v == null) return "";
+                  const opt = filteredRentalProperties.find((p) => Number(p.id) === Number(v));
+                  return opt ? opt.pId ?? opt.pid ?? opt.PId ?? String(v) : String(v);
+                }}
                 MenuProps={{
                   PaperProps: {
                     style: {
@@ -419,30 +486,30 @@ function RevenueRatesForm({
                   },
                 }}
               >
-                {isBothAll && (
+                {isBaseAll && (
                   <MenuItem key="prop-0" value={0} sx={{ fontSize: "1.1rem" }}>
                     —
                   </MenuItem>
                 )}
-                {filteredRentalProperties.map((option) => (
-                  <MenuItem
-                    key={option.id}
-                    value={option.id}
-                    sx={{ fontSize: "1.1rem", padding: "10px 14px" }}
-                  >
-                    {option.pId}
-                  </MenuItem>
-                ))}
+                {!isBaseAll &&
+                  filteredRentalProperties.map((option) => (
+                    <MenuItem
+                      key={option.id}
+                      value={option.id}
+                      sx={{ fontSize: "1.1rem", padding: "10px 14px" }}
+                    >
+                      {option.pId}
+                    </MenuItem>
+                  ))}
               </Select>
             </FormControl>
-            {selectedProperty && (
+            {selectedProperty && !isBaseAll && (
               <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
                 Area: {selectedArea || "-"} · UoM: {selectedUoM || "-"}
               </MDTypography>
             )}
           </Grid>
 
-          {/* RevenueRate */}
           <Grid item xs={12} sm={6}>
             <MDInput
               label="Revenue Rate"
@@ -463,28 +530,111 @@ function RevenueRatesForm({
             />
           </Grid>
 
-          {/* ApplicableDate */}
+          {/* Applicable Date - display dd-MMM-yyyy, state remains yyyy-mm-dd */}
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Applicable Date *"
-              type="date"
-              value={form.applicableDate}
-              onChange={(e) => handleChange("applicableDate", e.target.value)}
-              fullWidth
-              size="small"
-              InputLabelProps={{
-                shrink: true,
-              }}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1.1rem",
-                  padding: "12px 14px",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1.1rem",
-                },
-              }}
-            />
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={applicableDateInputRef}
+                value={form.applicableDate || ""}
+                onChange={(e) => handleChange("applicableDate", e.target.value)}
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Applicable Date *"
+                type="text"
+                value={toDisplayDate(form.applicableDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                onClick={() => openDatePicker(applicableDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1.1rem",
+                    padding: "12px 14px",
+                    cursor: "pointer",
+                  },
+                  "& .MuiInputLabel-root": { fontSize: "1.1rem" },
+                }}
+              />
+            </MDBox>
+          </Grid>
+
+          {/* Deactive Date - display dd-MMM-yyyy, state remains yyyy-mm-dd */}
+          <Grid item xs={12} sm={6}>
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={deactiveDateInputRef}
+                value={form.deactiveDate || ""}
+                onChange={(e) => handleChange("deactiveDate", e.target.value)}
+                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                min={
+                  form.applicableDate
+                    ? (() => {
+                        const d = new Date(form.applicableDate);
+                        d.setDate(d.getDate() + 1);
+                        return d.toISOString().split("T")[0];
+                      })()
+                    : undefined
+                }
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Deactive Date *"
+                type="text"
+                value={toDisplayDate(form.deactiveDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                onClick={() => openDatePicker(deactiveDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  "& .MuiInputBase-input": {
+                    fontSize: "1.1rem",
+                    padding: "12px 14px",
+                    cursor: "pointer",
+                  },
+                  "& .MuiInputLabel-root": { fontSize: "1.1rem" },
+                }}
+              />
+            </MDBox>
           </Grid>
 
           {/* Attachments - File Upload (only when editing) */}
@@ -976,6 +1126,18 @@ export default function RevenueRates() {
     try {
       const isBothAll =
         (data.cmdId === 0 || data.cmdId === "0") && (data.baseId === 0 || data.baseId === "0");
+      const isBaseAll = data.baseId === 0 || data.baseId === "0";
+      const rawDeactive = data.deactiveDate ?? "";
+      const deactiveDateValue =
+        rawDeactive && String(rawDeactive).trim()
+          ? String(rawDeactive).length === 10 && !String(rawDeactive).includes("T")
+            ? new Date(String(rawDeactive) + "T12:00:00").toISOString()
+            : String(rawDeactive)
+          : null;
+      if (!deactiveDateValue) {
+        alert("Deactive Date is required.");
+        return;
+      }
       const formattedData = {
         cmdId:
           data.cmdId === 0 || data.cmdId === "0"
@@ -989,12 +1151,12 @@ export default function RevenueRates() {
             : data.baseId !== "" && data.baseId != null
             ? Number(data.baseId)
             : null,
-        propertyId: isBothAll ? 0 : Number(data.propertyId) || null,
+        propertyId: isBothAll || isBaseAll ? 0 : Number(data.propertyId) || null,
         applicableDate: data.applicableDate || null,
         rate: data.rate ? Number(data.rate) : null,
         attachments: data.attachments || null,
         status: data.status !== undefined ? Boolean(data.status) : true,
-        DeactiveDate: currentRevenueRate ? new Date().toISOString() : null,
+        DeactiveDate: deactiveDateValue,
       };
       if (currentRevenueRate) {
         await revenueRatesApi.update(currentRevenueRate.id, formattedData);
@@ -1014,57 +1176,54 @@ export default function RevenueRates() {
     value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]),
   };
 
-  // Excel export cell formatter to format dates as dd-mmm-yyyy
+  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
+  const formatDateDDMMMYYYY = (dateValue) => {
+    if (!dateValue) return "";
+    const raw = String(dateValue).trim();
+    if (!raw) return "";
+    const monthShort = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    try {
+      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+      let day = "";
+      let month = "";
+      let year = "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        [year, month, day] = datePart.split("-");
+      } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+        [day, month, year] = datePart.split("-");
+      } else {
+        const parsed = new Date(raw);
+        if (!Number.isFinite(parsed.getTime())) return raw;
+        day = String(parsed.getDate()).padStart(2, "0");
+        month = String(parsed.getMonth() + 1).padStart(2, "0");
+        year = String(parsed.getFullYear());
+      }
+      const monthIndex = Number(month) - 1;
+      const monthText = monthShort[monthIndex] || month;
+      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+    } catch {
+      return raw;
+    }
+  };
+
+  // Excel export cell formatter to format dates as dd-MMM-yyyy
   const exportCellFormatter = ({ value, column, row }) => {
     const colId = String(column?.id || "").toLowerCase();
-    if (colId === "applicabledate" || colId === "applicationdate") {
-      // Use the same date formatting logic as in the Cell renderer
-      if (!value) return "";
-      const raw = String(value).trim();
-      if (!raw) return "";
-
-      const monthShort = [
-        "jan",
-        "feb",
-        "mar",
-        "apr",
-        "may",
-        "jun",
-        "jul",
-        "aug",
-        "sep",
-        "oct",
-        "nov",
-        "dec",
-      ];
-
-      try {
-        const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-        let day = "";
-        let month = "";
-        let year = "";
-
-        // yyyy-mm-dd
-        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-          [year, month, day] = datePart.split("-");
-        }
-        // dd-mm-yyyy
-        else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
-          [day, month, year] = datePart.split("-");
-        } else {
-          const parsed = new Date(raw);
-          if (!Number.isFinite(parsed.getTime())) return raw;
-          day = String(parsed.getDate()).padStart(2, "0");
-          month = String(parsed.getMonth() + 1).padStart(2, "0");
-          year = String(parsed.getFullYear());
-        }
-
-        const monthIndex = Number(month) - 1;
-        const monthText = monthShort[monthIndex] || month;
-        return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
-      } catch {
-        return raw;
-      }
+    if (colId === "applicabledate" || colId === "applicationdate" || colId === "deactivedate") {
+      return formatDateDDMMMYYYY(value);
     }
     // For Property column, use propertyName instead of propertyId
     const accessor = String(column?.accessor || "").toLowerCase();
@@ -1101,10 +1260,9 @@ export default function RevenueRates() {
       accessor: "cmdName",
       align: "left",
       Cell: ({ value, row }) => {
-        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
-        const isPropertyDash =
-          propId === 0 || propId === null || propId === undefined || propId === "";
-        return isPropertyDash ? "All" : value ?? "-";
+        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
+        const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
+        return isCmdAll ? "All" : value ?? "-";
       },
     },
     {
@@ -1153,56 +1311,9 @@ export default function RevenueRates() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
         const dateValue =
           value ?? row?.original?.applicableDate ?? row?.original?.ApplicableDate ?? null;
-        // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
-        if (!dateValue) return "";
-        const raw = String(dateValue).trim();
-        if (!raw) return "";
-
-        const monthShort = [
-          "jan",
-          "feb",
-          "mar",
-          "apr",
-          "may",
-          "jun",
-          "jul",
-          "aug",
-          "sep",
-          "oct",
-          "nov",
-          "dec",
-        ];
-
-        try {
-          const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-          let day = "";
-          let month = "";
-          let year = "";
-
-          // yyyy-mm-dd
-          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-            [year, month, day] = datePart.split("-");
-          }
-          // dd-mm-yyyy
-          else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
-            [day, month, year] = datePart.split("-");
-          } else {
-            const parsed = new Date(raw);
-            if (!Number.isFinite(parsed.getTime())) return raw;
-            day = String(parsed.getDate()).padStart(2, "0");
-            month = String(parsed.getMonth() + 1).padStart(2, "0");
-            year = String(parsed.getFullYear());
-          }
-
-          const monthIndex = Number(month) - 1;
-          const monthText = monthShort[monthIndex] || month;
-          return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
-        } catch {
-          return "";
-        }
+        return formatDateDDMMMYYYY(dateValue) || "";
       },
     },
     {
@@ -1273,46 +1384,7 @@ export default function RevenueRates() {
       Cell: ({ value, row }) => {
         const dateValue =
           value ?? row?.original?.deactiveDate ?? row?.original?.DeactiveDate ?? null;
-        if (!dateValue) return "";
-        const raw = String(dateValue).trim();
-        if (!raw) return "";
-
-        const monthShort = [
-          "jan",
-          "feb",
-          "mar",
-          "apr",
-          "may",
-          "jun",
-          "jul",
-          "aug",
-          "sep",
-          "oct",
-          "nov",
-          "dec",
-        ];
-        try {
-          const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-          let day = "";
-          let month = "";
-          let year = "";
-          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-            [year, month, day] = datePart.split("-");
-          } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
-            [day, month, year] = datePart.split("-");
-          } else {
-            const parsed = new Date(raw);
-            if (!Number.isFinite(parsed.getTime())) return raw;
-            day = String(parsed.getDate()).padStart(2, "0");
-            month = String(parsed.getMonth() + 1).padStart(2, "0");
-            year = String(parsed.getFullYear());
-          }
-          const monthIndex = Number(month) - 1;
-          const monthText = monthShort[monthIndex] || month;
-          return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
-        } catch {
-          return raw;
-        }
+        return formatDateDDMMMYYYY(dateValue) || "";
       },
     },
   ];
@@ -1323,6 +1395,16 @@ export default function RevenueRates() {
     const propertyId = row.propertyId ?? row.PropertyId;
     const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
     const propertyName = prop ? prop.pId ?? prop.pid ?? prop.PId ?? "" : "";
+    const cmdId = row.cmdId ?? row.CmdId ?? prop?.cmdId ?? null;
+    const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
+    const resolvedCmdName = isCmdAll
+      ? "All"
+      : (() => {
+          const cmd = (commandOptions || []).find((c) => Number(c?.id) === Number(cmdId));
+          return cmd
+            ? cmd.name ?? cmd.Name ?? cmd.value ?? cmd.Value ?? String(cmdId)
+            : row.cmdName ?? row.CmdName ?? row.cmdname ?? prop?.cmdName ?? String(cmdId ?? "");
+        })();
 
     return {
       ...row,
@@ -1333,16 +1415,7 @@ export default function RevenueRates() {
       applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
       deactiveDate: row.deactiveDate ?? row.DeactiveDate ?? null,
       status: row.status ?? row.Status ?? true,
-      cmdName:
-        row.cmdName ??
-        row.CmdName ??
-        row.cmdname ??
-        prop?.cmdName ??
-        prop?.cmdname ??
-        row.cmdId ??
-        row.CmdId ??
-        prop?.cmdId ??
-        "",
+      cmdName: resolvedCmdName,
       baseName:
         row.baseName ??
         row.BaseName ??

@@ -16,6 +16,7 @@ import DataTable from "examples/Tables/DataTable";
 import { useState } from "react";
 import ProfitSharingForm from "layouts/configuration/profit-sharing/components/ProfitSharingForm";
 import StatusBadge from "components/StatusBadge";
+import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 
 function ProfitSharing() {
   const [openForm, setOpenForm] = useState(false);
@@ -32,10 +33,20 @@ function ProfitSharing() {
     { Header: "AHQ Share", accessor: "ahqShare", align: "left" },
     { Header: "RAC Share", accessor: "racShare", align: "left" },
     { Header: "Base Share", accessor: "baseShare", align: "left" },
-    { Header: "Effective Date", accessor: "effectiveDate", align: "left" },
+    {
+      Header: "Effective Date",
+      accessor: "effectiveDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "Remarks", accessor: "remarks", align: "left" },
     { Header: "Updated By", accessor: "updatedBy", align: "left" },
-    { Header: "Updated Date", accessor: "updatedDate", align: "left" },
+    {
+      Header: "Updated Date",
+      accessor: "updatedDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "Status", accessor: "status", align: "left" },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];

@@ -224,25 +224,25 @@ export default function AgreementProvInvoice() {
     }
   };
 
-  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
   const formatDateDDMMMYYYY = (dateString) => {
     if (!dateString) return "-";
     const raw = String(dateString).trim();
     if (!raw) return "-";
 
     const monthShort = [
-      "jan",
-      "feb",
-      "mar",
-      "apr",
-      "may",
-      "jun",
-      "jul",
-      "aug",
-      "sep",
-      "oct",
-      "nov",
-      "dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     try {
@@ -282,15 +282,43 @@ export default function AgreementProvInvoice() {
     const margin = 15;
     let yPos = margin;
 
-    // Helper function to format date
+    // Helper function to format date as dd-MMM-yyyy
     const formatDate = (dateString) => {
       if (!dateString) return "";
       try {
-        const date = new Date(dateString);
-        const day = String(date.getDate()).padStart(2, "0");
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const year = date.getFullYear();
-        return `${day}-${month}-${year}`;
+        const raw = String(dateString).trim();
+        if (!raw) return "";
+        const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+        const monthShort = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        let day = "";
+        let month = "";
+        let year = "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          [year, month, day] = datePart.split("-");
+        } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+          [day, month, year] = datePart.split("-");
+        } else {
+          const date = new Date(dateString);
+          if (!Number.isFinite(date.getTime())) return dateString;
+          day = String(date.getDate()).padStart(2, "0");
+          month = String(date.getMonth() + 1).padStart(2, "0");
+          year = String(date.getFullYear());
+        }
+        const monthText = monthShort[Number(month) - 1] || month;
+        return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
       } catch (e) {
         return dateString;
       }

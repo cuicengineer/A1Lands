@@ -121,18 +121,18 @@ function PropertyGroupingForm({
     const raw = String(rawDate).trim();
     const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
     const months = [
-      "jan",
-      "feb",
-      "mar",
-      "apr",
-      "may",
-      "jun",
-      "jul",
-      "aug",
-      "sep",
-      "oct",
-      "nov",
-      "dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
       const [y, m, d] = datePart.split("-");
@@ -680,7 +680,8 @@ function PropertyGroupingForm({
     setForm((p) => ({
       ...p,
       [f]: f === "area" ? Number(v) : f === "status" || f === "isDeleted" ? Boolean(v) : v,
-      ...(f === "cmdid" && { baseid: "" }),
+      ...(f === "cmdid" && { baseid: "", property: [] }),
+      ...(f === "baseid" && { property: [] }),
     }));
     // clear field-level error on change
     if (errors?.[f]) setErrors((prev) => ({ ...prev, [f]: undefined }));
@@ -3634,25 +3635,25 @@ export default function PropertyGrouping() {
                       </thead>
                       <TableBody>
                         {activeContracts.map((contract, index) => {
-                          // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+                          // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
                           const formatDate = (dateValue) => {
                             if (!dateValue) return "-";
                             const raw = String(dateValue).trim();
                             if (!raw) return "-";
 
                             const monthShort = [
-                              "jan",
-                              "feb",
-                              "mar",
-                              "apr",
-                              "may",
-                              "jun",
-                              "jul",
-                              "aug",
-                              "sep",
-                              "oct",
-                              "nov",
-                              "dec",
+                              "Jan",
+                              "Feb",
+                              "Mar",
+                              "Apr",
+                              "May",
+                              "Jun",
+                              "Jul",
+                              "Aug",
+                              "Sep",
+                              "Oct",
+                              "Nov",
+                              "Dec",
                             ];
 
                             try {

@@ -17,6 +17,7 @@ import DataTable from "examples/Tables/DataTable";
 import NewContractForm from "layouts/contracts/components/NewContractForm";
 import { useState } from "react";
 import StatusBadge from "components/StatusBadge";
+import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 
 function Contracts() {
   const [openForm, setOpenForm] = useState(false);
@@ -40,12 +41,32 @@ function Contracts() {
     { Header: "Area-CA", accessor: "areaCA", align: "left" },
     { Header: "Area-BOO", accessor: "areaBOO", align: "left" },
     { Header: "Revenue Rate", accessor: "revenueRate", align: "left" },
-    { Header: "Revenue Rate Date", accessor: "revenueRateDate", align: "left" },
+    {
+      Header: "Revenue Rate Date",
+      accessor: "revenueRateDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "Rental Value", accessor: "rentalValue", align: "left" },
     { Header: "Initial Contractor Name", accessor: "initialContractorName", align: "left" },
-    { Header: "Initial Contract Date", accessor: "initialContractDate", align: "left" },
-    { Header: "Contract From", accessor: "contractFrom", align: "left" },
-    { Header: "Contract To", accessor: "contractTo", align: "left" },
+    {
+      Header: "Initial Contract Date",
+      accessor: "initialContractDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
+    {
+      Header: "Contract From",
+      accessor: "contractFrom",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
+    {
+      Header: "Contract To",
+      accessor: "contractTo",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "1st Y Rent PM", accessor: "firstYRentPM", align: "left" },
     { Header: "1st Y Rent PA", accessor: "firstYRentPA", align: "left" },
     { Header: "Term of Payment", accessor: "termOfPayment", align: "left" },
@@ -64,7 +85,12 @@ function Contracts() {
     { Header: "Remarks", accessor: "remarks", align: "left" },
     { Header: "Documents", accessor: "documents", align: "center" },
     { Header: "Created By", accessor: "createdBy", align: "left" },
-    { Header: "Created Date", accessor: "createdDate", align: "left" },
+    {
+      Header: "Created Date",
+      accessor: "createdDate",
+      align: "left",
+      Cell: ({ value }) => (value ? formatDateDDMMMYYYY(value) : value ?? "-"),
+    },
     { Header: "IsDeleted", accessor: "isDeleted", align: "left" },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];

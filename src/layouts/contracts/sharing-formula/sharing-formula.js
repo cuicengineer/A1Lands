@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -10,6 +10,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
 import MDBox from "components/MDBox";
@@ -24,10 +25,12 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import PropTypes from "prop-types";
 import api, { isOperatorUser } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
+import { format, parseISO, isValid } from "date-fns";
 
 function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases, initialData }) {
   const [form, setForm] = useState({
     applicableDate: "",
+    deactiveDate: "",
     cmdId: "",
     baseId: "",
     classIds: [],
@@ -63,6 +66,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       // Reset form when dialog closes
       setForm({
         applicableDate: "",
+        deactiveDate: "",
         cmdId: "",
         baseId: "",
         classIds: [],
@@ -140,6 +144,24 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
         }
       }
 
+      // Format DeactiveDate for date input (YYYY-MM-DD)
+      let formattedDeactiveDate = "";
+      const deactiveRaw = initialData.DeactiveDate ?? initialData.deactiveDate ?? "";
+      if (deactiveRaw) {
+        try {
+          const date = new Date(deactiveRaw);
+          if (!isNaN(date.getTime())) {
+            formattedDeactiveDate = date.toISOString().split("T")[0];
+          } else if (typeof deactiveRaw === "string") {
+            formattedDeactiveDate = deactiveRaw.split("T")[0] || "";
+          }
+        } catch (e) {
+          if (typeof deactiveRaw === "string") {
+            formattedDeactiveDate = deactiveRaw.split("T")[0] || "";
+          }
+        }
+      }
+
       // Get classIds - handle both single value and array (strictly PascalCase)
       let classIdsArray = [];
       if (initialData.ClassId !== undefined && initialData.ClassId !== null) {
@@ -159,6 +181,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
 
       setForm({
         applicableDate: formattedDate,
+        deactiveDate: formattedDeactiveDate,
         cmdId:
           initialData.CmdId !== undefined && initialData.CmdId !== null
             ? String(initialData.CmdId)
@@ -216,6 +239,10 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
+    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
+    if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
+      newErrors.deactiveDate = "Deactive Date must be after Application Date";
+    }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
     if (!form.baseId) newErrors.baseId = "Base is required";
     if (!form.classIds || form.classIds.length === 0) {
@@ -242,6 +269,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       // Map to match database model column names
       const dataArray = form.classIds.map((classId) => ({
         ApplicableDate: form.applicableDate,
+        DeactiveDate: form.deactiveDate,
         CmdId: Number(form.cmdId),
         BaseId: Number(form.baseId),
         ClassId: Number(classId), // Keep for multi-class selection logic
@@ -260,6 +288,28 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       alert("Failed to save sharing formula. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const applicableDateInputRef = useRef(null);
+  const deactiveDateInputRef = useRef(null);
+
+  const toDisplayDate = (isoStr) => {
+    if (!isoStr || typeof isoStr !== "string") return "";
+    const trimmed = isoStr.trim();
+    if (!trimmed) return "";
+    try {
+      const d = parseISO(trimmed);
+      return isValid(d) ? format(d, "dd-MMM-yyyy") : trimmed;
+    } catch {
+      return trimmed;
+    }
+  };
+
+  const openDatePicker = (ref) => {
+    if (ref?.current) {
+      if (ref.current.showPicker) ref.current.showPicker();
+      else ref.current.click();
     }
   };
 
@@ -291,19 +341,97 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       <DialogContent>
         <Grid container spacing={3} mt={1}>
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Application Date"
-              type="date"
-              value={form.applicableDate}
-              onChange={(e) => handleChange("applicableDate", e.target.value)}
-              fullWidth
-              size="small"
-              required
-              error={!!errors.applicableDate}
-              helperText={errors.applicableDate}
-              InputLabelProps={{ shrink: true }}
-              sx={inputSx}
-            />
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={applicableDateInputRef}
+                value={form.applicableDate || ""}
+                onChange={(e) => handleChange("applicableDate", e.target.value)}
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Application Date"
+                type="text"
+                value={toDisplayDate(form.applicableDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.applicableDate}
+                helperText={errors.applicableDate}
+                onClick={() => openDatePicker(applicableDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <MDBox sx={{ position: "relative" }}>
+              <input
+                type="date"
+                ref={deactiveDateInputRef}
+                value={form.deactiveDate || ""}
+                onChange={(e) => handleChange("deactiveDate", e.target.value)}
+                min={
+                  form.applicableDate
+                    ? (() => {
+                        const d = new Date(form.applicableDate);
+                        d.setDate(d.getDate() + 1);
+                        return d.toISOString().split("T")[0];
+                      })()
+                    : undefined
+                }
+                style={{
+                  position: "absolute",
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  top: 0,
+                  left: 0,
+                  cursor: "pointer",
+                }}
+                aria-hidden
+              />
+              <MDInput
+                label="Deactive Date *"
+                type="text"
+                value={toDisplayDate(form.deactiveDate)}
+                readOnly
+                fullWidth
+                size="small"
+                required
+                error={!!errors.deactiveDate}
+                helperText={errors.deactiveDate}
+                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                onClick={() => openDatePicker(deactiveDateInputRef)}
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+              />
+            </MDBox>
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -597,6 +725,7 @@ export default function SharingFormula() {
         // Ensure all fields are present in PascalCase
         Id: record.Id || record.id,
         ApplicableDate: record.ApplicableDate || record.applicableDate,
+        DeactiveDate: record.DeactiveDate || record.deactiveDate,
         CmdId: record.CmdId || record.cmdId,
         BaseId: record.BaseId || record.baseId,
         ClassId: record.ClassId || record.classId,
@@ -660,26 +789,25 @@ export default function SharingFormula() {
     }
   };
 
-  // Format date for display
-  // Format date for display as dd-mmm-yyyy (e.g., 10-feb-2026)
+  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
   const formatDateDDMMMYYYY = (dateString) => {
     if (!dateString) return "";
     const raw = String(dateString).trim();
     if (!raw) return "";
 
     const monthShort = [
-      "jan",
-      "feb",
-      "mar",
-      "apr",
-      "may",
-      "jun",
-      "jul",
-      "aug",
-      "sep",
-      "oct",
-      "nov",
-      "dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     try {
@@ -714,7 +842,7 @@ export default function SharingFormula() {
   // Excel export cell formatter to format dates as dd-mmm-yyyy
   const exportCellFormatter = ({ value, column }) => {
     const colId = String(column?.id || "").toLowerCase();
-    if (colId === "applicabledate" || colId === "applicationdate") {
+    if (colId === "applicabledate" || colId === "applicationdate" || colId === "deactivedate") {
       return formatDateDDMMMYYYY(value);
     }
     return value;
@@ -816,6 +944,15 @@ export default function SharingFormula() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => {
         return formatDateDDMMMYYYY(value);
+      },
+    },
+    {
+      Header: "Deactive Date",
+      accessor: "deactiveDate",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => {
+        return formatDateDDMMMYYYY(value) || "-";
       },
     },
     {
@@ -1017,6 +1154,7 @@ export default function SharingFormula() {
       const cmdId = row.cmdId ?? row.CmdId;
       const baseId = row.baseId ?? row.BaseId;
       const applicableDate = row.ApplicableDate ?? row.applicableDate;
+      const deactiveDate = row.DeactiveDate ?? row.deactiveDate;
 
       const classItem = classes.find((c) => Number(c.id) === Number(classId));
       const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
@@ -1028,6 +1166,7 @@ export default function SharingFormula() {
         baseId: baseId,
         classId: classId,
         applicableDate: applicableDate,
+        deactiveDate: deactiveDate,
         // Support multiple field name formats from API
         baseShare: row.baseRate ?? row.BaseRate ?? row.baseShare,
         commandShare: row.racRate ?? row.RACRate ?? row.commandShare,
@@ -1057,6 +1196,7 @@ export default function SharingFormula() {
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           applicableDate: row.applicableDate,
+          deactiveDate: row.deactiveDate,
           cmdId: row.cmdId,
           baseId: row.baseId,
           cmdName: row.cmdName,
