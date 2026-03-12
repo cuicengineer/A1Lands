@@ -24,7 +24,7 @@ import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
 import MDSnackbar from "components/MDSnackbar";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
 import CurrencyLoading from "components/CurrencyLoading";
@@ -505,7 +505,7 @@ function RevenueRatesForm({
             </FormControl>
             {selectedProperty && !isBaseAll && (
               <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
-                Area: {selectedArea || "-"} · UoM: {selectedUoM || "-"}
+                Area: {selectedArea || "-"} UoM: {selectedUoM || "-"}
               </MDTypography>
             )}
           </Grid>
@@ -836,7 +836,12 @@ function RevenueRatesForm({
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={isUploading}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isUploading}>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isUploading || isOperatorUser()}
+        >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
       </DialogActions>
@@ -1074,6 +1079,7 @@ export default function RevenueRates() {
   };
 
   const handleDeleteAttachment = async (file) => {
+    if (isOperatorUser()) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -1288,7 +1294,7 @@ export default function RevenueRates() {
       },
     },
     {
-      Header: "Area · UoM",
+      Header: "Area  UoM",
       accessor: "areaUoM",
       align: "left",
       Cell: ({ row }) => {
@@ -1302,7 +1308,7 @@ export default function RevenueRates() {
         const areaStr = area ? Number(area).toLocaleString() : "";
         const uoMStr = uoM || "";
         if (!areaStr && !uoMStr) return "-";
-        return [areaStr, uoMStr].filter(Boolean).join(" · ");
+        return [areaStr, uoMStr].filter(Boolean).join("  ");
       },
     },
     {
@@ -1501,8 +1507,17 @@ export default function RevenueRates() {
                 pt={3}
                 position="relative"
                 sx={{
-                  // Match contracts.js table grid fonts/spacing/styling (compact + readable)
-                  overflowX: "auto",
+                  // Flex column so DataTable fills height; scroll is inside DataTable (sticky toolbar + header)
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -1546,6 +1561,7 @@ export default function RevenueRates() {
                     rows: computedRows,
                   }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
                     entries: [10, 25, 50, 100],
@@ -1696,6 +1712,7 @@ export default function RevenueRates() {
                         size="small"
                         color="error"
                         onClick={() => handleDeleteAttachment(file)}
+                        disabled={isOperatorUser()}
                         sx={{ ml: 1 }}
                       >
                         <Icon>delete</Icon>
@@ -1735,7 +1752,12 @@ export default function RevenueRates() {
           <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+          <MDButton
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="gradient"
+            disabled={isOperatorUser()}
+          >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

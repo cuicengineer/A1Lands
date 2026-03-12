@@ -34,6 +34,14 @@ function getAll(pageNumber = 1, pageSize = 50) {
   return requestWithPagination("GET", `/api/Contracts?${params}`);
 }
 
+// Get active contracts as of a specific date (yyyy-MM-dd) using the ActiveByAsOfDate endpoint
+function getActiveByAsOfDate(asOfDateYyyyMmDd) {
+  const params = new URLSearchParams({
+    asOfDate: asOfDateYyyyMmDd,
+  }).toString();
+  return requestWithPagination("GET", `/api/Contracts/ActiveByAsOfDate?${params}`);
+}
+
 // Backwards-compatible alias
 function list(pageNumber = 1, pageSize = 50) {
   return getAll(pageNumber, pageSize);
@@ -96,6 +104,7 @@ async function deleteContractRiseTerm(riseTermId) {
 
 const contractApi = {
   getAll,
+  getActiveByAsOfDate,
   list,
   searchByGrpName,
   create,

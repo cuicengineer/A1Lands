@@ -106,12 +106,21 @@ function redirectToLogin(reason) {
   }
 }
 
+// Lightweight cache for role to avoid repeated localStorage parse (RBAC checks)
+let _cachedAuthRaw = null;
+let _cachedRole = null;
+
 function getCurrentUserRole() {
   try {
     const raw = localStorage.getItem("auth");
-    if (!raw) return "";
+    if (raw === _cachedAuthRaw && _cachedRole !== null) return _cachedRole;
+    _cachedAuthRaw = raw;
+    if (!raw) {
+      _cachedRole = "";
+      return "";
+    }
     const obj = JSON.parse(raw);
-    return String(
+    _cachedRole = String(
       obj?.role ||
         obj?.Role ||
         obj?.roleName ||
@@ -122,13 +131,26 @@ function getCurrentUserRole() {
         obj?.UserRole ||
         ""
     ).trim();
+    return _cachedRole;
   } catch (e) {
+    _cachedAuthRaw = null;
+    _cachedRole = "";
     return "";
   }
 }
 
 function isOperatorUser() {
   return getCurrentUserRole().toLowerCase() === "operator";
+}
+
+// Invalidate role cache when auth changes (e.g. login/logout or another tab)
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e?.key === "auth") {
+      _cachedAuthRaw = null;
+      _cachedRole = null;
+    }
+  });
 }
 
 // Helper function to get logged-in username

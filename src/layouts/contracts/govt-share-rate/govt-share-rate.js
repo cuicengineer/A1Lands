@@ -24,7 +24,7 @@ import DataTable from "examples/Tables/DataTable";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
 import PropTypes from "prop-types";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import { format, parseISO, isValid } from "date-fns";
@@ -759,7 +759,12 @@ function GovtShareRateForm({
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={isUploading}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isUploading}>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isUploading || isOperatorUser()}
+        >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
       </DialogActions>
@@ -835,24 +840,31 @@ export default function GovtShareRate() {
       const response = await govtShareRateApi.getAll(page, size);
       const data = response?.data ?? (Array.isArray(response) ? response : []);
       const pagination = response?.pagination;
+      const total = Number(pagination?.totalCount || 0);
 
       setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(Number(pagination?.totalCount || 0));
+      setTotalCount(total);
 
-      // Also fetch all records for duplicate checking
-      try {
-        const allResponse = await govtShareRateApi.getAll(1, 10000);
-        const allData = allResponse?.data ?? (Array.isArray(allResponse) ? allResponse : []);
-        setAllRecords(Array.isArray(allData) ? allData : []);
-      } catch (error) {
-        console.error("Error fetching all govt share rates for duplicate check:", error);
-        // Fallback to current page data
+      // Use current page data for duplicate check when we have all records in one page; otherwise allRecords is filled when form opens
+      if (total > 0 && total <= size) {
         setAllRecords(Array.isArray(data) ? data : []);
+      } else {
+        setAllRecords([]);
       }
     } catch (error) {
       console.error("Error fetching govt share rates:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAllRecordsForForm = async () => {
+    try {
+      const allResponse = await govtShareRateApi.getAll(1, 10000);
+      const allData = allResponse?.data ?? (Array.isArray(allResponse) ? allResponse : []);
+      setAllRecords(Array.isArray(allData) ? allData : []);
+    } catch (error) {
+      console.error("Error fetching all govt share rates for duplicate check:", error);
     }
   };
 
@@ -893,14 +905,17 @@ export default function GovtShareRate() {
     fetchGovtShareRates(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
 
-  const handleOpenForm = () => {
+  const handleOpenForm = async () => {
     setCurrentRecord(null);
+    if (totalCount > allRecords.length) {
+      await fetchAllRecordsForForm();
+    }
     setOpenForm(true);
   };
 
   const handleCloseForm = () => setOpenForm(false);
 
-  const handleEditRecord = (id) => {
+  const handleEditRecord = async (id) => {
     // Handle both camelCase and PascalCase for id lookup
     const record = tableRows.find(
       (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
@@ -961,6 +976,9 @@ export default function GovtShareRate() {
       Status: status !== undefined ? Boolean(status) : true,
       status: status !== undefined ? Boolean(status) : true,
     });
+    if (totalCount > allRecords.length) {
+      await fetchAllRecordsForForm();
+    }
     setOpenForm(true);
   };
 
@@ -1004,6 +1022,7 @@ export default function GovtShareRate() {
   };
 
   const handleDeleteAttachment = async (file) => {
+    if (isOperatorUser()) return;
     const fileId = file?.id || file?.fileId;
     if (!fileId) {
       alert("File ID is not available. Cannot delete this file.");
@@ -1366,7 +1385,16 @@ export default function GovtShareRate() {
                 pt={3}
                 position="relative"
                 sx={{
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -1409,6 +1437,7 @@ export default function GovtShareRate() {
                     rows: computedRows,
                   }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
                     entries: [10, 25, 50, 100],
@@ -1524,7 +1553,7 @@ export default function GovtShareRate() {
         </DialogContent>
         <DialogActions>
           <MDButton onClick={handleCancelDelete}>Cancel</MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error">
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={isOperatorUser()}>
             Delete
           </MDButton>
         </DialogActions>
@@ -1550,13 +1579,8 @@ export default function GovtShareRate() {
                     variant="outlined"
                     color="info"
                     onClick={() => {
-                      const path = getAttachmentPath(f);
-                      if (!path) {
-                        alert("File path is not available for this attachment.");
-                        return;
-                      }
                       uploadApi
-                        .downloadFileByPath(path, f.fileName || `File-${idx + 1}`)
+                        .downloadFile(f, f.fileName || `File-${idx + 1}`)
                         .catch((e) => alert(`Download failed: ${e.message}`));
                     }}
                     sx={{ justifyContent: "flex-start", flex: 1 }}
@@ -1569,6 +1593,7 @@ export default function GovtShareRate() {
                     color="error"
                     onClick={() => handleDeleteAttachment(f)}
                     title="Delete Attachment"
+                    disabled={isOperatorUser()}
                     sx={{ border: "1px solid", borderColor: "error.main", borderRadius: 1 }}
                   >
                     <Icon>delete</Icon>

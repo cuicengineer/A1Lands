@@ -619,7 +619,12 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={isSubmitting}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isSubmitting}>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isSubmitting || isOperatorUser()}
+        >
           <Icon>save</Icon>&nbsp;{isSubmitting ? "Saving..." : "Save"}
         </MDButton>
       </DialogActions>
@@ -1322,7 +1327,16 @@ export default function SharingFormula() {
                 pt={3}
                 position="relative"
                 sx={{
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -1365,6 +1379,7 @@ export default function SharingFormula() {
                     rows: computedRows,
                   }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
                     entries: [10, 25, 50, 100],

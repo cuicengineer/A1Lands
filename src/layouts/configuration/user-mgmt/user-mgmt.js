@@ -1,5 +1,5 @@
 import Card from "@mui/material/Card";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -15,7 +15,7 @@ import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Select from "@mui/material/Select";
-import api from "../../../services/api.service";
+import api, { isOperatorUser } from "../../../services/api.service";
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
 import { useMaterialUIController } from "context";
@@ -51,6 +51,11 @@ function UserMgmt() {
       .toLowerCase();
     return name === "ahq";
   };
+
+  const isSuperuserAccount = (rowOrUser) =>
+    String(rowOrUser?.username ?? "")
+      .trim()
+      .toLowerCase() === "superuser";
 
   useEffect(() => {
     let mounted = true;
@@ -122,15 +127,11 @@ function UserMgmt() {
   };
 
   const handleEditUser = (id) => {
+    if (isOperatorUser()) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
-    if (
-      String(row.username || "")
-        .trim()
-        .toLowerCase() === "ahq"
-    )
-      return;
+    if (isSuperuserAccount(row)) return;
     setEditingRowId(id);
     // Store original row data - preserve all existing values including password placeholder
     setEditDraft({
@@ -168,6 +169,19 @@ function UserMgmt() {
     // Validate all required fields
     if (!draft?.username || !String(draft.username).trim()) {
       errs.username = "Username is required";
+    } else {
+      // Duplicate username not allowed (case-insensitive)
+      const usernameLower = String(draft.username).trim().toLowerCase();
+      const existing = tableRows.find(
+        (row) =>
+          String(row.username || "")
+            .trim()
+            .toLowerCase() === usernameLower &&
+          (mode !== "edit" || row.id !== editingRowId)
+      );
+      if (existing) {
+        errs.username = "Username already exists";
+      }
     }
     if (!draft?.pakNo || !String(draft.pakNo).trim()) {
       errs.pakNo = "PakNo is required";
@@ -216,7 +230,14 @@ function UserMgmt() {
     if (draft?.status === "" || draft?.status === null || draft?.status === undefined) {
       errs.status = "Status is required";
     }
-    setErrors(errs);
+    // Only update errors state when something changed to avoid unnecessary re-renders / update loops
+    setErrors((prev) => {
+      const prevKeys = Object.keys(prev).sort().join();
+      const nextKeys = Object.keys(errs).sort().join();
+      if (prevKeys !== nextKeys) return errs;
+      const same = Object.keys(errs).every((k) => prev[k] === errs[k]);
+      return same ? prev : errs;
+    });
 
     if (showAlert && errs.password) {
       // Requirement: show policy as alert when password is not valid
@@ -269,6 +290,7 @@ function UserMgmt() {
   };
 
   const handleAddSave = async () => {
+    if (isOperatorUser()) return;
     if (!validateForm(newRowDraft, true, "add")) return;
 
     setErrors({});
@@ -310,6 +332,9 @@ function UserMgmt() {
   };
 
   const handleEditSave = async () => {
+    if (isOperatorUser()) return;
+    const rowBeingEdited = tableRows.find((r) => r.id === editingRowId);
+    if (rowBeingEdited && isSuperuserAccount(rowBeingEdited)) return;
     if (!validateForm(editDraft, true, "edit")) return;
 
     setErrors({});
@@ -381,14 +406,9 @@ function UserMgmt() {
   };
 
   const handleDeleteUser = async (id) => {
+    if (isOperatorUser()) return;
     const row = tableRows.find((r) => r.id === id);
-    if (
-      row &&
-      String(row.username || "")
-        .trim()
-        .toLowerCase() === "ahq"
-    )
-      return;
+    if (row && isSuperuserAccount(row)) return;
     if (window.confirm(`Are you sure you want to delete user with Id ${id}?`)) {
       try {
         await api.remove("User", id);
@@ -764,16 +784,13 @@ function UserMgmt() {
     </MDInput>
   );
 
-  const computedRows = (() => {
+  const computedRows = useMemo(() => {
     const rows = [];
 
     tableRows.forEach((r) => {
       const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
-      const isSuperuser =
-        String(r.username || "")
-          .trim()
-          .toLowerCase() === "ahq";
+      const isSuperuser = isSuperuserAccount(r);
       rows.push({
         __disabledRow: isSuperuser,
         id: r.id,
@@ -859,7 +876,16 @@ function UserMgmt() {
     });
 
     return rows;
-  })();
+  }, [
+    tableRows,
+    editingRowId,
+    editDraft,
+    commandOptions,
+    baseOptions,
+    roleOptions,
+    errors,
+    darkMode,
+  ]);
 
   return (
     <DashboardLayout>
@@ -882,14 +908,32 @@ function UserMgmt() {
             <MDTypography variant="h6" color="white">
               User Management
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddUser}>
-              Add User
-            </MDButton>
+            {!isOperatorUser() && (
+              <MDButton variant="gradient" color="info" onClick={handleAddUser}>
+                Add User
+              </MDButton>
+            )}
           </MDBox>
-          <MDBox pt={3}>
+          <MDBox
+            pt={3}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             <MDBox
               sx={{
-                overflowX: "auto",
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
                 "& .MuiTable-root": {
                   tableLayout: "fixed",
                   width: "100%",
@@ -919,6 +963,7 @@ function UserMgmt() {
               <DataTable
                 table={{ columns, rows: computedRows }}
                 isSorted={false}
+                stickyToolbarAndHeader
                 canSearch
                 page={pageIndex}
                 pageSize={pageSize}

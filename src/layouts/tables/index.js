@@ -56,10 +56,25 @@ function Tables() {
                   Authors Table
                 </MDTypography>
               </MDBox>
-              <MDBox pt={3}>
+              <MDBox
+                pt={3}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
+                }}
+              >
                 <DataTable
                   table={{ columns, rows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={false}
                   showTotalEntries={false}
                   noEndBorder
@@ -83,10 +98,25 @@ function Tables() {
                   Projects Table
                 </MDTypography>
               </MDBox>
-              <MDBox pt={3}>
+              <MDBox
+                pt={3}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
+                }}
+              >
                 <DataTable
                   table={{ columns: pColumns, rows: pRows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={false}
                   showTotalEntries={false}
                   noEndBorder

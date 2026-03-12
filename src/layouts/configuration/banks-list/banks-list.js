@@ -483,7 +483,22 @@ function BanksList() {
               </MDButton>
             </MDBox>
           </MDBox>
-          <MDBox pt={3} position="relative">
+          <MDBox
+            pt={3}
+            position="relative"
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             {loading && (
               <MDBox
                 position="absolute"
@@ -547,6 +562,7 @@ function BanksList() {
               <DataTable
                 table={tableData}
                 isSorted={false}
+                stickyToolbarAndHeader
                 canSearch={true}
                 page={pageNumber - 1}
                 entriesPerPage={{

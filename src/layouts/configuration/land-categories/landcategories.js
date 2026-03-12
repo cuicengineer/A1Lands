@@ -12,6 +12,7 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
+import { isOperatorUser } from "services/api.service";
 
 function LandCategories() {
   const [controller] = useMaterialUIController();
@@ -220,10 +221,25 @@ function LandCategories() {
               Add Category
             </MDButton>
           </MDBox>
-          <MDBox pt={3}>
+          <MDBox
+            pt={3}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             <DataTable
               table={{ columns, rows: computedRows }}
               isSorted={false}
+              stickyToolbarAndHeader
               canSearch={true}
               entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}

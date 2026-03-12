@@ -66,10 +66,111 @@ async function deleteUploadedFile(fileId) {
   return await res.text();
 }
 
+/**
+ * Get file ID from attachment object (backend may use different property names).
+ */
+function getFileIdFromObject(file) {
+  if (!file || typeof file !== "object") return null;
+  const keys = [
+    "id",
+    "Id",
+    "fileId",
+    "FileId",
+    "uploadId",
+    "UploadId",
+    "attachmentId",
+    "AttachmentId",
+    "documentId",
+    "DocumentId",
+  ];
+  for (const k of keys) {
+    const v = file[k];
+    if (v != null && String(v).trim() !== "") return v;
+  }
+  return null;
+}
+
+/**
+ * Download a file by file ID (backend requires a valid file ID).
+ * Tries path-style URL first (same pattern as Delete: /api/Upload/{id}), then query param.
+ * @param {string|number} fileId - The attachment/file ID from the server
+ * @param {string} suggestedFileName - Suggested filename for the download
+ */
+async function downloadFileById(fileId, suggestedFileName) {
+  const id = fileId != null ? String(fileId).trim() : "";
+  if (!id) {
+    throw new Error("Valid file ID is required.");
+  }
+  // Backend requires a valid file ID. Try path-style then query (?fileId= then ?id=).
+  const pathUrl = `/api/Upload/Download/${encodeURIComponent(id)}`;
+  const queryFileIdUrl = `/api/Upload/Download?fileId=${encodeURIComponent(id)}`;
+  const queryIdUrl = `/api/Upload/Download?id=${encodeURIComponent(id)}`;
+  let res;
+  try {
+    res = await api.requestRaw("GET", pathUrl);
+  } catch (e1) {
+    try {
+      res = await api.requestRaw("GET", queryFileIdUrl);
+    } catch (e2) {
+      res = await api.requestRaw("GET", queryIdUrl);
+    }
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedFileName || "download";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Download a file by ID or by path. Prefers file ID when present (backend requires ID).
+ * @param {object} file - Attachment object with id/fileId/Id/FileId etc. and optionally path/Path/downloadUrl
+ * @param {string} suggestedFileName - Suggested filename for the download
+ */
+async function downloadFile(file, suggestedFileName) {
+  const fileId = getFileIdFromObject(file);
+  if (fileId != null && String(fileId).trim() !== "") {
+    return downloadFileById(fileId, suggestedFileName || file?.fileName || "download");
+  }
+  const path =
+    file?.Path ||
+    file?.path ||
+    file?.filePath ||
+    file?.downloadUrl ||
+    file?.fileUrl ||
+    file?.url ||
+    "";
+  if (!path || typeof path !== "string") {
+    throw new Error("File ID or file path is required for download.");
+  }
+  const trimmed = path.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    window.open(trimmed, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const encodedPath = encodeURIComponent(trimmed);
+  const res = await api.requestRaw("GET", `/api/Upload/Download?path=${encodedPath}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = suggestedFileName || file?.fileName || "download";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 const uploadApi = {
   uploadFiles,
   getUploadedFiles,
   deleteUploadedFile,
+  downloadFileById,
+  downloadFile,
 };
 
 export default uploadApi;

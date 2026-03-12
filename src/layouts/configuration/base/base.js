@@ -1,6 +1,6 @@
 import Card from "@mui/material/Card";
 import { useEffect, useState } from "react";
-import api from "../../../services/api.service";
+import api, { isOperatorUser } from "../../../services/api.service";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -329,10 +329,25 @@ function Base() {
               Add Base
             </MDButton>
           </MDBox>
-          <MDBox pt={3}>
+          <MDBox
+            pt={3}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             <DataTable
               table={{ columns, rows: computedRows }}
               isSorted={false}
+              stickyToolbarAndHeader
               canSearch={true}
               entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}

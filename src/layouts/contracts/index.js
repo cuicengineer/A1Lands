@@ -18,6 +18,7 @@ import NewContractForm from "layouts/contracts/components/NewContractForm";
 import { useState } from "react";
 import StatusBadge from "components/StatusBadge";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
+import { isOperatorUser } from "services/api.service";
 
 function Contracts() {
   const [openForm, setOpenForm] = useState(false);
@@ -238,10 +239,25 @@ function Contracts() {
                   Add New Contract
                 </MDButton>
               </MDBox>
-              <MDBox pt={3}>
+              <MDBox
+                pt={3}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
+                }}
+              >
                 <DataTable
                   table={{ columns, rows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={true}
                   showTotalEntries={true}
                   noEndBorder

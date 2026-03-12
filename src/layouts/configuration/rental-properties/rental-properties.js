@@ -26,7 +26,7 @@ import Autocomplete from "@mui/material/Autocomplete";
 import RentalPropertyForm from "./RentalPropertyForm";
 import rentalPropertiesApi from "services/api.rentalproperties.service";
 import uploadApi from "services/api.upload.service";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 
@@ -279,18 +279,9 @@ function RentalProperties() {
   };
 
   const handleDownloadAttachment = (file) => {
-    const downloadUrl =
-      file?.downloadUrl || file?.fileUrl || file?.url || file?.filePath || file?.path;
-    if (downloadUrl) {
-      const fullUrl = downloadUrl.startsWith("http")
-        ? downloadUrl
-        : `${process.env.REACT_APP_API_BASE_URL || ""}${
-            downloadUrl.startsWith("/") ? "" : "/"
-          }${downloadUrl}`;
-      window.open(fullUrl, "_blank");
-    } else {
-      alert("Download URL is not available for this file.");
-    }
+    uploadApi
+      .downloadFile(file, file?.fileName || file?.name || "download")
+      .catch((e) => alert(`Download failed: ${e.message}`));
   };
 
   const handleDeleteAttachment = async (file) => {
@@ -505,31 +496,25 @@ function RentalProperties() {
       Header: "Property",
       accessor: "pId",
       align: "left",
-      width: "8%",
+      width: "18%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
       },
     },
     {
-      Header: "UoM",
-      accessor: "uoM",
-      align: "left",
-      width: "7%",
-      Cell: ({ value, row }) => {
-        const rowData = row?.original || {};
-        return value ?? rowData?.uoM ?? rowData?.UoM ?? rowData?.uom ?? "-";
-      },
-    },
-    {
-      Header: "Area",
+      Header: "Area(UoM)",
       accessor: "area",
       align: "right",
-      width: "7%",
+      width: "18%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
-        return areaValue ? Number(areaValue).toLocaleString() : "-";
+        const uoM = rowData?.uoM ?? rowData?.UoM ?? rowData?.uom ?? "";
+        const formattedArea =
+          areaValue || areaValue === 0 ? Number(areaValue).toLocaleString() : "";
+        const combined = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim();
+        return combined || "-";
       },
     },
     { Header: "Location", accessor: "location", align: "left", width: "20%" },
@@ -546,7 +531,7 @@ function RentalProperties() {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
-      width: "8%",
+      width: "14%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -589,7 +574,7 @@ function RentalProperties() {
       Header: "Active Groups",
       accessor: "activeGroups",
       align: "center",
-      width: "10%",
+      width: "18%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -728,7 +713,22 @@ function RentalProperties() {
               Add Rental Property
             </MDButton>
           </MDBox>
-          <MDBox pt={3} position="relative">
+          <MDBox
+            pt={3}
+            position="relative"
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             {/* Loading Overlay */}
             {loading && (
               <MDBox
@@ -752,7 +752,9 @@ function RentalProperties() {
 
             <MDBox
               sx={{
-                overflowX: "auto",
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
                 "& .MuiTable-root": {
                   tableLayout: "fixed",
                   width: "100%",
@@ -810,6 +812,7 @@ function RentalProperties() {
                   rows: computedRows,
                 }}
                 isSorted={false}
+                stickyToolbarAndHeader
                 entriesPerPage={{
                   defaultValue: 20,
                   entries: [10, 25, 50, 100],
@@ -940,7 +943,7 @@ function RentalProperties() {
                         variant="outlined"
                         color="info"
                         onClick={() => handleDownloadAttachment(file)}
-                        disabled={!file.downloadUrl}
+                        disabled={!file.id && !file.fileId && !file.downloadUrl}
                       >
                         <Icon>download</Icon>&nbsp;Download
                       </MDButton>

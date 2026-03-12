@@ -63,6 +63,11 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const [openUserMenu, setOpenUserMenu] = useState(null);
   const [loggedInUser, setLoggedInUser] = useState({ username: "User", category: "N/A" });
 
+  const isSuperuser =
+    String(loggedInUser?.username ?? "")
+      .trim()
+      .toLowerCase() === "superuser";
+
   let textColor = "white";
 
   if (transparentSidenav || (whiteSidenav && !darkMode)) {
@@ -227,10 +232,15 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         );
 
         if (Array.isArray(collapse) && collapse.length > 0) {
+          // Hide "User Roles" from Configuration unless superuser is logged in
+          const collapseToRender =
+            key === "configuration"
+              ? collapse.filter((item) => item.key !== "configuration-user-role" || isSuperuser)
+              : collapse;
           return (
             <MDBox key={`${key}-wrapper`}>
               {item}
-              {isOpen && <MDBox ml={2}>{renderNestedRoutes(collapse)}</MDBox>}
+              {isOpen && <MDBox ml={2}>{renderNestedRoutes(collapseToRender)}</MDBox>}
             </MDBox>
           );
         }

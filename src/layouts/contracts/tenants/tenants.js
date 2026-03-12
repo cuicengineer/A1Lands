@@ -16,7 +16,7 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -487,7 +487,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         <MDButton variant="outlined" color="secondary" onClick={onClose}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave}>
+        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isOperatorUser()}>
           <Icon>save</Icon>&nbsp;Save
         </MDButton>
       </DialogActions>
@@ -741,8 +741,16 @@ export default function Tenants() {
               <MDBox
                 pt={3}
                 sx={{
-                  // Match contracts.js table grid fonts/spacing/styling (compact + readable)
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -762,6 +770,7 @@ export default function Tenants() {
                 <DataTable
                   table={{ columns, rows: computedRows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={true}
                   showTotalEntries={true}
                   noEndBorder
@@ -791,7 +800,12 @@ export default function Tenants() {
           <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+          <MDButton
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="gradient"
+            disabled={isOperatorUser()}
+          >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

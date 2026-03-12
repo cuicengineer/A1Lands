@@ -24,7 +24,7 @@ import DataTable from "examples/Tables/DataTable";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
 import PropTypes from "prop-types";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
 import { format, parseISO, isValid } from "date-fns";
@@ -706,7 +706,12 @@ function RentalValueRateForm({
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={isUploading}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isUploading}>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isUploading || isOperatorUser()}
+        >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
       </DialogActions>
@@ -921,6 +926,7 @@ export default function RentalValueRate() {
   };
 
   const handleDeleteAttachment = async (file) => {
+    if (isOperatorUser()) return;
     const fileId = file?.id || file?.fileId;
     if (!fileId) {
       alert("File ID is not available. Cannot delete this file.");
@@ -1263,7 +1269,16 @@ export default function RentalValueRate() {
                 pt={3}
                 position="relative"
                 sx={{
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -1306,6 +1321,7 @@ export default function RentalValueRate() {
                     rows: computedRows,
                   }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
                     entries: [10, 25, 50, 100],
@@ -1420,7 +1436,7 @@ export default function RentalValueRate() {
         </DialogContent>
         <DialogActions>
           <MDButton onClick={handleCancelDelete}>Cancel</MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error">
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={isOperatorUser()}>
             Delete
           </MDButton>
         </DialogActions>
@@ -1446,13 +1462,8 @@ export default function RentalValueRate() {
                     variant="outlined"
                     color="info"
                     onClick={() => {
-                      const path = getAttachmentPath(f);
-                      if (!path) {
-                        alert("File path is not available for this attachment.");
-                        return;
-                      }
                       uploadApi
-                        .downloadFileByPath(path, f.fileName || `File-${idx + 1}`)
+                        .downloadFile(f, f.fileName || `File-${idx + 1}`)
                         .catch((e) => alert(`Download failed: ${e.message}`));
                     }}
                     sx={{ justifyContent: "flex-start", flex: 1 }}
@@ -1465,6 +1476,7 @@ export default function RentalValueRate() {
                     color="error"
                     onClick={() => handleDeleteAttachment(f)}
                     title="Delete Attachment"
+                    disabled={isOperatorUser()}
                     sx={{ border: "1px solid", borderColor: "error.main", borderRadius: 1 }}
                   >
                     <Icon>delete</Icon>

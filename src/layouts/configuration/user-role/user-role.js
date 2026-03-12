@@ -3,6 +3,7 @@ import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -12,13 +13,15 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api from "../../../services/api.service";
+import api, { isOperatorUser } from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
 function UserRole() {
+  const navigate = useNavigate();
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
+  const [isSuperuserAllowed, setIsSuperuserAllowed] = useState(null);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
@@ -59,6 +62,30 @@ function UserRole() {
   useEffect(() => {
     fetchRoles();
   }, []);
+
+  // Only superuser can access this page; redirect others
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("auth");
+      if (!raw) {
+        setIsSuperuserAllowed(false);
+        return;
+      }
+      const obj = JSON.parse(raw);
+      const username = String(
+        obj?.username || obj?.Username || obj?.userName || obj?.unique_name || ""
+      ).trim();
+      setIsSuperuserAllowed(username.toLowerCase() === "superuser");
+    } catch (e) {
+      setIsSuperuserAllowed(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSuperuserAllowed === false) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [isSuperuserAllowed, navigate]);
 
   const handleAddUser = () => {
     if (editingRowId) return;
@@ -354,6 +381,10 @@ function UserRole() {
     return rows;
   })();
 
+  if (isSuperuserAllowed !== true) {
+    return null;
+  }
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
@@ -379,10 +410,26 @@ function UserRole() {
               Add Roles
             </MDButton>
           </MDBox>
-          <MDBox pt={3}>
+          <MDBox
+            pt={3}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             <MDBox
               sx={{
-                overflowX: "auto",
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
                 "& .MuiTable-root": {
                   tableLayout: "auto",
                   width: "auto",
@@ -435,6 +482,7 @@ function UserRole() {
               <DataTable
                 table={{ columns, rows: computedRows }}
                 isSorted={false}
+                stickyToolbarAndHeader
                 canSearch
                 page={pageIndex}
                 pageSize={pageSize}

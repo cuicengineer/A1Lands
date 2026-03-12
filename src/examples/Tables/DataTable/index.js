@@ -57,6 +57,7 @@ import { useMaterialUIController } from "context";
 // Material Dashboard 2 React example components
 import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
+import { isOperatorUser } from "services/api.service";
 
 function extractText(value) {
   if (value === null || value === undefined) return "";
@@ -210,7 +211,7 @@ function ColumnValueFilter({ column }) {
             // Reduce filter icon size (~50%) for all grid columns
             fontSize: "12px",
             padding: "1px",
-            color: hasActiveFilter ? "#1A73E8" : darkMode ? "#ffffff" : "#111111",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
           <Icon fontSize="inherit">filter_alt</Icon>
@@ -351,39 +352,21 @@ function DataTable({
   exportExcludeGroupParentsWhenExpanded,
   exportAllColumns,
   initialHiddenColumns,
+  stickyToolbarAndHeader,
+  stickyBodyMinHeight,
+  stickyBodyMaxHeight,
+  contentFitTable,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   // Ref to store pagination info for S.No column calculation
   const pageInfoRef = useRef({ pageIndex: 0, pageSize: 20 });
-  const defaultValue = entriesPerPage.defaultValue ? entriesPerPage.defaultValue : 20;
-  const entries = entriesPerPage.entries
-    ? entriesPerPage.entries.map((el) => el.toString())
+  const entriesPerPageConfig =
+    entriesPerPage && typeof entriesPerPage === "object" ? entriesPerPage : {};
+  const defaultValue = entriesPerPageConfig.defaultValue ? entriesPerPageConfig.defaultValue : 20;
+  const entries = entriesPerPageConfig.entries
+    ? entriesPerPageConfig.entries.map((el) => el.toString())
     : ["5", "10", "15", "20", "25"];
-  const isOperatorUser = () => {
-    try {
-      const raw = localStorage.getItem("auth");
-      if (!raw) return false;
-      const obj = JSON.parse(raw);
-      const role = String(
-        obj?.role ||
-          obj?.Role ||
-          obj?.roleName ||
-          obj?.RoleName ||
-          obj?.category ||
-          obj?.Category ||
-          obj?.userRole ||
-          obj?.UserRole ||
-          ""
-      )
-        .trim()
-        .toLowerCase();
-      return role === "operator";
-    } catch (e) {
-      return false;
-    }
-  };
-
   const baseColumns = useMemo(() => table.columns, [table]);
 
   // Function to check if a column is Actions column
@@ -531,7 +514,7 @@ function DataTable({
     isControlled && onEntriesPerPageChange
       ? controlledPageSize !== undefined && controlledPageSize !== null
         ? controlledPageSize
-        : entriesPerPage.defaultValue || defaultValue || 20
+        : entriesPerPageConfig.defaultValue || defaultValue || 20
       : internalPageSize;
 
   const tableInstance = useTable(
@@ -908,38 +891,45 @@ function DataTable({
     entriesEnd = pageSize * (pageIndex + 1);
   }
 
+  const tableContainerSx = {
+    boxShadow: "none",
+    overflowX: "scroll",
+    overflowY: "scroll",
+    // Firefox - transparent track
+    scrollbarWidth: "thin",
+    scrollbarColor: "#333333 transparent",
+    // Chrome/Safari/Edge - transparent track, visible thumb only
+    "&::-webkit-scrollbar": {
+      width: "8px",
+      height: "8px",
+    },
+    "&::-webkit-scrollbar-track": {
+      backgroundColor: "transparent",
+    },
+    "&::-webkit-scrollbar-thumb": {
+      backgroundColor: "#333333",
+      borderRadius: "10px",
+      border: "none",
+      "&:hover": {
+        backgroundColor: "#1a1a1a",
+      },
+    },
+    "&::-webkit-scrollbar-button": {
+      display: "none",
+      width: 0,
+      height: 0,
+    },
+  };
+
+  if (stickyToolbarAndHeader) {
+    tableContainerSx.display = "flex";
+    tableContainerSx.flexDirection = "column";
+    tableContainerSx.height = "100%";
+    tableContainerSx.overflow = "hidden";
+  }
+
   return (
-    <TableContainer
-      sx={{
-        boxShadow: "none",
-        overflowX: "auto",
-        overflowY: "auto",
-        // Firefox - transparent track
-        scrollbarWidth: "thin",
-        scrollbarColor: "#333333 transparent",
-        // Chrome/Safari/Edge - transparent track, visible thumb only
-        "&::-webkit-scrollbar": {
-          width: "8px",
-          height: "8px",
-        },
-        "&::-webkit-scrollbar-track": {
-          backgroundColor: "transparent",
-        },
-        "&::-webkit-scrollbar-thumb": {
-          backgroundColor: "#333333",
-          borderRadius: "10px",
-          border: "none",
-          "&:hover": {
-            backgroundColor: "#1a1a1a",
-          },
-        },
-        "&::-webkit-scrollbar-button": {
-          display: "none",
-          width: 0,
-          height: 0,
-        },
-      }}
-    >
+    <TableContainer sx={tableContainerSx}>
       {/* Top toolbar should always be visible so Columns + Export are available on every grid */}
       {true ? (
         <MDBox display="flex" justifyContent="space-between" alignItems="center" p={3} gap={2}>
@@ -1208,93 +1198,218 @@ function DataTable({
           );
         })}
       </Menu>
-      <Table
-        {...getTableProps()}
-        sx={{
-          tableLayout: "fixed",
-          whiteSpace: "nowrap",
-          "& th": { padding: "4px 8px", fontSize: "14px !important" },
-          "& td": { padding: "4px 8px", fontSize: "0.875rem" },
-        }}
-      >
-        <MDBox component="thead">
-          {headerGroups.map((headerGroup, key) => (
-            <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
-              {headerGroup.headers.map((column, idx) => (
-                <DataTableHeadCell
-                  key={idx}
-                  {...column.getHeaderProps(column.getSortByToggleProps())}
-                  width={column.width ? column.width : "auto"}
-                  align={column.align ? column.align : "left"}
-                  sorted={setSortedValue(column)}
-                  filterNode={
-                    isFilterableColumn(column) ? <ColumnValueFilter column={column} /> : null
-                  }
-                  draggable
-                  onDragStart={() => {
-                    dragColumnIdRef.current = column.id;
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    moveColumn(dragColumnIdRef.current, column.id);
-                    dragColumnIdRef.current = null;
+      {stickyToolbarAndHeader ? (
+        <MDBox
+          sx={{
+            flex: "1 1 0",
+            minHeight: stickyBodyMinHeight || "300px",
+            maxHeight: stickyBodyMaxHeight || "none",
+            overflowX: "scroll",
+            overflowY: "scroll",
+            scrollbarGutter: "stable both-edges",
+            scrollbarWidth: "thin",
+            scrollbarColor: "#333333 transparent",
+            "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+            "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: "#333333",
+              borderRadius: "10px",
+              "&:hover": { backgroundColor: "#1a1a1a" },
+            },
+            "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+          }}
+        >
+          <Table
+            {...getTableProps()}
+            sx={{
+              tableLayout: contentFitTable ? "auto" : "fixed",
+              minWidth: contentFitTable ? "max-content" : "100%",
+              width: contentFitTable ? "max-content" : "100%",
+              whiteSpace: "nowrap",
+              "& th": { padding: "4px 8px", fontSize: "14px !important" },
+              "& td": { padding: "4px 8px", fontSize: "0.875rem" },
+              "& thead": {
+                position: "sticky",
+                top: 0,
+                zIndex: 2,
+                backgroundColor: "#fff",
+                boxShadow: "0 1px 0 0 #d0d0d0",
+              },
+              "& thead th": {
+                backgroundColor: "#fff",
+              },
+            }}
+          >
+            <MDBox component="thead">
+              {headerGroups.map((headerGroup, key) => (
+                <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
+                  {headerGroup.headers.map((column, idx) => (
+                    <DataTableHeadCell
+                      key={idx}
+                      {...column.getHeaderProps(column.getSortByToggleProps())}
+                      width={column.width ? column.width : "auto"}
+                      align={column.align ? column.align : "left"}
+                      sorted={setSortedValue(column)}
+                      filterNode={
+                        isFilterableColumn(column) ? <ColumnValueFilter column={column} /> : null
+                      }
+                      draggable
+                      onDragStart={() => {
+                        dragColumnIdRef.current = column.id;
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        moveColumn(dragColumnIdRef.current, column.id);
+                        dragColumnIdRef.current = null;
+                      }}
+                    >
+                      {typeof column.Header === "string" && column.Header === "Actions"
+                        ? "Action"
+                        : column.render("Header")}
+                    </DataTableHeadCell>
+                  ))}
+                </TableRow>
+              ))}
+            </MDBox>
+            <TableBody {...getTableBodyProps()}>
+              {page.map((row, key) => {
+                prepareRow(row);
+                // Check for custom row styling
+                // eslint-disable-next-line react/prop-types
+                const customRowStyle = row?.original?.__rowStyle || {};
+                // eslint-disable-next-line react/prop-types
+                const customRowClassName = row?.original?.__rowClassName || "";
+                const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
+                const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
+
+                return (
+                  <TableRow
+                    key={key}
+                    // eslint-disable-next-line react/prop-types
+                    {...row.getRowProps()}
+                    className={customRowClassName}
+                    sx={{
+                      backgroundColor: rowBgColor,
+                      ...customRowStyle,
+                    }}
+                  >
+                    {/* eslint-disable-next-line react/prop-types */}
+                    {row.cells.map((cell, idx) => {
+                      const isEvenRow = key % 2 === 0;
+                      // eslint-disable-next-line react/prop-types
+                      const isDisabledRow = Boolean(row?.original?.__disabledRow);
+                      return (
+                        <DataTableBodyCell
+                          key={idx}
+                          noBorder={noEndBorder && rows.length - 1 === key}
+                          align={cell.column.align ? cell.column.align : "left"}
+                          isEvenRow={isEvenRow}
+                          disabledRow={isDisabledRow}
+                          {...cell.getCellProps()}
+                        >
+                          {cell.render("Cell")}
+                        </DataTableBodyCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </MDBox>
+      ) : (
+        <Table
+          {...getTableProps()}
+          sx={{
+            tableLayout: contentFitTable ? "auto" : "fixed",
+            minWidth: contentFitTable ? "max-content" : "100%",
+            width: contentFitTable ? "max-content" : "100%",
+            whiteSpace: "nowrap",
+            "& th": { padding: "4px 8px", fontSize: "14px !important" },
+            "& td": { padding: "4px 8px", fontSize: "0.875rem" },
+          }}
+        >
+          <MDBox component="thead">
+            {headerGroups.map((headerGroup, key) => (
+              <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
+                {headerGroup.headers.map((column, idx) => (
+                  <DataTableHeadCell
+                    key={idx}
+                    {...column.getHeaderProps(column.getSortByToggleProps())}
+                    width={column.width ? column.width : "auto"}
+                    align={column.align ? column.align : "left"}
+                    sorted={setSortedValue(column)}
+                    filterNode={
+                      isFilterableColumn(column) ? <ColumnValueFilter column={column} /> : null
+                    }
+                    draggable
+                    onDragStart={() => {
+                      dragColumnIdRef.current = column.id;
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      moveColumn(dragColumnIdRef.current, column.id);
+                      dragColumnIdRef.current = null;
+                    }}
+                  >
+                    {typeof column.Header === "string" && column.Header === "Actions"
+                      ? "Action"
+                      : column.render("Header")}
+                  </DataTableHeadCell>
+                ))}
+              </TableRow>
+            ))}
+          </MDBox>
+          <TableBody {...getTableBodyProps()}>
+            {page.map((row, key) => {
+              prepareRow(row);
+              // eslint-disable-next-line react/prop-types
+              const customRowStyle = row?.original?.__rowStyle || {};
+              // eslint-disable-next-line react/prop-types
+              const customRowClassName = row?.original?.__rowClassName || "";
+              const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
+              const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
+              return (
+                <TableRow
+                  key={key}
+                  // eslint-disable-next-line react/prop-types
+                  {...row.getRowProps()}
+                  className={customRowClassName}
+                  sx={{
+                    backgroundColor: rowBgColor,
+                    ...customRowStyle,
                   }}
                 >
-                  {typeof column.Header === "string" && column.Header === "Actions"
-                    ? "Action"
-                    : column.render("Header")}
-                </DataTableHeadCell>
-              ))}
-            </TableRow>
-          ))}
-        </MDBox>
-        <TableBody {...getTableBodyProps()}>
-          {page.map((row, key) => {
-            prepareRow(row);
-            // Check for custom row styling
-            // eslint-disable-next-line react/prop-types
-            const customRowStyle = row?.original?.__rowStyle || {};
-            // eslint-disable-next-line react/prop-types
-            const customRowClassName = row?.original?.__rowClassName || "";
-            const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
-            const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
-
-            return (
-              <TableRow
-                key={key}
-                // eslint-disable-next-line react/prop-types
-                {...row.getRowProps()}
-                className={customRowClassName}
-                sx={{
-                  backgroundColor: rowBgColor,
-                  ...customRowStyle,
-                }}
-              >
-                {/* eslint-disable-next-line react/prop-types */}
-                {row.cells.map((cell, idx) => {
-                  const isEvenRow = key % 2 === 0;
-                  // eslint-disable-next-line react/prop-types
-                  const isDisabledRow = Boolean(row?.original?.__disabledRow);
-                  return (
-                    <DataTableBodyCell
-                      key={idx}
-                      noBorder={noEndBorder && rows.length - 1 === key}
-                      align={cell.column.align ? cell.column.align : "left"}
-                      disabledRow={isDisabledRow}
-                      {...cell.getCellProps()}
-                    >
-                      {cell.render("Cell")}
-                    </DataTableBodyCell>
-                  );
-                })}
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+                  {/* eslint-disable-next-line react/prop-types */}
+                  {row.cells.map((cell, idx) => {
+                    const isEvenRow = key % 2 === 0;
+                    // eslint-disable-next-line react/prop-types
+                    const isDisabledRow = Boolean(row?.original?.__disabledRow);
+                    return (
+                      <DataTableBodyCell
+                        key={idx}
+                        noBorder={noEndBorder && rows.length - 1 === key}
+                        align={cell.column.align ? cell.column.align : "left"}
+                        isEvenRow={isEvenRow}
+                        disabledRow={isDisabledRow}
+                        {...cell.getCellProps()}
+                      >
+                        {cell.render("Cell")}
+                      </DataTableBodyCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
 
       <MDBox
         display="flex"
@@ -1354,6 +1469,10 @@ DataTable.defaultProps = {
   pagination: { variant: "gradient", color: "info" },
   isSorted: true,
   noEndBorder: false,
+  stickyToolbarAndHeader: false,
+  stickyBodyMinHeight: undefined,
+  stickyBodyMaxHeight: undefined,
+  contentFitTable: false,
 };
 
 // Typechecking props for the DataTable
@@ -1392,6 +1511,10 @@ DataTable.propTypes = {
   exportExcludeGroupParentsWhenExpanded: PropTypes.bool,
   exportAllColumns: PropTypes.bool,
   initialHiddenColumns: PropTypes.arrayOf(PropTypes.string),
+  stickyToolbarAndHeader: PropTypes.bool,
+  stickyBodyMinHeight: PropTypes.string,
+  stickyBodyMaxHeight: PropTypes.string,
+  contentFitTable: PropTypes.bool,
 };
 
 export default DataTable;

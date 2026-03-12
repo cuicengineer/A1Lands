@@ -32,6 +32,10 @@ function DataTableBodyCell({ noBorder, align, children, isEvenRow, disabledRow }
         backgroundColor: disabledRow ? "#e6e6e6" : isEvenRow ? "#f0f0f0" : "#ffffff",
         // Force readable row text even when dark theme is enabled
         color: disabledRow ? "#777777 !important" : "#111111 !important",
+        "& .MuiTypography-root, & .MuiInputBase-input, & .MuiInputLabel-root, & .MuiFormHelperText-root, & .MuiSelect-select, & .MuiChip-label":
+          {
+            color: disabledRow ? "#777777 !important" : "#111111 !important",
+          },
         // Allow multi-line cells and prevent overflow into adjacent columns
         whiteSpace: "normal",
         overflowWrap: "anywhere",

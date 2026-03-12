@@ -27,7 +27,7 @@ import { useMaterialUIController } from "context";
 
 function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest }) {
   const [controller] = useMaterialUIController();
-  const { darkMode } = controller;
+  const headerTextColor = "#111111 !important";
   const hasFilterNode = Boolean(filterNode);
   return (
     <MDBox
@@ -43,13 +43,17 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
         overflowWrap: "anywhere",
         wordBreak: "break-word",
         verticalAlign: "top",
+        color: headerTextColor,
+        "& *": {
+          color: headerTextColor,
+        },
       })}
     >
       <MDBox
         {...rest}
         position="relative"
         textAlign={align}
-        color={darkMode ? "#ffffff !important" : "#111111 !important"}
+        color={headerTextColor}
         opacity={1}
         sx={({ typography: { size, fontWeightBold } }) => ({
           fontSize: "14px !important",
@@ -65,14 +69,14 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
           justifyContent:
             align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start",
           gap: "4px",
-          color: darkMode ? "#ffffff !important" : "#111111 !important",
+          color: headerTextColor,
         })}
       >
         <MDBox
           sx={{
             display: "inline-block",
             whiteSpace: "nowrap",
-            color: darkMode ? "#ffffff !important" : "inherit",
+            color: headerTextColor,
           }}
         >
           {children}
@@ -103,7 +107,7 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
             <MDBox
               position="absolute"
               top={-6}
-              color={sorted === "asce" ? "text" : "secondary"}
+              color={sorted === "asce" ? "#111111" : "#6c757d"}
               opacity={sorted === "asce" ? 1 : 0.5}
             >
               <Icon>arrow_drop_up</Icon>
@@ -111,7 +115,7 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
             <MDBox
               position="absolute"
               top={0}
-              color={sorted === "desc" ? "text" : "secondary"}
+              color={sorted === "desc" ? "#111111" : "#6c757d"}
               opacity={sorted === "desc" ? 1 : 0.5}
             >
               <Icon>arrow_drop_down</Icon>

@@ -33,7 +33,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Paper from "@mui/material/Paper";
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
 import revenueRatesApi from "services/api.revenuerates.service";
@@ -1635,7 +1635,12 @@ function PropertyGroupingForm({
           <MDButton variant="outlined" color="secondary" onClick={onClose}>
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton variant="gradient" color="info" onClick={handleSave}>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleSave}
+            disabled={isOperatorUser()}
+          >
             <Icon>save</Icon>&nbsp;Save
           </MDButton>
         </DialogActions>
@@ -2284,17 +2289,32 @@ export default function PropertyGrouping() {
     { Header: "RAC", accessor: "cmdName", align: "left", width: "12%" },
     { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
     { Header: "Class", accessor: "className", align: "left", width: "12%" },
-    { Header: "Group ID", accessor: "gId", align: "left", width: "8%" },
-    { Header: "Rate", accessor: "rate", align: "right", width: "7%" },
-    { Header: "Area", accessor: "area", align: "right", width: "7%" },
-    { Header: "UoM", accessor: "uoM", align: "left", width: "7%" },
+    { Header: "Group ID", accessor: "gId", align: "left", width: "12%" },
+    { Header: "Rate", accessor: "rate", align: "right", width: "15%" },
+    {
+      Header: "Area (UoM)",
+      accessor: "area",
+      align: "right",
+      width: "15%",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        const areaValue = value ?? rowData.area ?? rowData.Area ?? "";
+        const uoM = rowData.uoM ?? rowData.UoM ?? rowData.uom ?? "";
+        const formattedArea =
+          areaValue || areaValue === 0 ? Number(areaValue).toLocaleString() : "";
+        const combined = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim();
+        return combined || "-";
+      },
+    },
     { Header: "Location", accessor: "location", align: "left", width: "13%" },
     { Header: "Remarks", accessor: "remarks", align: "left" },
     {
       Header: "Status",
       accessor: "status",
       align: "center",
-      width: "8%",
+      width: "10%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
@@ -2302,7 +2322,7 @@ export default function PropertyGrouping() {
       Header: "Link Prop",
       accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
-      width: "10%",
+      width: "12%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2325,10 +2345,10 @@ export default function PropertyGrouping() {
       },
     },
     {
-      Header: "Active Contracts",
+      Header: "Contracts",
       accessor: "activeContracts",
       align: "center",
-      width: "10%",
+      width: "12%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2759,7 +2779,16 @@ export default function PropertyGrouping() {
                 pt={3}
                 position="relative"
                 sx={{
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -2786,21 +2815,30 @@ export default function PropertyGrouping() {
                     wordBreak: "break-word !important",
                     overflowWrap: "anywhere !important",
                   },
+                  // Base header styling – keep short headers on one line
                   "& .MuiTable-root th": {
                     fontSize: "1.05rem !important",
                     fontWeight: "700 !important",
                     padding: "10px 10px !important",
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
+                  },
+                  // Allow only long-text headers to wrap if needed (Location, Remarks)
+                  "& .MuiTable-root th:nth-of-type(10), & .MuiTable-root th:nth-of-type(11)": {
                     whiteSpace: "normal !important",
-                    overflowWrap: "anywhere",
-                    wordBreak: "break-word",
+                    wordBreak: "break-word !important",
+                    overflowWrap: "break-word !important",
                   },
                   "& .MuiTable-root td": {
                     padding: "8px 10px !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
+                  },
+                  // Let only Location and Remarks cell content wrap to multiple lines
+                  "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
                     whiteSpace: "normal !important",
-                    overflowWrap: "anywhere",
-                    wordBreak: "break-word",
+                    wordBreak: "break-word !important",
+                    overflowWrap: "break-word !important",
                   },
                   // Tighten spacing for numeric-ish columns (ID, Group ID, Area)
                   // 2 = ID, 6 = Group ID, 8 = Area
@@ -2809,25 +2847,13 @@ export default function PropertyGrouping() {
                       paddingLeft: "6px !important",
                       paddingRight: "6px !important",
                     },
-                  // ID column: keep integers on a single line (avoid 1006 -> 100 + 6)
+                  // ID column: fixed, single-line numeric
                   "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
                     whiteSpace: "nowrap !important",
-                    wordBreak: "normal !important",
-                    overflowWrap: "normal !important",
                     width: "56px !important",
                     minWidth: "56px !important",
                     maxWidth: "56px !important",
                     textAlign: "center !important",
-                  },
-                  "& .MuiTable-root td:nth-of-type(2) > div": {
-                    whiteSpace: "nowrap !important",
-                    wordBreak: "normal !important",
-                    overflowWrap: "normal !important",
-                  },
-                  "& .MuiTable-root td:nth-of-type(2) > div > *": {
-                    whiteSpace: "nowrap !important",
-                    wordBreak: "normal !important",
-                    overflowWrap: "normal !important",
                   },
                 }}
               >
@@ -2854,6 +2880,7 @@ export default function PropertyGrouping() {
                 <DataTable
                   table={{ columns, rows: computedRows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
                     entries: [10, 25, 50, 100],
@@ -2948,7 +2975,12 @@ export default function PropertyGrouping() {
           <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+          <MDButton
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="gradient"
+            disabled={isOperatorUser()}
+          >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

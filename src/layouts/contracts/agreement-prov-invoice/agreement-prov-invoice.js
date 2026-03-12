@@ -451,50 +451,8 @@ export default function AgreementProvInvoice() {
       yPos += 5;
       doc.text("Bank = Allied Bank E-9, PAF Complex Islamabad", rightX, yPos);
 
-      // Middle Section - Terms of Contract Agreement
-      yPos = 70;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("Terms of Contract Agreement======>=======>", margin, yPos);
+      // Bottom Section - Itemized Charges Table (move up to remove blank space)
       yPos += 10;
-
-      // Left Column
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const leftColX = margin;
-      doc.text(`Formation: ${baseName || cmdName || ""}`, leftColX, yPos);
-      yPos += 5;
-      doc.text(`CSD: ${formatDate(contractStartDate)}`, leftColX, yPos);
-      yPos += 5;
-      doc.text(`Business-CMO: ${businessName}`, leftColX, yPos);
-      yPos += 5;
-      doc.text(`CED: ${formatDate(contractEndDate)}`, leftColX, yPos);
-
-      // Right Column
-      yPos = 80;
-      const rightColX = pageWidth / 2 + 20;
-      doc.text(`Initial Rent-M: ${formatCurrency(initialRentPM)}`, rightColX, yPos);
-      yPos += 5;
-      doc.text(`Role-Type: Host`, rightColX, yPos);
-      yPos += 5;
-      doc.text(`Class: ${className || ""}`, rightColX, yPos);
-      yPos += 5;
-      const payTerm = paymentTermMonths ? `${paymentTermMonths}M-Start` : "";
-      doc.text(`Pay Term: ${payTerm}`, rightColX, yPos);
-      yPos += 5;
-      const incInterval = riseDate
-        ? formatDate(riseDate)
-        : increaseIntervalMonths
-        ? `${increaseIntervalMonths}M`
-        : "";
-      doc.text(`Inc-Interval: ${incInterval}`, rightColX, yPos);
-      yPos += 5;
-      doc.text(`UoM: ${uoM}`, rightColX, yPos);
-      yPos += 5;
-      doc.text(`DPC(%): 0.02`, rightColX, yPos);
-
-      // Bottom Section - Itemized Charges Table
-      yPos = 130;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
       doc.text("Item", margin, yPos);
@@ -892,32 +850,76 @@ export default function AgreementProvInvoice() {
                   </Grid>
 
                   <Grid item xs={12} sm={6} md={2.4}>
-                    <MDInput
-                      label="Date From"
-                      type="date"
-                      value={filters.dateFrom}
-                      onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
-                      fullWidth
-                      size="small"
-                      InputLabelProps={{ shrink: true }}
-                      sx={inputSx}
-                    />
+                    <MDBox position="relative" sx={{ width: "100%" }}>
+                      <MDInput
+                        label="Date From"
+                        type="date"
+                        value={filters.dateFrom}
+                        onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
+                        fullWidth
+                        size="small"
+                        InputLabelProps={{ shrink: true }}
+                        sx={inputSx}
+                      />
+                      <MDBox
+                        pointerEvents="none"
+                        sx={{
+                          position: "absolute",
+                          left: 12,
+                          right: 32,
+                          top: 12,
+                          bottom: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          color: "text.primary",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        <MDTypography variant="button">
+                          {filters.dateFrom ? formatDateDDMMMYYYY(filters.dateFrom) : ""}
+                        </MDTypography>
+                      </MDBox>
+                    </MDBox>
                   </Grid>
 
                   <Grid item xs={12} sm={6} md={2.4}>
-                    <MDInput
-                      label="Date To"
-                      type="date"
-                      value={filters.dateTo}
-                      onChange={(e) => handleFilterChange("dateTo", e.target.value)}
-                      fullWidth
-                      size="small"
-                      InputLabelProps={{ shrink: true }}
-                      inputProps={{
-                        min: filters.dateFrom || undefined,
-                      }}
-                      sx={inputSx}
-                    />
+                    <MDBox position="relative" sx={{ width: "100%" }}>
+                      <MDInput
+                        label="Date To"
+                        type="date"
+                        value={filters.dateTo}
+                        onChange={(e) => handleFilterChange("dateTo", e.target.value)}
+                        fullWidth
+                        size="small"
+                        InputLabelProps={{ shrink: true }}
+                        inputProps={{
+                          min: filters.dateFrom || undefined,
+                        }}
+                        sx={inputSx}
+                      />
+                      <MDBox
+                        pointerEvents="none"
+                        sx={{
+                          position: "absolute",
+                          left: 12,
+                          right: 32,
+                          top: 12,
+                          bottom: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          color: "text.primary",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        <MDTypography variant="button">
+                          {filters.dateTo ? formatDateDDMMMYYYY(filters.dateTo) : ""}
+                        </MDTypography>
+                      </MDBox>
+                    </MDBox>
                   </Grid>
 
                   {/* Second Row: Contract No and Search Button */}
@@ -1008,17 +1010,33 @@ export default function AgreementProvInvoice() {
                 </Grid>
 
                 {/* Results Table */}
-                <DataTable
-                  table={{ columns, rows }}
-                  canSearch={true}
-                  entriesPerPage={true}
-                  showTotalEntries={true}
-                  pagination={true}
-                  isSorted={true}
-                  noEndBorder
-                  exportFileName="Agreement-Prov-Invoice"
-                  exportCellFormatter={exportCellFormatter}
-                />
+                <MDBox
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    height: "70vh",
+                    minHeight: "400px",
+                    overflow: "hidden",
+                    "& .MuiTableContainer-root": {
+                      flex: "1 1 0",
+                      minHeight: 0,
+                      overflow: "hidden",
+                    },
+                  }}
+                >
+                  <DataTable
+                    table={{ columns, rows }}
+                    stickyToolbarAndHeader
+                    canSearch={true}
+                    entriesPerPage={true}
+                    showTotalEntries={true}
+                    pagination={true}
+                    isSorted={true}
+                    noEndBorder
+                    exportFileName="Agreement-Prov-Invoice"
+                    exportCellFormatter={exportCellFormatter}
+                  />
+                </MDBox>
               </MDBox>
             </Card>
           </Grid>

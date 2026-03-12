@@ -27,11 +27,12 @@ import CurrencyLoading from "components/CurrencyLoading";
 import Autocomplete from "@mui/material/Autocomplete";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import FormHelperText from "@mui/material/FormHelperText";
-import api, { getActionBy, getUserIPAddress } from "services/api.service";
+import api, { getActionBy, getUserIPAddress, isOperatorUser } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
@@ -61,6 +62,8 @@ function ContractsForm({
   natures,
   onPropertyGroupsRefresh,
 }) {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
   const [form, setForm] = useState({
     contractNo: "",
     cmdId: "",
@@ -1226,7 +1229,12 @@ function ContractsForm({
   return (
     <>
       <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-        <DialogTitle sx={{ py: 2 }}>
+        <DialogTitle
+          sx={{
+            py: 2,
+            ...(darkMode ? { color: "#ffffff !important" } : {}),
+          }}
+        >
           <MDBox
             sx={{
               width: "100%",
@@ -1237,7 +1245,11 @@ function ContractsForm({
               flexWrap: { xs: "wrap", md: "nowrap" },
             }}
           >
-            <MDTypography variant="h5" fontWeight="bold">
+            <MDTypography
+              variant="h5"
+              fontWeight="bold"
+              sx={darkMode ? { color: "#ffffff !important" } : {}}
+            >
               {initialData ? "Edit Contract" : "New Contract"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
@@ -2912,7 +2924,12 @@ function ContractsForm({
           <MDButton variant="outlined" color="secondary" onClick={handleCloseRiseTermsDialog}>
             <Icon>close</Icon>&nbsp;Close
           </MDButton>
-          <MDButton variant="gradient" color="info" onClick={handleAddRiseTerm}>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleAddRiseTerm}
+            disabled={isOperatorUser()}
+          >
             <Icon>{editingRiseTermIndex !== null ? "save" : "add"}</Icon>&nbsp;
             {editingRiseTermIndex !== null ? "Update" : "Add"} Term
           </MDButton>
@@ -2982,14 +2999,42 @@ export default function Contracts() {
       localStorage.setItem(CONTRACTS_GROUP_BY_CACHE_KEY, JSON.stringify(groupByColumns));
     } catch (_) {}
   }, [groupByColumns]);
-  const [commandFilterId, setCommandFilterId] = useState("");
-  const [baseFilterId, setBaseFilterId] = useState("");
-  const [classFilterId, setClassFilterId] = useState("");
+  const [commandFilterIds, setCommandFilterIds] = useState([]);
+  const [baseFilterIds, setBaseFilterIds] = useState([]);
+  const [classFilterIds, setClassFilterIds] = useState([]);
+  const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
+  // Trigger "as-of" refresh only on button click (not on date change).
+  const [asOfRefreshToken, setAsOfRefreshToken] = useState(0);
+  // Holds only the columns that should be overridden "as of" a selected date.
+  // Keyed by Contract Id (primary) and ContractNo (fallback).
+  const [asOfOverrideMap, setAsOfOverrideMap] = useState(() => ({
+    byId: new Map(),
+    byContractNo: new Map(),
+    asOfDate: "",
+  }));
   const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedContractDetails, setSelectedContractDetails] = useState(null);
   const [contractDetailsRiseTerms, setContractDetailsRiseTerms] = useState([]);
   const [loadingContractDetailsRiseTerms, setLoadingContractDetailsRiseTerms] = useState(false);
+  const asOfDateInputRef = useRef(null);
+
+  const openDatePicker = (ref) => {
+    if (ref?.current) {
+      if (ref.current.showPicker) ref.current.showPicker();
+      else ref.current.click();
+    }
+  };
+
+  const toDisplayDate = (isoDateStr) => {
+    if (!isoDateStr || typeof isoDateStr !== "string") return "";
+    try {
+      const d = parseISO(isoDateStr.trim());
+      return isValid(d) ? format(d, "dd-MMM-yyyy") : isoDateStr;
+    } catch {
+      return isoDateStr;
+    }
+  };
 
   const selectSx = {
     fontSize: "1rem",
@@ -3025,20 +3070,131 @@ export default function Contracts() {
         }
       : {}),
   };
+  const groupByInputSx = darkMode
+    ? {
+        "& .MuiInputLabel-root": {
+          color: "#ffffff !important",
+        },
+        "& .MuiInputBase-input": {
+          color: "#ffffff !important",
+        },
+        "& .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.3) !important",
+        },
+        "&:hover .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.5) !important",
+        },
+        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.7) !important",
+        },
+        "& .MuiSvgIcon-root": {
+          color: "#ffffff !important",
+        },
+      }
+    : {};
+  const ALL_FILTER_VALUE = "__ALL__";
+
+  const mergeAsOfOverrides = (baseRows, overrideState) => {
+    const rowsArr = Array.isArray(baseRows) ? baseRows : [];
+    if (!overrideState?.asOfDate) return rowsArr;
+
+    const byId = overrideState?.byId instanceof Map ? overrideState.byId : new Map();
+    const byContractNo =
+      overrideState?.byContractNo instanceof Map ? overrideState.byContractNo : new Map();
+    if (byId.size === 0 && byContractNo.size === 0) return rowsArr;
+
+    const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+    const readFirstOwn = (obj, keys) => {
+      for (let i = 0; i < keys.length; i += 1) {
+        const k = keys[i];
+        if (own(obj, k)) return obj[k];
+      }
+      return undefined;
+    };
+
+    return rowsArr.map((r) => {
+      const idKey = r?.Id ?? r?.id ?? null;
+      const contractNoKey = r?.ContractNo ?? r?.contractNo ?? null;
+
+      const fromId = idKey !== null && idKey !== undefined ? byId.get(Number(idKey)) : null;
+      const fromNo = !fromId && contractNoKey ? byContractNo.get(String(contractNoKey)) : null;
+      const o = fromId || fromNo;
+      if (!o) return r;
+
+      const next = { ...r };
+
+      const contractState = readFirstOwn(o, [
+        "ContractState",
+        "contractState",
+        "ContractStatus",
+        "contractStatus",
+      ]);
+      const rentalValue = readFirstOwn(o, ["RentalValue", "rentalValue"]);
+      const govtShare = readFirstOwn(o, ["GovtShare", "govtShare"]);
+      const pafShare = readFirstOwn(o, ["PAFShare", "pafShare"]);
+      const viability = readFirstOwn(o, ["Viability", "viability", "Feasible", "feasible"]);
+      // Rate column in grid represents GroupRate (property group rate), not any generic "Rate" field.
+      const groupRate = readFirstOwn(o, ["GroupRate", "groupRate"]);
+      const percentRate = readFirstOwn(o, [
+        "RentalValueRatePercent",
+        "rentalValueRatePercent",
+        "RentalValueRate",
+        "rentalValueRate",
+      ]);
+
+      // Bind these calculated columns from as-of payload when key exists (including null).
+      if (contractState !== undefined) {
+        next.ContractState = contractState;
+        next.contractState = contractState;
+      }
+      if (rentalValue !== undefined) {
+        next.RentalValue = rentalValue;
+        next.rentalValue = rentalValue;
+      }
+      if (govtShare !== undefined) {
+        next.GovtShare = govtShare;
+        next.govtShare = govtShare;
+      }
+      if (pafShare !== undefined) {
+        next.PAFShare = pafShare;
+        next.pafShare = pafShare;
+      }
+      if (viability !== undefined) {
+        next.Viability = viability;
+        next.viability = viability;
+        next.Feasible = viability;
+        next.feasible = viability;
+      }
+      if (groupRate !== undefined) {
+        next.GroupRate = groupRate;
+        next.groupRate = groupRate;
+      }
+      if (percentRate !== undefined) {
+        next.RentalValueRatePercent = percentRate;
+        next.rentalValueRatePercent = percentRate;
+        // Some parts of the grid also read RentalValueRate
+        next.RentalValueRate = percentRate;
+        next.rentalValueRate = percentRate;
+      }
+
+      return next;
+    });
+  };
 
   const fetchContracts = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
     try {
       const response = await contractApi.getAll(page, size);
       if (response && response.pagination) {
-        setRows(response.data || []);
+        const base = response.data || [];
+        setRows(mergeAsOfOverrides(base, asOfOverrideMap));
         setTotalCount(response.pagination.totalCount || 0);
         setPageNumber(response.pagination.pageNumber || page);
         setPageSize(response.pagination.pageSize || size);
       } else {
         // Fallback (non-paginated)
         const arr = Array.isArray(response) ? response : [];
-        setRows(arr);
+        setRows(mergeAsOfOverrides(arr, asOfOverrideMap));
         setTotalCount(arr.length);
       }
     } catch (error) {
@@ -3143,10 +3299,59 @@ export default function Contracts() {
     natures.length,
   ]);
 
-  // Load current page from backend
+  // Load current page from backend (also when As of Date changes)
   useEffect(() => {
     fetchContracts(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
+
+  // When As of Date changes, fetch "as of" values and merge into existing rows.
+  // Only these columns are overridden:
+  // Rental Value, Govt Share, PAF Share, Rate, % Rate
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchAsOfOverrides = async () => {
+      try {
+        if (!asOfRefreshToken) return; // no refresh requested yet
+        if (!asOfDate) {
+          if (!isMounted) return;
+          setAsOfOverrideMap({ byId: new Map(), byContractNo: new Map(), asOfDate: "" });
+          return;
+        }
+
+        const res = await contractApi.getActiveByAsOfDate(asOfDate);
+        const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+
+        const byId = new Map();
+        const byContractNo = new Map();
+        arr.forEach((r) => {
+          const id = r?.Id ?? r?.id ?? null;
+          const cn = r?.ContractNo ?? r?.contractNo ?? null;
+          if (id !== null && id !== undefined && Number.isFinite(Number(id))) {
+            byId.set(Number(id), r);
+          }
+          if (cn) byContractNo.set(String(cn), r);
+        });
+
+        if (!isMounted) return;
+        const nextOverrideState = { byId, byContractNo, asOfDate };
+        setAsOfOverrideMap(nextOverrideState);
+
+        // Merge into currently visible rows without replacing other fields.
+        setRows((prev) => mergeAsOfOverrides(prev, nextOverrideState));
+      } catch (e) {
+        console.error("Error fetching ActiveByAsOfDate:", e);
+        if (!isMounted) return;
+        // Keep existing grid, just clear overrides (no destructive reload).
+        setAsOfOverrideMap({ byId: new Map(), byContractNo: new Map(), asOfDate: "" });
+      }
+    };
+
+    fetchAsOfOverrides();
+    return () => {
+      isMounted = false;
+    };
+  }, [asOfRefreshToken]);
 
   // Reset expanded state when grouping keys change.
   useEffect(() => {
@@ -3229,6 +3434,7 @@ export default function Contracts() {
   };
 
   const handleConfirmDelete = async () => {
+    if (isOperatorUser()) return;
     if (recordToDelete) {
       try {
         // Include IP address in delete request body
@@ -3411,6 +3617,7 @@ export default function Contracts() {
   };
 
   const handleDeleteAttachment = async (file) => {
+    if (isOperatorUser()) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -3496,17 +3703,44 @@ export default function Contracts() {
     return value;
   };
 
+  const CALCULATED_CELL_BG = "#e9ecef";
+
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "72px", showInTable: true },
-    { Header: "ID", accessor: "id", align: "center", width: "56px", showInTable: true },
+    { Header: "S.No", accessor: "id", align: "center", width: "56px", showInTable: true },
     { Header: "Contract No", accessor: "contractNo", align: "left", showInTable: true },
+    // Backend now sends names directly (no mapping)
+    { Header: "RAC", accessor: "cmdName", align: "left", width: "72px", showInTable: true },
+    { Header: "Base", accessor: "baseName", align: "left", width: "72px", showInTable: true },
+    { Header: "Class", accessor: "className", align: "left", width: "72px", showInTable: true },
     {
-      Header: "Current Rent PA",
-      accessor: "asOfToday",
-      align: "center",
+      Header: "Grouping ID",
+      accessor: "grpId",
+      align: "left",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
-      Cell: () => <Icon sx={{ color: "success.main", fontSize: "1.25rem" }}>arrow_upward</Icon>,
+      Cell: ({ value, row }) => value || row?.original?.GId || "-",
+    },
+    {
+      id: "currentRentPA",
+      Header: "Current Rent PA",
+      accessor: "currentRentPA",
+      align: "right",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        const currentRentPA =
+          // eslint-disable-next-line react/prop-types
+          value ?? row?.original?.CurrentRentPA ?? row?.original?.currentRentPA ?? null;
+        return (
+          <MDTypography variant="body2" fontWeight="medium">
+            {currentRentPA != null && currentRentPA !== ""
+              ? Number(currentRentPA).toLocaleString()
+              : "-"}
+          </MDTypography>
+        );
+      },
     },
     {
       Header: "Viability",
@@ -3517,7 +3751,14 @@ export default function Contracts() {
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
-        const fromPayload = String(value || rowData.Feasible || "")
+        const fromPayload = String(
+          value ??
+            rowData.Viability ??
+            rowData.viability ??
+            rowData.Feasible ??
+            rowData.feasible ??
+            ""
+        )
           .trim()
           .toLowerCase();
         const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
@@ -3533,50 +3774,22 @@ export default function Contracts() {
         return <Chip label={label} size="small" color={label === "Viable" ? "success" : "error"} />;
       },
     },
-    // Backend now sends names directly (no mapping)
-    { Header: "RAC", accessor: "cmdName", align: "left", showInTable: true },
-    { Header: "Base", accessor: "baseName", align: "left", showInTable: true },
-    { Header: "Class", accessor: "className", align: "left", showInTable: true },
     {
-      Header: "Grouping ID",
-      accessor: "grpId",
-      align: "left",
-      showInTable: true,
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => value || row?.original?.GId || "-",
-    },
-    {
-      Header: "Total Area",
+      Header: "Total Area (UoM)",
       accessor: "totalArea",
       align: "right",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const totalArea = row.original?.TotalArea ?? 0;
+        const rowData = row?.original || {};
+        const totalArea = rowData?.TotalArea ?? 0;
+        const uoM = rowData?.UoM || rowData?.uoM || rowData?.unitName || rowData?.UnitName || "";
         return (
           <MDTypography variant="body2" fontWeight="medium">
-            {totalArea ? Number(totalArea).toLocaleString() : "-"}
+            {totalArea ? `${Number(totalArea).toLocaleString()}${uoM ? ` (${uoM})` : ""}` : "-"}
           </MDTypography>
         );
-      },
-    },
-    {
-      Header: "Rate",
-      accessor: "groupRate",
-      align: "right",
-      showInTable: false,
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        // eslint-disable-next-line react/prop-types
-        const groupRate =
-          value ||
-          row?.original?.GroupRate ||
-          row?.original?.groupRate ||
-          row?.original?.TotalRate ||
-          row?.original?.totalRate ||
-          0;
-        return groupRate || groupRate === 0 ? Number(groupRate).toLocaleString() : "-";
       },
     },
     {
@@ -3599,7 +3812,7 @@ export default function Contracts() {
       Header: "UoM",
       accessor: "uoM",
       align: "left",
-      showInTable: true,
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -3677,7 +3890,7 @@ export default function Contracts() {
       Header: "Contract End Date",
       accessor: "contractEndDate",
       align: "left",
-      showInTable: false,
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => formatDateDDMMMYYYY(value),
     },
@@ -3701,7 +3914,7 @@ export default function Contracts() {
       Header: "Initial Rent PA",
       accessor: "initialRentPA",
       align: "right",
-      showInTable: false,
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
@@ -3736,18 +3949,172 @@ export default function Contracts() {
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
     {
-      Header: "Rental Value",
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          Contract State
+        </MDBox>
+      ),
+      accessor: "contractState",
+      align: "left",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // Prefer backend-provided value if available, otherwise compute from dates.
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        const renderContractStateBadge = (state) => {
+          const normalizedState = String(state || "")
+            .trim()
+            .toLowerCase();
+          const displayState =
+            normalizedState === "upcoming" || normalizedState === "not started"
+              ? "Not Started"
+              : normalizedState === "active"
+              ? "Active"
+              : normalizedState === "expired"
+              ? "Expired"
+              : state;
+          const badgeStyles =
+            normalizedState === "active"
+              ? {
+                  backgroundColor: "#d4edda",
+                  color: "#155724",
+                }
+              : normalizedState === "expired"
+              ? {
+                  backgroundColor: "#f8d7da",
+                  color: "#721c24",
+                }
+              : normalizedState === "upcoming" || normalizedState === "not started"
+              ? {
+                  backgroundColor: "#dbeafe",
+                  color: "#1d4ed8",
+                }
+              : {
+                  backgroundColor: CALCULATED_CELL_BG,
+                  color: "#344767",
+                };
+
+          return (
+            <MDBox
+              sx={{
+                ...badgeStyles,
+                px: 1,
+                py: 0.35,
+                borderRadius: "999px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: "96px",
+                fontWeight: 600,
+              }}
+            >
+              {displayState}
+            </MDBox>
+          );
+        };
+        if (
+          rowData.ContractState === null ||
+          rowData.contractState === null ||
+          rowData.ContractStatus === null ||
+          rowData.contractStatus === null
+        ) {
+          return "null";
+        }
+        const fromPayload =
+          rowData.ContractState ??
+          rowData.contractState ??
+          rowData.ContractStatus ??
+          rowData.contractStatus ??
+          "";
+        const normalized = String(fromPayload || "")
+          .trim()
+          .toLowerCase();
+        if (normalized) {
+          return renderContractStateBadge(normalized);
+        }
+
+        const startRaw = rowData.ContractStartDate ?? rowData.contractStartDate ?? "";
+        const endRaw = rowData.ContractEndDate ?? rowData.contractEndDate ?? "";
+        const start = String(startRaw || "")
+          .split("T")[0]
+          .slice(0, 10);
+        const end = String(endRaw || "")
+          .split("T")[0]
+          .slice(0, 10);
+        const today = new Date().toISOString().split("T")[0];
+        const computed =
+          start && today < start
+            ? "Upcoming"
+            : end && today > end
+            ? "Expired"
+            : start && end && today >= start && today <= end
+            ? "Active"
+            : "-";
+
+        return (
+          <MDBox
+            sx={{
+              backgroundColor: CALCULATED_CELL_BG,
+              px: 0.75,
+              py: 0.25,
+              borderRadius: "6px",
+              display: "inline-block",
+              width: "100%",
+            }}
+          >
+            {computed === "-" ? computed : renderContractStateBadge(computed)}
+          </MDBox>
+        );
+      },
+    },
+    {
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          Rental Value
+        </MDBox>
+      ),
       accessor: "rentalValue",
       align: "right",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
+      Cell: ({ value }) => (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+            width: "100%",
+            textAlign: "right",
+          }}
+        >
+          {value === null ? "null" : value || value === 0 ? Number(value).toLocaleString() : "-"}
+        </MDBox>
+      ),
     },
     {
       Header: "CA Area",
       accessor: "vaArea",
       align: "right",
-      showInTable: true,
+      showInTable: false,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -3756,23 +4123,183 @@ export default function Contracts() {
       },
     },
     {
-      Header: "Govt Share (Rs)",
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          Govt Share (Rs)
+        </MDBox>
+      ),
       accessor: "govtShare",
       align: "right",
-      showInTable: false,
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const finalValue = value;
-        return finalValue || finalValue === 0 ? Number(finalValue).toLocaleString() : "-";
+        const display = finalValue || finalValue === 0 ? Number(finalValue).toLocaleString() : "-";
+        return (
+          <MDBox
+            sx={{
+              backgroundColor: CALCULATED_CELL_BG,
+              px: 0.75,
+              py: 0.25,
+              borderRadius: "6px",
+              display: "inline-block",
+              width: "100%",
+              textAlign: "right",
+            }}
+          >
+            {finalValue === null ? "null" : display}
+          </MDBox>
+        );
       },
     },
     {
-      Header: "PAF Share (Rs)",
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          PAF Share (Rs)
+        </MDBox>
+      ),
       accessor: "pafShare",
       align: "right",
-      showInTable: false,
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value || value === 0 ? Number(value).toLocaleString() : "-"),
+      Cell: ({ value }) => (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+            width: "100%",
+            textAlign: "right",
+          }}
+        >
+          {value === null ? "null" : value || value === 0 ? Number(value).toLocaleString() : "-"}
+        </MDBox>
+      ),
+    },
+    {
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          Rate
+        </MDBox>
+      ),
+      accessor: "groupRate",
+      align: "right",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        /* eslint-disable react/prop-types */
+        if (
+          value === null ||
+          row?.original?.GroupRate === null ||
+          row?.original?.groupRate === null
+        ) {
+          return (
+            <MDBox
+              sx={{
+                backgroundColor: CALCULATED_CELL_BG,
+                px: 0.75,
+                py: 0.25,
+                borderRadius: "6px",
+                display: "inline-block",
+                width: "100%",
+                textAlign: "right",
+              }}
+            >
+              null
+            </MDBox>
+          );
+        }
+        const groupRate =
+          value ||
+          row?.original?.GroupRate ||
+          row?.original?.groupRate ||
+          row?.original?.TotalRate ||
+          row?.original?.totalRate ||
+          0;
+        /* eslint-enable react/prop-types */
+        const display = groupRate || groupRate === 0 ? Number(groupRate).toLocaleString() : "-";
+        return (
+          <MDBox
+            sx={{
+              backgroundColor: CALCULATED_CELL_BG,
+              px: 0.75,
+              py: 0.25,
+              borderRadius: "6px",
+              display: "inline-block",
+              width: "100%",
+              textAlign: "right",
+            }}
+          >
+            {display}
+          </MDBox>
+        );
+      },
+    },
+    {
+      id: "percentRate",
+      Header: (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+          }}
+        >
+          % Rate
+        </MDBox>
+      ),
+      accessor: (row) =>
+        row?.RentalValueRate ??
+        row?.rentalValueRate ??
+        row?.RentalValueRatePercent ??
+        row?.rentalValueRatePercent ??
+        null,
+      align: "right",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => (
+        <MDBox
+          sx={{
+            backgroundColor: CALCULATED_CELL_BG,
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "6px",
+            display: "inline-block",
+            width: "100%",
+            textAlign: "right",
+          }}
+        >
+          {value === null ? "null" : value || value === 0 ? `${Number(value)}%` : "-"}
+        </MDBox>
+      ),
     },
     {
       Header: "Attachments",
@@ -3867,7 +4394,9 @@ export default function Contracts() {
       );
 
       // Calculate Viability (same logic as Cell function)
-      const fromPayload = String(row.Feasible || "")
+      const fromPayload = String(
+        row.Viability ?? row.viability ?? row.Feasible ?? row.feasible ?? ""
+      )
         .trim()
         .toLowerCase();
       const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
@@ -3905,6 +4434,7 @@ export default function Contracts() {
         contractEndDate: row.ContractEndDate || "",
         commercialOperationDate: row.CommercialOperationDate || "",
         initialRentPM: row.InitialRentPM || "",
+        currentRentPA: row.CurrentRentPA ?? row.currentRentPA ?? "",
         initialRentPA: row.InitialRentPA || "",
         paymentTermMonths: row.PaymentTermMonths || "",
         term: row.Term || "",
@@ -3912,17 +4442,26 @@ export default function Contracts() {
         increaseIntervalMonths: row.IncreaseIntervalMonths || "",
         sdRateMonths: row.SDRateMonths || "",
         securityDepositAmount: row.SecurityDepositAmount || "",
-        rentalValue: row.RentalValue || "",
-        govtShare: row.GovtShare || 0,
-        pafShare: row.PAFShare || 0,
+        contractState:
+          row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? "",
+        rentalValue: row.RentalValue ?? row.rentalValue,
+        govtShare: row.GovtShare ?? row.govtShare,
+        pafShare: row.PAFShare ?? row.pafShare,
         status: row.Status,
         remarks: row.Remarks || "",
         vaArea: row.VaArea || 0,
-        groupRate: row.GroupRate ?? propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        groupRate:
+          row.GroupRate !== undefined || row.groupRate !== undefined
+            ? row.GroupRate ?? row.groupRate
+            : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         // Also set PascalCase versions for direct access
+        CurrentRentPA: row.CurrentRentPA ?? row.currentRentPA ?? "",
         TotalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
         TotalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
-        GroupRate: row.GroupRate ?? propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        GroupRate:
+          row.GroupRate !== undefined || row.groupRate !== undefined
+            ? row.GroupRate ?? row.groupRate
+            : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         Location: propertyGrouping?.Location ?? row.Location ?? "",
         UnitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
         UoM: propertyGrouping?.UoM ?? row.UoM ?? "",
@@ -3931,26 +4470,49 @@ export default function Contracts() {
     });
 
     // Apply Command/Base/Class filters before grouping.
-    const selectedCommandName = String(commandFilterId || "")
-      .trim()
-      .toLowerCase();
-    const selectedBaseName = String(baseFilterId || "")
-      .trim()
-      .toLowerCase();
-    const selectedClassName = String(classFilterId || "")
-      .trim()
-      .toLowerCase();
+    const selectedCommandNames = new Set(
+      (Array.isArray(commandFilterIds) ? commandFilterIds : [])
+        .map((v) =>
+          String(v || "")
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    const selectedBaseNames = new Set(
+      (Array.isArray(baseFilterIds) ? baseFilterIds : [])
+        .map((v) =>
+          String(v || "")
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    const selectedClassNames = new Set(
+      (Array.isArray(classFilterIds) ? classFilterIds : [])
+        .map((v) =>
+          String(v || "")
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
 
     const filteredRows = normalizedRows.filter((row) => {
       const cmdName = String(row.cmdName || "").toLowerCase();
       const baseName = String(row.baseName || "").toLowerCase();
       const className = String(row.className || "").toLowerCase();
 
-      const matchesCommand = !selectedCommandName || cmdName === selectedCommandName;
-      const matchesBase = !selectedBaseName || baseName === selectedBaseName;
-      const matchesClass = !selectedClassName || className === selectedClassName;
+      const matchesCommand = selectedCommandNames.size === 0 || selectedCommandNames.has(cmdName);
+      const matchesBase = selectedBaseNames.size === 0 || selectedBaseNames.has(baseName);
+      const matchesClass = selectedClassNames.size === 0 || selectedClassNames.has(className);
 
-      return matchesCommand && matchesBase && matchesClass;
+      // IMPORTANT:
+      // "As of Date" is used only to refresh specific numeric columns via ActiveByAsOfDate,
+      // not to filter/hide the master contracts list in the grid.
+      const matchesAsOfDate = true;
+
+      return matchesCommand && matchesBase && matchesClass && matchesAsOfDate;
     });
 
     // If no grouping selected, return plain rows.
@@ -4271,9 +4833,9 @@ export default function Contracts() {
     return result;
   }, [
     rows,
-    commandFilterId,
-    baseFilterId,
-    classFilterId,
+    commandFilterIds,
+    baseFilterIds,
+    classFilterIds,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
@@ -4282,7 +4844,54 @@ export default function Contracts() {
   const computedRows = groupedData;
 
   // Filter columns to only show those with showInTable: true
-  const visibleColumns = columns.filter((col) => col.showInTable !== false);
+  const visibleColumnsBase = columns.filter((col) => col.showInTable !== false);
+
+  // Group calculated columns under a top header
+  const calculatedColumnKeys = new Set([
+    "contractState",
+    "rentalValue",
+    "govtShare",
+    "pafShare",
+    "groupRate",
+    "percentRate",
+  ]);
+  const getColumnKey = (col) => col?.id || (typeof col?.accessor === "string" ? col.accessor : "");
+  const calcIndexes = visibleColumnsBase
+    .map((c, i) => ({ i, key: getColumnKey(c) }))
+    .filter(({ key }) => calculatedColumnKeys.has(key))
+    .map(({ i }) => i);
+
+  const visibleColumns = (() => {
+    if (calcIndexes.length === 0) return visibleColumnsBase;
+    const first = Math.min(...calcIndexes);
+    const last = Math.max(...calcIndexes);
+    const before = visibleColumnsBase.slice(0, first);
+    const calcChildren = visibleColumnsBase.slice(first, last + 1);
+    const after = visibleColumnsBase.slice(last + 1);
+    return [
+      ...before,
+      {
+        Header: (
+          <MDBox
+            sx={{
+              backgroundColor: CALCULATED_CELL_BG,
+              px: 1,
+              py: 0.4,
+              borderRadius: "8px",
+              display: "inline-block",
+              width: "100%",
+              textAlign: "center",
+            }}
+          >
+            Calculated Values
+          </MDBox>
+        ),
+        align: "center",
+        columns: calcChildren,
+      },
+      ...after,
+    ];
+  })();
   const allColumns = columns; // Keep all columns for details dialog and export
 
   const getUserId = () => {
@@ -4335,15 +4944,17 @@ export default function Contracts() {
 
     const getDisplayValue = (col, rowData) => {
       const accessor = col.accessor;
-      let value = rowData[accessor];
-      if (value === undefined || value === null) {
-        const pascal = accessor.charAt(0).toUpperCase() + accessor.slice(1);
+      const accessorKey = typeof accessor === "string" ? accessor : null;
+      let value = accessorKey ? rowData[accessorKey] : undefined;
+      if ((value === undefined || value === null) && accessorKey) {
+        const pascal = accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1);
         value = rowData[pascal];
       }
-      if ((value === undefined || value === null) && rowData.original) {
-        value =
-          rowData.original[accessor] ||
-          rowData.original[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+      if ((value === undefined || value === null) && rowData.original && accessorKey) {
+        value = rowData.original[accessorKey];
+        if (value === undefined || value === null) {
+          value = rowData.original[accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)];
+        }
       }
       if (accessor === "groupRate" || accessor === "totalRate") {
         value =
@@ -4352,7 +4963,14 @@ export default function Contracts() {
       if (accessor === "grpId") return value || rowData?.GId || "-";
       if (accessor === "asOfToday") return "Active";
       if (accessor === "feasible") {
-        const fromPayload = String(value || rowData?.Feasible || "")
+        const fromPayload = String(
+          value ??
+            rowData?.Viability ??
+            rowData?.viability ??
+            rowData?.Feasible ??
+            rowData?.feasible ??
+            ""
+        )
           .trim()
           .toLowerCase();
         if (fromPayload === "viable" || fromPayload === "unviable")
@@ -4397,8 +5015,8 @@ export default function Contracts() {
         "pafShare",
         "securityDepositAmount",
       ];
-      if (numCols.includes(accessor)) {
-        const v = value ?? rowData?.[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+      if (accessorKey && numCols.includes(accessorKey)) {
+        const v = value ?? rowData?.[accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)];
         return v !== undefined && v !== null && v !== "" ? Number(v).toLocaleString() : "-";
       }
       if (accessor === "increaseRatePercent") return value ? `${value}%` : "-";
@@ -4671,8 +5289,16 @@ export default function Contracts() {
                 pt={3}
                 position="relative"
                 sx={{
-                  // Match property-grouping style: tight grid + multi-line headers/cells (no overflow)
-                  overflowX: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -4775,81 +5401,200 @@ export default function Contracts() {
                     gap={1}
                     width={{ xs: "100%", md: "auto" }}
                   >
-                    <MDBox width={{ xs: "100%", sm: "190px" }}>
-                      <FormControl size="small" fullWidth>
-                        <InputLabel
-                          id="contracts-filter-command-label"
-                          sx={darkMode ? { color: "#ffffff !important" } : {}}
-                        >
-                          RAC
-                        </InputLabel>
-                        <Select
-                          labelId="contracts-filter-command-label"
-                          value={commandFilterId}
-                          label="RAC"
-                          onChange={(e) => setCommandFilterId(e.target.value)}
-                          sx={selectSx}
-                        >
-                          <MenuItem value="">All RAC</MenuItem>
-                          {gridFilterOptions.commands.map((cmdName) => (
-                            <MenuItem key={cmdName} value={cmdName}>
-                              {cmdName}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.commands]}
+                        disableCloseOnSelect
+                        value={commandFilterIds}
+                        isOptionEqualToValue={(option, value) => option === value}
+                        getOptionLabel={(option) =>
+                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
+                        }
+                        onChange={(event, newValue, reason, details) => {
+                          if (details?.option === ALL_FILTER_VALUE) {
+                            const allSelected =
+                              gridFilterOptions.commands.length > 0 &&
+                              commandFilterIds.length === gridFilterOptions.commands.length;
+                            setCommandFilterIds(allSelected ? [] : [...gridFilterOptions.commands]);
+                            return;
+                          }
+                          setCommandFilterIds(
+                            (Array.isArray(newValue) ? newValue : []).filter(
+                              (value) => value !== ALL_FILTER_VALUE
+                            )
+                          );
+                        }}
+                        renderOption={(props, option, { selected }) => {
+                          const allSelected =
+                            gridFilterOptions.commands.length > 0 &&
+                            commandFilterIds.length === gridFilterOptions.commands.length;
+                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
+                          return (
+                            <li {...props}>
+                              <Checkbox size="small" checked={checked} />
+                              {option === ALL_FILTER_VALUE ? "All" : option}
+                            </li>
+                          );
+                        }}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="RAC"
+                            placeholder="Select RAC"
+                            sx={groupByInputSx}
+                          />
+                        )}
+                      />
                     </MDBox>
-                    <MDBox width={{ xs: "100%", sm: "190px" }}>
-                      <FormControl size="small" fullWidth>
-                        <InputLabel
-                          id="contracts-filter-base-label"
-                          sx={darkMode ? { color: "#ffffff !important" } : {}}
-                        >
-                          Base
-                        </InputLabel>
-                        <Select
-                          labelId="contracts-filter-base-label"
-                          value={baseFilterId}
-                          label="Base"
-                          onChange={(e) => setBaseFilterId(e.target.value)}
-                          sx={selectSx}
-                        >
-                          <MenuItem value="">All Bases</MenuItem>
-                          {gridFilterOptions.bases.map((baseName) => (
-                            <MenuItem key={baseName} value={baseName}>
-                              {baseName}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.bases]}
+                        disableCloseOnSelect
+                        value={baseFilterIds}
+                        isOptionEqualToValue={(option, value) => option === value}
+                        getOptionLabel={(option) =>
+                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
+                        }
+                        onChange={(event, newValue, reason, details) => {
+                          if (details?.option === ALL_FILTER_VALUE) {
+                            const allSelected =
+                              gridFilterOptions.bases.length > 0 &&
+                              baseFilterIds.length === gridFilterOptions.bases.length;
+                            setBaseFilterIds(allSelected ? [] : [...gridFilterOptions.bases]);
+                            return;
+                          }
+                          setBaseFilterIds(
+                            (Array.isArray(newValue) ? newValue : []).filter(
+                              (value) => value !== ALL_FILTER_VALUE
+                            )
+                          );
+                        }}
+                        renderOption={(props, option, { selected }) => {
+                          const allSelected =
+                            gridFilterOptions.bases.length > 0 &&
+                            baseFilterIds.length === gridFilterOptions.bases.length;
+                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
+                          return (
+                            <li {...props}>
+                              <Checkbox size="small" checked={checked} />
+                              {option === ALL_FILTER_VALUE ? "All" : option}
+                            </li>
+                          );
+                        }}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="Base"
+                            placeholder="Select Base"
+                            sx={groupByInputSx}
+                          />
+                        )}
+                      />
                     </MDBox>
-                    <MDBox width={{ xs: "100%", sm: "190px" }}>
-                      <FormControl size="small" fullWidth>
-                        <InputLabel
-                          id="contracts-filter-class-label"
-                          sx={darkMode ? { color: "#ffffff !important" } : {}}
-                        >
-                          Class
-                        </InputLabel>
-                        <Select
-                          labelId="contracts-filter-class-label"
-                          value={classFilterId}
-                          label="Class"
-                          onChange={(e) => setClassFilterId(e.target.value)}
-                          sx={selectSx}
-                        >
-                          <MenuItem value="">All Classes</MenuItem>
-                          {gridFilterOptions.classes.map((className) => (
-                            <MenuItem key={className} value={className}>
-                              {className}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.classes]}
+                        disableCloseOnSelect
+                        value={classFilterIds}
+                        isOptionEqualToValue={(option, value) => option === value}
+                        getOptionLabel={(option) =>
+                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
+                        }
+                        onChange={(event, newValue, reason, details) => {
+                          if (details?.option === ALL_FILTER_VALUE) {
+                            const allSelected =
+                              gridFilterOptions.classes.length > 0 &&
+                              classFilterIds.length === gridFilterOptions.classes.length;
+                            setClassFilterIds(allSelected ? [] : [...gridFilterOptions.classes]);
+                            return;
+                          }
+                          setClassFilterIds(
+                            (Array.isArray(newValue) ? newValue : []).filter(
+                              (value) => value !== ALL_FILTER_VALUE
+                            )
+                          );
+                        }}
+                        renderOption={(props, option, { selected }) => {
+                          const allSelected =
+                            gridFilterOptions.classes.length > 0 &&
+                            classFilterIds.length === gridFilterOptions.classes.length;
+                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
+                          return (
+                            <li {...props}>
+                              <Checkbox size="small" checked={checked} />
+                              {option === ALL_FILTER_VALUE ? "All" : option}
+                            </li>
+                          );
+                        }}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="Class"
+                            placeholder="Select Class"
+                            sx={groupByInputSx}
+                          />
+                        )}
+                      />
+                    </MDBox>
+                    <MDBox width={{ xs: "80%", sm: "160px" }} sx={{ position: "relative" }}>
+                      <input
+                        type="date"
+                        ref={asOfDateInputRef}
+                        value={asOfDate || ""}
+                        onChange={(e) => setAsOfDate(e.target.value)}
+                        style={{
+                          position: "absolute",
+                          opacity: 0,
+                          width: "100%",
+                          height: "100%",
+                          top: 0,
+                          left: 0,
+                          cursor: "pointer",
+                        }}
+                        aria-hidden
+                      />
+                      <MDInput
+                        label="As of Date"
+                        value={toDisplayDate(asOfDate)}
+                        onClick={() => openDatePicker(asOfDateInputRef)}
+                        InputProps={{
+                          readOnly: true,
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                            </InputAdornment>
+                          ),
+                        }}
+                        fullWidth
+                        sx={groupByInputSx}
+                      />
+                    </MDBox>
+                    <MDBox
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        mt: { xs: 1, sm: 0 },
+                      }}
+                    >
+                      <IconButton
+                        size="small"
+                        color="info"
+                        title="Refresh as-of values"
+                        onClick={() => setAsOfRefreshToken((t) => t + 1)}
+                      >
+                        <Icon fontSize="small">refresh</Icon>
+                      </IconButton>
                     </MDBox>
                   </MDBox>
 
-                  <MDBox width={{ xs: "100%", md: "520px" }}>
+                  <MDBox width={{ xs: "80%", md: "200px" }}>
                     <Autocomplete
                       multiple
                       size="small"
@@ -4868,30 +5613,7 @@ export default function Contracts() {
                           {...params}
                           label="Group By Columns"
                           placeholder="Select columns"
-                          sx={
-                            darkMode
-                              ? {
-                                  "& .MuiInputLabel-root": {
-                                    color: "#ffffff !important",
-                                  },
-                                  "& .MuiInputBase-input": {
-                                    color: "#ffffff !important",
-                                  },
-                                  "& .MuiOutlinedInput-notchedOutline": {
-                                    borderColor: "rgba(255, 255, 255, 0.3) !important",
-                                  },
-                                  "&:hover .MuiOutlinedInput-notchedOutline": {
-                                    borderColor: "rgba(255, 255, 255, 0.5) !important",
-                                  },
-                                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                                    borderColor: "rgba(255, 255, 255, 0.7) !important",
-                                  },
-                                  "& .MuiSvgIcon-root": {
-                                    color: "#ffffff !important",
-                                  },
-                                }
-                              : {}
-                          }
+                          sx={groupByInputSx}
                         />
                       )}
                     />
@@ -4904,16 +5626,11 @@ export default function Contracts() {
                     rows: computedRows,
                   }}
                   isSorted={false}
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100],
-                  }}
+                  stickyToolbarAndHeader
+                  stickyBodyMinHeight="unset"
+                  contentFitTable
+                  entriesPerPage={false}
                   pageSize={pageSize}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchContracts(1, value);
-                  }}
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
@@ -4934,7 +5651,27 @@ export default function Contracts() {
                     p={3}
                     gap={2}
                   >
-                    <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
+                    <MDBox mb={{ xs: 1.5, sm: 0 }} display="flex" alignItems="center" gap={1}>
+                      <FormControl size="xs" sx={{ minWidth: 12 }}>
+                        <Select
+                          value={String(pageSize)}
+                          onChange={(e) => {
+                            const value = Number(e.target.value);
+                            setPageSize(value);
+                            setPageNumber(1);
+                            fetchContracts(1, value);
+                          }}
+                          sx={{
+                            "& .MuiSelect-select": { py: 0.5, fontSize: "0.8rem" },
+                          }}
+                        >
+                          {[10, 20, 50, 100].map((size) => (
+                            <MenuItem key={size} value={String(size)}>
+                              {size}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                       <MDTypography variant="button" color="secondary" fontWeight="regular">
                         {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
                       </MDTypography>
@@ -5053,6 +5790,7 @@ export default function Contracts() {
                             size="small"
                             color="error"
                             onClick={() => handleDeleteAttachment(file)}
+                            disabled={isOperatorUser()}
                             sx={{ ml: 1 }}
                           >
                             <Icon>delete</Icon>
@@ -5164,7 +5902,7 @@ export default function Contracts() {
           <MDButton onClick={handleCancelDelete} color="secondary">
             Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error">
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={isOperatorUser()}>
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>
@@ -5203,21 +5941,31 @@ export default function Contracts() {
                   .filter((col) => col.accessor !== "actions" && col.accessor !== "attachments")
                   .map((col) => {
                     const accessor = col.accessor;
+                    const accessorKey = typeof accessor === "string" ? accessor : null;
                     // Access value from both camelCase and PascalCase
                     const rowData = selectedContractDetails;
-                    let value = rowData[accessor];
+                    let value = accessorKey ? rowData[accessorKey] : undefined;
 
                     // If not found in camelCase, try PascalCase
-                    if (value === undefined || value === null) {
-                      const pascalAccessor = accessor.charAt(0).toUpperCase() + accessor.slice(1);
+                    if ((value === undefined || value === null) && accessorKey) {
+                      const pascalAccessor =
+                        accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1);
                       value = rowData[pascalAccessor];
                     }
 
                     // Also try accessing from original if available
-                    if ((value === undefined || value === null) && rowData.original) {
-                      value =
-                        rowData.original[accessor] ||
-                        rowData.original[accessor.charAt(0).toUpperCase() + accessor.slice(1)];
+                    if (
+                      (value === undefined || value === null) &&
+                      rowData.original &&
+                      accessorKey
+                    ) {
+                      value = rowData.original[accessorKey];
+                      if (value === undefined || value === null) {
+                        value =
+                          rowData.original[
+                            accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)
+                          ];
+                      }
                     }
 
                     // Special handling for Rate field - use GroupRate

@@ -26,7 +26,7 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 
-import api from "services/api.service";
+import api, { isOperatorUser } from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
 
@@ -406,7 +406,16 @@ function NatureConfig() {
           <MDBox pt={3}>
             <MDBox
               sx={{
-                overflowX: "auto",
+                display: "flex",
+                flexDirection: "column",
+                height: "70vh",
+                minHeight: "400px",
+                overflow: "hidden",
+                "& .MuiTableContainer-root": {
+                  flex: "1 1 0",
+                  minHeight: 0,
+                  overflow: "hidden",
+                },
                 "& .MuiTable-root": {
                   tableLayout: "auto",
                   width: "auto",
@@ -459,6 +468,7 @@ function NatureConfig() {
               <DataTable
                 table={tableData}
                 isSorted={false}
+                stickyToolbarAndHeader
                 canSearch={true}
                 page={pageIndex}
                 entriesPerPage={{

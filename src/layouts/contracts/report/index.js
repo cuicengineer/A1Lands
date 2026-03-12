@@ -255,10 +255,25 @@ function ContractsReport() {
                   </Grid>
                 </Grid>
               </MDBox>
-              <MDBox pt={3}>
+              <MDBox
+                pt={3}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "70vh",
+                  minHeight: "400px",
+                  overflow: "hidden",
+                  "& .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflow: "hidden",
+                  },
+                }}
+              >
                 <DataTable
                   table={{ columns, rows }}
                   isSorted={false}
+                  stickyToolbarAndHeader
                   entriesPerPage={false}
                   showTotalEntries={false}
                   noEndBorder

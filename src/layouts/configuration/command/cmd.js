@@ -10,7 +10,7 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api from "../../../services/api.service";
+import api, { isOperatorUser } from "../../../services/api.service";
 
 function Command() {
   const [tableRows, setTableRows] = useState([]);
@@ -286,10 +286,25 @@ function Command() {
               Add Command
             </MDButton>
           </MDBox>
-          <MDBox pt={3}>
+          <MDBox
+            pt={3}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              height: "70vh",
+              minHeight: "400px",
+              overflow: "hidden",
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            }}
+          >
             <DataTable
               table={{ columns, rows: computedRows }}
               isSorted={false}
+              stickyToolbarAndHeader
               canSearch={true}
               entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
               showTotalEntries={true}

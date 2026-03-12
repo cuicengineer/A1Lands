@@ -86,11 +86,25 @@ function Projects() {
         </MDBox>
         {renderMenu}
       </MDBox>
-      <MDBox>
+      <MDBox
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          height: "70vh",
+          minHeight: "400px",
+          overflow: "hidden",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
         <DataTable
           table={{ columns, rows }}
           showTotalEntries={false}
           isSorted={false}
+          stickyToolbarAndHeader
           noEndBorder
           entriesPerPage={false}
         />
