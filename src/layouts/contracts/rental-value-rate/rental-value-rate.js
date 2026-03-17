@@ -56,6 +56,43 @@ function RentalValueRateForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
 
+  const getSaveErrorMessage = (error) => {
+    if (error?.response?.status === 400) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim()) {
+        return responseData;
+      }
+      if (typeof responseData?.message === "string" && responseData.message.trim()) {
+        return responseData.message;
+      }
+      if (typeof responseData?.title === "string" && responseData.title.trim()) {
+        return responseData.title;
+      }
+      try {
+        const serialized = JSON.stringify(responseData);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch (serializationError) {
+        console.error("Error serializing rental value rate API response:", serializationError);
+      }
+    }
+
+    const rawMessage = String(error?.message || "").trim();
+    if (rawMessage) {
+      const http400PrefixMatch = rawMessage.match(/^HTTP\s+400\s+Bad\s+Request:\s*(.*)$/i);
+      if (http400PrefixMatch?.[1]?.trim()) {
+        return http400PrefixMatch[1].trim();
+      }
+
+      if (/^HTTP\s+400\b/i.test(rawMessage)) {
+        return rawMessage;
+      }
+    }
+
+    return "Failed to save rental value rate. Please try again.";
+  };
+
   // Filter bases based on selected command
   useEffect(() => {
     if (form.cmdId && bases.length > 0) {
@@ -243,7 +280,6 @@ function RentalValueRateForm({
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
-    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
     if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
       newErrors.deactiveDate = "Deactive Date must be after Application Date";
     }
@@ -262,40 +298,44 @@ function RentalValueRateForm({
 
   const handleSave = async () => {
     if (!validate()) return;
+    try {
+      const payload = {
+        applicableDate: form.applicableDate,
+        deactiveDate: form.deactiveDate,
+        cmdId: Number(form.cmdId),
+        baseId: Number(form.baseId),
+        classId: Number(form.classId),
+        rate: form.rate ? Number(form.rate) : null,
+        description: form.description.trim(),
+        status: form.status,
+        category: "RentalValue", // Static value, not displayed to user
+        type: 1, // Static value, not displayed to user
+      };
 
-    const payload = {
-      applicableDate: form.applicableDate,
-      deactiveDate: form.deactiveDate,
-      cmdId: Number(form.cmdId),
-      baseId: Number(form.baseId),
-      classId: Number(form.classId),
-      rate: form.rate ? Number(form.rate) : null,
-      description: form.description.trim(),
-      status: form.status,
-      category: "RentalValue", // Static value, not displayed to user
-      type: 1, // Static value, not displayed to user
-    };
+      const result = await onSubmit(payload);
 
-    const result = await onSubmit(payload);
+      // Get the record ID (either from existing or newly created)
+      const recordId = initialData?.id || result?.id;
 
-    // Get the record ID (either from existing or newly created)
-    const recordId = initialData?.id || result?.id;
-
-    // If files are selected, upload them
-    if (recordId && selectedFiles.length > 0) {
-      setIsUploading(true);
-      try {
-        await uploadApi.uploadFiles(recordId, "RentalValueRate", selectedFiles);
-        if (onUploadSuccess) {
-          onUploadSuccess();
+      // If files are selected, upload them
+      if (recordId && selectedFiles.length > 0) {
+        setIsUploading(true);
+        try {
+          await uploadApi.uploadFiles(recordId, "RentalValueRate", selectedFiles);
+          if (onUploadSuccess) {
+            onUploadSuccess();
+          }
+          setSelectedFiles([]);
+        } catch (error) {
+          console.error("Error uploading files:", error);
+          alert(`Failed to upload files: ${error.message}`);
+        } finally {
+          setIsUploading(false);
         }
-        setSelectedFiles([]);
-      } catch (error) {
-        console.error("Error uploading files:", error);
-        alert(`Failed to upload files: ${error.message}`);
-      } finally {
-        setIsUploading(false);
       }
+    } catch (error) {
+      console.error("Error saving rental value rate:", error);
+      alert(getSaveErrorMessage(error));
     }
   };
 
@@ -418,13 +458,12 @@ function RentalValueRateForm({
                 aria-hidden
               />
               <MDInput
-                label="Deactive Date *"
+                label="Deactive Date"
                 type="text"
                 value={toDisplayDate(form.deactiveDate)}
                 readOnly
                 fullWidth
                 size="small"
-                required
                 error={!!errors.deactiveDate}
                 helperText={errors.deactiveDate}
                 disabled={!form.applicableDate || !String(form.applicableDate).trim()}
@@ -848,6 +887,10 @@ export default function RentalValueRate() {
       console.error("Record not found for id:", id);
       return;
     }
+    if (record.deactiveDate ?? record.DeactiveDate) {
+      alert("Deactive date already exists contact Administrator");
+      return;
+    }
     // Handle both camelCase and PascalCase for all fields
     const applicableDate = record.applicableDate ?? record.ApplicableDate ?? null;
     const applicationDate = record.applicationDate ?? record.ApplicationDate ?? null;
@@ -971,7 +1014,7 @@ export default function RentalValueRate() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving rental value rate:", error);
-      alert("Failed to save rental value rate. Please try again.");
+      throw error;
     }
   };
 
@@ -1271,8 +1314,8 @@ export default function RentalValueRate() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "78vh",
+                  minHeight: "560px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",

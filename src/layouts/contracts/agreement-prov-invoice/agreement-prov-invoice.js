@@ -276,6 +276,7 @@ export default function AgreementProvInvoice() {
 
   // Generate PDF for a contract row
   const generatePDF = (rowData) => {
+    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -483,8 +484,18 @@ export default function AgreementProvInvoice() {
     // Load logo first, then build content and open PDF
     addLogoToPDF().then(() => {
       buildPDFContent();
-      // Open PDF in new window for viewing (user can then download or save using browser controls)
-      doc.output("dataurlnewwindow");
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+
+      if (previewWindow) {
+        previewWindow.location.href = pdfUrl;
+      } else {
+        window.open(pdfUrl, "_blank", "noopener,noreferrer");
+      }
+
+      setTimeout(() => {
+        URL.revokeObjectURL(pdfUrl);
+      }, 60000);
     });
   };
 

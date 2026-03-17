@@ -1697,6 +1697,7 @@ export default function PropertyGrouping() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   // Pagination state for linked properties dialog
@@ -2319,7 +2320,7 @@ export default function PropertyGrouping() {
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
     {
-      Header: "Link Prop",
+      Header: "Linked",
       accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
       width: "12%",
@@ -2896,6 +2897,7 @@ export default function PropertyGrouping() {
                   canSearch
                   pagination={{ variant: "gradient", color: "info" }}
                   exportFileName="Property-Grouping"
+                  onVisibleRowCountChange={setVisibleRowCount}
                 />
 
                 {/* Custom Pagination Footer */}
@@ -2910,7 +2912,7 @@ export default function PropertyGrouping() {
                   >
                     <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
                       <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
+                        {visibleRowCount} of {totalCount} entries
                       </MDTypography>
                       {Math.ceil(totalCount / pageSize) > 1 && (
                         <MDPagination variant="gradient" color="info">

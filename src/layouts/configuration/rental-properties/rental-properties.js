@@ -48,6 +48,7 @@ function RentalProperties() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [propertyTypes, setPropertyTypes] = useState([]);
   // Search is handled by shared DataTable (canSearch)
@@ -479,24 +480,24 @@ function RentalProperties() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "10%" },
-    { Header: "Is Active", accessor: "status", align: "center", width: "8%", Cell: StatusBadge },
-    { Header: "Id", accessor: "id", align: "left", width: "5%" },
-    { Header: "RAC", accessor: "cmdName", align: "left", width: "12%" },
-    { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
-    { Header: "Class", accessor: "className", align: "left", width: "12%" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "15%" },
+    { Header: "Status", accessor: "status", align: "center", width: "10%", Cell: StatusBadge },
+    { Header: "Id", accessor: "id", align: "left", width: "7%" },
+    { Header: "RAC", accessor: "cmdName", align: "left", width: "14%" },
+    { Header: "Base", accessor: "baseName", align: "left", width: "14%" },
+    { Header: "Class", accessor: "className", align: "left", width: "14%" },
     {
       Header: "Type",
       accessor: "propertyTypeName",
       align: "left",
-      width: "12%",
+      width: "14%",
       Cell: ({ value }) => value || "-",
     },
     {
       Header: "Property",
       accessor: "pId",
       align: "left",
-      width: "18%",
+      width: "20%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
@@ -506,7 +507,7 @@ function RentalProperties() {
       Header: "Area(UoM)",
       accessor: "area",
       align: "right",
-      width: "18%",
+      width: "21%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
@@ -517,7 +518,7 @@ function RentalProperties() {
         return combined || "-";
       },
     },
-    { Header: "Location", accessor: "location", align: "left", width: "20%" },
+    { Header: "Location", accessor: "location", align: "left", width: "22%" },
     {
       Header: "Remarks",
       accessor: "remarks",
@@ -531,7 +532,7 @@ function RentalProperties() {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
-      width: "14%",
+      width: "16%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -571,10 +572,10 @@ function RentalProperties() {
       },
     },
     {
-      Header: "Active Groups",
+      Header: "Groups",
       accessor: "activeGroups",
       align: "center",
-      width: "18%",
+      width: "20%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -827,6 +828,7 @@ function RentalProperties() {
                 noEndBorder
                 canSearch
                 exportFileName="Rental-Properties"
+                onVisibleRowCountChange={setVisibleRowCount}
               />
             </MDBox>
 
@@ -842,7 +844,7 @@ function RentalProperties() {
               >
                 <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
                   <MDTypography variant="button" color="secondary" fontWeight="regular">
-                    {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
+                    {visibleRowCount} of {totalCount} entries
                   </MDTypography>
                   {Math.ceil(totalCount / pageSize) > 1 && (
                     <MDPagination variant="gradient" color="info">

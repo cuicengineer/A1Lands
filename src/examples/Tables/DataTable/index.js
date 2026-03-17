@@ -208,9 +208,11 @@ function ColumnValueFilter({ column }) {
           onClick={handleOpen}
           onMouseDown={(e) => e.stopPropagation()}
           sx={{
-            // Reduce filter icon size (~50%) for all grid columns
-            fontSize: "12px",
-            padding: "1px",
+            // Keep filter icon compact so it fits below sort controls in all grids
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -356,6 +358,7 @@ function DataTable({
   stickyBodyMinHeight,
   stickyBodyMaxHeight,
   contentFitTable,
+  onVisibleRowCountChange,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -863,6 +866,12 @@ function DataTable({
   const onSearchChange = useAsyncDebounce((value) => {
     setGlobalFilter(value || undefined);
   }, 100);
+
+  useEffect(() => {
+    if (typeof onVisibleRowCountChange === "function") {
+      onVisibleRowCountChange(page.length);
+    }
+  }, [page, onVisibleRowCountChange]);
 
   // A function that sets the sorted value for the table
   const setSortedValue = (column) => {
@@ -1473,6 +1482,7 @@ DataTable.defaultProps = {
   stickyBodyMinHeight: undefined,
   stickyBodyMaxHeight: undefined,
   contentFitTable: false,
+  onVisibleRowCountChange: undefined,
 };
 
 // Typechecking props for the DataTable
@@ -1515,6 +1525,7 @@ DataTable.propTypes = {
   stickyBodyMinHeight: PropTypes.string,
   stickyBodyMaxHeight: PropTypes.string,
   contentFitTable: PropTypes.bool,
+  onVisibleRowCountChange: PropTypes.func,
 };
 
 export default DataTable;

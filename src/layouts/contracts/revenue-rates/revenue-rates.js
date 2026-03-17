@@ -61,6 +61,43 @@ function RevenueRatesForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
 
+  const getSaveErrorMessage = (error) => {
+    if (error?.response?.status === 400) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim()) {
+        return responseData;
+      }
+      if (typeof responseData?.message === "string" && responseData.message.trim()) {
+        return responseData.message;
+      }
+      if (typeof responseData?.title === "string" && responseData.title.trim()) {
+        return responseData.title;
+      }
+      try {
+        const serialized = JSON.stringify(responseData);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch (serializationError) {
+        console.error("Error serializing revenue rate API response:", serializationError);
+      }
+    }
+
+    const rawMessage = String(error?.message || "").trim();
+    if (rawMessage) {
+      const http400PrefixMatch = rawMessage.match(/^HTTP\s+400\s+Bad\s+Request:\s*(.*)$/i);
+      if (http400PrefixMatch?.[1]?.trim()) {
+        return http400PrefixMatch[1].trim();
+      }
+
+      if (/^HTTP\s+400\b/i.test(rawMessage)) {
+        return rawMessage;
+      }
+    }
+
+    return "Failed to save revenue rate. Please try again.";
+  };
+
   const applicableDateInputRef = useRef(null);
   const deactiveDateInputRef = useRef(null);
 
@@ -332,10 +369,6 @@ function RevenueRatesForm({
       return;
     }
     const deactiveDate = String(form.deactiveDate ?? "").trim();
-    if (!deactiveDate) {
-      alert("Deactive Date is required.");
-      return;
-    }
     if (applicableDate && deactiveDate) {
       const appDate = new Date(applicableDate);
       const deactDate = new Date(deactiveDate);
@@ -344,8 +377,14 @@ function RevenueRatesForm({
         return;
       }
     }
-    // First save the form data
-    await onSubmit(form);
+    try {
+      // First save the form data
+      await onSubmit(form);
+    } catch (error) {
+      console.error("Error saving revenue rate:", error);
+      alert(getSaveErrorMessage(error));
+      return;
+    }
 
     // If editing and files are selected, upload them
     if (initialData && initialData.id && selectedFiles.length > 0) {
@@ -608,13 +647,12 @@ function RevenueRatesForm({
                 aria-hidden
               />
               <MDInput
-                label="Deactive Date *"
+                label="Deactive Date"
                 type="text"
                 value={toDisplayDate(form.deactiveDate)}
                 readOnly
                 fullWidth
                 size="small"
-                required
                 disabled={!form.applicableDate || !String(form.applicableDate).trim()}
                 onClick={() => openDatePicker(deactiveDateInputRef)}
                 InputProps={{
@@ -870,6 +908,7 @@ export default function RevenueRates() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
   // Search is handled by shared DataTable (canSearch)
   const [successSB, setSuccessSB] = useState(false);
@@ -966,6 +1005,10 @@ export default function RevenueRates() {
     );
     if (!revenueRate) {
       console.error("Revenue rate not found for id:", id);
+      return;
+    }
+    if (revenueRate.deactiveDate ?? revenueRate.DeactiveDate) {
+      alert("Deactive date already exists contact Administrator");
       return;
     }
     // Handle both camelCase and PascalCase for all fields
@@ -1140,10 +1183,6 @@ export default function RevenueRates() {
             ? new Date(String(rawDeactive) + "T12:00:00").toISOString()
             : String(rawDeactive)
           : null;
-      if (!deactiveDateValue) {
-        alert("Deactive Date is required.");
-        return;
-      }
       const formattedData = {
         cmdId:
           data.cmdId === 0 || data.cmdId === "0"
@@ -1173,6 +1212,7 @@ export default function RevenueRates() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving revenue rate:", error);
+      throw error;
     }
   };
 
@@ -1577,6 +1617,7 @@ export default function RevenueRates() {
                   canSearch
                   exportFileName="Revenue-Rates"
                   exportCellFormatter={exportCellFormatter}
+                  onVisibleRowCountChange={setVisibleRowCount}
                 />
 
                 {/* Server-side Pagination Footer */}
@@ -1592,12 +1633,10 @@ export default function RevenueRates() {
                     <MDTypography variant="button" color="secondary" fontWeight="regular">
                       {(() => {
                         const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+                        const displayVisible = displayTotal === 0 ? 0 : visibleRowCount;
                         return displayTotal === 0
                           ? "0 of 0 entries"
-                          : `${Math.min(
-                              pageNumber * pageSize,
-                              displayTotal
-                            )} of ${displayTotal} entries`;
+                          : `${displayVisible} of ${displayTotal} entries`;
                       })()}
                     </MDTypography>
                     {(() => {

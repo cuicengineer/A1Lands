@@ -2964,6 +2964,7 @@ export default function Contracts() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
   // Search is handled by shared DataTable (canSearch)
 
@@ -3724,7 +3725,7 @@ export default function Contracts() {
     {
       id: "currentRentPA",
       Header: "Current Rent PA",
-      accessor: "currentRentPA",
+      accessor: "initialRentPA",
       align: "right",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
@@ -5291,8 +5292,8 @@ export default function Contracts() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "82vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
@@ -5589,7 +5590,7 @@ export default function Contracts() {
                         title="Refresh as-of values"
                         onClick={() => setAsOfRefreshToken((t) => t + 1)}
                       >
-                        <Icon fontSize="small">refresh</Icon>
+                        <Icon fontSize="small">send</Icon>
                       </IconButton>
                     </MDBox>
                   </MDBox>
@@ -5639,6 +5640,7 @@ export default function Contracts() {
                   exportExcludeGroupParentsWhenExpanded
                   exportAllColumns
                   initialHiddenColumns={initialHiddenColumnIds}
+                  onVisibleRowCountChange={setVisibleRowCount}
                 />
 
                 {/* Server-side Pagination Footer */}
@@ -5673,7 +5675,7 @@ export default function Contracts() {
                         </Select>
                       </FormControl>
                       <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        {Math.min(pageNumber * pageSize, totalCount)} of {totalCount} entries
+                        {visibleRowCount} of {totalCount} entries
                       </MDTypography>
                       {Math.ceil(totalCount / pageSize) > 1 && (
                         <MDPagination variant="gradient" color="info">

@@ -44,13 +44,50 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const [filteredBases, setFilteredBases] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const getSaveErrorMessage = (error) => {
+    if (error?.response?.status === 400) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim()) {
+        return responseData;
+      }
+      if (typeof responseData?.message === "string" && responseData.message.trim()) {
+        return responseData.message;
+      }
+      if (typeof responseData?.title === "string" && responseData.title.trim()) {
+        return responseData.title;
+      }
+      try {
+        const serialized = JSON.stringify(responseData);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch (serializationError) {
+        console.error("Error serializing sharing formula API response:", serializationError);
+      }
+    }
+
+    const rawMessage = String(error?.message || "").trim();
+    if (rawMessage) {
+      const http400PrefixMatch = rawMessage.match(/^HTTP\s+400\s+Bad\s+Request:\s*(.*)$/i);
+      if (http400PrefixMatch?.[1]?.trim()) {
+        return http400PrefixMatch[1].trim();
+      }
+
+      if (/^HTTP\s+400\b/i.test(rawMessage)) {
+        return rawMessage;
+      }
+    }
+
+    return "Failed to save sharing formula. Please try again.";
+  };
+
   // Filter bases based on selected command
   useEffect(() => {
     if (form.cmdId && bases.length > 0) {
       const filtered = bases.filter((base) => Number(base.cmd) === Number(form.cmdId));
       setFilteredBases(filtered);
       // Clear base if it's no longer valid
-      if (form.baseId && !filtered.find((b) => b.id === form.baseId)) {
+      if (form.baseId && !filtered.find((b) => Number(b.id) === Number(form.baseId))) {
         setForm((prev) => ({ ...prev, baseId: "" }));
       }
     } else {
@@ -239,7 +276,6 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
-    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
     if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
       newErrors.deactiveDate = "Deactive Date must be after Application Date";
     }
@@ -265,11 +301,15 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
 
     setIsSubmitting(true);
     try {
+      const deactiveDateValue = String(form.deactiveDate ?? "").trim()
+        ? String(form.deactiveDate).trim()
+        : null;
+
       // Create array of records - one per selected class
       // Map to match database model column names
       const dataArray = form.classIds.map((classId) => ({
         ApplicableDate: form.applicableDate,
-        DeactiveDate: form.deactiveDate,
+        DeactiveDate: deactiveDateValue,
         CmdId: Number(form.cmdId),
         BaseId: Number(form.baseId),
         ClassId: Number(classId), // Keep for multi-class selection logic
@@ -285,7 +325,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       onClose();
     } catch (error) {
       console.error("Error saving sharing formula:", error);
-      alert("Failed to save sharing formula. Please try again.");
+      alert(getSaveErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -410,13 +450,12 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
                 aria-hidden
               />
               <MDInput
-                label="Deactive Date *"
+                label="Deactive Date"
                 type="text"
                 value={toDisplayDate(form.deactiveDate)}
                 readOnly
                 fullWidth
                 size="small"
-                required
                 error={!!errors.deactiveDate}
                 helperText={errors.deactiveDate}
                 disabled={!form.applicableDate || !String(form.applicableDate).trim()}
@@ -724,11 +763,16 @@ export default function SharingFormula() {
       (r) => (r.Id || r.id) === id || Number(r.Id || r.id) === Number(id)
     );
     if (record) {
+      if (record.DeactiveDate || record.deactiveDate) {
+        alert("Deactive date already exists contact Administrator");
+        return;
+      }
       // Ensure we pass the original record with all PascalCase fields preserved
       setCurrentRecord({
         ...record,
         // Ensure all fields are present in PascalCase
         Id: record.Id || record.id,
+        id: record.Id || record.id,
         ApplicableDate: record.ApplicableDate || record.applicableDate,
         DeactiveDate: record.DeactiveDate || record.deactiveDate,
         CmdId: record.CmdId || record.cmdId,
@@ -778,9 +822,10 @@ export default function SharingFormula() {
 
   const handleSubmit = async (dataArray) => {
     try {
-      if (currentRecord && currentRecord.id) {
+      const currentRecordId = currentRecord?.id || currentRecord?.Id;
+      if (currentRecordId) {
         // Update existing record
-        await sharingFormulaApi.update(currentRecord.id, dataArray[0]);
+        await sharingFormulaApi.update(currentRecordId, dataArray[0]);
       } else {
         // Create new records
         await sharingFormulaApi.create(dataArray);
@@ -789,7 +834,6 @@ export default function SharingFormula() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving sharing formula:", error);
-      alert("Failed to save sharing formula. Please try again.");
       throw error; // Re-throw to let form handle it
     }
   };

@@ -57,6 +57,43 @@ function GovtShareRateForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
 
+  const getSaveErrorMessage = (error) => {
+    if (error?.response?.status === 400) {
+      const responseData = error.response?.data;
+      if (typeof responseData === "string" && responseData.trim()) {
+        return responseData;
+      }
+      if (typeof responseData?.message === "string" && responseData.message.trim()) {
+        return responseData.message;
+      }
+      if (typeof responseData?.title === "string" && responseData.title.trim()) {
+        return responseData.title;
+      }
+      try {
+        const serialized = JSON.stringify(responseData);
+        if (serialized && serialized !== "{}") {
+          return serialized;
+        }
+      } catch (serializationError) {
+        console.error("Error serializing govt share rate API response:", serializationError);
+      }
+    }
+
+    const rawMessage = String(error?.message || "").trim();
+    if (rawMessage) {
+      const http400PrefixMatch = rawMessage.match(/^HTTP\s+400\s+Bad\s+Request:\s*(.*)$/i);
+      if (http400PrefixMatch?.[1]?.trim()) {
+        return http400PrefixMatch[1].trim();
+      }
+
+      if (/^HTTP\s+400\b/i.test(rawMessage)) {
+        return rawMessage;
+      }
+    }
+
+    return "Failed to save govt share rate. Please try again.";
+  };
+
   // Filter bases based on selected command
   useEffect(() => {
     if (form.cmdId && bases.length > 0) {
@@ -249,7 +286,6 @@ function GovtShareRateForm({
   const validate = () => {
     const newErrors = {};
     if (!form.applicableDate) newErrors.applicableDate = "Application Date is required";
-    if (!form.deactiveDate) newErrors.deactiveDate = "Deactive Date is required";
     if (form.applicableDate && form.deactiveDate && form.deactiveDate <= form.applicableDate) {
       newErrors.deactiveDate = "Deactive Date must be after Application Date";
     }
@@ -303,9 +339,13 @@ function GovtShareRateForm({
   const handleSave = async () => {
     if (!validate()) return;
 
+    const deactiveDateValue = String(form.deactiveDate ?? "").trim()
+      ? String(form.deactiveDate).trim()
+      : null;
+
     const payload = {
       applicableDate: form.applicableDate,
-      deactiveDate: form.deactiveDate,
+      deactiveDate: deactiveDateValue,
       cmdId: Number(form.cmdId),
       baseId: Number(form.baseId),
       classId: Number(form.classId),
@@ -348,7 +388,7 @@ function GovtShareRateForm({
       onClose();
     } catch (error) {
       console.error("Error saving govt share rate:", error);
-      alert("Failed to save govt share rate. Please try again.");
+      alert(getSaveErrorMessage(error));
     }
   };
 
@@ -471,13 +511,12 @@ function GovtShareRateForm({
                 aria-hidden
               />
               <MDInput
-                label="Deactive Date *"
+                label="Deactive Date"
                 type="text"
                 value={toDisplayDate(form.deactiveDate)}
                 readOnly
                 fullWidth
                 size="small"
-                required
                 error={!!errors.deactiveDate}
                 helperText={errors.deactiveDate}
                 disabled={!form.applicableDate || !String(form.applicableDate).trim()}
@@ -922,6 +961,10 @@ export default function GovtShareRate() {
     );
     if (!record) {
       console.error("Record not found for id:", id);
+      return;
+    }
+    if (record.DeactiveDate ?? record.deactiveDate) {
+      alert("Deactive date already exists contact Administrator");
       return;
     }
     // Use PascalCase first (strict API response format), then fallback to camelCase

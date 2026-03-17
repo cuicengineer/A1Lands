@@ -28,7 +28,6 @@ import { useMaterialUIController } from "context";
 function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest }) {
   const [controller] = useMaterialUIController();
   const headerTextColor = "#111111 !important";
-  const hasFilterNode = Boolean(filterNode);
   return (
     <MDBox
       component="th"
@@ -81,45 +80,65 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
         >
           {children}
         </MDBox>
-        {filterNode && (
+        {(sorted || filterNode) && (
           <MDBox
             sx={{
-              cursor: "default",
-              userSelect: "none",
               display: "inline-flex",
-              alignItems: "flex-start",
-              marginTop: "2px",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              flexShrink: 0,
+              marginLeft: "2px",
+              minWidth: "16px",
             }}
           >
-            {filterNode}
-          </MDBox>
-        )}
-        {sorted && (
-          <MDBox
-            position="absolute"
-            top={0}
-            right={align !== "right" ? "16px" : 0}
-            left={align === "right" ? "-5px" : "unset"}
-            sx={({ typography: { size } }) => ({
-              fontSize: size.lg,
-            })}
-          >
-            <MDBox
-              position="absolute"
-              top={-6}
-              color={sorted === "asce" ? "#111111" : "#6c757d"}
-              opacity={sorted === "asce" ? 1 : 0.5}
-            >
-              <Icon>arrow_drop_up</Icon>
-            </MDBox>
-            <MDBox
-              position="absolute"
-              top={0}
-              color={sorted === "desc" ? "#111111" : "#6c757d"}
-              opacity={sorted === "desc" ? 1 : 0.5}
-            >
-              <Icon>arrow_drop_down</Icon>
-            </MDBox>
+            {sorted && (
+              <MDBox
+                sx={{
+                  display: "inline-flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  lineHeight: 0.7,
+                  transform: "translateY(1px)",
+                }}
+              >
+                <Icon
+                  sx={{
+                    fontSize: "18px !important",
+                    marginBottom: "-10px",
+                    color: sorted === "asce" ? "#111111" : "#6c757d",
+                    opacity: sorted === "asce" ? 1 : 0.5,
+                  }}
+                >
+                  arrow_drop_up
+                </Icon>
+                <Icon
+                  sx={{
+                    fontSize: "18px !important",
+                    marginTop: "-10px",
+                    color: sorted === "desc" ? "#111111" : "#6c757d",
+                    opacity: sorted === "desc" ? 1 : 0.5,
+                  }}
+                >
+                  arrow_drop_down
+                </Icon>
+              </MDBox>
+            )}
+            {filterNode && (
+              <MDBox
+                sx={{
+                  cursor: "default",
+                  userSelect: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginTop: sorted ? "-2px" : "2px",
+                }}
+              >
+                {filterNode}
+              </MDBox>
+            )}
           </MDBox>
         )}
       </MDBox>
