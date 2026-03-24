@@ -33,7 +33,11 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Paper from "@mui/material/Paper";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
 import revenueRatesApi from "services/api.revenuerates.service";
@@ -1639,7 +1643,7 @@ function PropertyGroupingForm({
             variant="gradient"
             color="info"
             onClick={handleSave}
-            disabled={isOperatorUser()}
+            disabled={!canCreateCurrentMenu()}
           >
             <Icon>save</Icon>&nbsp;Save
           </MDButton>
@@ -2726,24 +2730,28 @@ export default function PropertyGrouping() {
             borderRadius: "2px",
           }}
         >
-          <IconButton
-            size="small"
-            color="info"
-            onClick={() => handleEditPropertyGrouping(normalizedId)}
-            title="Edit"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>edit</Icon>
-          </IconButton>
-          <IconButton
-            size="small"
-            color="error"
-            onClick={() => handleDeletePropertyGrouping(normalizedId)}
-            title="Delete"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>delete</Icon>
-          </IconButton>
+          {canEditCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditPropertyGrouping(normalizedId)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+          )}
+          {canDeleteCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeletePropertyGrouping(normalizedId)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+          )}
         </MDBox>
       ),
     };
@@ -2772,9 +2780,11 @@ export default function PropertyGrouping() {
                 <MDTypography variant="h6" color="white">
                   Property Grouping
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreateCurrentMenu() && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}
@@ -2981,7 +2991,7 @@ export default function PropertyGrouping() {
             onClick={handleConfirmDelete}
             color="error"
             variant="gradient"
-            disabled={isOperatorUser()}
+            disabled={!canDeleteCurrentMenu()}
           >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>

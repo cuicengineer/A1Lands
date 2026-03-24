@@ -18,12 +18,22 @@ import NewContractForm from "layouts/contracts/components/NewContractForm";
 import { useState } from "react";
 import StatusBadge from "components/StatusBadge";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
-import { isOperatorUser } from "services/api.service";
+import {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 
 function Contracts() {
   const [openForm, setOpenForm] = useState(false);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
-  const handleOpenForm = () => setOpenForm(true);
+  const handleOpenForm = () => {
+    if (!canCreate) return;
+    setOpenForm(true);
+  };
   const handleCloseForm = () => setOpenForm(false);
 
   // Placeholder for columns and rows data
@@ -145,12 +155,16 @@ function Contracts() {
       isDeleted: "No",
       actions: (
         <MDBox display="flex" alignItems="center" mt={{ xs: 2, sm: 0 }} ml={{ xs: -1.5, sm: 0 }}>
-          <MDButton variant="text" color="dark">
-            <Icon>edit</Icon>&nbsp;edit
-          </MDButton>
-          <MDButton variant="text" color="error">
-            <Icon>delete</Icon>&nbsp;delete
-          </MDButton>
+          {canEdit && (
+            <MDButton variant="text" color="dark">
+              <Icon>edit</Icon>&nbsp;edit
+            </MDButton>
+          )}
+          {canDelete && (
+            <MDButton variant="text" color="error">
+              <Icon>delete</Icon>&nbsp;delete
+            </MDButton>
+          )}
         </MDBox>
       ),
     },
@@ -201,12 +215,16 @@ function Contracts() {
       isDeleted: "No",
       actions: (
         <MDBox display="flex" alignItems="center" mt={{ xs: 2, sm: 0 }} ml={{ xs: -1.5, sm: 0 }}>
-          <MDButton variant="text" color="dark">
-            <Icon>edit</Icon>&nbsp;edit
-          </MDButton>
-          <MDButton variant="text" color="error">
-            <Icon>delete</Icon>&nbsp;delete
-          </MDButton>
+          {canEdit && (
+            <MDButton variant="text" color="dark">
+              <Icon>edit</Icon>&nbsp;edit
+            </MDButton>
+          )}
+          {canDelete && (
+            <MDButton variant="text" color="error">
+              <Icon>delete</Icon>&nbsp;delete
+            </MDButton>
+          )}
         </MDBox>
       ),
     },
@@ -235,9 +253,11 @@ function Contracts() {
                 <MDTypography variant="h6" color="white">
                   Contracts
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  Add New Contract
-                </MDButton>
+                {canCreate && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    Add New Contract
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}

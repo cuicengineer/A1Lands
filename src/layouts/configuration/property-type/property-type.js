@@ -26,7 +26,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
 import { useMaterialUIController } from "context";
@@ -51,6 +55,9 @@ function PropertyType() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     fetchPropertyTypes(pageNumber, pageSize);
@@ -96,6 +103,7 @@ function PropertyType() {
   };
 
   const handleAddPropertyType = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewErrors({});
@@ -107,6 +115,7 @@ function PropertyType() {
   };
 
   const handleEditPropertyType = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -142,6 +151,7 @@ function PropertyType() {
 
   const handleSave = async () => {
     if (editingRowId === "__new__" && newRowDraft) {
+      if (!canCreate) return;
       // Mandatory validation only for Create New (as requested)
       const ok = validateNewRow();
       if (!ok) return;
@@ -169,6 +179,7 @@ function PropertyType() {
         alert(`Failed to create property type: ${errorMessage}`);
       }
     } else if (editingRowId && editDraft) {
+      if (!canEdit) return;
       if (!editDraft.name) {
         alert("Name is mandatory.");
         return;
@@ -204,6 +215,7 @@ function PropertyType() {
   };
 
   const handleDeletePropertyType = (id) => {
+    if (!canDelete) return;
     if (editingRowId) return;
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
@@ -215,6 +227,7 @@ function PropertyType() {
   };
 
   const handleConfirmDelete = async () => {
+    if (!canDelete) return;
     if (!recordToDelete) return;
     try {
       await api.remove("PropertyTypes", recordToDelete);
@@ -377,24 +390,28 @@ function PropertyType() {
               borderRadius: "2px",
             }}
           >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditPropertyType(r.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeletePropertyType(r.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            {canEdit && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditPropertyType(r.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDelete && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeletePropertyType(r.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
           </MDBox>
         ),
       });
@@ -428,9 +445,11 @@ function PropertyType() {
               Property Type
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={2}>
-              <MDButton variant="gradient" color="info" onClick={handleAddPropertyType}>
-                Add Property Type
-              </MDButton>
+              {canCreate && (
+                <MDButton variant="gradient" color="info" onClick={handleAddPropertyType}>
+                  Add Property Type
+                </MDButton>
+              )}
             </MDBox>
           </MDBox>
           <MDBox pt={3} position="relative">
@@ -554,7 +573,12 @@ function PropertyType() {
           <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+          <MDButton
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="gradient"
+            disabled={!canDelete}
+          >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

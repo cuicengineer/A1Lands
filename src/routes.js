@@ -237,7 +237,7 @@ const routes = [
         name: "Rental Properties",
         key: "configuration-rental-properties",
         icon: <Icon fontSize="small">home</Icon>,
-        route: "/configuration/rental-properties",
+        route: "/contracts/rental-properties",
         component: <RentalProperties />,
       },
       {
@@ -253,7 +253,7 @@ const routes = [
         name: "Property Grouping",
         key: "configuration-property-grouping",
         icon: <Icon fontSize="small">group_work</Icon>,
-        route: "/configuration/property-grouping",
+        route: "/contracts/property-grouping",
         component: <PropertyGrouping />,
       },
       {

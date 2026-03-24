@@ -1,0 +1,19 @@
+create TABLE dbo.UserPermissions
+(
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    UserId INT NOT NULL,
+    MenuName NVARCHAR(100) NOT NULL,
+    CanView BIT NOT NULL DEFAULT 0,
+    CanCreate BIT NOT NULL DEFAULT 0,
+    CanEdit BIT NOT NULL DEFAULT 0,
+    CanDelete BIT NOT NULL DEFAULT 0,
+    [Action] [varchar](10) NULL,
+	[ActionBy] [varchar](20) NULL,
+	[ActionDate] [datetime] NULL,
+	[IsDeleted] [bit] NULL,
+);
+CREATE UNIQUE INDEX UX_UserPermissions_User_Menu
+ON dbo.UserPermissions(UserId, MenuName);
+
+ALTER TABLE dbo.UserPermissions
+ADD CONSTRAINT CHK_MenuName_NotEmpty CHECK (LEN(MenuName) > 0);

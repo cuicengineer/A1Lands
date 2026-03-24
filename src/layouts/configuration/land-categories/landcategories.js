@@ -12,7 +12,11 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
-import { isOperatorUser } from "services/api.service";
+import {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 
 function LandCategories() {
   const [controller] = useMaterialUIController();
@@ -30,14 +34,19 @@ function LandCategories() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   const handleAddCategory = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({ sno: "", class: "", status: statusOptions[0] });
   };
 
   const handleEditCategory = (cls) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.class === cls);
     if (!row) return;
@@ -55,10 +64,12 @@ function LandCategories() {
 
   const handleSave = () => {
     if (editingRowId === "__new__" && newRowDraft) {
+      if (!canCreate) return;
       setTableRows((prev) => [newRowDraft, ...prev]);
       setEditingRowId(null);
       setNewRowDraft(null);
     } else if (editingRowId && editDraft) {
+      if (!canEdit) return;
       setTableRows((prev) => prev.map((r) => (r.class === editingRowId ? editDraft : r)));
       setEditingRowId(null);
       setEditDraft(null);
@@ -72,6 +83,7 @@ function LandCategories() {
   };
 
   const handleDeleteCategory = (cls) => {
+    if (!canDelete) return;
     setTableRows((prev) => prev.filter((r) => r.class !== cls));
   };
 
@@ -172,22 +184,26 @@ function LandCategories() {
           </MDBox>
         ) : (
           <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
-              color="info"
-              size="small"
-              onClick={() => handleEditCategory(r.class)}
-            >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
-              size="small"
-              onClick={() => handleDeleteCategory(r.class)}
-            >
-              Delete
-            </MDButton>
+            {canEdit && (
+              <MDButton
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={() => handleEditCategory(r.class)}
+              >
+                Edit
+              </MDButton>
+            )}
+            {canDelete && (
+              <MDButton
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => handleDeleteCategory(r.class)}
+              >
+                Delete
+              </MDButton>
+            )}
           </MDBox>
         ),
       });
@@ -217,9 +233,11 @@ function LandCategories() {
             <MDTypography variant="h6" color="white">
               Land Categories
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddCategory}>
-              Add Category
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" color="info" onClick={handleAddCategory}>
+                Add Category
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}

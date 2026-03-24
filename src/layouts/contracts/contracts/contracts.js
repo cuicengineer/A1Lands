@@ -32,7 +32,13 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import FormHelperText from "@mui/material/FormHelperText";
-import api, { getActionBy, getUserIPAddress, isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canEditCurrentMenu,
+  canDeleteCurrentMenu,
+  getActionBy,
+  getUserIPAddress,
+} from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
@@ -2928,7 +2934,7 @@ function ContractsForm({
             variant="gradient"
             color="info"
             onClick={handleAddRiseTerm}
-            disabled={isOperatorUser()}
+            disabled={!canCreateCurrentMenu()}
           >
             <Icon>{editingRiseTermIndex !== null ? "save" : "add"}</Icon>&nbsp;
             {editingRiseTermIndex !== null ? "Update" : "Add"} Term
@@ -3360,6 +3366,7 @@ export default function Contracts() {
   }, [groupByColumns]);
 
   const handleOpenForm = () => {
+    if (!canCreateCurrentMenu()) return;
     setCurrentContract(null);
     setOpenForm(true);
   };
@@ -3367,6 +3374,7 @@ export default function Contracts() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditContract = async (id) => {
+    if (!canEditCurrentMenu()) return;
     try {
       // Fetch contract data from API by ID instead of using local storage/table data
       setLoading(true);
@@ -3382,6 +3390,7 @@ export default function Contracts() {
   };
 
   const handleDeleteContract = (id) => {
+    if (!canDeleteCurrentMenu()) return;
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
   };
@@ -3435,7 +3444,7 @@ export default function Contracts() {
   };
 
   const handleConfirmDelete = async () => {
-    if (isOperatorUser()) return;
+    if (!canDeleteCurrentMenu()) return;
     if (recordToDelete) {
       try {
         // Include IP address in delete request body
@@ -3618,7 +3627,7 @@ export default function Contracts() {
   };
 
   const handleDeleteAttachment = async (file) => {
-    if (isOperatorUser()) return;
+    if (!canDeleteCurrentMenu()) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -4531,24 +4540,28 @@ export default function Contracts() {
               borderRadius: "2px",
             }}
           >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditContract(row.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteContract(row.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            {canEditCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditContract(row.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDeleteCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteContract(row.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
             <IconButton
               size="small"
               color="primary"
@@ -4797,24 +4810,28 @@ export default function Contracts() {
                   borderRadius: "2px",
                 }}
               >
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => handleEditContract(row.id)}
-                  title="Edit"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>edit</Icon>
-                </IconButton>
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDeleteContract(row.id)}
-                  title="Delete"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>delete</Icon>
-                </IconButton>
+                {canEditCurrentMenu() && (
+                  <IconButton
+                    size="small"
+                    color="info"
+                    onClick={() => handleEditContract(row.id)}
+                    title="Edit"
+                    sx={{ padding: "1px" }}
+                  >
+                    <Icon>edit</Icon>
+                  </IconButton>
+                )}
+                {canDeleteCurrentMenu() && (
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => handleDeleteContract(row.id)}
+                    title="Delete"
+                    sx={{ padding: "1px" }}
+                  >
+                    <Icon>delete</Icon>
+                  </IconButton>
+                )}
                 <IconButton
                   size="small"
                   color="primary"
@@ -5282,9 +5299,11 @@ export default function Contracts() {
                 <MDTypography variant="h6" color="white">
                   Contracts
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreateCurrentMenu() && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}
@@ -5792,7 +5811,7 @@ export default function Contracts() {
                             size="small"
                             color="error"
                             onClick={() => handleDeleteAttachment(file)}
-                            disabled={isOperatorUser()}
+                            disabled={!canDeleteCurrentMenu()}
                             sx={{ ml: 1 }}
                           >
                             <Icon>delete</Icon>
@@ -5904,7 +5923,7 @@ export default function Contracts() {
           <MDButton onClick={handleCancelDelete} color="secondary">
             Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" disabled={isOperatorUser()}>
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={!canDeleteCurrentMenu()}>
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

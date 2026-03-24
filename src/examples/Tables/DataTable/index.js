@@ -57,7 +57,7 @@ import { useMaterialUIController } from "context";
 // Material Dashboard 2 React example components
 import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
-import { isOperatorUser } from "services/api.service";
+import { canDeleteCurrentMenu, canEditCurrentMenu } from "services/api.service";
 
 function extractText(value) {
   if (value === null || value === undefined) return "";
@@ -445,10 +445,10 @@ function DataTable({
   }, [baseColumns, isActionsColumn, hasSNoColumn, shouldExcludeSNo]);
 
   const columns = useMemo(() => {
-    if (!isOperatorUser()) return columnsWithSNo;
-    // Hide Action(s) column entirely for Operator users
+    if (canEditCurrentMenu() || canDeleteCurrentMenu()) return columnsWithSNo;
+    // Hide Action(s) column when both edit/delete are not allowed
     return (columnsWithSNo || []).filter((c) => !isActionsColumn(c));
-  }, [columnsWithSNo, isActionsColumn, isOperatorUser]);
+  }, [columnsWithSNo, isActionsColumn]);
   const data = useMemo(() => table.rows, [table]);
 
   // Function to detect if a column is an "Id" column

@@ -24,7 +24,11 @@ import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
 import MDSnackbar from "components/MDSnackbar";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
 import CurrencyLoading from "components/CurrencyLoading";
@@ -60,6 +64,7 @@ function RevenueRatesForm({
   const [isUploading, setIsUploading] = useState(false);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
+  const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -878,7 +883,7 @@ function RevenueRatesForm({
           variant="gradient"
           color="info"
           onClick={handleSave}
-          disabled={isUploading || isOperatorUser()}
+          disabled={isUploading || (isEditMode ? !canEditCurrentMenu() : !canCreateCurrentMenu())}
         >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
@@ -1122,7 +1127,7 @@ export default function RevenueRates() {
   };
 
   const handleDeleteAttachment = async (file) => {
-    if (isOperatorUser()) return;
+    if (!canDeleteCurrentMenu()) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -1493,24 +1498,28 @@ export default function RevenueRates() {
             borderRadius: "2px",
           }}
         >
-          <IconButton
-            size="small"
-            color="info"
-            onClick={() => handleEditRevenueRate(normalizedId)}
-            title="Edit"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>edit</Icon>
-          </IconButton>
-          <IconButton
-            size="small"
-            color="error"
-            onClick={() => handleDeleteRevenueRate(normalizedId)}
-            title="Delete"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>delete</Icon>
-          </IconButton>
+          {canEditCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditRevenueRate(normalizedId)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+          )}
+          {canDeleteCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteRevenueRate(normalizedId)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+          )}
         </MDBox>
       ),
     };
@@ -1539,9 +1548,11 @@ export default function RevenueRates() {
                 <MDTypography variant="h6" color="white">
                   Revenue Rates
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreateCurrentMenu() && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}
@@ -1751,7 +1762,7 @@ export default function RevenueRates() {
                         size="small"
                         color="error"
                         onClick={() => handleDeleteAttachment(file)}
-                        disabled={isOperatorUser()}
+                        disabled={!canDeleteCurrentMenu()}
                         sx={{ ml: 1 }}
                       >
                         <Icon>delete</Icon>
@@ -1795,7 +1806,7 @@ export default function RevenueRates() {
             onClick={handleConfirmDelete}
             color="error"
             variant="gradient"
-            disabled={isOperatorUser()}
+            disabled={!canDeleteCurrentMenu()}
           >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>

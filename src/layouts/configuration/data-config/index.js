@@ -12,7 +12,11 @@ import DataTable from "examples/Tables/DataTable";
 import Icon from "@mui/material/Icon";
 import { useMaterialUIController } from "context";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
-import { isOperatorUser } from "services/api.service";
+import {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 
 function DataConfig() {
   const [controller] = useMaterialUIController();
@@ -20,6 +24,9 @@ function DataConfig() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
   const [tableRows, setTableRows] = useState([
     {
       id: "1",
@@ -73,6 +80,7 @@ function DataConfig() {
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
   const handleAddNew = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({
@@ -91,6 +99,7 @@ function DataConfig() {
     });
   };
   const handleEdit = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -106,11 +115,13 @@ function DataConfig() {
   };
   const handleSave = () => {
     if (editingRowId === "__new__" && newRowDraft) {
+      if (!canCreate) return;
       const rowToAdd = { ...newRowDraft, id: String(Date.now()) };
       setTableRows((prev) => [rowToAdd, ...prev]);
       setEditingRowId(null);
       setNewRowDraft(null);
     } else if (editingRowId && editDraft) {
+      if (!canEdit) return;
       setTableRows((prev) => prev.map((r) => (r.id === editingRowId ? { ...editDraft } : r)));
       setEditingRowId(null);
       setEditDraft(null);
@@ -122,6 +133,7 @@ function DataConfig() {
     setEditDraft(null);
   };
   const handleDelete = (id) => {
+    if (!canDelete) return;
     setTableRows((prev) => prev.filter((r) => r.id !== id));
   };
   const renderInput = (field, value) => (
@@ -205,12 +217,21 @@ function DataConfig() {
           </MDBox>
         ) : (
           <MDBox display="flex" alignItems="center" gap={1}>
-            <MDButton variant="text" color="dark" size="small" onClick={() => handleEdit(r.id)}>
-              <Icon>edit</Icon>&nbsp;Edit
-            </MDButton>
-            <MDButton variant="text" color="error" size="small" onClick={() => handleDelete(r.id)}>
-              <Icon>delete</Icon>&nbsp;Delete
-            </MDButton>
+            {canEdit && (
+              <MDButton variant="text" color="dark" size="small" onClick={() => handleEdit(r.id)}>
+                <Icon>edit</Icon>&nbsp;Edit
+              </MDButton>
+            )}
+            {canDelete && (
+              <MDButton
+                variant="text"
+                color="error"
+                size="small"
+                onClick={() => handleDelete(r.id)}
+              >
+                <Icon>delete</Icon>&nbsp;Delete
+              </MDButton>
+            )}
           </MDBox>
         ),
       });
@@ -240,9 +261,11 @@ function DataConfig() {
                 <MDTypography variant="h6" color="white">
                   Data Config
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleAddNew}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreate && (
+                  <MDButton variant="contained" color="white" onClick={handleAddNew}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}

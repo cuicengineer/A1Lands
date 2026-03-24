@@ -11,7 +11,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Card from "@mui/material/Card";
-import api, { isOperatorUser } from "../../../services/api.service"; // Assuming api service is available
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service"; // Assuming api service is available
 import { useMaterialUIController } from "context";
 
 function UnitsConfig() {
@@ -26,6 +30,9 @@ function UnitsConfig() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     let mounted = true;
@@ -81,6 +88,7 @@ function UnitsConfig() {
   };
 
   const handleAddUnit = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({
@@ -97,6 +105,7 @@ function UnitsConfig() {
   };
 
   const handleEditUnit = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -143,6 +152,7 @@ function UnitsConfig() {
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
+        if (!canCreate) return;
         if (!validateNew()) return;
         const payload = {
           Id: newRowDraft.id,
@@ -157,6 +167,7 @@ function UnitsConfig() {
         setNewRowDraft(null);
         setRefreshTrigger((prev) => prev + 1);
       } else if (editingRowId && editDraft) {
+        if (!canEdit) return;
         const payload = {
           Id: editDraft.id,
           Name: editDraft.name,
@@ -183,6 +194,7 @@ function UnitsConfig() {
   };
 
   const handleDeleteUnit = async (id) => {
+    if (!canDelete) return;
     try {
       await api.remove("Units", id);
       setTableRows((prev) => prev.filter((row) => row.id !== id));
@@ -193,6 +205,7 @@ function UnitsConfig() {
   };
 
   const confirmDelete = async (id) => {
+    if (!canDelete) return;
     const ok = window.confirm("Are you sure you want to delete this unit?");
     if (!ok) return;
     await handleDeleteUnit(id);
@@ -379,22 +392,26 @@ function UnitsConfig() {
           </MDBox>
         ) : (
           <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
-              color="info"
-              size="small"
-              onClick={() => handleEditUnit(r.id)}
-            >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
-              size="small"
-              onClick={() => confirmDelete(r.id)}
-            >
-              Delete
-            </MDButton>
+            {canEdit && (
+              <MDButton
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={() => handleEditUnit(r.id)}
+              >
+                Edit
+              </MDButton>
+            )}
+            {canDelete && (
+              <MDButton
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => confirmDelete(r.id)}
+              >
+                Delete
+              </MDButton>
+            )}
           </MDBox>
         ),
       });
@@ -423,9 +440,11 @@ function UnitsConfig() {
             <MDTypography variant="h6" color="white">
               Units
             </MDTypography>
-            <MDButton variant="gradient" bgColor="dark" onClick={handleAddUnit}>
-              Add Unit
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" bgColor="dark" onClick={handleAddUnit}>
+                Add Unit
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}

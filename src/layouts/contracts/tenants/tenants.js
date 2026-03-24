@@ -16,7 +16,11 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -26,6 +30,8 @@ import StatusBadge from "components/StatusBadge";
 
 function TenantsForm({ open, onClose, onSubmit, initialData }) {
   const isAddMode = !initialData;
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
   const [form, setForm] = useState({
     tenantNo: "",
     ownerName: "",
@@ -487,7 +493,12 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         <MDButton variant="outlined" color="secondary" onClick={onClose}>
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isOperatorUser()}>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isAddMode ? !canCreate : !canEdit}
+        >
           <Icon>save</Icon>&nbsp;Save
         </MDButton>
       </DialogActions>
@@ -503,6 +514,9 @@ TenantsForm.propTypes = {
 };
 
 export default function Tenants() {
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
   const [openForm, setOpenForm] = useState(false);
   const [currentTenant, setCurrentTenant] = useState(null);
   const [rows, setRows] = useState([]);
@@ -525,6 +539,7 @@ export default function Tenants() {
   }, []);
 
   const handleOpenForm = () => {
+    if (!canCreate) return;
     setCurrentTenant(null);
     setOpenForm(true);
   };
@@ -532,6 +547,7 @@ export default function Tenants() {
   const handleCloseForm = () => setOpenForm(false);
 
   const handleEditTenant = (id) => {
+    if (!canEdit) return;
     const tenant = rows.find((row) => row.id === id);
     setCurrentTenant({
       ...tenant,
@@ -553,11 +569,13 @@ export default function Tenants() {
   };
 
   const handleDeleteTenant = (id) => {
+    if (!canDelete) return;
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
   };
 
   const handleConfirmDelete = async () => {
+    if (!canDelete) return;
     if (!recordToDelete) return;
 
     try {
@@ -604,8 +622,10 @@ export default function Tenants() {
         remarks: data.remarks || null,
       };
       if (currentTenant) {
+        if (!canEdit) return;
         await api.update("tenant", currentTenant.id, formattedData);
       } else {
+        if (!canCreate) return;
         await api.create("tenant", formattedData);
       }
       fetchTenants();
@@ -689,24 +709,28 @@ export default function Tenants() {
           borderRadius: "2px",
         }}
       >
-        <IconButton
-          size="small"
-          color="info"
-          onClick={() => handleEditTenant(row.id)}
-          title="Edit"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>edit</Icon>
-        </IconButton>
-        <IconButton
-          size="small"
-          color="error"
-          onClick={() => handleDeleteTenant(row.id)}
-          title="Delete"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>delete</Icon>
-        </IconButton>
+        {canEdit && (
+          <IconButton
+            size="small"
+            color="info"
+            onClick={() => handleEditTenant(row.id)}
+            title="Edit"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>edit</Icon>
+          </IconButton>
+        )}
+        {canDelete && (
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() => handleDeleteTenant(row.id)}
+            title="Delete"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>delete</Icon>
+          </IconButton>
+        )}
       </MDBox>
     ),
   }));
@@ -734,9 +758,11 @@ export default function Tenants() {
                 <MDTypography variant="h6" color="white">
                   Tenants
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreate && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}
@@ -804,7 +830,7 @@ export default function Tenants() {
             onClick={handleConfirmDelete}
             color="error"
             variant="gradient"
-            disabled={isOperatorUser()}
+            disabled={!canDelete}
           >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>

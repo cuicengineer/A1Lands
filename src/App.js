@@ -45,7 +45,7 @@ import createCache from "@emotion/cache";
 
 // Material Dashboard 2 React routes
 import routes from "routes";
-import api from "services/api.service";
+import api, { canViewCurrentMenu } from "services/api.service";
 
 // Material Dashboard 2 React contexts
 import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "context";
@@ -213,7 +213,11 @@ export default function App() {
         const element = isPublicRoute ? (
           route.component
         ) : hasAccessToken() ? (
-          route.component
+          canViewCurrentMenu(route.route) ? (
+            route.component
+          ) : (
+            <Navigate to="/" replace />
+          )
         ) : (
           <Navigate to="/" replace />
         );

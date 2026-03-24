@@ -140,7 +140,158 @@ function getCurrentUserRole() {
 }
 
 function isOperatorUser() {
-  return getCurrentUserRole().toLowerCase() === "operator";
+  return false;
+}
+
+const MENU_ROUTE_PREFIXES = [
+  { menuName: "Dashboard", prefix: "/dashboard" },
+  { menuName: "Configuration", prefix: "/configuration" },
+  { menuName: "Contracts Mgmt", prefix: "/contracts" },
+];
+
+function toBooleanFlag(value) {
+  if (value === true || value === 1 || value === "1") return true;
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return lower === "true" || lower === "yes";
+}
+
+function getStoredPermissions() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return [];
+    const authObj = JSON.parse(raw);
+    const perms = Array.isArray(authObj?.permissions)
+      ? authObj.permissions
+      : Array.isArray(authObj?.Permissions)
+      ? authObj.Permissions
+      : [];
+    return perms;
+  } catch (e) {
+    return [];
+  }
+}
+
+function normalizeMenuName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeAccessValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function isAhqOrSuperuserUser() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return false;
+    const authObj = JSON.parse(raw);
+    const candidates = [
+      authObj?.role,
+      authObj?.Role,
+      authObj?.roleName,
+      authObj?.RoleName,
+      authObj?.category,
+      authObj?.Category,
+      authObj?.userRole,
+      authObj?.UserRole,
+      authObj?.username,
+      authObj?.Username,
+      authObj?.userName,
+      authObj?.UserName,
+      authObj?.unique_name,
+    ];
+    const normalized = candidates.map(normalizeAccessValue);
+    return normalized.includes("ahq") || normalized.includes("superuser");
+  } catch (e) {
+    return false;
+  }
+}
+
+function canAccessPrivilegedConfigRoute(pathnameArg) {
+  const pathname =
+    pathnameArg ??
+    (typeof window !== "undefined" && window.location
+      ? String(window.location.pathname || "")
+      : "");
+  const cleaned = String(pathname || "")
+    .trim()
+    .toLowerCase();
+  const isPrivilegedOnlyRoute =
+    cleaned.startsWith("/configuration/user-mgmt") ||
+    cleaned.startsWith("/configuration/user-role");
+  if (!isPrivilegedOnlyRoute) return true;
+  return isAhqOrSuperuserUser();
+}
+
+function getPermissionByMenuName(menuName) {
+  const normalized = normalizeMenuName(menuName);
+  if (!normalized) return null;
+  const allPermissions = getStoredPermissions();
+  const row = allPermissions.find((item) => {
+    const name = String(item?.menuName ?? item?.MenuName ?? "").trim();
+    return normalizeMenuName(name) === normalized;
+  });
+  return row || null;
+}
+
+function getCurrentMainMenuName(pathnameArg) {
+  const pathname =
+    pathnameArg ??
+    (typeof window !== "undefined" && window.location
+      ? String(window.location.pathname || "")
+      : "");
+  const cleaned = String(pathname || "")
+    .trim()
+    .toLowerCase();
+  const matched = MENU_ROUTE_PREFIXES.find(({ prefix }) => cleaned.startsWith(prefix));
+  return matched?.menuName || "";
+}
+
+function canViewMenu(menuName) {
+  const p = getPermissionByMenuName(menuName);
+  if (!p) return true;
+  return toBooleanFlag(p?.canView ?? p?.CanView ?? p?.view ?? p?.View);
+}
+
+function canCreateInMenu(menuName) {
+  const p = getPermissionByMenuName(menuName);
+  if (!p) return true;
+  return toBooleanFlag(p?.canCreate ?? p?.CanCreate ?? p?.create ?? p?.Create);
+}
+
+function canEditInMenu(menuName) {
+  const p = getPermissionByMenuName(menuName);
+  if (!p) return true;
+  return toBooleanFlag(p?.canEdit ?? p?.CanEdit ?? p?.edit ?? p?.Edit);
+}
+
+function canDeleteInMenu(menuName) {
+  const p = getPermissionByMenuName(menuName);
+  if (!p) return true;
+  return toBooleanFlag(p?.canDelete ?? p?.CanDelete ?? p?.delete ?? p?.Delete);
+}
+
+function canViewCurrentMenu(pathnameArg) {
+  if (!canAccessPrivilegedConfigRoute(pathnameArg)) return false;
+  return canViewMenu(getCurrentMainMenuName(pathnameArg));
+}
+
+function canCreateCurrentMenu(pathnameArg) {
+  return canCreateInMenu(getCurrentMainMenuName(pathnameArg));
+}
+
+function canEditCurrentMenu(pathnameArg) {
+  return canEditInMenu(getCurrentMainMenuName(pathnameArg));
+}
+
+function canDeleteCurrentMenu(pathnameArg) {
+  return canDeleteInMenu(getCurrentMainMenuName(pathnameArg));
 }
 
 // Invalidate role cache when auth changes (e.g. login/logout or another tab)
@@ -267,11 +418,15 @@ async function refreshAccessToken() {
 }
 
 async function fetchWithAuth(method, path, body, headers = {}, requestOptions = {}) {
-  // Frontend RBAC: Operator can only GET and POST. Do not send PUT/DELETE.
   const m = String(method || "").toUpperCase();
-  if (isOperatorUser() && (m === "PUT" || m === "DELETE")) {
-    console.log(`Blocked ${m} request for Operator user: ${path}`);
-    throw new Error("Operator user is not allowed to perform update/delete operations.");
+  if (m === "POST" && !canCreateCurrentMenu()) {
+    throw new Error("You are not allowed to create in this module.");
+  }
+  if ((m === "PUT" || m === "PATCH") && !canEditCurrentMenu()) {
+    throw new Error("You are not allowed to edit in this module.");
+  }
+  if (m === "DELETE" && !canDeleteCurrentMenu()) {
+    throw new Error("You are not allowed to delete in this module.");
   }
 
   const pathWithLeadingSlash = path.startsWith("/") ? path : `/${path}`;
@@ -452,6 +607,15 @@ const api = {
   refreshAccessToken,
   fetchAndUpdateUserContext,
   isOperatorUser,
+  getStoredPermissions,
+  getCurrentMainMenuName,
+  canViewMenu,
+  canViewCurrentMenu,
+  canCreateCurrentMenu,
+  canEditCurrentMenu,
+  canDeleteCurrentMenu,
+  canAccessPrivilegedConfigRoute,
+  isAhqOrSuperuserUser,
   getCurrentUserRole,
   getActionBy,
   getLoggedInUsername,
@@ -460,6 +624,15 @@ const api = {
 export default api;
 export {
   isOperatorUser,
+  getStoredPermissions,
+  getCurrentMainMenuName,
+  canViewMenu,
+  canViewCurrentMenu,
+  canCreateCurrentMenu,
+  canEditCurrentMenu,
+  canDeleteCurrentMenu,
+  canAccessPrivilegedConfigRoute,
+  isAhqOrSuperuserUser,
   getCurrentUserRole,
   getActionBy,
   getLoggedInUsername,

@@ -23,7 +23,11 @@ import MDBadge from "components/MDBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import PropTypes from "prop-types";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
 import { format, parseISO, isValid } from "date-fns";
 
@@ -43,6 +47,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const [errors, setErrors] = useState({});
   const [filteredBases, setFilteredBases] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -662,7 +667,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
           variant="gradient"
           color="info"
           onClick={handleSave}
-          disabled={isSubmitting || isOperatorUser()}
+          disabled={isSubmitting || (isEditMode ? !canEditCurrentMenu() : !canCreateCurrentMenu())}
         >
           <Icon>save</Icon>&nbsp;{isSubmitting ? "Saving..." : "Save"}
         </MDButton>
@@ -794,11 +799,7 @@ export default function SharingFormula() {
   };
 
   const handleDeleteRecord = async (id) => {
-    // Block delete for operator users
-    if (isOperatorUser()) {
-      alert("Operator users are not allowed to delete records.");
-      return;
-    }
+    if (!canDeleteCurrentMenu()) return;
     if (window.confirm("Are you sure you want to delete this sharing formula?")) {
       try {
         await sharingFormulaApi.remove(id);
@@ -926,7 +927,7 @@ export default function SharingFormula() {
                 onClick={() => handleEditRecord(recordId)}
                 title="Edit"
                 sx={{ padding: "1px" }}
-                disabled={isOperatorUser()}
+                disabled={!canEditCurrentMenu()}
               >
                 <Icon>edit</Icon>
               </IconButton>
@@ -936,7 +937,7 @@ export default function SharingFormula() {
                 onClick={() => handleDeleteRecord(recordId)}
                 title="Delete"
                 sx={{ padding: "1px" }}
-                disabled={isOperatorUser()}
+                disabled={!canDeleteCurrentMenu()}
               >
                 <Icon>delete</Icon>
               </IconButton>
@@ -1363,9 +1364,11 @@ export default function SharingFormula() {
                 <MDTypography variant="h6" color="white">
                   Sharing Formula
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreateCurrentMenu() && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}

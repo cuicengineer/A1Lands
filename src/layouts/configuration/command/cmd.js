@@ -10,7 +10,11 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api, { isOperatorUser } from "../../../services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service";
 
 function Command() {
   const [tableRows, setTableRows] = useState([]);
@@ -18,6 +22,9 @@ function Command() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     let mounted = true;
@@ -44,6 +51,7 @@ function Command() {
   };
 
   const handleAddCommand = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({ id: 0, name: "", abb: "", status: "" });
@@ -51,6 +59,7 @@ function Command() {
   };
 
   const handleEditCommand = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -74,6 +83,7 @@ function Command() {
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
+        if (!canCreate) return;
         if (!validateNew()) return;
         const payload = {
           Id: newRowDraft.id,
@@ -89,6 +99,7 @@ function Command() {
         setEditingRowId(null);
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
+        if (!canEdit) return;
         const payload = {
           Id: editDraft.id,
           name: editDraft.name,
@@ -108,6 +119,7 @@ function Command() {
   };
 
   const handleDeleteCommand = async (id) => {
+    if (!canDelete) return;
     try {
       await api.remove("Command", id);
       setTableRows((prev) => prev.filter((row) => row.id !== id));
@@ -117,6 +129,7 @@ function Command() {
   };
 
   const confirmDelete = async (id) => {
+    if (!canDelete) return;
     const ok = window.confirm("Are you sure you want to delete this command?");
     if (!ok) return;
     await handleDeleteCommand(id);
@@ -238,22 +251,26 @@ function Command() {
           </MDBox>
         ) : (
           <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
-              color="info"
-              size="small"
-              onClick={() => handleEditCommand(r.id)}
-            >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
-              size="small"
-              onClick={() => confirmDelete(r.id)}
-            >
-              Delete
-            </MDButton>
+            {canEdit && (
+              <MDButton
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={() => handleEditCommand(r.id)}
+              >
+                Edit
+              </MDButton>
+            )}
+            {canDelete && (
+              <MDButton
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => confirmDelete(r.id)}
+              >
+                Delete
+              </MDButton>
+            )}
           </MDBox>
         ),
       });
@@ -282,9 +299,11 @@ function Command() {
             <MDTypography variant="h6" color="white">
               Command
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddCommand}>
-              Add Command
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" color="info" onClick={handleAddCommand}>
+                Add Command
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}

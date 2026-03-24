@@ -34,6 +34,34 @@ function A1Login() {
       // Send both camelCase and PascalCase to be resilient to backend DTO naming
       const res = await api.login({ username: u, password: p, Username: u, Password: p });
 
+      const permissions = Array.isArray(res?.permissions)
+        ? res.permissions
+        : Array.isArray(res?.Permissions)
+        ? res.Permissions
+        : [];
+
+      const normalizeLoginValue = (value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "");
+      const privilegedValues = new Set(["ahq", "superuser"]);
+      const isPrivilegedUser =
+        privilegedValues.has(normalizeLoginValue(u)) ||
+        privilegedValues.has(normalizeLoginValue(res?.username)) ||
+        privilegedValues.has(normalizeLoginValue(res?.Username)) ||
+        privilegedValues.has(normalizeLoginValue(res?.userName)) ||
+        privilegedValues.has(normalizeLoginValue(res?.UserName)) ||
+        privilegedValues.has(normalizeLoginValue(res?.roleName)) ||
+        privilegedValues.has(normalizeLoginValue(res?.RoleName));
+      const hasValidPermissions = Array.isArray(permissions) && permissions.length > 0;
+
+      if (!hasValidPermissions && !isPrivilegedUser) {
+        alert("No rights assigned. Please contact administrator.");
+        setAuthError("No rights assigned. Please contact administrator.");
+        return;
+      }
+
       // Store token if backend returns it
       const token =
         res?.token || res?.Token || res?.accessToken || res?.AccessToken || res?.jwt || res?.Jwt;
@@ -52,7 +80,24 @@ function A1Login() {
         // ignore
       }
 
-      navigate("/dashboard");
+      const canView = (p) =>
+        p?.canView === true ||
+        p?.CanView === true ||
+        p?.canView === 1 ||
+        p?.CanView === 1 ||
+        String(p?.canView ?? p?.CanView ?? "")
+          .trim()
+          .toLowerCase() === "true";
+      const firstVisibleMenu = permissions.find(canView);
+      const menuName = String(
+        firstVisibleMenu?.menuName ?? firstVisibleMenu?.MenuName ?? ""
+      ).trim();
+      const routeByMenu = {
+        Dashboard: "/dashboard",
+        Configuration: isPrivilegedUser ? "/configuration/user-mgmt" : "/configuration/class",
+        "Contracts Mgmt": "/contracts/tenants",
+      };
+      navigate(routeByMenu[menuName] || "/dashboard");
     } catch (err) {
       setAuthError(err?.message ? String(err.message) : "Login failed");
     } finally {

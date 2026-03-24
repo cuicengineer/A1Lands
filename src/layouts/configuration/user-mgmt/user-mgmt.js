@@ -15,7 +15,23 @@ import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Select from "@mui/material/Select";
-import api, { isOperatorUser } from "../../../services/api.service";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Checkbox from "@mui/material/Checkbox";
+import Paper from "@mui/material/Paper";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service";
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
 import { useMaterialUIController } from "context";
@@ -43,6 +59,16 @@ function UserMgmt() {
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(20);
+  const [isRightsModalOpen, setIsRightsModalOpen] = useState(false);
+  const [rightsUserId, setRightsUserId] = useState(null);
+  const [rightsUserName, setRightsUserName] = useState("");
+  const [mainMenuNames, setMainMenuNames] = useState([]);
+  const [rightsDraftRows, setRightsDraftRows] = useState([]);
+  const [rightsRowMetaByMenu, setRightsRowMetaByMenu] = useState({});
+  const [isRightsSaving, setIsRightsSaving] = useState(false);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   const isAhqCommand = (cmdId) => {
     const command = commandOptions.find((c) => Number(c.id) === Number(cmdId));
@@ -51,11 +77,6 @@ function UserMgmt() {
       .toLowerCase();
     return name === "ahq";
   };
-
-  const isSuperuserAccount = (rowOrUser) =>
-    String(rowOrUser?.username ?? "")
-      .trim()
-      .toLowerCase() === "superuser";
 
   useEffect(() => {
     let mounted = true;
@@ -105,6 +126,7 @@ function UserMgmt() {
   }, [refreshTrigger]);
 
   const handleAddUser = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     const defaultCmdId = commandOptions[0]?.id || "";
     const isAhq = defaultCmdId ? isAhqCommand(defaultCmdId) : false;
@@ -127,11 +149,10 @@ function UserMgmt() {
   };
 
   const handleEditUser = (id) => {
-    if (isOperatorUser()) return;
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
-    if (isSuperuserAccount(row)) return;
     setEditingRowId(id);
     // Store original row data - preserve all existing values including password placeholder
     setEditDraft({
@@ -290,7 +311,7 @@ function UserMgmt() {
   };
 
   const handleAddSave = async () => {
-    if (isOperatorUser()) return;
+    if (!canCreate) return;
     if (!validateForm(newRowDraft, true, "add")) return;
 
     setErrors({});
@@ -332,9 +353,7 @@ function UserMgmt() {
   };
 
   const handleEditSave = async () => {
-    if (isOperatorUser()) return;
-    const rowBeingEdited = tableRows.find((r) => r.id === editingRowId);
-    if (rowBeingEdited && isSuperuserAccount(rowBeingEdited)) return;
+    if (!canEdit) return;
     if (!validateForm(editDraft, true, "edit")) return;
 
     setErrors({});
@@ -406,9 +425,7 @@ function UserMgmt() {
   };
 
   const handleDeleteUser = async (id) => {
-    if (isOperatorUser()) return;
-    const row = tableRows.find((r) => r.id === id);
-    if (row && isSuperuserAccount(row)) return;
+    if (!canDelete) return;
     if (window.confirm(`Are you sure you want to delete user with Id ${id}?`)) {
       try {
         await api.remove("User", id);
@@ -416,6 +433,174 @@ function UserMgmt() {
       } catch (e) {
         console.error("Delete failed", e);
       }
+    }
+  };
+
+  const loadMainMenuNames = async () => {
+    try {
+      const routesModule = await import("routes");
+      const appRoutes = routesModule?.default || [];
+      const names = appRoutes
+        .filter((route) => route?.type === "collapse" && route?.name)
+        .map((route) => route.name);
+      setMainMenuNames(names);
+      return names;
+    } catch (e) {
+      console.error("Failed to load main menu names", e);
+      setMainMenuNames([]);
+      return [];
+    }
+  };
+
+  const handleOpenRightsModal = async (id) => {
+    const row = tableRows.find((r) => r.id === id);
+
+    const toBoolean = (value) =>
+      value === true ||
+      value === 1 ||
+      value === "1" ||
+      String(value || "")
+        .trim()
+        .toLowerCase() === "true";
+
+    const getMenuName = (item) =>
+      String(
+        item?.menuName ??
+          item?.MenuName ??
+          item?.moduleName ??
+          item?.ModuleName ??
+          item?.menu ??
+          item?.name ??
+          ""
+      ).trim();
+    const normalizeMenuKey = (name) =>
+      String(name || "")
+        .trim()
+        .toLowerCase();
+
+    const menus = mainMenuNames.length > 0 ? mainMenuNames : await loadMainMenuNames();
+    let permissionRows = [];
+    try {
+      const permissionsData = await api.request("GET", `/api/UserPermissions/ByUser/${id}`);
+      permissionRows = Array.isArray(permissionsData)
+        ? permissionsData
+        : Array.isArray(permissionsData?.items)
+        ? permissionsData.items
+        : Array.isArray(permissionsData?.data)
+        ? permissionsData.data
+        : permissionsData && typeof permissionsData === "object"
+        ? [permissionsData]
+        : [];
+    } catch (e) {
+      console.error("Failed to load user permissions", e);
+    }
+
+    const rightsLookup = permissionRows.reduce((acc, item) => {
+      const menuName = getMenuName(item);
+      if (!menuName) return acc;
+      acc[normalizeMenuKey(menuName)] = item;
+      return acc;
+    }, {});
+
+    setRightsRowMetaByMenu(rightsLookup);
+    setRightsDraftRows(
+      menus.map((menuName) => {
+        const existing = rightsLookup[normalizeMenuKey(menuName)] || {};
+        return {
+          menuName,
+          view: toBoolean(
+            existing?.canView ?? existing?.CanView ?? existing?.view ?? existing?.View
+          ),
+          create: toBoolean(
+            existing?.canCreate ?? existing?.CanCreate ?? existing?.create ?? existing?.Create
+          ),
+          edit: toBoolean(
+            existing?.canEdit ?? existing?.CanEdit ?? existing?.edit ?? existing?.Edit
+          ),
+          delete: toBoolean(
+            existing?.canDelete ?? existing?.CanDelete ?? existing?.delete ?? existing?.Delete
+          ),
+        };
+      })
+    );
+    setRightsUserId(id);
+    setRightsUserName(row?.username || "");
+    setIsRightsModalOpen(true);
+  };
+
+  const handleCloseRightsModal = () => {
+    setIsRightsModalOpen(false);
+    setRightsUserId(null);
+    setRightsUserName("");
+    setRightsDraftRows([]);
+    setRightsRowMetaByMenu({});
+  };
+
+  const handleRightsToggle = (menuName, field) => {
+    setRightsDraftRows((prev) =>
+      prev.map((row) =>
+        row.menuName === menuName
+          ? {
+              ...row,
+              [field]: !row[field],
+            }
+          : row
+      )
+    );
+  };
+
+  const handleRightsSave = async () => {
+    if (!rightsUserId) return;
+    setIsRightsSaving(true);
+    try {
+      await Promise.all(
+        rightsDraftRows.map((row) => {
+          const existingRow =
+            rightsRowMetaByMenu[row.menuName] ||
+            rightsRowMetaByMenu[
+              String(row.menuName || "")
+                .trim()
+                .toLowerCase()
+            ] ||
+            {};
+          const {
+            id,
+            Id,
+            view,
+            View,
+            create,
+            Create,
+            edit,
+            Edit,
+            delete: deleteFlag,
+            Delete,
+            canView,
+            CanView,
+            canCreate,
+            CanCreate,
+            canEdit,
+            CanEdit,
+            canDelete,
+            CanDelete,
+            ...existingRowWithoutPermissionFlags
+          } = existingRow;
+          const payload = {
+            ...existingRowWithoutPermissionFlags,
+            userId: rightsUserId,
+            menuName: row.menuName,
+            canView: row.view,
+            canCreate: row.create,
+            canEdit: row.edit,
+            canDelete: row.delete,
+          };
+          return api.post("/api/UserPermissions", payload);
+        })
+      );
+      handleCloseRightsModal();
+    } catch (e) {
+      console.error("Failed to save user permissions", e);
+    } finally {
+      setIsRightsSaving(false);
     }
   };
 
@@ -790,9 +975,8 @@ function UserMgmt() {
     tableRows.forEach((r) => {
       const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
-      const isSuperuser = isSuperuserAccount(r);
       rows.push({
-        __disabledRow: isSuperuser,
+        __disabledRow: false,
         id: r.id,
         username: isEditing ? renderInput("username", draft.username, true, false) : r.username,
         password: isEditing
@@ -830,9 +1014,7 @@ function UserMgmt() {
             r.levelId ||
             "-",
         status: isEditing ? renderStatusSelect("status", draft.status) : r.status, // Keep raw status value, let Cell function render it
-        actions: isSuperuser ? (
-          <MDBox />
-        ) : isEditing ? (
+        actions: isEditing ? (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleEditSave} title="Save">
               <Icon>check</Icon>
@@ -852,23 +1034,36 @@ function UserMgmt() {
               borderRadius: "2px",
             }}
           >
+            {canEdit && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditUser(r.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDelete && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteUser(r.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
             <IconButton
               size="small"
-              color="info"
-              onClick={() => handleEditUser(r.id)}
-              title="Edit"
+              color="secondary"
+              onClick={() => handleOpenRightsModal(r.id)}
+              title="Assign Rights"
               sx={{ padding: "1px" }}
             >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteUser(r.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
+              <Icon>security</Icon>
             </IconButton>
           </MDBox>
         ),
@@ -908,7 +1103,7 @@ function UserMgmt() {
             <MDTypography variant="h6" color="white">
               User Management
             </MDTypography>
-            {!isOperatorUser() && (
+            {canCreate && (
               <MDButton variant="gradient" color="info" onClick={handleAddUser}>
                 Add User
               </MDButton>
@@ -982,6 +1177,84 @@ function UserMgmt() {
         </Card>
       </MDBox>
       <Footer />
+
+      <Dialog open={isRightsModalOpen} onClose={handleCloseRightsModal} fullWidth maxWidth="md">
+        <DialogTitle sx={{ color: "#344767" }}>
+          {`Assign Rights${rightsUserName ? ` - ${rightsUserName}` : ""}`}
+        </DialogTitle>
+        <DialogContent>
+          <TableContainer
+            component={Paper}
+            sx={{
+              "& thead th": {
+                color: darkMode ? "#ffffff !important" : "#344767 !important",
+              },
+              "& tbody td:first-of-type": {
+                color: darkMode ? "#ffffff" : "inherit",
+                maxWidth: "60px",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              },
+            }}
+          >
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Menu Name</TableCell>
+                  <TableCell align="center">View</TableCell>
+                  <TableCell align="center">Create</TableCell>
+                  <TableCell align="center">Edit</TableCell>
+                  <TableCell align="center">Delete</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rightsDraftRows.map((row) => (
+                  <TableRow key={row.menuName}>
+                    <TableCell>{row.menuName}</TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={row.view}
+                        onChange={() => handleRightsToggle(row.menuName, "view")}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={row.create}
+                        onChange={() => handleRightsToggle(row.menuName, "create")}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={row.edit}
+                        onChange={() => handleRightsToggle(row.menuName, "edit")}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={row.delete}
+                        onChange={() => handleRightsToggle(row.menuName, "delete")}
+                        size="small"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <MDButton color="secondary" onClick={handleCloseRightsModal} disabled={isRightsSaving}>
+            Cancel
+          </MDButton>
+          <MDButton color="info" onClick={handleRightsSave} disabled={isRightsSaving}>
+            {isRightsSaving ? "Saving..." : "Save"}
+          </MDButton>
+        </DialogActions>
+      </Dialog>
 
       <AddUserForm
         open={isAddFormOpen}

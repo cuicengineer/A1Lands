@@ -24,7 +24,11 @@ import DataTable from "examples/Tables/DataTable";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
 import PropTypes from "prop-types";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import { format, parseISO, isValid } from "date-fns";
@@ -56,6 +60,7 @@ function GovtShareRateForm({
   const [isUploading, setIsUploading] = useState(false);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
+  const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -802,7 +807,7 @@ function GovtShareRateForm({
           variant="gradient"
           color="info"
           onClick={handleSave}
-          disabled={isUploading || isOperatorUser()}
+          disabled={isUploading || (isEditMode ? !canEditCurrentMenu() : !canCreateCurrentMenu())}
         >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
@@ -1065,7 +1070,7 @@ export default function GovtShareRate() {
   };
 
   const handleDeleteAttachment = async (file) => {
-    if (isOperatorUser()) return;
+    if (!canDeleteCurrentMenu()) return;
     const fileId = file?.id || file?.fileId;
     if (!fileId) {
       alert("File ID is not available. Cannot delete this file.");
@@ -1374,24 +1379,28 @@ export default function GovtShareRate() {
             borderRadius: "2px",
           }}
         >
-          <IconButton
-            size="small"
-            color="info"
-            onClick={() => handleEditRecord(normalizedId)}
-            title="Edit"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>edit</Icon>
-          </IconButton>
-          <IconButton
-            size="small"
-            color="error"
-            onClick={() => handleDeleteRecord(normalizedId)}
-            title="Delete"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>delete</Icon>
-          </IconButton>
+          {canEditCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditRecord(normalizedId)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+          )}
+          {canDeleteCurrentMenu() && (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteRecord(normalizedId)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+          )}
         </MDBox>
       ),
     };
@@ -1420,9 +1429,11 @@ export default function GovtShareRate() {
                 <MDTypography variant="h6" color="white">
                   Govt Share Rate
                 </MDTypography>
-                <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                  <Icon>add</Icon>&nbsp;Add New
-                </MDButton>
+                {canCreateCurrentMenu() && (
+                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
+                    <Icon>add</Icon>&nbsp;Add New
+                  </MDButton>
+                )}
               </MDBox>
               <MDBox
                 pt={3}
@@ -1596,7 +1607,7 @@ export default function GovtShareRate() {
         </DialogContent>
         <DialogActions>
           <MDButton onClick={handleCancelDelete}>Cancel</MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" disabled={isOperatorUser()}>
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={!canDeleteCurrentMenu()}>
             Delete
           </MDButton>
         </DialogActions>
@@ -1636,7 +1647,7 @@ export default function GovtShareRate() {
                     color="error"
                     onClick={() => handleDeleteAttachment(f)}
                     title="Delete Attachment"
-                    disabled={isOperatorUser()}
+                    disabled={!canDeleteCurrentMenu()}
                     sx={{ border: "1px solid", borderColor: "error.main", borderRadius: 1 }}
                   >
                     <Icon>delete</Icon>

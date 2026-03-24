@@ -15,7 +15,11 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api, { isOperatorUser } from "../../../services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
 function ClassConfig() {
@@ -27,6 +31,9 @@ function ClassConfig() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     fetchClasses();
@@ -43,6 +50,7 @@ function ClassConfig() {
   };
 
   const handleAddClass = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({
@@ -56,6 +64,7 @@ function ClassConfig() {
   };
 
   const handleEditClass = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -93,6 +102,7 @@ function ClassConfig() {
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
+        if (!canCreate) return;
         if (!validateNew()) return;
         const payload = {
           id: newRowDraft.id,
@@ -111,6 +121,7 @@ function ClassConfig() {
         setEditingRowId(null);
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
+        if (!canEdit) return;
         const payload = {
           id: editDraft.id,
           code: String(editDraft.code || "")
@@ -138,6 +149,7 @@ function ClassConfig() {
   };
 
   const handleDeleteClass = async (id) => {
+    if (!canDelete) return;
     try {
       await api.remove("Class", id);
       await fetchClasses();
@@ -147,6 +159,7 @@ function ClassConfig() {
   };
 
   const confirmDelete = async (id) => {
+    if (!canDelete) return;
     const ok = window.confirm("Are you sure you want to delete this class?");
     if (!ok) return;
     await handleDeleteClass(id);
@@ -328,24 +341,28 @@ function ClassConfig() {
               borderRadius: "2px",
             }}
           >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditClass(row.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => confirmDelete(row.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            {canEdit && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditClass(row.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDelete && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => confirmDelete(row.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
           </MDBox>
         ),
       });
@@ -376,9 +393,11 @@ function ClassConfig() {
               Class
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={2}>
-              <MDButton variant="gradient" color="info" onClick={handleAddClass}>
-                Add Class
-              </MDButton>
+              {canCreate && (
+                <MDButton variant="gradient" color="info" onClick={handleAddClass}>
+                  Add Class
+                </MDButton>
+              )}
             </MDBox>
           </MDBox>
           <MDBox

@@ -26,7 +26,11 @@ import Autocomplete from "@mui/material/Autocomplete";
 import RentalPropertyForm from "./RentalPropertyForm";
 import rentalPropertiesApi from "services/api.rentalproperties.service";
 import uploadApi from "services/api.upload.service";
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import contractApi from "services/api.contract.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 
@@ -44,6 +48,9 @@ StatusBadge.propTypes = {
 };
 
 function RentalProperties() {
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
   const [tableRows, setTableRows] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -121,11 +128,13 @@ function RentalProperties() {
   const [currentPropertyId, setCurrentPropertyId] = useState(null);
 
   const handleAddProperty = () => {
+    if (!canCreate) return;
     setCurrentProperty(null);
     setFormOpen(true);
   };
 
   const handleEditProperty = (id) => {
+    if (!canEdit) return;
     // Handle both camelCase and PascalCase for id lookup
     const property = tableRows.find(
       (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
@@ -188,10 +197,12 @@ function RentalProperties() {
 
       let createdOrUpdatedId = null;
       if (currentProperty) {
+        if (!canEdit) return null;
         // Edit existing property
         await rentalPropertiesApi.update(currentProperty.id, formattedData);
         createdOrUpdatedId = currentProperty.id;
       } else {
+        if (!canCreate) return null;
         // Add new property
         const response = await rentalPropertiesApi.create(formattedData);
         // Extract ID from response (could be response.id or response.data.id)
@@ -214,11 +225,13 @@ function RentalProperties() {
   };
 
   const handleDeleteProperty = (id) => {
+    if (!canDelete) return;
     setPropertyToDelete(id);
     setShowDeleteDialog(true);
   };
 
   const handleConfirmDelete = async () => {
+    if (!canDelete) return;
     try {
       await rentalPropertiesApi.remove(propertyToDelete);
       await fetchRentalProperties(pageNumber, pageSize);
@@ -286,6 +299,7 @@ function RentalProperties() {
   };
 
   const handleDeleteAttachment = async (file) => {
+    if (!canDelete) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -664,24 +678,28 @@ function RentalProperties() {
                 borderRadius: "2px",
               }}
             >
-              <IconButton
-                size="small"
-                color="info"
-                onClick={() => handleEditProperty(normalizedId)}
-                title="Edit"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>edit</Icon>
-              </IconButton>
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDeleteProperty(normalizedId)}
-                title="Delete"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>delete</Icon>
-              </IconButton>
+              {canEdit && (
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => handleEditProperty(normalizedId)}
+                  title="Edit"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>edit</Icon>
+                </IconButton>
+              )}
+              {canDelete && (
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteProperty(normalizedId)}
+                  title="Delete"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
+              )}
             </MDBox>
           ),
         };
@@ -710,9 +728,11 @@ function RentalProperties() {
             <MDTypography variant="h6" color="white">
               Rental Properties
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddProperty}>
-              Add Rental Property
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" color="info" onClick={handleAddProperty}>
+                Add Rental Property
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}
@@ -949,14 +969,16 @@ function RentalProperties() {
                       >
                         <Icon>download</Icon>&nbsp;Download
                       </MDButton>
-                      <IconButton
-                        size="small"
-                        color="error"
-                        onClick={() => handleDeleteAttachment(file)}
-                        sx={{ ml: 1 }}
-                      >
-                        <Icon>delete</Icon>
-                      </IconButton>
+                      {canDelete && (
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteAttachment(file)}
+                          sx={{ ml: 1 }}
+                        >
+                          <Icon>delete</Icon>
+                        </IconButton>
+                      )}
                     </MDBox>
                   </ListItem>
                   {index < attachmentList.length - 1 && <Divider />}
@@ -983,7 +1005,7 @@ function RentalProperties() {
           <MDButton onClick={handleCancelDelete} color="secondary">
             Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error">
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={!canDelete}>
             Delete
           </MDButton>
         </DialogActions>

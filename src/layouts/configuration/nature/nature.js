@@ -26,7 +26,11 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 
-import api, { isOperatorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "services/api.service";
 import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
 
@@ -48,6 +52,9 @@ function NatureConfig() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     fetchNatures();
@@ -63,6 +70,7 @@ function NatureConfig() {
   };
 
   const handleAddNature = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewErrors({});
@@ -75,6 +83,7 @@ function NatureConfig() {
   };
 
   const handleEditNature = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -114,6 +123,7 @@ function NatureConfig() {
 
   const handleSave = async () => {
     if (editingRowId === "__new__" && newRowDraft) {
+      if (!canCreate) return;
       // Mandatory validation only for Create New (as requested)
       const ok = validateNewRow();
       if (!ok) return;
@@ -127,6 +137,7 @@ function NatureConfig() {
         console.error("Error creating nature:", error);
       }
     } else if (editingRowId && editDraft) {
+      if (!canEdit) return;
       if (!editDraft.name) {
         alert("Name is mandatory.");
         return;
@@ -150,6 +161,7 @@ function NatureConfig() {
   };
 
   const handleDeleteNature = (id) => {
+    if (!canDelete) return;
     if (editingRowId) return;
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
@@ -161,6 +173,7 @@ function NatureConfig() {
   };
 
   const handleConfirmDelete = async () => {
+    if (!canDelete) return;
     if (!recordToDelete) return;
     try {
       await api.remove("Nature", recordToDelete);
@@ -338,24 +351,28 @@ function NatureConfig() {
               borderRadius: "2px", // Optional: softens the box edges
             }}
           >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditNature(r.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteNature(r.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            {canEdit && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditNature(r.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDelete && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteNature(r.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
           </MDBox>
         ),
       });
@@ -398,9 +415,11 @@ function NatureConfig() {
               Nature
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={2}>
-              <MDButton variant="gradient" color="info" onClick={handleAddNature}>
-                Add Nature
-              </MDButton>
+              {canCreate && (
+                <MDButton variant="gradient" color="info" onClick={handleAddNature}>
+                  Add Nature
+                </MDButton>
+              )}
             </MDBox>
           </MDBox>
           <MDBox pt={3}>
@@ -501,7 +520,12 @@ function NatureConfig() {
           <MDButton onClick={handleCancelDelete} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Cancel
           </MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" variant="gradient">
+          <MDButton
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="gradient"
+            disabled={!canDelete}
+          >
             <Icon>delete</Icon>&nbsp;Delete
           </MDButton>
         </DialogActions>

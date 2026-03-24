@@ -1,6 +1,10 @@
 import Card from "@mui/material/Card";
 import { useEffect, useState } from "react";
-import api, { isOperatorUser } from "../../../services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -25,6 +29,9 @@ function Base() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   useEffect(() => {
     let mounted = true;
@@ -55,6 +62,7 @@ function Base() {
   };
 
   const handleAddBase = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({ id: 0, name: "", cmd: commandOptions[0]?.id, status: 0 });
@@ -62,6 +70,7 @@ function Base() {
   };
 
   const handleEditBase = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -86,6 +95,7 @@ function Base() {
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
+        if (!canCreate) return;
         if (!validateNew()) return;
         const payload = {
           Id: newRowDraft.id,
@@ -99,6 +109,7 @@ function Base() {
         setNewRowDraft(null);
         setRefreshTrigger((prev) => prev + 1);
       } else if (editingRowId && editDraft) {
+        if (!canEdit) return;
         const payload = {
           Id: editDraft.id,
           Name: editDraft.name,
@@ -117,6 +128,7 @@ function Base() {
   };
 
   const handleDeleteBase = async (id) => {
+    if (!canDelete) return;
     try {
       await api.remove("Base", id);
       setTableRows((prev) => prev.filter((row) => row.id !== id));
@@ -127,6 +139,7 @@ function Base() {
   };
 
   const confirmDelete = async (id) => {
+    if (!canDelete) return;
     const ok = window.confirm("Are you sure you want to delete this base?");
     if (!ok) return;
     await handleDeleteBase(id);
@@ -280,22 +293,26 @@ function Base() {
           </MDBox>
         ) : (
           <MDBox display="flex" gap={1}>
-            <MDButton
-              variant="outlined"
-              color="info"
-              size="small"
-              onClick={() => handleEditBase(r.id)}
-            >
-              Edit
-            </MDButton>
-            <MDButton
-              variant="outlined"
-              color="error"
-              size="small"
-              onClick={() => confirmDelete(r.id)}
-            >
-              Delete
-            </MDButton>
+            {canEdit && (
+              <MDButton
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={() => handleEditBase(r.id)}
+              >
+                Edit
+              </MDButton>
+            )}
+            {canDelete && (
+              <MDButton
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => confirmDelete(r.id)}
+              >
+                Delete
+              </MDButton>
+            )}
           </MDBox>
         ),
       });
@@ -325,9 +342,11 @@ function Base() {
             <MDTypography variant="h6" color="white">
               Base
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddBase}>
-              Add Base
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" color="info" onClick={handleAddBase}>
+                Add Base
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}

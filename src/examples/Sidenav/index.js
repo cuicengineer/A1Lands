@@ -42,6 +42,7 @@ import {
   setWhiteSidenav,
   setHasUserManuallyToggledSidenav,
 } from "context";
+import { canAccessPrivilegedConfigRoute, canViewMenu } from "services/api.service";
 
 // Images
 import adminProfile from "assets/images/bruce-mars.PNG";
@@ -62,11 +63,6 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const [openCollapse, setOpenCollapse] = useState(null);
   const [openUserMenu, setOpenUserMenu] = useState(null);
   const [loggedInUser, setLoggedInUser] = useState({ username: "User", category: "N/A" });
-
-  const isSuperuser =
-    String(loggedInUser?.username ?? "")
-      .trim()
-      .toLowerCase() === "superuser";
 
   let textColor = "white";
 
@@ -164,123 +160,124 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
 
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
-    allRoutes.map((route) => {
-      const { type, name, icon, title, noCollapse, key, href, route: path, collapse } = route;
-      const defaultIcon = <Icon fontSize="small">chevron_right</Icon>;
+    allRoutes
+      .filter((route) => {
+        const routePath = route?.route;
+        if (!routePath) return true;
+        return canAccessPrivilegedConfigRoute(routePath);
+      })
+      .map((route) => {
+        const { type, name, icon, title, noCollapse, key, href, route: path, collapse } = route;
+        const defaultIcon = <Icon fontSize="small">chevron_right</Icon>;
 
-      if (type === "collapse") {
-        const iconNode = icon || defaultIcon;
-        const isOpen = openCollapse === key;
+        if (type === "collapse") {
+          const iconNode = icon || defaultIcon;
+          const isOpen = openCollapse === key;
 
-        const handleClick = () => {
-          if (Array.isArray(collapse)) {
-            setOpenCollapse(isOpen ? null : key);
-          }
-        };
+          const handleClick = () => {
+            if (Array.isArray(collapse)) {
+              setOpenCollapse(isOpen ? null : key);
+            }
+          };
 
-        const item = href ? (
-          <Link
-            href={href}
-            key={key}
-            target="_blank"
-            rel="noreferrer"
-            sx={{ textDecoration: "none" }}
-          >
+          const item = href ? (
+            <Link
+              href={href}
+              key={key}
+              target="_blank"
+              rel="noreferrer"
+              sx={{ textDecoration: "none" }}
+            >
+              <SidenavCollapse
+                name={name}
+                icon={iconNode}
+                active={isOpen}
+                noCollapse={noCollapse}
+                onClick={handleClick}
+              />
+            </Link>
+          ) : path ? (
+            <Link
+              key={key}
+              href={path}
+              sx={{ textDecoration: "none" }}
+              onClick={(e) => {
+                // Allow Ctrl+Click, Middle-click, and Right-click to open in new tab
+                if (e.ctrlKey || e.metaKey || e.button === 1 || e.button === 2) {
+                  return; // Let browser handle it naturally
+                }
+                // Normal click: use React Router navigation
+                e.preventDefault();
+                navigate(path);
+                // Handle collapse toggle if needed
+                if (Array.isArray(collapse)) {
+                  handleClick();
+                }
+              }}
+              onAuxClick={(e) => {
+                // Middle-click (button 1) - let browser handle it
+                if (e.button === 1) {
+                  return;
+                }
+              }}
+            >
+              <SidenavCollapse name={name} icon={iconNode} active={isOpen} />
+            </Link>
+          ) : (
             <SidenavCollapse
+              key={key}
               name={name}
               icon={iconNode}
               active={isOpen}
-              noCollapse={noCollapse}
               onClick={handleClick}
             />
-          </Link>
-        ) : path ? (
-          <Link
-            key={key}
-            href={path}
-            sx={{ textDecoration: "none" }}
-            onClick={(e) => {
-              // Allow Ctrl+Click, Middle-click, and Right-click to open in new tab
-              if (e.ctrlKey || e.metaKey || e.button === 1 || e.button === 2) {
-                return; // Let browser handle it naturally
-              }
-              // Normal click: use React Router navigation
-              e.preventDefault();
-              navigate(path);
-              // Handle collapse toggle if needed
-              if (Array.isArray(collapse)) {
-                handleClick();
-              }
-            }}
-            onAuxClick={(e) => {
-              // Middle-click (button 1) - let browser handle it
-              if (e.button === 1) {
-                return;
-              }
-            }}
-          >
-            <SidenavCollapse name={name} icon={iconNode} active={isOpen} />
-          </Link>
-        ) : (
-          <SidenavCollapse
-            key={key}
-            name={name}
-            icon={iconNode}
-            active={isOpen}
-            onClick={handleClick}
-          />
-        );
+          );
 
-        if (Array.isArray(collapse) && collapse.length > 0) {
-          // Hide "User Roles" from Configuration unless superuser is logged in
-          const collapseToRender =
-            key === "configuration"
-              ? collapse.filter((item) => item.key !== "configuration-user-role" || isSuperuser)
-              : collapse;
+          if (Array.isArray(collapse) && collapse.length > 0) {
+            return (
+              <MDBox key={`${key}-wrapper`}>
+                {item}
+                {isOpen && <MDBox ml={2}>{renderNestedRoutes(collapse)}</MDBox>}
+              </MDBox>
+            );
+          }
+
+          return item;
+        }
+
+        if (type === "title") {
           return (
-            <MDBox key={`${key}-wrapper`}>
-              {item}
-              {isOpen && <MDBox ml={2}>{renderNestedRoutes(collapseToRender)}</MDBox>}
-            </MDBox>
+            <MDTypography
+              key={key}
+              color={textColor}
+              display="block"
+              variant="caption"
+              fontWeight="bold"
+              textTransform="uppercase"
+              pl={3}
+              mt={2}
+              mb={1}
+              ml={1}
+            >
+              {title}
+            </MDTypography>
           );
         }
 
-        return item;
-      }
+        if (type === "divider") {
+          return (
+            <Divider
+              key={key}
+              light={
+                (!darkMode && !whiteSidenav && !transparentSidenav) ||
+                (darkMode && !transparentSidenav && whiteSidenav)
+              }
+            />
+          );
+        }
 
-      if (type === "title") {
-        return (
-          <MDTypography
-            key={key}
-            color={textColor}
-            display="block"
-            variant="caption"
-            fontWeight="bold"
-            textTransform="uppercase"
-            pl={3}
-            mt={2}
-            mb={1}
-            ml={1}
-          >
-            {title}
-          </MDTypography>
-        );
-      }
-
-      if (type === "divider") {
-        return (
-          <Divider
-            key={key}
-            light={
-              (!darkMode && !whiteSidenav && !transparentSidenav) ||
-              (darkMode && !transparentSidenav && whiteSidenav)
-            }
-          />
-        );
-      }
-
-      return null;
-    });
+        return null;
+      });
 
   return (
     <SidenavRoot
@@ -383,7 +380,11 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             },
           }}
         >
-          <List>{renderNestedRoutes(routes)}</List>
+          <List>
+            {renderNestedRoutes(
+              routes.filter((route) => route?.type !== "collapse" || canViewMenu(route?.name))
+            )}
+          </List>
         </MDBox>
 
         {/* Footer controls (avatar + settings) */}

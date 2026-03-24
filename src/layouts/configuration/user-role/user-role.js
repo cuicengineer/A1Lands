@@ -3,7 +3,6 @@ import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -13,15 +12,17 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api, { isOperatorUser } from "../../../services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canDeleteCurrentMenu,
+  canEditCurrentMenu,
+} from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
 function UserRole() {
-  const navigate = useNavigate();
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
-  const [isSuperuserAllowed, setIsSuperuserAllowed] = useState(null);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
@@ -29,6 +30,9 @@ function UserRole() {
   const [errors, setErrors] = useState({});
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(5);
+  const canCreate = canCreateCurrentMenu();
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
 
   const fetchRoles = async () => {
     try {
@@ -63,31 +67,8 @@ function UserRole() {
     fetchRoles();
   }, []);
 
-  // Only superuser can access this page; redirect others
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("auth");
-      if (!raw) {
-        setIsSuperuserAllowed(false);
-        return;
-      }
-      const obj = JSON.parse(raw);
-      const username = String(
-        obj?.username || obj?.Username || obj?.userName || obj?.unique_name || ""
-      ).trim();
-      setIsSuperuserAllowed(username.toLowerCase() === "superuser");
-    } catch (e) {
-      setIsSuperuserAllowed(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isSuperuserAllowed === false) {
-      navigate("/dashboard", { replace: true });
-    }
-  }, [isSuperuserAllowed, navigate]);
-
   const handleAddUser = () => {
+    if (!canCreate) return;
     if (editingRowId) return;
     setEditingRowId("__new__");
     setNewRowDraft({
@@ -100,6 +81,7 @@ function UserRole() {
   };
 
   const handleEditRole = (id) => {
+    if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
@@ -134,6 +116,7 @@ function UserRole() {
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
+        if (!canCreate) return;
         if (!validateNew()) return;
         const payload = {
           ...newRowDraft,
@@ -147,6 +130,7 @@ function UserRole() {
         setEditingRowId(null);
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
+        if (!canEdit) return;
         const payload = {
           ...editDraft,
           status:
@@ -163,6 +147,7 @@ function UserRole() {
   };
 
   const handleDeleteRole = async (id) => {
+    if (!canDelete) return;
     try {
       await api.remove("Role", id);
       await fetchRoles();
@@ -172,6 +157,7 @@ function UserRole() {
   };
 
   const confirmDelete = async (id) => {
+    if (!canDelete) return;
     const ok = window.confirm("Are you sure you want to delete this role?");
     if (!ok) return;
     await handleDeleteRole(id);
@@ -355,24 +341,28 @@ function UserRole() {
               borderRadius: "2px",
             }}
           >
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditRole(r.id)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => confirmDelete(r.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
+            {canEdit && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditRole(r.id)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDelete && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => confirmDelete(r.id)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
           </MDBox>
         ),
       });
@@ -380,10 +370,6 @@ function UserRole() {
 
     return rows;
   })();
-
-  if (isSuperuserAllowed !== true) {
-    return null;
-  }
 
   return (
     <DashboardLayout>
@@ -406,9 +392,11 @@ function UserRole() {
             <MDTypography variant="h6" color="white">
               User Roles
             </MDTypography>
-            <MDButton variant="gradient" color="info" onClick={handleAddUser}>
-              Add Roles
-            </MDButton>
+            {canCreate && (
+              <MDButton variant="gradient" color="info" onClick={handleAddUser}>
+                Add Roles
+              </MDButton>
+            )}
           </MDBox>
           <MDBox
             pt={3}
