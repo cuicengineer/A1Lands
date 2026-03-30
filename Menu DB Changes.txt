@@ -1,19 +1,13 @@
-create TABLE dbo.UserPermissions
-(
-    Id INT IDENTITY(1,1) PRIMARY KEY,
-    UserId INT NOT NULL,
-    MenuName NVARCHAR(100) NOT NULL,
-    CanView BIT NOT NULL DEFAULT 0,
-    CanCreate BIT NOT NULL DEFAULT 0,
-    CanEdit BIT NOT NULL DEFAULT 0,
-    CanDelete BIT NOT NULL DEFAULT 0,
-    [Action] [varchar](10) NULL,
-	[ActionBy] [varchar](20) NULL,
-	[ActionDate] [datetime] NULL,
-	[IsDeleted] [bit] NULL,
-);
-CREATE UNIQUE INDEX UX_UserPermissions_User_Menu
-ON dbo.UserPermissions(UserId, MenuName);
+--  ALTER TABLE Tenants
+--ADD CONSTRAINT UQ_Tenants_TenantNo UNIQUE (TenantNo);
 
-ALTER TABLE dbo.UserPermissions
-ADD CONSTRAINT CHK_MenuName_NotEmpty CHECK (LEN(MenuName) > 0);
+
+  ALTER TABLE PropertyGroups
+ADD CONSTRAINT UQ_PropertyGroups_PropGrp UNIQUE (GId);
+
+ ALTER TABLE RentalProperties
+ADD CONSTRAINT UQ_RentalProperties_RenProp UNIQUE (PId);
+
+
+ ALTER TABLE Contracts
+ADD CONSTRAINT UQ_Contracts_ContNo UNIQUE (ContractNo);

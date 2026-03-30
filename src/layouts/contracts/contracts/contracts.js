@@ -3371,7 +3371,10 @@ export default function Contracts() {
     setOpenForm(true);
   };
 
-  const handleCloseForm = () => setOpenForm(false);
+  const handleCloseForm = () => {
+    setOpenForm(false);
+    setCurrentContract(null);
+  };
 
   const handleEditContract = async (id) => {
     if (!canEditCurrentMenu()) return;
@@ -3485,10 +3488,11 @@ export default function Contracts() {
         await contractApi.create(dataWithIP);
       }
       await fetchContracts(pageNumber, pageSize);
+      setCurrentContract(null);
       handleCloseForm();
     } catch (error) {
       console.error("Error saving contract:", error);
-      alert("Failure: Contract could not be saved. Please try again.");
+      alert("Error: Contract ID Duplicate or Please try again.");
     }
   };
 

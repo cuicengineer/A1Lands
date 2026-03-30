@@ -380,6 +380,18 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
       }
     } catch (error) {
       console.error("Error saving form:", error);
+      const rawErrorText = [
+        error?.response?.data,
+        error?.response?.data?.message,
+        error?.response?.data?.title,
+        error?.message,
+      ]
+        .map((part) => (typeof part === "string" ? part : ""))
+        .join(" ")
+        .trim();
+      if (/Cannot insert duplicate key in obj(?:ect)?/i.test(rawErrorText)) {
+        alert("Cannot insert Duplocate Property ID");
+      }
       return;
     }
 

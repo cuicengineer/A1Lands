@@ -632,6 +632,18 @@ export default function Tenants() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving tenant:", error);
+      const rawErrorText = [
+        error?.response?.data,
+        error?.response?.data?.message,
+        error?.response?.data?.title,
+        error?.message,
+      ]
+        .map((part) => (typeof part === "string" ? part : ""))
+        .join(" ")
+        .trim();
+      if (/Cannot insert duplicate key in object\s+'dbo\.Tenants'/i.test(rawErrorText)) {
+        alert(rawErrorText || "Duplicate tenant found. Please use a unique tenant number.");
+      }
     }
   };
 

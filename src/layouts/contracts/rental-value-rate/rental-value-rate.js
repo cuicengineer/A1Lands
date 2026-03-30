@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -47,8 +47,8 @@ function RentalValueRateForm({
     applicableDate: "",
     deactiveDate: "",
     cmdId: "",
-    baseId: "",
-    classId: "",
+    baseIds: [],
+    classIds: [],
     rate: "",
     description: "",
     status: true,
@@ -60,6 +60,10 @@ function RentalValueRateForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
   const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
+  const baseNameById = useMemo(
+    () => new Map(filteredBases.map((base) => [String(base.id), base.name])),
+    [filteredBases]
+  );
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -103,17 +107,21 @@ function RentalValueRateForm({
     if (form.cmdId && bases.length > 0) {
       const filtered = bases.filter((base) => Number(base.cmd) === Number(form.cmdId));
       setFilteredBases(filtered);
-      // Clear base if it's no longer valid
-      if (form.baseId && !filtered.find((b) => b.id === form.baseId)) {
-        setForm((prev) => ({ ...prev, baseId: "" }));
+      // Keep only valid selected bases for current command
+      if (Array.isArray(form.baseIds) && form.baseIds.length > 0) {
+        const validIds = new Set(filtered.map((b) => String(b.id)));
+        const nextBaseIds = form.baseIds.filter((id) => validIds.has(String(id)));
+        if (nextBaseIds.length !== form.baseIds.length) {
+          setForm((prev) => ({ ...prev, baseIds: nextBaseIds }));
+        }
       }
     } else {
       setFilteredBases([]);
-      if (form.baseId) {
-        setForm((prev) => ({ ...prev, baseId: "" }));
+      if (Array.isArray(form.baseIds) && form.baseIds.length > 0) {
+        setForm((prev) => ({ ...prev, baseIds: [] }));
       }
     }
-  }, [form.cmdId, bases]);
+  }, [form.cmdId, bases, form.baseIds]);
 
   useEffect(() => {
     if (initialData) {
@@ -141,8 +149,8 @@ function RentalValueRateForm({
         applicableDate: dateValue,
         deactiveDate: deactiveStr,
         cmdId: initialData.cmdId || initialData.CmdId || "",
-        baseId: initialData.baseId || initialData.BaseId || "",
-        classId: initialData.classId || initialData.ClassId || "",
+        baseIds: [String(initialData.baseId || initialData.BaseId || "")].filter(Boolean),
+        classIds: [String(initialData.classId || initialData.ClassId || "")].filter(Boolean),
         rate: initialData.rate || initialData.Rate || "",
         description: initialData.description || initialData.Description || "",
         status:
@@ -155,9 +163,10 @@ function RentalValueRateForm({
     } else {
       setForm({
         applicableDate: "",
+        deactiveDate: "",
         cmdId: "",
-        baseId: "",
-        classId: "",
+        baseIds: [],
+        classIds: [],
         rate: "",
         description: "",
         status: true,
@@ -289,8 +298,8 @@ function RentalValueRateForm({
       newErrors.deactiveDate = "Deactive Date must be after Application Date";
     }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
-    if (!form.baseId) newErrors.baseId = "Base is required";
-    if (!form.classId) newErrors.classId = "Class is required";
+    if (!form.baseIds || form.baseIds.length === 0) newErrors.baseIds = "Base is required";
+    if (!form.classIds || form.classIds.length === 0) newErrors.classIds = "Class is required";
     if (!form.rate) newErrors.rate = "Rate is required";
     if (!form.description?.trim()) newErrors.description = "Description is required";
     if (form.description && form.description.length > 250) {
@@ -304,12 +313,13 @@ function RentalValueRateForm({
   const handleSave = async () => {
     if (!validate()) return;
     try {
-      const payload = {
+      const deactiveDateValue = String(form.deactiveDate ?? "").trim()
+        ? String(form.deactiveDate).trim()
+        : null;
+      const payloadBase = {
         applicableDate: form.applicableDate,
-        deactiveDate: form.deactiveDate,
+        deactiveDate: deactiveDateValue,
         cmdId: Number(form.cmdId),
-        baseId: Number(form.baseId),
-        classId: Number(form.classId),
         rate: form.rate ? Number(form.rate) : null,
         description: form.description.trim(),
         status: form.status,
@@ -317,16 +327,32 @@ function RentalValueRateForm({
         type: 1, // Static value, not displayed to user
       };
 
-      const result = await onSubmit(payload);
+      const payloadToSubmit = isEditMode
+        ? { ...payloadBase, baseId: Number(form.baseIds[0]), classId: Number(form.classIds[0]) }
+        : (form.baseIds || []).flatMap((baseId) =>
+            (form.classIds || []).map((classId) => ({
+              ...payloadBase,
+              baseId: Number(baseId),
+              classId: Number(classId),
+            }))
+          );
+
+      const result = await onSubmit(payloadToSubmit);
 
       // Get the record ID (either from existing or newly created)
-      const recordId = initialData?.id || result?.id;
+      const recordIds = Array.isArray(result?.ids)
+        ? result.ids.filter(Boolean)
+        : [initialData?.id || initialData?.Id || result?.id].filter(Boolean);
 
       // If files are selected, upload them
-      if (recordId && selectedFiles.length > 0) {
+      if (recordIds.length > 0 && selectedFiles.length > 0) {
         setIsUploading(true);
         try {
-          await uploadApi.uploadFiles(recordId, "RentalValueRate", selectedFiles);
+          await Promise.all(
+            recordIds.map((recordId) =>
+              uploadApi.uploadFiles(recordId, "RentalValueRate", selectedFiles)
+            )
+          );
           if (onUploadSuccess) {
             onUploadSuccess();
           }
@@ -515,39 +541,108 @@ function RentalValueRateForm({
               size="small"
               fullWidth
               required
-              error={!!errors.baseId}
+              error={!!errors.baseIds}
               disabled={!form.cmdId}
             >
-              <InputLabel id="base-label">Base</InputLabel>
+              <InputLabel id="base-label">
+                {isEditMode ? "Base" : "Base (Multiple Selection)"}
+              </InputLabel>
               <Select
                 labelId="base-label"
-                value={form.baseId}
-                label="Base"
-                onChange={(e) => handleChange("baseId", e.target.value)}
+                multiple={!isEditMode}
+                value={isEditMode ? form.baseIds[0] || "" : form.baseIds}
+                label={isEditMode ? "Base" : "Base (Multiple Selection)"}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (isEditMode) {
+                    handleChange("baseIds", [String(value)]);
+                    return;
+                  }
+                  const selectedValues = Array.isArray(value) ? value.map(String) : [];
+                  if (selectedValues.includes("__all__")) {
+                    const allIds = filteredBases.map((base) => String(base.id));
+                    const allSelected =
+                      allIds.length > 0 && allIds.every((id) => form.baseIds.includes(id));
+                    handleChange("baseIds", allSelected ? [] : allIds);
+                    return;
+                  }
+                  handleChange("baseIds", selectedValues);
+                }}
+                renderValue={
+                  isEditMode
+                    ? undefined
+                    : (selected) => (
+                        <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                          {selected.map((value) => (
+                            <Chip
+                              key={value}
+                              label={baseNameById.get(String(value)) || value}
+                              size="small"
+                              sx={{ fontSize: "0.875rem" }}
+                            />
+                          ))}
+                        </MDBox>
+                      )
+                }
                 sx={selectSx}
               >
+                {!isEditMode && (
+                  <MenuItem value="__all__">
+                    <em>
+                      {filteredBases.length > 0 &&
+                      filteredBases.every((base) => form.baseIds.includes(String(base.id)))
+                        ? "Deselect All"
+                        : "Select All"}
+                    </em>
+                  </MenuItem>
+                )}
                 {filteredBases.map((base) => (
                   <MenuItem key={base.id} value={base.id}>
                     {base.name}
                   </MenuItem>
                 ))}
               </Select>
-              {errors.baseId && (
+              {errors.baseIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.baseId}
+                  {errors.baseIds}
                 </MDTypography>
               )}
             </FormControl>
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth required error={!!errors.classId}>
-              <InputLabel id="class-label">Class</InputLabel>
+            <FormControl size="small" fullWidth required error={!!errors.classIds}>
+              <InputLabel id="class-label">
+                {isEditMode ? "Class" : "Class (Multiple Selection)"}
+              </InputLabel>
               <Select
                 labelId="class-label"
-                value={form.classId}
-                label="Class"
-                onChange={(e) => handleChange("classId", e.target.value)}
+                multiple={!isEditMode}
+                value={isEditMode ? form.classIds[0] || "" : form.classIds}
+                label={isEditMode ? "Class" : "Class (Multiple Selection)"}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  handleChange("classIds", isEditMode ? [String(value)] : value);
+                }}
+                renderValue={
+                  isEditMode
+                    ? undefined
+                    : (selected) => (
+                        <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                          {selected.map((value) => {
+                            const classItem = classes.find((c) => Number(c.id) === Number(value));
+                            return (
+                              <Chip
+                                key={value}
+                                label={classItem?.name || value}
+                                size="small"
+                                sx={{ fontSize: "0.875rem" }}
+                              />
+                            );
+                          })}
+                        </MDBox>
+                      )
+                }
                 sx={selectSx}
               >
                 {classes.map((cls) => (
@@ -556,9 +651,9 @@ function RentalValueRateForm({
                   </MenuItem>
                 ))}
               </Select>
-              {errors.classId && (
+              {errors.classIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.classId}
+                  {errors.classIds}
                 </MDTypography>
               )}
             </FormControl>
@@ -1013,7 +1108,29 @@ export default function RentalValueRate() {
       if (currentRecord && currentRecord.id) {
         await rentalValueRateApi.update(currentRecord.id, data);
       } else {
-        await rentalValueRateApi.create(data);
+        const payloads = Array.isArray(data) ? data : [data];
+        const createResults = [];
+        const batchSize = 5;
+        for (let i = 0; i < payloads.length; i += batchSize) {
+          const batch = payloads.slice(i, i + batchSize);
+          const batchResults = await Promise.all(
+            batch.map((item) => rentalValueRateApi.create(item))
+          );
+          createResults.push(...batchResults);
+        }
+        const ids = createResults
+          .map(
+            (result) =>
+              result?.Id ||
+              result?.id ||
+              result?.data?.Id ||
+              result?.data?.id ||
+              (Array.isArray(result?.data) ? result?.data[0]?.Id || result?.data[0]?.id : null)
+          )
+          .filter(Boolean);
+        await fetchRentalValueRates(pageNumber, pageSize);
+        handleCloseForm();
+        return { ids, id: ids[0] };
       }
       fetchRentalValueRates(pageNumber, pageSize);
       handleCloseForm();

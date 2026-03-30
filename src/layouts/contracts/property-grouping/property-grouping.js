@@ -504,7 +504,7 @@ function PropertyGroupingForm({
       setLinkedPropertyNameById({});
       setLinkedPropertiesForEdit([]);
     }
-  }, [initialData, allBases]);
+  }, [initialData, allBases, open]);
 
   // Fetch linked properties when in edit mode
   useEffect(() => {
@@ -2693,10 +2693,24 @@ export default function PropertyGrouping() {
         await propertyGroupingApi.create(formattedData);
       }
       fetchPropertyGroupings(pageNumber, pageSize);
+      setCurrentPropertyGrouping(null);
       handleCloseForm();
     } catch (error) {
       console.error("Error saving property grouping:", error);
-      alert("Failed to save property grouping. Please try again.");
+      const rawErrorText = [
+        error?.response?.data,
+        error?.response?.data?.message,
+        error?.response?.data?.title,
+        error?.message,
+      ]
+        .map((part) => (typeof part === "string" ? part : ""))
+        .join(" ")
+        .trim();
+      if (/Cannot insert duplicate key in obj(?:ect)?/i.test(rawErrorText)) {
+        alert("Cannot insert Duplicate Group ID");
+        return;
+      }
+      alert("ERROR:  Check Duplicate Group ID or Please try again.");
     }
   };
 

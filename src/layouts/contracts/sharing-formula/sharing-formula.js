@@ -36,7 +36,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
     applicableDate: "",
     deactiveDate: "",
     cmdId: "",
-    baseId: "",
+    baseIds: [],
     classIds: [],
     baseShare: "",
     commandShare: "",
@@ -48,6 +48,10 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const [filteredBases, setFilteredBases] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
+  const baseNameById = useMemo(
+    () => new Map(filteredBases.map((base) => [String(base.id), base.name])),
+    [filteredBases]
+  );
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -91,17 +95,21 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
     if (form.cmdId && bases.length > 0) {
       const filtered = bases.filter((base) => Number(base.cmd) === Number(form.cmdId));
       setFilteredBases(filtered);
-      // Clear base if it's no longer valid
-      if (form.baseId && !filtered.find((b) => Number(b.id) === Number(form.baseId))) {
-        setForm((prev) => ({ ...prev, baseId: "" }));
+      // Keep only valid selected bases for current command.
+      if (Array.isArray(form.baseIds) && form.baseIds.length > 0) {
+        const validIds = new Set(filtered.map((b) => String(b.id)));
+        const nextBaseIds = form.baseIds.filter((id) => validIds.has(String(id)));
+        if (nextBaseIds.length !== form.baseIds.length) {
+          setForm((prev) => ({ ...prev, baseIds: nextBaseIds }));
+        }
       }
     } else {
       setFilteredBases([]);
-      if (form.baseId) {
-        setForm((prev) => ({ ...prev, baseId: "" }));
+      if (Array.isArray(form.baseIds) && form.baseIds.length > 0) {
+        setForm((prev) => ({ ...prev, baseIds: [] }));
       }
     }
-  }, [form.cmdId, bases]);
+  }, [form.cmdId, bases, form.baseIds]);
 
   useEffect(() => {
     if (!open) {
@@ -110,7 +118,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
         applicableDate: "",
         deactiveDate: "",
         cmdId: "",
-        baseId: "",
+        baseIds: [],
         classIds: [],
         baseShare: "",
         commandShare: "",
@@ -230,12 +238,12 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
             : initialData.cmdId !== undefined && initialData.cmdId !== null
             ? String(initialData.cmdId)
             : "",
-        baseId:
+        baseIds:
           initialData.BaseId !== undefined && initialData.BaseId !== null
-            ? String(initialData.BaseId)
+            ? [String(initialData.BaseId)]
             : initialData.baseId !== undefined && initialData.baseId !== null
-            ? String(initialData.baseId)
-            : "",
+            ? [String(initialData.baseId)]
+            : [],
         classIds: classIdsArray.map((id) => String(id)),
         baseShare:
           initialData.BaseRate !== undefined && initialData.BaseRate !== null
@@ -285,7 +293,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
       newErrors.deactiveDate = "Deactive Date must be after Application Date";
     }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
-    if (!form.baseId) newErrors.baseId = "Base is required";
+    if (!form.baseIds || form.baseIds.length === 0) newErrors.baseIds = "Base is required";
     if (!form.classIds || form.classIds.length === 0) {
       newErrors.classIds = "At least one Class is required";
     }
@@ -310,20 +318,24 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
         ? String(form.deactiveDate).trim()
         : null;
 
-      // Create array of records - one per selected class
+      const selectedBaseIds = Array.isArray(form.baseIds) ? form.baseIds : [];
+
+      // Create array of records for each selected Base x Class combination.
       // Map to match database model column names
-      const dataArray = form.classIds.map((classId) => ({
-        ApplicableDate: form.applicableDate,
-        DeactiveDate: deactiveDateValue,
-        CmdId: Number(form.cmdId),
-        BaseId: Number(form.baseId),
-        ClassId: Number(classId), // Keep for multi-class selection logic
-        BaseRate: form.baseShare ? Number(form.baseShare) : 0,
-        RACRate: form.commandShare ? Number(form.commandShare) : 0,
-        AHQRate: form.ahqShare ? Number(form.ahqShare) : 0,
-        Description: form.description.trim(),
-        Status: form.status !== undefined ? form.status : true,
-      }));
+      const dataArray = selectedBaseIds.flatMap((baseId) =>
+        form.classIds.map((classId) => ({
+          ApplicableDate: form.applicableDate,
+          DeactiveDate: deactiveDateValue,
+          CmdId: Number(form.cmdId),
+          BaseId: Number(baseId),
+          ClassId: Number(classId), // Keep for multi-class selection logic
+          BaseRate: form.baseShare ? Number(form.baseShare) : 0,
+          RACRate: form.commandShare ? Number(form.commandShare) : 0,
+          AHQRate: form.ahqShare ? Number(form.ahqShare) : 0,
+          Description: form.description.trim(),
+          Status: form.status !== undefined ? form.status : true,
+        }))
+      );
 
       // API accepts array of objects - send all at once
       await onSubmit(dataArray);
@@ -507,15 +519,37 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
               size="small"
               fullWidth
               required
-              error={!!errors.baseId}
+              error={!!errors.baseIds}
               disabled={!form.cmdId}
             >
-              <InputLabel id="base-label">Base</InputLabel>
+              <InputLabel id="base-label">
+                {isEditMode ? "Base" : "Base (Multiple Selection)"}
+              </InputLabel>
               <Select
                 labelId="base-label"
-                value={form.baseId}
-                label="Base"
-                onChange={(e) => handleChange("baseId", e.target.value)}
+                multiple={!isEditMode}
+                value={isEditMode ? form.baseIds[0] || "" : form.baseIds}
+                label={isEditMode ? "Base" : "Base (Multiple Selection)"}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  handleChange("baseIds", isEditMode ? [String(value)] : value);
+                }}
+                renderValue={
+                  isEditMode
+                    ? undefined
+                    : (selected) => (
+                        <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                          {selected.map((value) => (
+                            <Chip
+                              key={value}
+                              label={baseNameById.get(String(value)) || value}
+                              size="small"
+                              sx={{ fontSize: "0.875rem" }}
+                            />
+                          ))}
+                        </MDBox>
+                      )
+                }
                 sx={selectSx}
               >
                 {filteredBases.map((base) => (
@@ -524,9 +558,9 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
                   </MenuItem>
                 ))}
               </Select>
-              {errors.baseId && (
+              {errors.baseIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.baseId}
+                  {errors.baseIds}
                 </MDTypography>
               )}
             </FormControl>
