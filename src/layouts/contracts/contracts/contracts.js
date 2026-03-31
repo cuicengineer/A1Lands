@@ -994,26 +994,26 @@ function ContractsForm({
     form.contractStartDate,
   ]);
 
-  // Auto-calculate PAF Share = Rental Value - Govt Share (rounded to integer)
+  // Auto-calculate PAF Share = Initial Rent PA - Govt Share (rounded, min 0)
   useEffect(() => {
-    const rentalValue = Number(form.rentalValue);
+    const initialRentPA = Number(form.initialRentPA);
     const govtShare = Number(form.govtShare);
-    const hasInputs = Number.isFinite(rentalValue) && Number.isFinite(govtShare);
-    const calculated = hasInputs ? Math.round(rentalValue - govtShare) : 0;
+    const hasInputs = Number.isFinite(initialRentPA) && Number.isFinite(govtShare);
+    const calculated = hasInputs ? Math.max(0, Math.round(initialRentPA - govtShare)) : 0;
 
     setForm((prev) => {
       const prevNum = Number(prev.pafShare || 0);
       if (prevNum === calculated) return prev;
       return { ...prev, pafShare: calculated };
     });
-  }, [form.rentalValue, form.govtShare]);
+  }, [form.initialRentPA, form.govtShare]);
 
   const pafShareFormulaText = useMemo(() => {
-    const rentalValue = Number(form.rentalValue) || 0;
+    const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
-    const calculated = Math.round(rentalValue - govtShare);
-    return `Formula: ${rentalValue} - ${govtShare} = ${calculated}`;
-  }, [form.rentalValue, form.govtShare]);
+    const calculated = Math.max(0, Math.round(initialRentPA - govtShare));
+    return `Formula: ${initialRentPA} - ${govtShare} = ${calculated}`;
+  }, [form.initialRentPA, form.govtShare]);
 
   const viabilityLabel = useMemo(() => {
     const initialRentPA = Number(form.initialRentPA) || 0;
@@ -4414,8 +4414,9 @@ export default function Contracts() {
         .trim()
         .toLowerCase();
       const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
-      const govt = Number(row.GovtShare ?? 0);
-      const paf = Number(row.PAFShare ?? 0);
+      const govt = Number(row.GovtShare ?? row.govtShare ?? 0);
+      const initialRentPAValue = Number(row.InitialRentPA ?? row.initialRentPA ?? 0);
+      const paf = Math.max(0, Math.round(initialRentPAValue - govt));
       const feasibleValue = hasPayloadValue
         ? fromPayload === "viable"
           ? "Viable"
@@ -4460,7 +4461,13 @@ export default function Contracts() {
           row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? "",
         rentalValue: row.RentalValue ?? row.rentalValue,
         govtShare: row.GovtShare ?? row.govtShare,
-        pafShare: row.PAFShare ?? row.pafShare,
+        pafShare: Math.max(
+          0,
+          Math.round(
+            Number(row.InitialRentPA ?? row.initialRentPA ?? 0) -
+              Number(row.GovtShare ?? row.govtShare ?? 0)
+          )
+        ),
         status: row.Status,
         remarks: row.Remarks || "",
         vaArea: row.VaArea || 0,

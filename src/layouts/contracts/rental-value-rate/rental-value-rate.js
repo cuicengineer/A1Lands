@@ -28,6 +28,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  getLoggedInUsername,
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
@@ -886,6 +887,11 @@ export default function RentalValueRate() {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
+  const isSuperUser =
+    String(getLoggedInUsername() || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "") === "superuser";
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -987,7 +993,7 @@ export default function RentalValueRate() {
       console.error("Record not found for id:", id);
       return;
     }
-    if (record.deactiveDate ?? record.DeactiveDate) {
+    if ((record.deactiveDate ?? record.DeactiveDate) && !isSuperUser) {
       alert("Deactive date already exists contact Administrator");
       return;
     }

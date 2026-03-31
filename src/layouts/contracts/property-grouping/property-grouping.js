@@ -2315,6 +2315,7 @@ export default function PropertyGrouping() {
     },
     { Header: "Location", accessor: "location", align: "left", width: "13%" },
     { Header: "Remarks", accessor: "remarks", align: "left" },
+    { Header: "Props", accessor: "attachedproperties", align: "left" },
     {
       Header: "Status",
       accessor: "status",
@@ -2717,6 +2718,52 @@ export default function PropertyGrouping() {
   const computedRows = rows.map((row) => {
     // API returns PascalCase
     const normalizedId = row.Id;
+    const linkedPropertyNames = (() => {
+      const namesFromLinkings = Array.isArray(row.PropertyGroupLinkings)
+        ? row.PropertyGroupLinkings.map((link) => {
+            if (!link) return "";
+            if (typeof link === "string") return link.trim();
+            if (typeof link === "number") return getPropertyName(link);
+            if (typeof link === "object") {
+              if (link.PropertyName || link.PId) {
+                return String(link.PropertyName || link.PId || "").trim();
+              }
+              const nested = link.Property;
+              if (nested && typeof nested === "object") {
+                return String(nested.PropertyName || nested.PId || "").trim();
+              }
+              const pid = link.PropertyId || link.PropId || link.Id;
+              return pid ? getPropertyName(pid) : "";
+            }
+            return "";
+          }).filter((name) => String(name || "").trim().length > 0)
+        : [];
+
+      if (namesFromLinkings.length > 0) {
+        return namesFromLinkings.join(", ");
+      }
+
+      const fallbackIds = Array.isArray(row.PropertyGroupLinkings)
+        ? row.PropertyGroupLinkings.map((link) => {
+            if (link == null) return null;
+            if (typeof link === "number" || typeof link === "string") return Number(link);
+            if (typeof link === "object") {
+              const pid = link.PropertyId || link.PropId || link.Id;
+              return pid ? Number(pid) : null;
+            }
+            return null;
+          }).filter((id) => id !== null && Number.isFinite(id))
+        : typeof row.Property === "string"
+        ? row.Property.split(",")
+            .map((x) => Number(String(x).trim()))
+            .filter((id) => Number.isFinite(id))
+        : [];
+
+      return Array.from(new Set(fallbackIds))
+        .map((id) => getPropertyName(id))
+        .filter((name) => String(name || "").trim().length > 0)
+        .join(", ");
+    })();
     return {
       id: normalizedId,
       cmdId: row.CmdId,
@@ -2731,8 +2778,9 @@ export default function PropertyGrouping() {
       uoM: row.UoM || "",
       location: row.Location || "",
       remarks: row.Remarks || "",
+      attachedproperties: row.attachedproperties || row.attachedproperties || "",
       status: row.Status,
-      linkedProperties: normalizedId, // Dummy field for Linked Property column accessor
+      linkedProperties: linkedPropertyNames,
       actions: (
         <MDBox
           alignItems="left"
@@ -2919,6 +2967,7 @@ export default function PropertyGrouping() {
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
+                  autoResetFilters={false}
                   pagination={{ variant: "gradient", color: "info" }}
                   exportFileName="Property-Grouping"
                   onVisibleRowCountChange={setVisibleRowCount}
@@ -3033,119 +3082,121 @@ export default function PropertyGrouping() {
         <DialogTitle>Group ID: {currentGroupId}</DialogTitle>
         <DialogContent>
           {/* Add Linked Properties */}
-          <MDBox mb={2}>
-            <MDTypography
-              variant="button"
-              color="secondary"
-              fontWeight="regular"
-              sx={{ display: "block", mb: 0.5 }}
-            >
-              Add Properties
-            </MDTypography>
-            <Autocomplete
-              multiple
-              disableCloseOnSelect
-              options={availablePropertiesForLinking || []}
-              value={(availablePropertiesForLinking || []).filter((rp) => {
-                const pid = rp.Id || rp.PropertyId;
-                return pid && (linkingSelection || []).some((id) => Number(id) === Number(pid));
-              })}
-              getOptionLabel={(option) => {
-                const pid = option.Id || option.PropertyId;
-                return getRentalPropertyLabel(option) || String(pid || "");
-              }}
-              isOptionEqualToValue={(option, value) => {
-                const optId = option.Id || option.PropertyId;
-                const valId = value.Id || value.PropertyId;
-                return optId && valId && Number(optId) === Number(valId);
-              }}
-              onChange={(event, newValue) => {
-                const nextIds = (newValue || [])
-                  .map((v) => {
-                    const pid = v.Id || v.PropertyId;
-                    return pid ? Number(pid) : null;
-                  })
-                  .filter((n) => n !== null && Number.isFinite(n));
-
-                // Enforce unique propertyName across already-linked + newly-selected
-                const usedNames = getLinkedPropertyNameSet();
-                const seen = new Set();
-                for (let i = 0; i < nextIds.length; i += 1) {
-                  const label = getPropertyLabelById(nextIds[i]);
-                  if (usedNames.has(label) || seen.has(label)) {
-                    alert(
-                      `"${label}" is already selected. Each property name can be added only once.`
-                    );
-                    return;
-                  }
-                  seen.add(label);
-                }
-                setLinkingSelection(nextIds);
-              }}
-              renderInput={(params) => (
-                <MDInput {...params} placeholder="Select properties..." size="small" fullWidth />
-              )}
-              renderTags={(value, getTagProps) =>
-                value.map((option, index) => {
-                  const pid = option.Id || option.PropertyId;
-                  return (
-                    <Chip
-                      key={pid || index}
-                      label={getRentalPropertyLabel(option) || String(pid || "")}
-                      size="small"
-                      {...getTagProps({ index })}
-                    />
-                  );
-                })
-              }
-              renderOption={(props, option) => {
-                const pid = option.Id || option.PropertyId;
-                const optionLabel = getRentalPropertyLabel(option) || String(pid || "");
-                const linkedNameSet = getLinkedPropertyNameSet();
-                const selectedNameSet = new Set(
-                  (linkingSelection || []).map((id) => getPropertyLabelById(id))
-                );
-                const isAlreadyLinked = linkedNameSet.has(optionLabel);
-                const isDuplicateByName =
-                  selectedNameSet.has(optionLabel) &&
-                  pid &&
-                  !(linkingSelection || []).includes(Number(pid));
-
-                return (
-                  <li {...props} aria-disabled={isAlreadyLinked || isDuplicateByName}>
-                    <MDBox
-                      display="flex"
-                      justifyContent="space-between"
-                      width="100%"
-                      alignItems="center"
-                    >
-                      <span>{optionLabel}</span>
-                      {isAlreadyLinked ? (
-                        <MDTypography variant="caption" color="secondary">
-                          linked
-                        </MDTypography>
-                      ) : null}
-                    </MDBox>
-                  </li>
-                );
-              }}
-              sx={{
-                "& .MuiInputBase-root": { minHeight: "45px" },
-                "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
-                "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
-              }}
-            />
-            <MDBox display="flex" justifyContent="flex-end" mt={1} gap={1}>
-              <MDButton
-                variant="gradient"
-                color="info"
-                onClick={handleSaveLinkings}
-                disabled={savingLinkings || !linkingSelection.length}
+          {canCreateCurrentMenu() && (
+            <MDBox mb={2}>
+              <MDTypography
+                variant="button"
+                color="secondary"
+                fontWeight="regular"
+                sx={{ display: "block", mb: 0.5 }}
               >
-                {savingLinkings ? "Saving..." : "Save"}
-              </MDButton>
+                Add Properties
+              </MDTypography>
+              <Autocomplete
+                multiple
+                disableCloseOnSelect
+                options={availablePropertiesForLinking || []}
+                value={(availablePropertiesForLinking || []).filter((rp) => {
+                  const pid = rp.Id || rp.PropertyId;
+                  return pid && (linkingSelection || []).some((id) => Number(id) === Number(pid));
+                })}
+                getOptionLabel={(option) => {
+                  const pid = option.Id || option.PropertyId;
+                  return getRentalPropertyLabel(option) || String(pid || "");
+                }}
+                isOptionEqualToValue={(option, value) => {
+                  const optId = option.Id || option.PropertyId;
+                  const valId = value.Id || value.PropertyId;
+                  return optId && valId && Number(optId) === Number(valId);
+                }}
+                onChange={(event, newValue) => {
+                  const nextIds = (newValue || [])
+                    .map((v) => {
+                      const pid = v.Id || v.PropertyId;
+                      return pid ? Number(pid) : null;
+                    })
+                    .filter((n) => n !== null && Number.isFinite(n));
+
+                  // Enforce unique propertyName across already-linked + newly-selected
+                  const usedNames = getLinkedPropertyNameSet();
+                  const seen = new Set();
+                  for (let i = 0; i < nextIds.length; i += 1) {
+                    const label = getPropertyLabelById(nextIds[i]);
+                    if (usedNames.has(label) || seen.has(label)) {
+                      alert(
+                        `"${label}" is already selected. Each property name can be added only once.`
+                      );
+                      return;
+                    }
+                    seen.add(label);
+                  }
+                  setLinkingSelection(nextIds);
+                }}
+                renderInput={(params) => (
+                  <MDInput {...params} placeholder="Select properties..." size="small" fullWidth />
+                )}
+                renderTags={(value, getTagProps) =>
+                  value.map((option, index) => {
+                    const pid = option.Id || option.PropertyId;
+                    return (
+                      <Chip
+                        key={pid || index}
+                        label={getRentalPropertyLabel(option) || String(pid || "")}
+                        size="small"
+                        {...getTagProps({ index })}
+                      />
+                    );
+                  })
+                }
+                renderOption={(props, option) => {
+                  const pid = option.Id || option.PropertyId;
+                  const optionLabel = getRentalPropertyLabel(option) || String(pid || "");
+                  const linkedNameSet = getLinkedPropertyNameSet();
+                  const selectedNameSet = new Set(
+                    (linkingSelection || []).map((id) => getPropertyLabelById(id))
+                  );
+                  const isAlreadyLinked = linkedNameSet.has(optionLabel);
+                  const isDuplicateByName =
+                    selectedNameSet.has(optionLabel) &&
+                    pid &&
+                    !(linkingSelection || []).includes(Number(pid));
+
+                  return (
+                    <li {...props} aria-disabled={isAlreadyLinked || isDuplicateByName}>
+                      <MDBox
+                        display="flex"
+                        justifyContent="space-between"
+                        width="100%"
+                        alignItems="center"
+                      >
+                        <span>{optionLabel}</span>
+                        {isAlreadyLinked ? (
+                          <MDTypography variant="caption" color="secondary">
+                            linked
+                          </MDTypography>
+                        ) : null}
+                      </MDBox>
+                    </li>
+                  );
+                }}
+                sx={{
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                  "& .MuiInputBase-input": { paddingTop: 0, paddingBottom: 0 },
+                }}
+              />
+              <MDBox display="flex" justifyContent="flex-end" mt={1} gap={1}>
+                <MDButton
+                  variant="gradient"
+                  color="info"
+                  onClick={handleSaveLinkings}
+                  disabled={savingLinkings || !linkingSelection.length}
+                >
+                  {savingLinkings ? "Saving..." : "Save"}
+                </MDButton>
+              </MDBox>
             </MDBox>
-          </MDBox>
+          )}
 
           {loadingLinkedProperties ? (
             <MDBox display="flex" justifyContent="center" py={3}>
@@ -3232,19 +3283,21 @@ export default function PropertyGrouping() {
                         }}
                       >
                         <ListItemText primary={propertyName} />
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleRemoveProperty(linkingId)}
-                          disabled={removingPropertyId === linkingId}
-                          title="Remove property from group"
-                        >
-                          {removingPropertyId === linkingId ? (
-                            <CurrencyLoading size={20} />
-                          ) : (
-                            <Icon>delete</Icon>
-                          )}
-                        </IconButton>
+                        {canDeleteCurrentMenu() && (
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRemoveProperty(linkingId)}
+                            disabled={removingPropertyId === linkingId}
+                            title="Remove property from group"
+                          >
+                            {removingPropertyId === linkingId ? (
+                              <CurrencyLoading size={20} />
+                            ) : (
+                              <Icon>delete</Icon>
+                            )}
+                          </IconButton>
+                        )}
                       </ListItem>
                       {index < linkedProperties.length - 1 && <Divider />}
                     </MDBox>

@@ -28,6 +28,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  getLoggedInUsername,
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
@@ -50,6 +51,7 @@ function GovtShareRateForm({
     cmdId: "",
     baseIds: [],
     classIds: [],
+    config: "",
     rate: "",
     description: "",
     status: true,
@@ -152,6 +154,7 @@ function GovtShareRateForm({
         cmdId: initialData.CmdId || initialData.cmdId || "",
         baseIds: [String(initialData.BaseId || initialData.baseId || "")].filter(Boolean),
         classIds: [String(initialData.ClassId || initialData.classId || "")].filter(Boolean),
+        config: initialData.Config || initialData.config || "",
         rate: initialData.Rate || initialData.rate || "",
         description: initialData.Description || initialData.description || "",
         status:
@@ -168,6 +171,7 @@ function GovtShareRateForm({
         cmdId: "",
         baseIds: [],
         classIds: [],
+        config: "",
         rate: "",
         description: "",
         status: true,
@@ -359,6 +363,7 @@ function GovtShareRateForm({
       applicableDate: form.applicableDate,
       deactiveDate: deactiveDateValue,
       cmdId: Number(form.cmdId),
+      config: form.config ? String(form.config).trim() : null,
       rate: form.rate ? Number(form.rate) : null,
       description: form.description.trim(),
       status: form.status,
@@ -698,6 +703,22 @@ function GovtShareRateForm({
           </Grid>
 
           <Grid item xs={12} sm={6}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="config-label">Config</InputLabel>
+              <Select
+                labelId="config-label"
+                value={form.config || ""}
+                label="Config"
+                onChange={(e) => handleChange("config", e.target.value)}
+                sx={selectSx}
+              >
+                <MenuItem value="Annual Rent">Annual Rent</MenuItem>
+                <MenuItem value="Revenue Rate">Revenue Rate</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
             <MDInput
               label="% Rate"
               type="number"
@@ -926,6 +947,11 @@ export default function GovtShareRate() {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
+  const isSuperUser =
+    String(getLoggedInUsername() || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "") === "superuser";
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -1048,7 +1074,7 @@ export default function GovtShareRate() {
       console.error("Record not found for id:", id);
       return;
     }
-    if (record.DeactiveDate ?? record.deactiveDate) {
+    if ((record.DeactiveDate ?? record.deactiveDate) && !isSuperUser) {
       alert("Deactive date already exists contact Administrator");
       return;
     }
@@ -1292,6 +1318,8 @@ export default function GovtShareRate() {
     return value;
   };
 
+  const classAndConfigGridColumnWidth = "140px";
+
   const columns = [
     {
       Header: "Action",
@@ -1372,6 +1400,7 @@ export default function GovtShareRate() {
       Header: "Class",
       accessor: "className",
       align: "left",
+      width: classAndConfigGridColumnWidth,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
@@ -1381,9 +1410,15 @@ export default function GovtShareRate() {
       },
     },
     {
+      Header: "Config",
+      accessor: "config",
+      align: "left",
+      width: classAndConfigGridColumnWidth,
+    },
+    {
       Header: "% Rate",
       accessor: "rate",
-      align: "right",
+      align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (value ? `${Number(value).toLocaleString()}%` : "-"),
     },
@@ -1437,6 +1472,7 @@ export default function GovtShareRate() {
       cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
       baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
       className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
+      config: row.Config ?? row.config ?? "",
       applicableDate:
         row.ApplicableDate ??
         row.applicableDate ??

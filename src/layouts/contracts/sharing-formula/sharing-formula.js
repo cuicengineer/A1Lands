@@ -27,6 +27,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  getLoggedInUsername,
 } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
 import { format, parseISO, isValid } from "date-fns";
@@ -732,6 +733,11 @@ export default function SharingFormula() {
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const isSuperUser =
+    String(getLoggedInUsername() || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "") === "superuser";
 
   const fetchSharingFormulas = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
@@ -802,7 +808,7 @@ export default function SharingFormula() {
       (r) => (r.Id || r.id) === id || Number(r.Id || r.id) === Number(id)
     );
     if (record) {
-      if (record.DeactiveDate || record.deactiveDate) {
+      if ((record.DeactiveDate || record.deactiveDate) && !isSuperUser) {
         alert("Deactive date already exists contact Administrator");
         return;
       }

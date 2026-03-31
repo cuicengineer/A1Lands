@@ -28,6 +28,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  getLoggedInUsername,
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
@@ -924,6 +925,11 @@ export default function RevenueRates() {
   const [currentViewingRecord, setCurrentViewingRecord] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
+  const isSuperUser =
+    String(getLoggedInUsername() || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "") === "superuser";
 
   const openSuccessSB = () => setSuccessSB(true);
   const closeSuccessSB = () => setSuccessSB(false);
@@ -1012,7 +1018,7 @@ export default function RevenueRates() {
       console.error("Revenue rate not found for id:", id);
       return;
     }
-    if (revenueRate.deactiveDate ?? revenueRate.DeactiveDate) {
+    if ((revenueRate.deactiveDate ?? revenueRate.DeactiveDate) && !isSuperUser) {
       alert("Deactive date already exists contact Administrator");
       return;
     }
@@ -1203,7 +1209,7 @@ export default function RevenueRates() {
             : null,
         propertyId: isBothAll || isBaseAll ? 0 : Number(data.propertyId) || null,
         applicableDate: data.applicableDate || null,
-        rate: data.rate ? Number(data.rate) : null,
+        rate: data.rate !== "" && data.rate != null ? Number(data.rate) : null,
         attachments: data.attachments || null,
         status: data.status !== undefined ? Boolean(data.status) : true,
         DeactiveDate: deactiveDateValue,
@@ -1375,7 +1381,9 @@ export default function RevenueRates() {
       Cell: ({ value, row }) => {
         // Handle both camelCase and PascalCase - use value from accessor first, then fallback
         const rateValue = value ?? row?.original?.rate ?? row?.original?.Rate ?? 0;
-        return rateValue ? Number(rateValue).toLocaleString() : "";
+        if (rateValue === "" || rateValue == null) return "";
+        const parsedRate = Number(rateValue);
+        return Number.isFinite(parsedRate) ? parsedRate.toLocaleString() : "";
       },
     },
     {
@@ -1626,6 +1634,7 @@ export default function RevenueRates() {
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
+                  autoResetFilters={false}
                   exportFileName="Revenue-Rates"
                   exportCellFormatter={exportCellFormatter}
                   onVisibleRowCountChange={setVisibleRowCount}

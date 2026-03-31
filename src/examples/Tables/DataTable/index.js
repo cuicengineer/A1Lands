@@ -359,6 +359,7 @@ function DataTable({
   stickyBodyMaxHeight,
   contentFitTable,
   onVisibleRowCountChange,
+  autoResetFilters,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -531,6 +532,7 @@ function DataTable({
       },
       defaultColumn,
       filterTypes,
+      autoResetFilters,
       state: isControlled
         ? {
             pageIndex: currentPageIndex,
@@ -1483,6 +1485,7 @@ DataTable.defaultProps = {
   stickyBodyMaxHeight: undefined,
   contentFitTable: false,
   onVisibleRowCountChange: undefined,
+  autoResetFilters: true,
 };
 
 // Typechecking props for the DataTable
@@ -1526,6 +1529,7 @@ DataTable.propTypes = {
   stickyBodyMaxHeight: PropTypes.string,
   contentFitTable: PropTypes.bool,
   onVisibleRowCountChange: PropTypes.func,
+  autoResetFilters: PropTypes.bool,
 };
 
 export default DataTable;
