@@ -18,6 +18,7 @@ import InputLabel from "@mui/material/InputLabel";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
+import Autocomplete from "@mui/material/Autocomplete";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
@@ -61,10 +62,13 @@ function RentalValueRateForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
   const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
-  const baseNameById = useMemo(
-    () => new Map(filteredBases.map((base) => [String(base.id), base.name])),
-    [filteredBases]
-  );
+
+  const baseAutocompleteOptionsAddMode = useMemo(() => {
+    const allSelected =
+      filteredBases.length > 0 &&
+      filteredBases.every((base) => form.baseIds.includes(String(base.id)));
+    return [{ id: "__all__", name: allSelected ? "Deselect All" : "Select All" }, ...filteredBases];
+  }, [filteredBases, form.baseIds]);
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -514,101 +518,170 @@ function RentalValueRateForm({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth required error={!!errors.cmdId}>
-              <InputLabel id="cmd-label">RAC</InputLabel>
-              <Select
-                labelId="cmd-label"
-                value={form.cmdId}
-                label="Command"
-                onChange={(e) => handleChange("cmdId", e.target.value)}
-                sx={selectSx}
-              >
-                {commands.map((cmd) => (
-                  <MenuItem key={cmd.id} value={cmd.id}>
-                    {cmd.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {errors.cmdId && (
-                <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.cmdId}
-                </MDTypography>
+            <Autocomplete
+              size="small"
+              fullWidth
+              disableClearable
+              options={commands || []}
+              getOptionLabel={(option) => option?.name ?? ""}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={(commands || []).find((c) => Number(c.id) === Number(form.cmdId)) ?? null}
+              onChange={(_, newValue) => handleChange("cmdId", newValue != null ? newValue.id : "")}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                width: "100%",
+                fontSize: "1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": {
+                  minHeight: "45px",
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+                "& .MuiInputBase-input": {
+                  fontSize: "1rem",
+                  padding: "10px 12px",
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput {...params} label="RAC" required error={!!errors.cmdId} sx={inputSx} />
               )}
-            </FormControl>
+            />
+            {errors.cmdId && (
+              <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                {errors.cmdId}
+              </MDTypography>
+            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl
-              size="small"
-              fullWidth
-              required
-              error={!!errors.baseIds}
-              disabled={!form.cmdId}
-            >
-              <InputLabel id="base-label">
-                {isEditMode ? "Base" : "Base (Multiple Selection)"}
-              </InputLabel>
-              <Select
-                labelId="base-label"
-                multiple={!isEditMode}
-                value={isEditMode ? form.baseIds[0] || "" : form.baseIds}
-                label={isEditMode ? "Base" : "Base (Multiple Selection)"}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (isEditMode) {
-                    handleChange("baseIds", [String(value)]);
-                    return;
+            {isEditMode ? (
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={filteredBases}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={filteredBases.find((b) => Number(b.id) === Number(form.baseIds[0])) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("baseIds", newValue != null ? [String(newValue.id)] : [])
+                }
+                disabled={!form.cmdId}
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "10px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="Base"
+                    required
+                    error={!!errors.baseIds}
+                    sx={inputSx}
+                  />
+                )}
+              />
+            ) : (
+              <Autocomplete
+                multiple
+                disableCloseOnSelect
+                size="small"
+                fullWidth
+                options={baseAutocompleteOptionsAddMode}
+                filterOptions={(options, state) => {
+                  const input = (state.inputValue || "").toLowerCase().trim();
+                  const allOpt = options.find((o) => String(o.id) === "__all__");
+                  const rest = options.filter((o) => String(o.id) !== "__all__");
+                  const filtered = !input
+                    ? rest
+                    : rest.filter((o) =>
+                        String(o.name || "")
+                          .toLowerCase()
+                          .includes(input)
+                      );
+                  return allOpt ? [allOpt, ...filtered] : filtered;
+                }}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => {
+                  if (String(a?.id) === "__all__" || String(b?.id) === "__all__") {
+                    return String(a?.id) === "__all__" && String(b?.id) === "__all__";
                   }
-                  const selectedValues = Array.isArray(value) ? value.map(String) : [];
-                  if (selectedValues.includes("__all__")) {
+                  return Number(a?.id) === Number(b?.id);
+                }}
+                value={(form.baseIds || [])
+                  .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
+                  .filter(Boolean)}
+                onChange={(_, newValue) => {
+                  const raw = newValue || [];
+                  if (raw.some((o) => String(o.id) === "__all__")) {
                     const allIds = filteredBases.map((base) => String(base.id));
                     const allSelected =
                       allIds.length > 0 && allIds.every((id) => form.baseIds.includes(id));
                     handleChange("baseIds", allSelected ? [] : allIds);
                     return;
                   }
-                  handleChange("baseIds", selectedValues);
+                  handleChange(
+                    "baseIds",
+                    raw.map((b) => String(b.id))
+                  );
                 }}
-                renderValue={
-                  isEditMode
-                    ? undefined
-                    : (selected) => (
-                        <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                          {selected.map((value) => (
-                            <Chip
-                              key={value}
-                              label={baseNameById.get(String(value)) || value}
-                              size="small"
-                              sx={{ fontSize: "0.875rem" }}
-                            />
-                          ))}
-                        </MDBox>
-                      )
-                }
-                sx={selectSx}
-              >
-                {!isEditMode && (
-                  <MenuItem value="__all__">
-                    <em>
-                      {filteredBases.length > 0 &&
-                      filteredBases.every((base) => form.baseIds.includes(String(base.id)))
-                        ? "Deselect All"
-                        : "Select All"}
-                    </em>
-                  </MenuItem>
+                disabled={!form.cmdId}
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "10px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="Base (Multiple Selection)"
+                    required
+                    error={!!errors.baseIds}
+                    sx={inputSx}
+                  />
                 )}
-                {filteredBases.map((base) => (
-                  <MenuItem key={base.id} value={base.id}>
-                    {base.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {errors.baseIds && (
-                <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.baseIds}
-                </MDTypography>
-              )}
-            </FormControl>
+                renderTags={(value, getTagProps) =>
+                  value.map((option, index) => (
+                    <Chip
+                      key={option.id}
+                      label={option.name}
+                      size="small"
+                      sx={{ fontSize: "0.875rem" }}
+                      {...getTagProps({ index })}
+                    />
+                  ))
+                }
+              />
+            )}
+            {errors.baseIds && (
+              <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                {errors.baseIds}
+              </MDTypography>
+            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -662,7 +735,7 @@ function RentalValueRateForm({
 
           <Grid item xs={12} sm={6}>
             <MDInput
-              label="% Rate"
+              label="Rate(%)"
               type="number"
               value={form.rate}
               onChange={(e) => handleChange("rate", e.target.value)}
@@ -1297,7 +1370,7 @@ export default function RentalValueRate() {
       },
     },
     {
-      Header: "% Rate",
+      Header: "Rate(%)",
       accessor: "rate",
       align: "right",
       // eslint-disable-next-line react/prop-types

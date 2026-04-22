@@ -55,6 +55,7 @@ import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
 
 const LAST_ACTIVITY_KEY = "lastActivityAt";
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const SLIDING_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 
 export default function App() {
   const [controller, dispatch] = useMaterialUIController();
@@ -197,6 +198,27 @@ export default function App() {
     };
   }, [pathname]);
 
+  // While the user is active (same window as inactivity), periodically refresh so the server refresh token stays valid during work.
+  useEffect(() => {
+    if (!hasAccessToken()) return undefined;
+    const isWorkingSession = () => {
+      try {
+        const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
+        const ts = Number(raw);
+        if (!Number.isFinite(ts) || ts <= 0) return true;
+        return Date.now() - ts < INACTIVITY_TIMEOUT_MS;
+      } catch (e) {
+        return false;
+      }
+    };
+    const tick = () => {
+      if (!hasAccessToken() || !isWorkingSession()) return;
+      api.refreshAccessToken().catch(() => {});
+    };
+    const id = setInterval(tick, SLIDING_TOKEN_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [pathname]);
+
   const getRoutes = (allRoutes) =>
     allRoutes.map((route) => {
       if (route.collapse) {
@@ -256,14 +278,14 @@ export default function App() {
     <CacheProvider value={rtlCache}>
       <ThemeProvider theme={darkMode ? themeDarkRTL : themeRTL}>
         <CssBaseline />
-        {layout === "dashboard" && (
+        {layout === "dashboard" && hasAccessToken() && (
           <>
             <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
             <Configurator />
             {configsButton}
           </>
         )}
-        {layout === "vr" && <Configurator />}
+        {layout === "vr" && hasAccessToken() && <Configurator />}
         <Routes>
           {getRoutes(routes)}
           <Route path="*" element={<Navigate to="/" />} />
@@ -273,13 +295,13 @@ export default function App() {
   ) : (
     <ThemeProvider theme={darkMode ? themeDark : theme}>
       <CssBaseline />
-      {layout === "dashboard" && (
+      {layout === "dashboard" && hasAccessToken() && (
         <>
           <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
           <Configurator />
         </>
       )}
-      {layout === "vr" && <Configurator />}
+      {layout === "vr" && hasAccessToken() && <Configurator />}
       <Routes>
         {getRoutes(routes)}
         <Route path="*" element={<Navigate to="/" />} />

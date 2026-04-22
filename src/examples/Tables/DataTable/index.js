@@ -360,6 +360,7 @@ function DataTable({
   contentFitTable,
   onVisibleRowCountChange,
   autoResetFilters,
+  toolbarStart,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -943,7 +944,16 @@ function DataTable({
     <TableContainer sx={tableContainerSx}>
       {/* Top toolbar should always be visible so Columns + Export are available on every grid */}
       {true ? (
-        <MDBox display="flex" justifyContent="space-between" alignItems="center" p={3} gap={2}>
+        <MDBox
+          display="flex"
+          flexDirection="row"
+          alignItems="center"
+          p={3}
+          gap={2}
+          flexWrap="wrap"
+          width="100%"
+        >
+          {toolbarStart ? <MDBox sx={{ minWidth: 0 }}>{toolbarStart}</MDBox> : null}
           {entriesPerPage && (
             <MDBox display="flex" alignItems="center">
               <Autocomplete
@@ -987,7 +997,7 @@ function DataTable({
               </MDTypography>
             </MDBox>
           )}
-          <MDBox display="flex" alignItems="center" gap={1} ml="auto">
+          <MDBox display="flex" alignItems="center" gap={1} marginLeft="auto" flexWrap="wrap">
             {/* Search bar is always visible so toolbar tools can sit beside it on every grid */}
             <MDBox width="12rem">
               <MDInput
@@ -1486,6 +1496,7 @@ DataTable.defaultProps = {
   contentFitTable: false,
   onVisibleRowCountChange: undefined,
   autoResetFilters: true,
+  toolbarStart: null,
 };
 
 // Typechecking props for the DataTable
@@ -1530,6 +1541,7 @@ DataTable.propTypes = {
   contentFitTable: PropTypes.bool,
   onVisibleRowCountChange: PropTypes.func,
   autoResetFilters: PropTypes.bool,
+  toolbarStart: PropTypes.node,
 };
 
 export default DataTable;

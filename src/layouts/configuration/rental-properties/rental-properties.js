@@ -30,6 +30,8 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  getLoggedInUserBaseId,
+  isLoggedInUserBaseReadCategory,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
@@ -51,6 +53,26 @@ function RentalProperties() {
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
+  const isBaseReadUser = isLoggedInUserBaseReadCategory();
+  const userBaseId = getLoggedInUserBaseId();
+
+  const getPropertyRowBaseId = (property) => {
+    const b = property?.baseId ?? property?.BaseId;
+    if (b === null || b === undefined || b === "") return null;
+    const n = Number(b);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  /** For Base-Read users, only rows whose base matches the logged-in user's base. */
+  const rowIsEditableOrDeletableByBase = (row) => {
+    if (!isBaseReadUser) return true;
+    if (userBaseId === null) return false;
+    return getPropertyRowBaseId(row) === userBaseId;
+  };
+
+  /** Base-Read users need a base on the session to add/edit/delete; others use menu rights only. */
+  const baseReadCanMutate = !isBaseReadUser || userBaseId != null;
+  const lockedBaseIdForForm = isBaseReadUser && userBaseId != null ? userBaseId : null;
   const [tableRows, setTableRows] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -129,6 +151,10 @@ function RentalProperties() {
 
   const handleAddProperty = () => {
     if (!canCreate) return;
+    if (isBaseReadUser && userBaseId == null) {
+      alert("Your session has no base assigned; you cannot create rental properties.");
+      return;
+    }
     setCurrentProperty(null);
     setFormOpen(true);
   };
@@ -141,6 +167,10 @@ function RentalProperties() {
     );
     if (!property) {
       console.error("Property not found for id:", id);
+      return;
+    }
+    if (isBaseReadUser && !rowIsEditableOrDeletableByBase(property)) {
+      alert("You can only edit rental properties for your assigned base.");
       return;
     }
     console.log("Editing property:", property);
@@ -176,6 +206,22 @@ function RentalProperties() {
 
   const handleFormSubmit = async (formData) => {
     try {
+      if (isBaseReadUser) {
+        if (userBaseId == null) {
+          alert("Your session has no base assigned; you cannot save rental properties.");
+          return null;
+        }
+        const submittedBase =
+          formData.baseId === "" || formData.baseId == null ? null : Number(formData.baseId);
+        if (submittedBase !== userBaseId) {
+          alert("You can only create or update rental properties for your assigned base.");
+          return null;
+        }
+        if (currentProperty && getPropertyRowBaseId(currentProperty) !== userBaseId) {
+          alert("You can only update rental properties for your assigned base.");
+          return null;
+        }
+      }
       const formattedData = {
         cmdId: formData.cmdId,
         baseId: formData.baseId,
@@ -226,12 +272,30 @@ function RentalProperties() {
 
   const handleDeleteProperty = (id) => {
     if (!canDelete) return;
+    const property = tableRows.find(
+      (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
+    );
+    if (property && isBaseReadUser && !rowIsEditableOrDeletableByBase(property)) {
+      alert("You can only delete rental properties for your assigned base.");
+      return;
+    }
     setPropertyToDelete(id);
     setShowDeleteDialog(true);
   };
 
   const handleConfirmDelete = async () => {
     if (!canDelete) return;
+    const property = tableRows.find(
+      (row) =>
+        (row.id ?? row.Id) === propertyToDelete ||
+        Number(row.id ?? row.Id) === Number(propertyToDelete)
+    );
+    if (property && isBaseReadUser && !rowIsEditableOrDeletableByBase(property)) {
+      alert("You can only delete rental properties for your assigned base.");
+      setShowDeleteDialog(false);
+      setPropertyToDelete(null);
+      return;
+    }
     try {
       await rentalPropertiesApi.remove(propertyToDelete);
       await fetchRentalProperties(pageNumber, pageSize);
@@ -300,6 +364,10 @@ function RentalProperties() {
 
   const handleDeleteAttachment = async (file) => {
     if (!canDelete) return;
+    if (isBaseReadUser && !rowIsEditableOrDeletableByBase(currentViewingRecord || {})) {
+      alert("You can only remove attachments for rental properties for your assigned base.");
+      return;
+    }
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -629,6 +697,8 @@ function RentalProperties() {
           row.propertytypename ||
           "";
 
+        const baseReadAllowsActions = rowIsEditableOrDeletableByBase(row);
+
         return {
           ...row,
           id: normalizedId,
@@ -678,7 +748,7 @@ function RentalProperties() {
                 borderRadius: "2px",
               }}
             >
-              {canEdit && (
+              {canEdit && baseReadAllowsActions && (
                 <IconButton
                   size="small"
                   color="info"
@@ -689,7 +759,7 @@ function RentalProperties() {
                   <Icon>edit</Icon>
                 </IconButton>
               )}
-              {canDelete && (
+              {canDelete && baseReadAllowsActions && (
                 <IconButton
                   size="small"
                   color="error"
@@ -704,7 +774,7 @@ function RentalProperties() {
           ),
         };
       }),
-    [tableRows, propertyTypes]
+    [tableRows, propertyTypes, isBaseReadUser, userBaseId]
   );
 
   return (
@@ -728,7 +798,7 @@ function RentalProperties() {
             <MDTypography variant="h6" color="white">
               Rental Properties
             </MDTypography>
-            {canCreate && (
+            {canCreate && baseReadCanMutate && (
               <MDButton variant="gradient" color="info" onClick={handleAddProperty}>
                 Add Rental Property
               </MDButton>
@@ -925,6 +995,7 @@ function RentalProperties() {
         onSubmit={handleFormSubmit}
         initialData={currentProperty}
         onUploadSuccess={handleUploadSuccess}
+        lockedBaseId={lockedBaseIdForForm}
       />
 
       <Dialog
@@ -969,7 +1040,7 @@ function RentalProperties() {
                       >
                         <Icon>download</Icon>&nbsp;Download
                       </MDButton>
-                      {canDelete && (
+                      {canDelete && rowIsEditableOrDeletableByBase(currentViewingRecord || {}) && (
                         <IconButton
                           size="small"
                           color="error"

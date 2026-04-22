@@ -10,6 +10,7 @@ import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
 import MDTypography from "components/MDTypography";
 import Icon from "@mui/material/Icon";
+import Autocomplete from "@mui/material/Autocomplete";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
@@ -26,7 +27,14 @@ const UOM_OPTIONS = [
   { key: "Acre", value: "Acre" },
 ];
 
-function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSuccess }) {
+function RentalPropertyForm({
+  open,
+  onClose,
+  onSubmit,
+  initialData,
+  onUploadSuccess,
+  lockedBaseId,
+}) {
   // Match "New Property Grouping" form styling (compact, simple, consistent)
   const MENU_PROPS = {
     PaperProps: {
@@ -189,6 +197,39 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
         newForm.baseId = ""; // Reset if not found in filtered bases
       }
       setForm(newForm);
+    } else if (lockedBaseId != null) {
+      const base = allBases.length
+        ? allBases.find((b) => Number(b.id) === Number(lockedBaseId))
+        : null;
+      if (base) {
+        setForm({
+          cmdId: base.cmd != null ? Number(base.cmd) : "",
+          baseId: base.id != null ? Number(base.id) : "",
+          classId: "",
+          propertyType: "",
+          pId: "",
+          uoM: "",
+          area: 0,
+          location: "",
+          remarks: "",
+          status: false,
+        });
+        setBases(allBases.filter((b) => Number(b.cmd) === Number(base.cmd)));
+      } else {
+        setForm({
+          cmdId: "",
+          baseId: "",
+          classId: "",
+          propertyType: "",
+          pId: "",
+          uoM: "",
+          area: 0,
+          location: "",
+          remarks: "",
+          status: false,
+        });
+        setBases([]);
+      }
     } else {
       setForm({
         cmdId: "",
@@ -216,7 +257,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
       setExistingFiles([]);
       setSelectedFiles([]);
     }
-  }, [initialData, allBases, open]);
+  }, [initialData, allBases, open, lockedBaseId]);
 
   const fetchExistingFiles = async (id) => {
     setLoadingExistingFiles(true);
@@ -264,7 +305,7 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
             ? Number(normalizedValue)
             : ""
           : normalizedValue,
-      ...(field === "cmdId" && { baseId: "" }), // Reset baseId when cmdId changes
+      ...(field === "cmdId" && lockedBaseId == null && { baseId: "" }), // Reset baseId when cmdId changes (not when Base is fixed)
     }));
     if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
@@ -451,34 +492,76 @@ function RentalPropertyForm({ open, onClose, onSubmit, initialData, onUploadSucc
           {fields.map((f) => (
             <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
               {f.type === "select" ? (
-                <FormControl
-                  fullWidth
-                  size="small"
-                  required={Boolean(f.mandatory)}
-                  error={Boolean(errors[f.key])}
-                  sx={formControlSx}
-                >
-                  <InputLabel sx={labelSx}>{f.label}</InputLabel>
-                  <Select
-                    value={form[f.key] ?? ""}
-                    label={f.label}
-                    onChange={(e) => handleChange(f.key, e.target.value)}
-                    MenuProps={MENU_PROPS}
-                    sx={selectSx}
+                f.key === "cmdId" || f.key === "baseId" ? (
+                  <Autocomplete
+                    size="small"
+                    fullWidth
+                    disableClearable
+                    disabled={lockedBaseId != null}
+                    options={f.key === "cmdId" ? commands : bases}
+                    getOptionLabel={(option) => option?.name ?? ""}
+                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                    value={
+                      f.key === "cmdId"
+                        ? commands.find((c) => Number(c.id) === Number(form.cmdId)) ?? null
+                        : bases.find((b) => Number(b.id) === Number(form.baseId)) ?? null
+                    }
+                    onChange={(_, newValue) =>
+                      handleChange(f.key, newValue != null ? newValue.id : "")
+                    }
+                    ListboxProps={{ style: { maxHeight: 300 } }}
+                    sx={{
+                      ...formControlSx,
+                      fontSize: "1rem",
+                      "& .MuiInputBase-root": { minHeight: "45px" },
+                      "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                      "& .MuiInputBase-input": {
+                        fontSize: "1rem",
+                        paddingTop: 0,
+                        paddingBottom: 0,
+                      },
+                    }}
+                    renderInput={(params) => (
+                      <MDInput
+                        {...params}
+                        label={f.label}
+                        required={Boolean(f.mandatory)}
+                        error={Boolean(errors[f.key])}
+                        helperText={errors[f.key]}
+                      />
+                    )}
+                  />
+                ) : (
+                  <FormControl
+                    fullWidth
+                    size="small"
+                    required={Boolean(f.mandatory)}
+                    error={Boolean(errors[f.key])}
+                    sx={formControlSx}
                   >
-                    {f.options.map((option) => {
-                      const optionValue = option.value ?? option.id;
-                      const optionLabel = option.label ?? option.name ?? String(optionValue ?? "");
-                      const optionKey = option.key ?? option.id ?? option.value ?? optionLabel;
-                      return (
-                        <MenuItem key={optionKey} value={optionValue} sx={menuItemSx}>
-                          {optionLabel}
-                        </MenuItem>
-                      );
-                    })}
-                  </Select>
-                  {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
-                </FormControl>
+                    <InputLabel sx={labelSx}>{f.label}</InputLabel>
+                    <Select
+                      value={form[f.key] ?? ""}
+                      label={f.label}
+                      onChange={(e) => handleChange(f.key, e.target.value)}
+                      MenuProps={MENU_PROPS}
+                      sx={selectSx}
+                    >
+                      {f.options.map((option) => {
+                        const optionValue = option.value ?? option.id;
+                        const optionLabel =
+                          option.label ?? option.name ?? String(optionValue ?? "");
+                        const optionKey = option.key ?? option.id ?? option.value ?? optionLabel;
+                        return (
+                          <MenuItem key={optionKey} value={optionValue} sx={menuItemSx}>
+                            {optionLabel}
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                    {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
+                  </FormControl>
+                )
               ) : (
                 <MDInput
                   label={f.label}
@@ -670,6 +753,8 @@ RentalPropertyForm.propTypes = {
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
   onUploadSuccess: PropTypes.func,
+  /** When set, RAC and Base are fixed to this base (Base-Read users on /contracts/rental-properties). */
+  lockedBaseId: PropTypes.number,
 };
 
 export default RentalPropertyForm;

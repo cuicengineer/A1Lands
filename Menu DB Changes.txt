@@ -1,13 +1,152 @@
---  ALTER TABLE Tenants
---ADD CONSTRAINT UQ_Tenants_TenantNo UNIQUE (TenantNo);
+USE [A1Lands]
+GO
+/****** Object:  StoredProcedure [dbo].[GetPropertyDashboardSummary]    Script Date: 08/04/2026 1:56:37 pm ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[GetPropertyDashboardSummary]
+    @CmdId INT = NULL,
+    @BaseId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ---------------------------------------------------
+    -- Result Set 1: Property Summary
+    ---------------------------------------------------
+    SELECT
+        'PropertySummary' AS DataSetName,  -- Name of this result set
+        p.CmdId,
+        p.BaseId,
+        p.ClassId,
+        COUNT(*) AS PropertyCount,
+        ROUND(SUM(ISNULL(p.Rate, 0)) / 1000000.0, 6) AS ClassRevenue_Million,
+        SUM(COUNT(*)) OVER (PARTITION BY p.CmdId, p.BaseId) AS TotalProperties,
+        ROUND(
+            SUM(SUM(ISNULL(p.Rate, 0))) OVER (PARTITION BY p.CmdId, p.BaseId) / 1000000.0, 
+            6
+        ) AS TotalRevenue_Million
+    FROM dbo.vw_PropertyLatestRates p
+    WHERE (@CmdId IS NULL OR p.CmdId = @CmdId)
+      AND (@BaseId IS NULL OR p.BaseId = @BaseId)
+    GROUP BY p.CmdId, p.BaseId, p.ClassId
+    ORDER BY p.CmdId, p.BaseId, p.ClassId;
 
 
-  ALTER TABLE PropertyGroups
-ADD CONSTRAINT UQ_PropertyGroups_PropGrp UNIQUE (GId);
+    ---------------------------------------------------
+    -- Result Set 2: Contracts Summary
+    ---------------------------------------------------
+    SELECT
+        'ContractsSummary' AS DataSetName,  -- Name of this result set
+        c.CmdId,
+        c.BaseId,
+        COUNT(*) AS TotalContracts,
+        SUM(CASE 
+            WHEN Status = 1 
+             AND IsDeleted = 0 
+             AND ContractEndDate >= GETDATE()
+            THEN 1 ELSE 0 END) AS ActiveContracts,
+        SUM(CASE 
+            WHEN Status = 1 
+             AND IsDeleted = 0 
+             AND ContractEndDate < GETDATE()
+            THEN 1 ELSE 0 END) AS ExpiredContracts,
+        SUM(CASE 
+            WHEN Status = 1 
+             AND IsDeleted = 0 
+             AND ContractEndDate BETWEEN GETDATE() AND DATEADD(DAY, 30, GETDATE())
+            THEN 1 ELSE 0 END) AS BorderLineContracts,
+        SUM(CASE 
+            WHEN Status <> 1 
+             AND IsDeleted = 0
+            THEN 1 ELSE 0 END) AS ClosedContracts
+    FROM dbo.Contracts c WITH (NOLOCK)
+    WHERE IsDeleted = 0
+      AND (@CmdId IS NULL OR c.CmdId = @CmdId)
+      AND (@BaseId IS NULL OR c.BaseId = @BaseId)
+    GROUP BY c.CmdId, c.BaseId
+    ORDER BY c.CmdId, c.BaseId;
 
- ALTER TABLE RentalProperties
-ADD CONSTRAINT UQ_RentalProperties_RenProp UNIQUE (PId);
+
+    ---------------------------------------------------
+    -- Result Set 3: Govt vs PAF Share (Latest Rates)
+    ---------------------------------------------------
+    ;WITH LatestShareRates AS
+    (
+        SELECT 
+            s.ClassId,
+            s.CmdId,
+            s.BaseId,
+            s.Type,
+            s.Rate,
+            ROW_NUMBER() OVER 
+            (
+                PARTITION BY s.ClassId, s.Type, s.CmdId, s.BaseId
+                ORDER BY s.ApplicableDate DESC, s.Id DESC
+            ) AS rn
+        FROM dbo.RentalValueGovtShareRates s WITH (NOLOCK)
+        WHERE IsDeleted = 0
+          AND Status = 1
+          AND (@CmdId IS NULL OR s.CmdId = @CmdId)
+          AND (@BaseId IS NULL OR s.BaseId = @BaseId)
+    )
+
+    SELECT
+        'GovtPAFShare' AS DataSetName,  -- Name of this result set
+        CmdId,
+        BaseId,
+        ClassId,
+        SUM(CASE 
+            WHEN Type = 1 AND rn = 1 
+            THEN Rate ELSE 0 END) AS GovtShare,
+        SUM(CASE 
+            WHEN Type = 2 AND rn = 1 
+            THEN Rate ELSE 0 END) AS PAFShare
+    FROM LatestShareRates
+    WHERE rn = 1
+    GROUP BY CmdId, BaseId, ClassId
+    ORDER BY CmdId, BaseId, ClassId;
+
+END;
 
 
- ALTER TABLE Contracts
-ADD CONSTRAINT UQ_Contracts_ContNo UNIQUE (ContractNo);
+
+
+
+
+USE [A1Lands]
+GO
+
+/****** Object:  View [dbo].[vw_PropertyLatestRates]    Script Date: 08/04/2026 1:57:00 pm ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER VIEW [dbo].[vw_PropertyLatestRates]
+AS
+SELECT 
+    p.Id AS PropertyId,
+    p.ClassId,
+    p.CmdId,
+    p.BaseId,
+    r.Rate
+FROM A1Lands.dbo.RentalProperties p WITH (NOLOCK)
+OUTER APPLY
+(
+    SELECT TOP 1 rr.Rate
+    FROM A1Lands.dbo.RevenueRates rr WITH (NOLOCK)
+    WHERE rr.PropertyId = p.Id
+      AND rr.IsDeleted = 0
+      AND rr.Status = 1
+    ORDER BY rr.ApplicableDate DESC, rr.Id DESC
+) r
+WHERE p.IsDeleted = 0
+  AND p.Status = 1;
+GO
+
+

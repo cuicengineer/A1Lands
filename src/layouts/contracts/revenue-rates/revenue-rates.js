@@ -281,6 +281,28 @@ function RevenueRatesForm({
     return (baseOptions || []).filter((b) => Number(b?.cmdId) === numCmdId);
   }, [baseOptions, form.cmdId]);
 
+  const racAutocompleteOptions = useMemo(
+    () => [{ id: 0, name: "All" }, ...(commandOptions || [])],
+    [commandOptions]
+  );
+
+  const baseAutocompleteOptions = useMemo(
+    () => [{ id: 0, name: "All" }, ...filteredBaseOptions],
+    [filteredBaseOptions]
+  );
+
+  const racAutocompleteValue = useMemo(() => {
+    const v = form.cmdId;
+    if (v === "" || v == null) return null;
+    return racAutocompleteOptions.find((o) => Number(o.id) === Number(v)) ?? null;
+  }, [form.cmdId, racAutocompleteOptions]);
+
+  const baseAutocompleteValue = useMemo(() => {
+    const v = form.baseId;
+    if (v === "" || v == null) return null;
+    return baseAutocompleteOptions.find((o) => Number(o.id) === Number(v)) ?? null;
+  }, [form.baseId, baseAutocompleteOptions]);
+
   const filteredRentalProperties = useMemo(() => {
     const isCmdAll = form.cmdId === 0 || form.cmdId === "0";
     const isBaseAll = form.baseId === 0 || form.baseId === "0";
@@ -419,73 +441,71 @@ function RevenueRatesForm({
         <Grid container spacing={3} mt={1}>
           {/* Command Dropdown */}
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth>
-              <InputLabel id="cmd-label" sx={{ fontSize: "1.1rem" }}>
-                RAC
-              </InputLabel>
-              <Select
-                labelId="cmd-label"
-                value={form.cmdId ?? ""}
-                label="Command"
-                onChange={(e) => handleChange("cmdId", e.target.value)}
-                sx={{
+            <Autocomplete
+              size="small"
+              fullWidth
+              disableClearable
+              options={racAutocompleteOptions}
+              getOptionLabel={(option) => (option == null ? "" : getOptionLabel(option))}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={racAutocompleteValue}
+              onChange={(_, newValue) => handleChange("cmdId", newValue != null ? newValue.id : "")}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                fontSize: "1.1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1.1rem",
-                    padding: "0 32px 0 14px",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                }}
-              >
-                <MenuItem key="All" value={0} sx={{ fontSize: "1.1rem" }}>
-                  All
-                </MenuItem>
-                {commandOptions.map((option) => (
-                  <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
-                    {getOptionLabel(option)}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput
+                  {...params}
+                  label="RAC"
+                  sx={{ "& .MuiInputLabel-root": { fontSize: "1.1rem" } }}
+                />
+              )}
+            />
           </Grid>
 
           {/* Base Dropdown */}
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth>
-              <InputLabel id="base-label" sx={{ fontSize: "1.1rem" }}>
-                Base
-              </InputLabel>
-              <Select
-                labelId="base-label"
-                value={form.baseId ?? ""}
-                label="Base"
-                onChange={(e) => handleChange("baseId", e.target.value)}
-                disabled={
-                  form.cmdId === "" || form.cmdId == null || form.cmdId === 0 || form.cmdId === "0"
-                }
-                sx={{
+            <Autocomplete
+              size="small"
+              fullWidth
+              disableClearable
+              options={baseAutocompleteOptions}
+              getOptionLabel={(option) => (option == null ? "" : getOptionLabel(option))}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={baseAutocompleteValue}
+              onChange={(_, newValue) =>
+                handleChange("baseId", newValue != null ? newValue.id : "")
+              }
+              disabled={
+                form.cmdId === "" || form.cmdId == null || form.cmdId === 0 || form.cmdId === "0"
+              }
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                fontSize: "1.1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
-                  "& .MuiSelect-select": {
-                    fontSize: "1.1rem",
-                    padding: "0 32px 0 14px",
-                    minHeight: "45px",
-                    display: "flex",
-                    alignItems: "center",
-                  },
-                }}
-              >
-                <MenuItem key="All" value={0} sx={{ fontSize: "1.1rem" }}>
-                  All
-                </MenuItem>
-                {filteredBaseOptions.map((option) => (
-                  <MenuItem key={option.id} value={option.id} sx={{ fontSize: "1.1rem" }}>
-                    {getOptionLabel(option)}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput
+                  {...params}
+                  label="Base"
+                  sx={{ "& .MuiInputLabel-root": { fontSize: "1.1rem" } }}
+                />
+              )}
+            />
           </Grid>
 
           {/* Property and Revenue Rate - same row */}

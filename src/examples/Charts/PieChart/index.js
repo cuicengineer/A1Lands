@@ -47,7 +47,13 @@ function PieChart({ icon, title, description, height, chart }) {
   const renderChart = (
     <MDBox py={2} pr={2} pl={icon.component ? 1 : 2}>
       {title || description ? (
-        <MDBox display="flex" px={description ? 1 : 0} pt={description ? 1 : 0}>
+        <MDBox
+          display="flex"
+          alignItems="flex-start"
+          px={description ? 1 : 0}
+          pt={description ? 1 : 0}
+          gap={1}
+        >
           {icon.component && (
             <MDBox
               width="4rem"
@@ -66,19 +72,22 @@ function PieChart({ icon, title, description, height, chart }) {
               <Icon fontSize="medium">{icon.component}</Icon>
             </MDBox>
           )}
-          <MDBox mt={icon.component ? -2 : 0}>
-            {title && (
-              <MDTypography
-                variant="h6"
-                sx={{
-                  color: darkMode ? "#ffffff !important" : "#000000 !important",
-                  fontSize: "1.25rem !important",
-                  fontWeight: "700 !important",
-                }}
-              >
-                {title}
-              </MDTypography>
-            )}
+          <MDBox mt={icon.component ? -2 : 0} flex={1} minWidth={0}>
+            {title &&
+              (typeof title === "string" ? (
+                <MDTypography
+                  variant="h6"
+                  sx={{
+                    color: darkMode ? "#ffffff !important" : "#000000 !important",
+                    fontSize: "1.25rem !important",
+                    fontWeight: "700 !important",
+                  }}
+                >
+                  {title}
+                </MDTypography>
+              ) : (
+                title
+              ))}
             <MDBox mb={2}>
               <MDTypography
                 component="div"
@@ -132,7 +141,7 @@ PieChart.propTypes = {
     ]),
     component: PropTypes.node,
   }),
-  title: PropTypes.string,
+  title: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   description: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   height: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   chart: PropTypes.objectOf(PropTypes.oneOfType([PropTypes.array, PropTypes.object])).isRequired,

@@ -32,6 +32,10 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import FormHelperText from "@mui/material/FormHelperText";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import api, {
   canCreateCurrentMenu,
   canEditCurrentMenu,
@@ -89,11 +93,14 @@ function ContractsForm({
     increaseRatePercent: "",
     increaseIntervalMonths: "",
     sdRateMonths: "",
+    dpc: "",
+    signatory: "",
     securityDepositAmount: "",
     rentalValue: "",
     govtShare: "",
     pafShare: "",
     status: true,
+    isArchive: false,
     remarks: "",
     riseTermType: "",
     riseyear: "",
@@ -150,9 +157,21 @@ function ContractsForm({
   };
 
   const openDatePicker = (ref) => {
-    if (ref?.current) {
-      if (ref.current.showPicker) ref.current.showPicker();
-      else ref.current.click();
+    const el = ref?.current;
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+      if (typeof el.showPicker === "function") {
+        el.showPicker();
+      } else {
+        el.click();
+      }
+    } catch (_) {
+      try {
+        el.click();
+      } catch (_e) {
+        // ignore
+      }
     }
   };
 
@@ -220,6 +239,20 @@ function ContractsForm({
         increaseRatePercent: initialData.IncreaseRatePercent || "",
         increaseIntervalMonths: initialData.IncreaseIntervalMonths || "",
         sdRateMonths: initialData.SDRateMonths || "",
+        dpc:
+          initialData.Dpc !== undefined && initialData.Dpc !== null
+            ? String(initialData.Dpc)
+            : initialData.dpc !== undefined && initialData.dpc !== null
+            ? String(initialData.dpc)
+            : initialData.DPC !== undefined && initialData.DPC !== null
+            ? String(initialData.DPC)
+            : "",
+        signatory:
+          initialData.Signatory !== undefined && initialData.Signatory !== null
+            ? String(initialData.Signatory)
+            : initialData.signatory !== undefined && initialData.signatory !== null
+            ? String(initialData.signatory)
+            : "",
         securityDepositAmount:
           initialData.SecurityDepositAmount !== "" &&
           initialData.SecurityDepositAmount != null &&
@@ -240,6 +273,10 @@ function ContractsForm({
             ? String(Math.round(Number(initialData.PAFShare)))
             : initialData.PAFShare || "",
         status: initialData.Status !== undefined ? initialData.Status : true,
+        isArchive:
+          initialData.IsArchive !== undefined && initialData.IsArchive !== null
+            ? Boolean(initialData.IsArchive)
+            : false,
         remarks: initialData.Remarks || "",
         riseTermType: normalizeRiseTermType(rawRiseType),
         riseyear: normalizedRiseYear,
@@ -304,11 +341,14 @@ function ContractsForm({
         increaseRatePercent: "",
         increaseIntervalMonths: "",
         sdRateMonths: "",
+        dpc: "",
+        signatory: "",
         securityDepositAmount: "",
         rentalValue: "",
         govtShare: "",
         pafShare: "",
         status: true,
+        isArchive: false,
         remarks: "",
         riseTermType: "",
         riseyear: "",
@@ -454,6 +494,13 @@ function ContractsForm({
       return;
     }
 
+    if (field === "dpc") {
+      const nextValue = String(value ?? "");
+      if (nextValue !== "" && !/^\d+(\.\d{0,2})?$/.test(nextValue)) {
+        return;
+      }
+    }
+
     setForm((prev) => {
       const updated = {
         ...prev,
@@ -483,6 +530,13 @@ function ContractsForm({
       // Auto-fill COD with selected CSD. User can still manually change COD afterwards.
       if (field === "contractStartDate") {
         updated.commercialOperationDate = value || "";
+      }
+      // In New Contract, auto-fill Business Name when Tenant No is selected.
+      if (field === "tenantNo" && !initialData) {
+        const selectedTenant = tenants.find(
+          (t) => String(t?.tenantNo ?? "").trim() === String(value || "").trim()
+        );
+        updated.businessName = selectedTenant?.businessName ?? selectedTenant?.BusinessName ?? "";
       }
 
       // If start date or end date changes, validate commercial operation date
@@ -655,6 +709,9 @@ function ContractsForm({
     if (form.remarks && form.remarks.length > 500) {
       newErrors.remarks = "Remarks cannot exceed 500 characters";
     }
+    if (form.signatory && form.signatory.length > 250) {
+      newErrors.signatory = "Signatory cannot exceed 250 characters";
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -698,6 +755,8 @@ function ContractsForm({
           ? Number(form.increaseIntervalMonths)
           : null,
       sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
+      dpc: form.dpc != null && String(form.dpc).trim() !== "" ? Number(form.dpc) : null,
+      signatory: form.signatory?.trim() || null,
       securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
       rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
       govtShare: form.govtShare ? Number(form.govtShare) : null,
@@ -705,6 +764,7 @@ function ContractsForm({
       feasible:
         Number(form.initialRentPA || 0) > Number(form.govtShare || 0) ? "Unviable" : "Viable",
       status: form.status,
+      IsArchive: Boolean(form.isArchive),
       remarks: form.remarks?.trim() || null,
       riseTermType: form.riseTermType || null,
       riseyear:
@@ -892,7 +952,7 @@ function ContractsForm({
 
   const selectedGovtShareRateMeta = useMemo(() => {
     if (!form.cmdId || !form.baseId || !form.classId || !form.contractStartDate) {
-      return { percent: 0, applicationDate: "" };
+      return { percent: 0, applicationDate: "", config: "" };
     }
     const isActive = (v) =>
       v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
@@ -900,7 +960,7 @@ function ContractsForm({
       v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
     const contractStartTs = new Date(`${form.contractStartDate}T23:59:59`).getTime();
     if (!Number.isFinite(contractStartTs) || contractStartTs <= 0) {
-      return { percent: 0, applicationDate: "" };
+      return { percent: 0, applicationDate: "", config: "" };
     }
 
     // Use only PascalCase (strict API response format)
@@ -948,7 +1008,7 @@ function ContractsForm({
 
       return true;
     });
-    if (matched.length === 0) return { percent: 0, applicationDate: "" };
+    if (matched.length === 0) return { percent: 0, applicationDate: "", config: "" };
 
     const sorted = [...matched].sort((a, b) => {
       const da = new Date(a.ApplicableDate || 0).getTime() || 0;
@@ -958,44 +1018,80 @@ function ContractsForm({
     const selected = sorted[0] || {};
     const rate = Number(selected?.Rate ?? 0);
     const appDate = selected?.ApplicableDate || "";
-    return { percent: Number.isFinite(rate) ? rate : 0, applicationDate: String(appDate || "") };
+    const config = String(selected?.Config ?? selected?.config ?? "").trim();
+    return {
+      percent: Number.isFinite(rate) ? rate : 0,
+      applicationDate: String(appDate || ""),
+      config,
+    };
   }, [govtShareRates, form.cmdId, form.baseId, form.classId, form.contractStartDate]);
   const selectedGovtSharePercentRate = selectedGovtShareRateMeta.percent;
 
-  // Auto-calculate Govt Share = Rental Value * (%Govt Share / 100) (rounded to integer)
+  const govtShareUsesInitialRentPAForNewContract = useMemo(
+    () =>
+      !initialData &&
+      String(selectedGovtShareRateMeta.config || "")
+        .trim()
+        .toLowerCase() === "annual rent",
+    [initialData, selectedGovtShareRateMeta.config]
+  );
+
+  // Auto-calculate Govt Share = Rental Value * (%Govt Share / 100), or for New Contract when rate Config is "Annual Rent": Initial Rent PA * (% / 100) (rounded to integer)
   useEffect(() => {
-    const rentalValue = Number(form.rentalValue);
+    if (initialData) return;
     const percent = Number(selectedGovtSharePercentRate);
-    const hasInputs = Number.isFinite(rentalValue) && Number.isFinite(percent);
-    const calculated = hasInputs ? Math.round((rentalValue * percent) / 100) : 0;
+    const baseAmount = govtShareUsesInitialRentPAForNewContract
+      ? Number(form.initialRentPA)
+      : Number(form.rentalValue);
+    const hasInputs = Number.isFinite(baseAmount) && Number.isFinite(percent);
+    const calculated = hasInputs ? Math.round((baseAmount * percent) / 100) : 0;
 
     setForm((prev) => {
       const prevNum = Number(prev.govtShare || 0);
       if (prevNum === calculated) return prev;
       return { ...prev, govtShare: calculated };
     });
-  }, [form.rentalValue, selectedGovtSharePercentRate]);
+  }, [
+    form.rentalValue,
+    form.initialRentPA,
+    selectedGovtSharePercentRate,
+    govtShareUsesInitialRentPAForNewContract,
+  ]);
 
   const govtShareFormulaText = useMemo(() => {
-    const rentalValue = Number(form.rentalValue) || 0;
     const percent = Number(selectedGovtSharePercentRate) || 0;
-    const calculated = Math.round((rentalValue * percent) / 100);
+    const conceptOld =
+      "Formula: GovtShare = Rental Value x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
+    const conceptNew =
+      "Formula: GovtShare = Initial Rent PA x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
+    const conceptOldApplied = "Formula: GovtShare = Rental Value x (% Govt Share / 100).";
+    const conceptNewApplied = "Formula: GovtShare = Initial Rent PA x (% Govt Share / 100).";
     if (!form.contractStartDate) {
-      return "Formula: GovtShare = Rental Value x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
+      return govtShareUsesInitialRentPAForNewContract ? conceptNew : conceptOld;
     }
     const appDateInfo = selectedGovtShareRateMeta.applicationDate
       ? ` | % Rate App Date: ${String(selectedGovtShareRateMeta.applicationDate).split("T")[0]}`
       : " | % Rate App Date: N/A";
-    return `Formula: ${rentalValue} x (${percent} / 100) = ${calculated}${appDateInfo}`;
+    if (govtShareUsesInitialRentPAForNewContract) {
+      const initialRentPA = Number(form.initialRentPA) || 0;
+      const calculated = Math.round((initialRentPA * percent) / 100);
+      return `${conceptNewApplied} ${initialRentPA} x (${percent} / 100) = ${calculated}${appDateInfo}`;
+    }
+    const rentalValue = Number(form.rentalValue) || 0;
+    const calculated = Math.round((rentalValue * percent) / 100);
+    return `${conceptOldApplied} ${rentalValue} x (${percent} / 100) = ${calculated}${appDateInfo}`;
   }, [
     form.rentalValue,
+    form.initialRentPA,
     selectedGovtSharePercentRate,
     selectedGovtShareRateMeta.applicationDate,
     form.contractStartDate,
+    govtShareUsesInitialRentPAForNewContract,
   ]);
 
   // Auto-calculate PAF Share = Initial Rent PA - Govt Share (rounded, min 0)
   useEffect(() => {
+    if (initialData) return;
     const initialRentPA = Number(form.initialRentPA);
     const govtShare = Number(form.govtShare);
     const hasInputs = Number.isFinite(initialRentPA) && Number.isFinite(govtShare);
@@ -1298,46 +1394,72 @@ function ContractsForm({
           <Grid container spacing={2} mt={1}>
             {/* Command, Base, Class - First Row */}
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.cmdId}>
-                <InputLabel id="cmd-label" sx={labelSx}>
-                  RAC
-                </InputLabel>
-                <Select
-                  labelId="cmd-label"
-                  value={form.cmdId || ""}
-                  label="RAC"
-                  onChange={(e) => handleChange("cmdId", e.target.value)}
-                  sx={selectSx}
-                >
-                  {commands.map((cmd) => (
-                    <MenuItem key={cmd.id} value={cmd.id} sx={menuItemSx}>
-                      {cmd.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={commands || []}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={(commands || []).find((c) => Number(c.id) === Number(form.cmdId)) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("cmdId", newValue != null ? newValue.id : "")
+                }
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "12px 32px 12px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput {...params} label="RAC" error={!!errors.cmdId} sx={inputSx} />
+                )}
+              />
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.baseId}>
-                <InputLabel id="base-label" sx={labelSx}>
-                  Base
-                </InputLabel>
-                <Select
-                  labelId="base-label"
-                  value={form.baseId || ""}
-                  label="Base"
-                  onChange={(e) => handleChange("baseId", e.target.value)}
-                  disabled={!form.cmdId}
-                  sx={selectSx}
-                >
-                  {filteredBases.map((base) => (
-                    <MenuItem key={base.id} value={base.id} sx={menuItemSx}>
-                      {base.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={filteredBases}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={filteredBases.find((b) => Number(b.id) === Number(form.baseId)) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("baseId", newValue != null ? newValue.id : "")
+                }
+                disabled={!form.cmdId}
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "12px 32px 12px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput {...params} label="Base" error={!!errors.baseId} sx={inputSx} />
+                )}
+              />
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
@@ -1470,7 +1592,7 @@ function ContractsForm({
             {/* BusinessName */}
             <Grid item xs={12} sm={6} md={4}>
               <MDInput
-                label="Business Name"
+                label="Project Name"
                 type="text"
                 value={form.businessName}
                 onChange={(e) => handleChange("businessName", e.target.value)}
@@ -1533,7 +1655,7 @@ function ContractsForm({
                   onChange={(e) => handleChange("contractStartDate", e.target.value)}
                   style={{
                     position: "absolute",
-                    opacity: 0,
+                    opacity: 0.01,
                     width: "100%",
                     height: "100%",
                     top: 0,
@@ -1557,7 +1679,15 @@ function ContractsForm({
                     readOnly: true,
                     endAdornment: (
                       <InputAdornment position="end">
-                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                        <Icon
+                          sx={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDatePicker(contractStartDateInputRef);
+                          }}
+                        >
+                          calendar_today
+                        </Icon>
                       </InputAdornment>
                     ),
                   }}
@@ -1578,7 +1708,7 @@ function ContractsForm({
                   max={form.contractEndDate || undefined}
                   style={{
                     position: "absolute",
-                    opacity: 0,
+                    opacity: 0.01,
                     width: "100%",
                     height: "100%",
                     top: 0,
@@ -1601,7 +1731,15 @@ function ContractsForm({
                     readOnly: true,
                     endAdornment: (
                       <InputAdornment position="end">
-                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                        <Icon
+                          sx={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDatePicker(commercialOperationDateInputRef);
+                          }}
+                        >
+                          calendar_today
+                        </Icon>
                       </InputAdornment>
                     ),
                   }}
@@ -1629,7 +1767,7 @@ function ContractsForm({
                   }
                   style={{
                     position: "absolute",
-                    opacity: 0,
+                    opacity: 0.01,
                     width: "100%",
                     height: "100%",
                     top: 0,
@@ -1653,7 +1791,15 @@ function ContractsForm({
                     readOnly: true,
                     endAdornment: (
                       <InputAdornment position="end">
-                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                        <Icon
+                          sx={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDatePicker(contractEndDateInputRef);
+                          }}
+                        >
+                          calendar_today
+                        </Icon>
                       </InputAdornment>
                     ),
                   }}
@@ -1726,7 +1872,7 @@ function ContractsForm({
                 <Select
                   labelId="sd-rate-months-label"
                   value={
-                    [1, 2, 3, 9, 12].includes(Number(form.sdRateMonths))
+                    [1, 2, 3, 4, 6, 9, 12].includes(Number(form.sdRateMonths))
                       ? Number(form.sdRateMonths)
                       : ""
                   }
@@ -1734,7 +1880,7 @@ function ContractsForm({
                   onChange={(e) => handleChange("sdRateMonths", e.target.value)}
                   sx={selectSx}
                 >
-                  {[1, 2, 3, 9, 12].map((n) => (
+                  {[1, 2, 3, 4, 6, 9, 12].map((n) => (
                     <MenuItem key={n} value={n} sx={menuItemSx}>
                       {n}
                     </MenuItem>
@@ -1862,7 +2008,7 @@ function ContractsForm({
                     </MDBox>
                   </Grid>
                 )}
-                {form.riseTermType !== "Variable" && form.riseTermType !== "Fixed Date" && (
+                {form.riseTermType !== "Variable" && (
                   <Grid item xs={12} sm={6} md={4}>
                     <MDInput
                       label="Increase Rate Percent %"
@@ -1911,7 +2057,7 @@ function ContractsForm({
                     onChange={(e) => handleChange("risedate", e.target.value)}
                     style={{
                       position: "absolute",
-                      opacity: 0,
+                      opacity: 0.01,
                       width: "100%",
                       height: "100%",
                       top: 0,
@@ -1934,7 +2080,15 @@ function ContractsForm({
                       readOnly: true,
                       endAdornment: (
                         <InputAdornment position="end">
-                          <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                          <Icon
+                            sx={{ cursor: "pointer" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDatePicker(riseDateInputRef);
+                            }}
+                          >
+                            calendar_today
+                          </Icon>
                         </InputAdornment>
                       ),
                     }}
@@ -1943,6 +2097,36 @@ function ContractsForm({
                 </MDBox>
               </Grid>
             )}
+
+            <Grid item xs={12} sm={6} md={4}>
+              <MDInput
+                label="DPC (%)"
+                type="number"
+                value={form.dpc}
+                onChange={(e) => handleChange("dpc", e.target.value)}
+                fullWidth
+                size="small"
+                inputProps={{ step: "0.01", min: 0 }}
+                sx={inputSx}
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <MDInput
+                label="Signatory"
+                type="text"
+                value={form.signatory}
+                onChange={(e) => handleChange("signatory", e.target.value)}
+                fullWidth
+                multiline
+                rows={3}
+                size="small"
+                error={!!errors.signatory}
+                inputProps={{ maxLength: 250 }}
+                helperText={errors.signatory || `${form.signatory?.length || 0}/250 characters`}
+                sx={inputSx}
+              />
+            </Grid>
 
             {/* Auto-calculated summary (display-only, separated from editable fields) */}
             <Grid item xs={12}>
@@ -2069,7 +2253,7 @@ function ContractsForm({
             </Grid>
 
             {/* Status */}
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={12} sm={6} md={2}>
               <FormControl size="small" fullWidth>
                 <InputLabel id="status-label" sx={labelSx}>
                   Status
@@ -2088,6 +2272,30 @@ function ContractsForm({
                     Inactive
                   </MenuItem>
                 </Select>
+              </FormControl>
+            </Grid>
+
+            {/* IsArchive */}
+            <Grid item xs={12} sm={6} md={2}>
+              <FormControl size="small" fullWidth>
+                <MDTypography
+                  variant="caption"
+                  color="black"
+                  fontWeight="bold"
+                  sx={{ display: "block", mb: 0.5 }}
+                >
+                  Archive
+                </MDTypography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={Boolean(form.isArchive)}
+                      onChange={(e) => handleChange("isArchive", e.target.checked)}
+                    />
+                  }
+                  label={form.isArchive ? "On" : "Off"}
+                />
               </FormControl>
             </Grid>
 
@@ -3010,8 +3218,9 @@ export default function Contracts() {
   const [baseFilterIds, setBaseFilterIds] = useState([]);
   const [classFilterIds, setClassFilterIds] = useState([]);
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
-  // Trigger "as-of" refresh only on button click (not on date change).
-  const [asOfRefreshToken, setAsOfRefreshToken] = useState(0);
+  const [tableArchiveView, setTableArchiveView] = useState("all");
+  // Increment to refetch as-of values (used on first load, send button, not on date-only change).
+  const [asOfRefreshToken, setAsOfRefreshToken] = useState(1);
   // Holds only the columns that should be overridden "as of" a selected date.
   // Keyed by Contract Id (primary) and ContractNo (fallback).
   const [asOfOverrideMap, setAsOfOverrideMap] = useState(() => ({
@@ -3019,6 +3228,10 @@ export default function Contracts() {
     byContractNo: new Map(),
     asOfDate: "",
   }));
+  const asOfOverrideMapRef = useRef(asOfOverrideMap);
+  useEffect(() => {
+    asOfOverrideMapRef.current = asOfOverrideMap;
+  }, [asOfOverrideMap]);
   const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedContractDetails, setSelectedContractDetails] = useState(null);
@@ -3027,9 +3240,21 @@ export default function Contracts() {
   const asOfDateInputRef = useRef(null);
 
   const openDatePicker = (ref) => {
-    if (ref?.current) {
-      if (ref.current.showPicker) ref.current.showPicker();
-      else ref.current.click();
+    const el = ref?.current;
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+      if (typeof el.showPicker === "function") {
+        el.showPicker();
+      } else {
+        el.click();
+      }
+    } catch (_) {
+      try {
+        el.click();
+      } catch (_e) {
+        // ignore
+      }
     }
   };
 
@@ -3194,14 +3419,14 @@ export default function Contracts() {
       const response = await contractApi.getAll(page, size);
       if (response && response.pagination) {
         const base = response.data || [];
-        setRows(mergeAsOfOverrides(base, asOfOverrideMap));
+        setRows(mergeAsOfOverrides(base, asOfOverrideMapRef.current));
         setTotalCount(response.pagination.totalCount || 0);
         setPageNumber(response.pagination.pageNumber || page);
         setPageSize(response.pagination.pageSize || size);
       } else {
         // Fallback (non-paginated)
         const arr = Array.isArray(response) ? response : [];
-        setRows(mergeAsOfOverrides(arr, asOfOverrideMap));
+        setRows(mergeAsOfOverrides(arr, asOfOverrideMapRef.current));
         setTotalCount(arr.length);
       }
     } catch (error) {
@@ -3345,7 +3570,10 @@ export default function Contracts() {
         setAsOfOverrideMap(nextOverrideState);
 
         // Merge into currently visible rows without replacing other fields.
-        setRows((prev) => mergeAsOfOverrides(prev, nextOverrideState));
+        setRows((prev) => {
+          if (!Array.isArray(prev) || prev.length === 0) return prev;
+          return mergeAsOfOverrides(prev, nextOverrideState);
+        });
       } catch (e) {
         console.error("Error fetching ActiveByAsOfDate:", e);
         if (!isMounted) return;
@@ -3515,14 +3743,32 @@ export default function Contracts() {
     return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`;
   };
 
+  const CONTRACT_ATTACH_MAX = 6;
+
+  const isContractAttachmentFile = (file) => {
+    const name = (file?.name || "").toLowerCase();
+    const ext = name.includes(".") ? name.split(".").pop() : "";
+    if (["pdf", "xlsx", "xls", "doc", "docx"].includes(ext)) return true;
+    const t = (file?.type || "").toLowerCase();
+    return (
+      t.includes("pdf") ||
+      t.includes("spreadsheetml") ||
+      t.includes("ms-excel") ||
+      t.includes("excel") ||
+      t.includes("msword") ||
+      t.includes("wordprocessingml")
+    );
+  };
+
   const handleViewAttachments = async (record) => {
-    if (!record?.id) return;
+    const contractId = record?.id ?? record?.Id;
+    if (!contractId) return;
     setAttachmentLoading(true);
-    setAttachmentLoadingId(record.id);
+    setAttachmentLoadingId(contractId);
     setCurrentViewingRecord(record);
     setSelectedFiles([]);
     try {
-      const response = await uploadApi.getUploadedFiles(record.id, "Contracts");
+      const response = await uploadApi.getUploadedFiles(contractId, "Contracts");
       const filesArray = response?.files || (Array.isArray(response) ? response : []);
       setAttachmentList(normalizeFiles(filesArray));
       setAttachmentDialogOpen(true);
@@ -3547,18 +3793,20 @@ export default function Contracts() {
     const totalExisting = attachmentList.length;
     const totalSelected = selectedFiles.length;
     const totalFiles = totalExisting + totalSelected;
-    const remainingSlots = 5 - totalFiles;
+    const remainingSlots = CONTRACT_ATTACH_MAX - totalFiles;
 
-    if (totalFiles >= 5) {
+    if (totalFiles >= CONTRACT_ATTACH_MAX) {
       alert(
-        "Maximum 5 files allowed. Please delete some existing files before uploading new ones."
+        `Maximum ${CONTRACT_ATTACH_MAX} files allowed. Please delete some existing files before uploading new ones.`
       );
       event.target.value = "";
       return;
     }
 
     if (files.length > remainingSlots) {
-      alert(`You can only upload ${remainingSlots} more file(s). Maximum 5 files allowed.`);
+      alert(
+        `You can only upload ${remainingSlots} more file(s). Maximum ${CONTRACT_ATTACH_MAX} files allowed.`
+      );
       event.target.value = "";
       return;
     }
@@ -3569,11 +3817,21 @@ export default function Contracts() {
         alert(`File "${file.name}" exceeds 10MB limit and will be skipped.`);
         return false;
       }
+      if (!isContractAttachmentFile(file)) {
+        alert(
+          `File "${file.name}" is not allowed. Use PDF, Excel (.xls, .xlsx), or Word (.doc, .docx) only.`
+        );
+        return false;
+      }
       return true;
     });
 
-    if (totalFiles + validFiles.length > 5) {
-      alert(`You can only upload ${5 - totalFiles} more file(s). Maximum 5 files allowed.`);
+    if (totalFiles + validFiles.length > CONTRACT_ATTACH_MAX) {
+      alert(
+        `You can only upload ${
+          CONTRACT_ATTACH_MAX - totalFiles
+        } more file(s). Maximum ${CONTRACT_ATTACH_MAX} files allowed.`
+      );
       event.target.value = "";
       return;
     }
@@ -3593,7 +3851,8 @@ export default function Contracts() {
   };
 
   const handleUploadSelected = async () => {
-    if (!currentViewingRecord?.id) {
+    const contractId = currentViewingRecord?.id ?? currentViewingRecord?.Id;
+    if (!contractId) {
       alert("Record ID not found. Please reopen attachments and try again.");
       return;
     }
@@ -3603,8 +3862,8 @@ export default function Contracts() {
     }
     setIsUploading(true);
     try {
-      await uploadApi.uploadFiles(currentViewingRecord.id, "Contracts", selectedFiles);
-      await refreshAttachments(currentViewingRecord.id);
+      await uploadApi.uploadFiles(contractId, "Contracts", selectedFiles);
+      await refreshAttachments(contractId);
       setSelectedFiles([]);
       alert("Files uploaded successfully.");
     } catch (error) {
@@ -3631,7 +3890,7 @@ export default function Contracts() {
   };
 
   const handleDeleteAttachment = async (file) => {
-    if (!canDeleteCurrentMenu()) return;
+    if (!canEditCurrentMenu() && !canDeleteCurrentMenu()) return;
     if (!file?.id) {
       alert("File ID is not available. Cannot delete this file.");
       return;
@@ -3643,8 +3902,9 @@ export default function Contracts() {
 
     try {
       await uploadApi.deleteUploadedFile(file.id);
-      if (currentViewingRecord?.id) {
-        await refreshAttachments(currentViewingRecord.id);
+      const contractId = currentViewingRecord?.id ?? currentViewingRecord?.Id;
+      if (contractId) {
+        await refreshAttachments(contractId);
       } else {
         setAttachmentList((prev) => prev.filter((f) => f.id !== file.id));
       }
@@ -3748,7 +4008,7 @@ export default function Contracts() {
           // eslint-disable-next-line react/prop-types
           value ?? row?.original?.CurrentRentPA ?? row?.original?.currentRentPA ?? null;
         return (
-          <MDTypography variant="body2" fontWeight="medium">
+          <MDTypography variant="body2">
             {currentRentPA != null && currentRentPA !== ""
               ? Number(currentRentPA).toLocaleString()
               : "-"}
@@ -3800,7 +4060,7 @@ export default function Contracts() {
         const totalArea = rowData?.TotalArea ?? 0;
         const uoM = rowData?.UoM || rowData?.uoM || rowData?.unitName || rowData?.UnitName || "";
         return (
-          <MDTypography variant="body2" fontWeight="medium">
+          <MDTypography variant="body2">
             {totalArea ? `${Number(totalArea).toLocaleString()}${uoM ? ` (${uoM})` : ""}` : "-"}
           </MDTypography>
         );
@@ -3990,9 +4250,9 @@ export default function Contracts() {
             .toLowerCase();
           const displayState =
             normalizedState === "upcoming" || normalizedState === "not started"
-              ? "Not Started"
+              ? "Pre-mature"
               : normalizedState === "active"
-              ? "Active"
+              ? "Valid"
               : normalizedState === "expired"
               ? "Expired"
               : state;
@@ -4316,15 +4576,24 @@ export default function Contracts() {
       ),
     },
     {
-      Header: "Attachments",
-      accessor: "attachments",
-      align: "left",
-      showInTable: false,
+      Header: "Status",
+      accessor: "status",
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <StatusBadge value={value} />,
+    },
+    { Header: "Remarks", accessor: "remarks", align: "left" },
+    {
+      Header: "Attach",
+      accessor: "contractAttachments",
+      align: "center",
+      width: "16%",
+      showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
         const rowData = row?.original || {};
-        const hasId = rowData?.Id;
+        const contractKey = rowData?.id ?? rowData?.Id;
         const rawIsAttachment = rowData?.IsAttachment;
         const countValue =
           rowData?.AttachmentCount ?? rowData?.AttachmentsCount ?? rowData?.FilesCount;
@@ -4336,14 +4605,14 @@ export default function Contracts() {
             .trim()
             .toLowerCase() === "true" ||
           Number(countValue || 0) > 0;
-        return hasId ? (
+        return contractKey ? (
           <IconButton
             size="small"
             color={hasAttachments ? "success" : "error"}
             // eslint-disable-next-line react/prop-types
             onClick={() => handleViewAttachments(row.original)}
             // eslint-disable-next-line react/prop-types
-            disabled={attachmentLoading && attachmentLoadingId === row?.original?.Id}
+            disabled={attachmentLoading && attachmentLoadingId === contractKey}
             title="View attachments"
           >
             <Icon>visibility</Icon>
@@ -4353,14 +4622,6 @@ export default function Contracts() {
         );
       },
     },
-    {
-      Header: "Status",
-      accessor: "status",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <StatusBadge value={value} />,
-    },
-    { Header: "Remarks", accessor: "remarks", align: "left" },
   ];
 
   const groupingColumnOptions = [
@@ -4468,7 +4729,15 @@ export default function Contracts() {
               Number(row.GovtShare ?? row.govtShare ?? 0)
           )
         ),
+        isArchive: row.IsArchive ?? row.isArchive ?? false,
+        IsArchive: row.IsArchive ?? row.isArchive ?? false,
         status: row.Status,
+        __disabledRow: !(
+          row.Status === true ||
+          row.Status === 1 ||
+          row.Status === "1" ||
+          (typeof row.Status === "string" && String(row.Status).toLowerCase() === "active")
+        ),
         remarks: row.Remarks || "",
         vaArea: row.VaArea || 0,
         groupRate:
@@ -4519,7 +4788,34 @@ export default function Contracts() {
         .filter(Boolean)
     );
 
+    const getRowContractStateNormalized = (r) => {
+      const fromPayload =
+        r.ContractState ?? r.contractState ?? r.ContractStatus ?? r.contractStatus ?? "";
+      const n = String(fromPayload || "")
+        .trim()
+        .toLowerCase();
+      if (n) {
+        if (n === "upcoming" || n === "not started") return "upcoming";
+        return n;
+      }
+      const startRaw = r.contractStartDate ?? r.ContractStartDate ?? "";
+      const endRaw = r.contractEndDate ?? r.ContractEndDate ?? "";
+      const start = String(startRaw || "")
+        .split("T")[0]
+        .slice(0, 10);
+      const end = String(endRaw || "")
+        .split("T")[0]
+        .slice(0, 10);
+      const today = new Date().toISOString().split("T")[0];
+      if (start && today < start) return "upcoming";
+      if (end && today > end) return "expired";
+      if (start && end && today >= start && today <= end) return "active";
+      return "";
+    };
+
     const filteredRows = normalizedRows.filter((row) => {
+      const isArchived = (v) =>
+        v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
       const cmdName = String(row.cmdName || "").toLowerCase();
       const baseName = String(row.baseName || "").toLowerCase();
       const className = String(row.className || "").toLowerCase();
@@ -4532,8 +4828,17 @@ export default function Contracts() {
       // "As of Date" is used only to refresh specific numeric columns via ActiveByAsOfDate,
       // not to filter/hide the master contracts list in the grid.
       const matchesAsOfDate = true;
+      const matchesArchive =
+        tableArchiveView === "all"
+          ? true
+          : tableArchiveView === "archive"
+          ? isArchived(row.IsArchive ?? row.isArchive)
+          : (() => {
+              const st = getRowContractStateNormalized(row);
+              return st === "active" || st === "valid";
+            })();
 
-      return matchesCommand && matchesBase && matchesClass && matchesAsOfDate;
+      return matchesCommand && matchesBase && matchesClass && matchesAsOfDate && matchesArchive;
     });
 
     // If no grouping selected, return plain rows.
@@ -4764,6 +5069,7 @@ export default function Contracts() {
         Status: "",
         feasible: "",
         Feasible: "",
+        __disabledRow: false,
         // Group metadata
         IsGroupRow: true,
         GroupKey: groupKey,
@@ -4865,6 +5171,7 @@ export default function Contracts() {
     commandFilterIds,
     baseFilterIds,
     classFilterIds,
+    tableArchiveView,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
@@ -5059,6 +5366,7 @@ export default function Contracts() {
       (col) =>
         col.accessor !== "actions" &&
         col.accessor !== "attachments" &&
+        col.accessor !== "contractAttachments" &&
         typeof col.Header === "string"
     );
 
@@ -5067,6 +5375,11 @@ export default function Contracts() {
 
     if (viewOnly) {
       // Plain text only - no UI formatting (no boxes, no grid)
+      const gap = 6;
+      const leftW = (pageWidth - 2 * margin - gap) * 0.56;
+      const rightW = (pageWidth - 2 * margin - gap) * 0.44;
+      const valueColumnCenterX = margin + leftW + gap + rightW / 2;
+
       let yPos = margin;
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
@@ -5074,21 +5387,189 @@ export default function Contracts() {
       yPos += lineHeight + 2;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
-      doc.text(`Contract No: ${contractNo}`, margin, yPos);
-      yPos += lineHeight + 4;
 
-      detailsColumns.forEach((col) => {
-        const displayVal = getDisplayValue(col, selectedContractDetails);
-        const line = `${col.Header}: ${displayVal}`;
-        const textLines = doc.splitTextToSize(line, pageWidth - 2 * margin);
-        textLines.forEach((l) => {
+      const racBaseClassAccessors = ["cmdName", "baseName", "className"];
+      const racCol = detailsColumns.find((c) => c.accessor === "cmdName");
+      const baseCol = detailsColumns.find((c) => c.accessor === "baseName");
+      const classCol = detailsColumns.find((c) => c.accessor === "className");
+      if (racCol || baseCol || classCol) {
+        const usableW = pageWidth - 2 * margin;
+        const colGap = 4;
+        const contractBlockW = usableW * 0.3;
+        const rbcAreaW = usableW - contractBlockW - colGap;
+        const wCol = (rbcAreaW - 2 * colGap) / 3;
+        const xContract = margin;
+        const x1 = margin + contractBlockW + colGap;
+        const x2 = x1 + wCol + colGap;
+        const x3 = x2 + wCol + colGap;
+        const seg = (c) => (c ? `${c.Header}: ${getDisplayValue(c, selectedContractDetails)}` : "");
+        const contractLines = doc.splitTextToSize(`Contract No: ${contractNo}`, contractBlockW);
+        const lines1 = doc.splitTextToSize(seg(racCol), wCol);
+        const lines2 = doc.splitTextToSize(seg(baseCol), wCol);
+        const lines3 = doc.splitTextToSize(seg(classCol), wCol);
+        const maxHeadLines = Math.max(
+          contractLines.length,
+          lines1.length,
+          lines2.length,
+          lines3.length
+        );
+        doc.setFont("helvetica", "bold");
+        for (let i = 0; i < maxHeadLines; i += 1) {
           if (yPos > pageHeight - 20) {
             doc.addPage();
             yPos = margin;
           }
-          doc.text(l, margin, yPos);
+          if (contractLines[i]) doc.text(contractLines[i], xContract, yPos);
+          if (lines1[i]) doc.text(lines1[i], x1, yPos);
+          if (lines2[i]) doc.text(lines2[i], x2, yPos);
+          if (lines3[i]) doc.text(lines3[i], x3, yPos);
           yPos += lineHeight;
+        }
+        doc.setFont("helvetica", "normal");
+        yPos += 2;
+        doc.setDrawColor(33, 33, 33);
+        doc.setLineWidth(0.5);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 4;
+      } else {
+        doc.setFont("helvetica", "bold");
+        doc.text(`Contract No: ${contractNo}`, margin, yPos);
+        doc.setFont("helvetica", "normal");
+        yPos += lineHeight + 2;
+        doc.setDrawColor(33, 33, 33);
+        doc.setLineWidth(0.5);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 4;
+      }
+
+      const restColumns = detailsColumns.filter(
+        (col) =>
+          !racBaseClassAccessors.includes(col.accessor) &&
+          col.accessor !== "id" &&
+          col.Header !== "S.No"
+      );
+
+      const contractorAccessors = new Set([
+        "tenantNo",
+        "businessName",
+        "natureOfBusiness",
+        "status",
+        "remarks",
+        "signatory",
+      ]);
+      const propertyAccessors = new Set([
+        "grpId",
+        "grpName",
+        "totalArea",
+        "location",
+        "uoM",
+        "unitName",
+        "groupRate",
+        "vaArea",
+      ]);
+      const termsAccessors = new Set([
+        "contractStartDate",
+        "contractEndDate",
+        "commercialOperationDate",
+        "initialRentPM",
+        "initialRentPA",
+        "paymentTermMonths",
+        "term",
+        "increaseRatePercent",
+        "increaseIntervalMonths",
+        "sdRateMonths",
+        "securityDepositAmount",
+        "contractState",
+        "rentalValue",
+        "govtShare",
+        "pafShare",
+        "percentRate",
+        "dpc",
+      ]);
+
+      const getSectionName = (col) => {
+        const accessor = String(col?.accessor || "")
+          .trim()
+          .toLowerCase();
+        const header = String(col?.Header || "")
+          .trim()
+          .toLowerCase();
+        if (contractorAccessors.has(accessor)) return "Contractor";
+        if (propertyAccessors.has(accessor)) return "Property";
+        if (termsAccessors.has(accessor)) return "Terms";
+
+        if (
+          header.includes("tenant") ||
+          header.includes("business") ||
+          header.includes("nature") ||
+          header.includes("signatory") ||
+          header.includes("remark") ||
+          header === "status"
+        ) {
+          return "Contractor";
+        }
+        if (
+          header.includes("group") ||
+          header.includes("area") ||
+          header.includes("location") ||
+          header === "uom" ||
+          header.includes("unit")
+        ) {
+          return "Property";
+        }
+        return "Terms";
+      };
+
+      const sectionTitles = ["Contractor", "Property", "Terms"];
+      const sectionColumns = {
+        Contractor: [],
+        Property: [],
+        Terms: [],
+      };
+      restColumns.forEach((col) => {
+        sectionColumns[getSectionName(col)].push(col);
+      });
+
+      sectionTitles.forEach((sectionTitle) => {
+        const cols = sectionColumns[sectionTitle];
+        if (!cols || cols.length === 0) return;
+
+        if (yPos > pageHeight - 24) {
+          doc.addPage();
+          yPos = margin;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(sectionTitle, margin, yPos);
+        yPos += lineHeight + 1;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+
+        let fieldSerial = 0;
+        cols.forEach((col) => {
+          fieldSerial += 1;
+          const displayVal = getDisplayValue(col, selectedContractDetails);
+          const labelBlock = `${fieldSerial}. ${col.Header}:`;
+          const labelLines = doc.splitTextToSize(labelBlock, leftW);
+          const valueLines = doc.splitTextToSize(String(displayVal), rightW);
+          const maxLines = Math.max(labelLines.length, valueLines.length);
+          for (let i = 0; i < maxLines; i += 1) {
+            if (yPos > pageHeight - 20) {
+              doc.addPage();
+              yPos = margin;
+            }
+            if (labelLines[i]) {
+              doc.text(labelLines[i], margin, yPos);
+            }
+            if (valueLines[i]) {
+              doc.text(valueLines[i], valueColumnCenterX, yPos, { align: "left" });
+            }
+            yPos += lineHeight;
+          }
+          yPos += 2;
         });
+
         yPos += 2;
       });
 
@@ -5106,13 +5587,13 @@ export default function Contracts() {
         doc.setFontSize(10);
         doc.text("Sequence No    Months Interval    Rise Percent (%)", margin, yPos);
         yPos += lineHeight + 2;
-        contractDetailsRiseTerms.forEach((term) => {
+        contractDetailsRiseTerms.forEach((term, riseIdx) => {
           if (yPos > pageHeight - 20) {
             doc.addPage();
             yPos = margin;
           }
           doc.text(
-            `${term.sequenceNo ?? ""}    ${term.monthsInterval ?? ""}    ${
+            `${riseIdx + 1}. ${term.sequenceNo ?? ""}    ${term.monthsInterval ?? ""}    ${
               term.risePercent ?? ""
             }%`,
             margin,
@@ -5121,6 +5602,27 @@ export default function Contracts() {
           yPos += lineHeight;
         });
       }
+
+      if (yPos > pageHeight - 42) {
+        doc.addPage();
+        yPos = margin;
+      }
+
+      const signatureGap = 10;
+      const signatureWidth = (pageWidth - 2 * margin - 2 * signatureGap) / 3;
+      const signatureY = pageHeight - 24;
+      const signatureLabels = ["Signatory 1", "Signatory 2", "Counter Sign"];
+
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+
+      signatureLabels.forEach((label, index) => {
+        const x = margin + index * (signatureWidth + signatureGap);
+        doc.line(x, signatureY, x + signatureWidth, signatureY);
+        doc.text(label, x + signatureWidth / 2, signatureY + 6, { align: "center" });
+      });
     } else {
       // Formatted layout with boxes and grid (for download)
       let yPos = margin;
@@ -5292,8 +5794,8 @@ export default function Contracts() {
       <DashboardNavbar />
       <MDBox pt={6} pb={3}>
         <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
+          <Grid item xs={12} sx={{ minWidth: 0, maxWidth: "100%" }}>
+            <Card sx={{ minWidth: 0, maxWidth: "100%", overflow: "visible" }}>
               <MDBox
                 mx={2}
                 mt={-3}
@@ -5322,17 +5824,74 @@ export default function Contracts() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "82vh",
-                  minHeight: "680px",
+                  // Match tenants.js: flex column + viewport height for the grid host.
+                  height: "90vh",
+                  minHeight: "400px",
+                  minWidth: 0,
+                  maxWidth: "100%",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
                     minHeight: 0,
-                    overflow: "hidden",
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "fixed",
+                    minWidth: 0,
                     width: "100%",
+                    maxWidth: "100%",
+                    height: "400px",
+                    minHeight: "400px",
+                    maxHeight: "400px",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                  },
+                  // Sticky DataTable: scroll wrapper sits after the toolbar row; Firefox needs minWidth/minHeight 0
+                  // on this flex child so the table gets a definite width and columns lay out (Chrome is more forgiving).
+                  "& .MuiTableContainer-root > div:last-of-type:not(:first-of-type)": {
+                    flex: "1 1 0%",
+                    minWidth: 0,
+                    minHeight: 0,
+                    width: "100%",
+                    maxWidth: "100%",
+                    maxWidth: "400%",
+                    boxSizing: "border-box",
+                    // stable scrollbar gutter skews width math in some Firefox flex+table cases
+                    scrollbarGutter: "auto",
+                    overflow: "auto",
+                  },
+                  // Kill DataTable's max-content sizing (from contentFitTable) — it explodes scrollWidth in Firefox.
+                  "& .MuiTable-root": {
+                    display: "table",
+                    tableLayout: "fixed !important",
+                    width: "100% !important",
+                    minWidth: "0 !important",
+                    maxWidth: "100% !important",
+                    whiteSpace: "normal !important",
+                    boxSizing: "border-box",
+                  },
+                  "& .MuiTable-root thead": {
+                    display: "table-header-group !important",
+                    // DataTable sets sticky on thead; override so each th sticks (works reliably in scrollport).
+                    position: "static !important",
+                  },
+                  // Lock column header cells to the DataTable body scroll area (vertical scroll).
+                  "& .MuiTable-root thead th": {
+                    position: "sticky !important",
+                    top: "0 !important",
+                    zIndex: 50,
+                    backgroundColor: "#fff !important",
+                    backgroundClip: "padding-box",
+                    boxShadow: "0 1px 0 0 #d0d0d0",
+                  },
+                  "& .MuiTable-root tbody td, & .MuiTable-root tbody td *": {
+                    zIndex: "auto !important",
+                  },
+                  "& .MuiTable-root tbody": {
+                    display: "table-row-group !important",
+                  },
+                  "& .MuiTable-root thead tr, & .MuiTable-root tbody tr": {
+                    display: "table-row !important",
+                  },
+                  "& .MuiTable-root th, & .MuiTable-root td": {
+                    display: "table-cell !important",
                   },
                   // DataTable uses custom <td> cells (MDBox), not MUI TableCell.
                   // Force wrapping + constrain inner "max-content" wrapper so text never overlaps.
@@ -5581,7 +6140,7 @@ export default function Contracts() {
                         onChange={(e) => setAsOfDate(e.target.value)}
                         style={{
                           position: "absolute",
-                          opacity: 0,
+                          opacity: 0.01,
                           width: "100%",
                           height: "100%",
                           top: 0,
@@ -5598,7 +6157,15 @@ export default function Contracts() {
                           readOnly: true,
                           endAdornment: (
                             <InputAdornment position="end">
-                              <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                              <Icon
+                                sx={{ cursor: "pointer" }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDatePicker(asOfDateInputRef);
+                                }}
+                              >
+                                calendar_today
+                              </Icon>
                             </InputAdornment>
                           ),
                         }}
@@ -5611,6 +6178,7 @@ export default function Contracts() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
+                        gap: 1,
                         mt: { xs: 1, sm: 0 },
                       }}
                     >
@@ -5622,32 +6190,21 @@ export default function Contracts() {
                       >
                         <Icon fontSize="small">send</Icon>
                       </IconButton>
+                      <ToggleButtonGroup
+                        exclusive
+                        value={tableArchiveView}
+                        onChange={(_, v) => {
+                          if (v !== null) setTableArchiveView(v);
+                        }}
+                        size="small"
+                        color="info"
+                        aria-label="Filter by archive or contract state"
+                      >
+                        <ToggleButton value="all">All</ToggleButton>
+                        <ToggleButton value="active">Valid</ToggleButton>
+                        <ToggleButton value="archive">Archive</ToggleButton>
+                      </ToggleButtonGroup>
                     </MDBox>
-                  </MDBox>
-
-                  <MDBox width={{ xs: "80%", md: "200px" }}>
-                    <Autocomplete
-                      multiple
-                      size="small"
-                      options={groupingColumnOptions}
-                      disableCloseOnSelect
-                      value={groupingColumnOptions.filter((opt) =>
-                        groupByColumns.includes(opt.value)
-                      )}
-                      isOptionEqualToValue={(option, value) => option.value === value.value}
-                      getOptionLabel={(option) => option.label}
-                      onChange={(event, newValue) => {
-                        setGroupByColumns((newValue || []).map((item) => item.value));
-                      }}
-                      renderInput={(params) => (
-                        <MDInput
-                          {...params}
-                          label="Group By Columns"
-                          placeholder="Select columns"
-                          sx={groupByInputSx}
-                        />
-                      )}
-                    />
                   </MDBox>
                 </MDBox>
 
@@ -5658,13 +6215,44 @@ export default function Contracts() {
                   }}
                   isSorted={false}
                   stickyToolbarAndHeader
-                  stickyBodyMinHeight="unset"
-                  contentFitTable
                   entriesPerPage={false}
                   pageSize={pageSize}
-                  showTotalEntries={false}
+                  page={0}
+                  onPageChange={() => {}}
+                  onEntriesPerPageChange={(n) => {
+                    setPageSize(n);
+                    setPageNumber(1);
+                  }}
+                  showTotalEntries
+                  pagination={{ variant: "gradient", color: "info" }}
                   noEndBorder
                   canSearch
+                  toolbarStart={
+                    <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={groupingColumnOptions}
+                        disableCloseOnSelect
+                        value={groupingColumnOptions.filter((opt) =>
+                          groupByColumns.includes(opt.value)
+                        )}
+                        isOptionEqualToValue={(option, value) => option.value === value.value}
+                        getOptionLabel={(option) => option.label}
+                        onChange={(event, newValue) => {
+                          setGroupByColumns((newValue || []).map((item) => item.value));
+                        }}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="Group By Columns"
+                            placeholder="Select columns"
+                            sx={groupByInputSx}
+                          />
+                        )}
+                      />
+                    </MDBox>
+                  }
                   exportFileName="Contracts"
                   exportCellFormatter={contractsExportCellFormatter}
                   exportExcludeGroupParentsWhenExpanded
@@ -5822,7 +6410,7 @@ export default function Contracts() {
                             size="small"
                             color="error"
                             onClick={() => handleDeleteAttachment(file)}
-                            disabled={!canDeleteCurrentMenu()}
+                            disabled={!canEditCurrentMenu() && !canDeleteCurrentMenu()}
                             sx={{ ml: 1 }}
                           >
                             <Icon>delete</Icon>
@@ -5835,7 +6423,7 @@ export default function Contracts() {
                 </List>
               )}
 
-              {currentViewingRecord?.id && (
+              {(currentViewingRecord?.id || currentViewingRecord?.Id) && (
                 <MDBox
                   mt={3}
                   p={2}
@@ -5847,24 +6435,30 @@ export default function Contracts() {
                   }}
                 >
                   <MDTypography variant="h6" sx={{ fontSize: "1rem", mb: 1 }}>
-                    Upload Attachments (Max 5 total)
+                    Upload Attachments (Max {CONTRACT_ATTACH_MAX} total — PDF, Excel, or Word)
                   </MDTypography>
 
                   <input
-                    accept="*/*"
+                    accept=".pdf,.xlsx,.xls,.doc,.docx,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     style={{ display: "none" }}
                     id="contract-file-upload"
                     type="file"
                     multiple
                     onChange={handleFileSelect}
-                    disabled={attachmentList.length + selectedFiles.length >= 5 || isUploading}
+                    disabled={
+                      attachmentList.length + selectedFiles.length >= CONTRACT_ATTACH_MAX ||
+                      isUploading
+                    }
                   />
                   <label htmlFor="contract-file-upload">
                     <MDButton
                       variant="gradient"
                       color="info"
                       component="span"
-                      disabled={attachmentList.length + selectedFiles.length >= 5 || isUploading}
+                      disabled={
+                        attachmentList.length + selectedFiles.length >= CONTRACT_ATTACH_MAX ||
+                        isUploading
+                      }
                       sx={{
                         mb: 2,
                         minHeight: "48px",
@@ -5875,13 +6469,15 @@ export default function Contracts() {
                       }}
                     >
                       <Icon>cloud_upload</Icon>
-                      Select Files ({attachmentList.length + selectedFiles.length}/5)
+                      Select Files ({attachmentList.length + selectedFiles.length}/
+                      {CONTRACT_ATTACH_MAX})
                     </MDButton>
                   </label>
 
-                  {attachmentList.length + selectedFiles.length < 5 && (
+                  {attachmentList.length + selectedFiles.length < CONTRACT_ATTACH_MAX && (
                     <MDTypography variant="caption" color="text" sx={{ display: "block", mb: 1 }}>
-                      You can upload {5 - (attachmentList.length + selectedFiles.length)} more
+                      You can upload{" "}
+                      {CONTRACT_ATTACH_MAX - (attachmentList.length + selectedFiles.length)} more
                       file(s).
                     </MDTypography>
                   )}
@@ -5970,7 +6566,12 @@ export default function Contracts() {
             <MDBox>
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {allColumns
-                  .filter((col) => col.accessor !== "actions" && col.accessor !== "attachments")
+                  .filter(
+                    (col) =>
+                      col.accessor !== "actions" &&
+                      col.accessor !== "attachments" &&
+                      col.accessor !== "contractAttachments"
+                  )
                   .map((col) => {
                     const accessor = col.accessor;
                     const accessorKey = typeof accessor === "string" ? accessor : null;

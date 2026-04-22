@@ -14,7 +14,6 @@ import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
-import Select from "@mui/material/Select";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -100,6 +99,7 @@ function UserMgmt() {
           userArr.map((u) => ({
             ...u,
             status: u.status === 1 || u.status === "1" || u.status === true ? 1 : 0,
+            appoint: u.appoint ?? u.Appoint ?? "",
           }))
         );
         setCommandOptions(commandArr.map((cmd) => ({ id: Number(cmd.id), name: cmd.name })));
@@ -107,8 +107,20 @@ function UserMgmt() {
           baseArr.map((base) => ({ id: Number(base.id), name: base.name, cmdId: Number(base.cmd) }))
         );
         // Category lookup (bind to user-role): store roleName as value, roleName as key (per request)
+        const isActiveUserRole = (r) => {
+          const s = r.status ?? r.Status;
+          return s === 1 || s === true || s === "1" || String(s ?? "").toLowerCase() === "true";
+        };
+        const isUserRoleNotDeleted = (r) => {
+          const d = r.isDeleted ?? r.IsDeleted;
+          if (d === undefined || d === null) return true;
+          if (d === false || d === 0 || d === "0" || String(d).toLowerCase() === "false")
+            return true;
+          return false;
+        };
         setRoleOptions(
           roleArr
+            .filter((r) => isActiveUserRole(r) && isUserRoleNotDeleted(r))
             .map((r) => ({
               key: String(r.roleName ?? r.name ?? r.id ?? ""),
               value: String(r.roleName ?? r.name ?? r.id ?? ""),
@@ -137,7 +149,8 @@ function UserMgmt() {
       name: "",
       password: "",
       rank: "",
-      category: "",
+      appoint: "",
+      category: [],
       unitId: isAhq ? null : "",
       baseId: isAhq ? null : "",
       cmdId: defaultCmdId,
@@ -162,7 +175,13 @@ function UserMgmt() {
       pakNo: row.pakNo || "",
       name: row.name || "",
       rank: row.rank || "",
-      category: row.category || "",
+      appoint: row.appoint ?? row.Appoint ?? "",
+      category: Array.isArray(row.category)
+        ? row.category
+        : String(row.category || "")
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean),
       cmdId: row.cmdId !== undefined && row.cmdId !== null ? Number(row.cmdId) : "",
       baseId: row.baseId !== undefined && row.baseId !== null ? Number(row.baseId) : "",
       unitId: row.unitId !== undefined && row.unitId !== null ? Number(row.unitId) : "",
@@ -225,7 +244,13 @@ function UserMgmt() {
     if (!draft?.rank || !String(draft.rank).trim()) {
       errs.rank = "Rank is required";
     }
-    if (!draft?.category || !String(draft.category).trim()) {
+    const categoryArr = Array.isArray(draft?.category)
+      ? draft.category
+      : String(draft?.category || "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+    if (categoryArr.length === 0) {
       errs.category = "Category is required";
     }
     if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined) {
@@ -277,6 +302,13 @@ function UserMgmt() {
       field === "baseId" ||
       field === "levelId"
         ? Number(value)
+        : field === "category"
+        ? Array.isArray(value)
+          ? value
+          : String(value || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
         : value;
     if (editingRowId) {
       setEditDraft((draft) => {
@@ -329,7 +361,14 @@ function UserMgmt() {
         name: newRowDraft.name,
         password: newRowDraft.password,
         rank: newRowDraft.rank,
-        category: newRowDraft.category,
+        appoint: String(newRowDraft.appoint ?? "").trim(),
+        category: (Array.isArray(newRowDraft.category)
+          ? newRowDraft.category
+          : String(newRowDraft.category || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+        ).join(","),
         unitId: ahqSelected ? null : newRowDraft.unitId ? Number(newRowDraft.unitId) : null,
         status: Number(newRowDraft.status),
         cmdId: Number(newRowDraft.cmdId),
@@ -369,7 +408,14 @@ function UserMgmt() {
           pakNo: String(editDraft.pakNo || "").trim(),
           name: String(editDraft.name || "").trim(),
           rank: String(editDraft.rank || "").trim(),
-          category: String(editDraft.category || "").trim(),
+          appoint: String(editDraft.appoint ?? editDraft.Appoint ?? "").trim(),
+          category: (Array.isArray(editDraft.category)
+            ? editDraft.category
+            : String(editDraft.category || "")
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+          ).join(","),
           status: Number(editDraft.status) === 1 ? 1 : 0, // Ensure status is 1 or 0
           cmdId: Number(editDraft.cmdId),
           baseId: ahqSelected ? null : editDraft.baseId ? Number(editDraft.baseId) : null,
@@ -612,6 +658,7 @@ function UserMgmt() {
     { Header: "Name", accessor: "name", align: "left" },
     { Header: "Password", accessor: "password", align: "left" },
     { Header: "Rank", accessor: "rank", align: "left" },
+    { Header: "Appointment", accessor: "appoint", align: "left" },
     { Header: "Category", accessor: "category", align: "left" },
     {
       Header: "RAC",
@@ -747,7 +794,14 @@ function UserMgmt() {
   const renderCategorySelect = (field, value, disabled = false) => (
     <MDInput
       select
-      value={value || ""}
+      value={
+        Array.isArray(value)
+          ? value
+          : String(value || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+      }
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
@@ -755,6 +809,10 @@ function UserMgmt() {
       disabled={disabled}
       error={Boolean(errors[field])}
       helperText={errors[field]}
+      SelectProps={{
+        multiple: true,
+        renderValue: (selected) => (Array.isArray(selected) ? selected.join(", ") : ""),
+      }}
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
@@ -894,6 +952,9 @@ function UserMgmt() {
         size="small"
         fullWidth
         disabled={disabled}
+        SelectProps={{
+          displayEmpty: true,
+        }}
         sx={{
           "& .MuiInputBase-root": { minHeight: "45px" },
           "& .MuiSelect-select": {
@@ -985,6 +1046,9 @@ function UserMgmt() {
         pakNo: isEditing ? renderInput("pakNo", draft.pakNo, false, false) : r.pakNo,
         name: isEditing ? renderInput("name", draft.name, false, false) : r.name,
         rank: isEditing ? renderInput("rank", draft.rank, false, false) : r.rank,
+        appoint: isEditing
+          ? renderInput("appoint", draft.appoint ?? draft.Appoint ?? "", false, false)
+          : r.appoint ?? r.Appoint ?? "" ?? "",
         category: isEditing ? renderCategorySelect("category", draft.category, false) : r.category,
         cmdId: isEditing
           ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
@@ -1199,7 +1263,7 @@ function UserMgmt() {
             }}
           >
             <Table size="small">
-              <TableHead>
+              <TableHead sx={{ display: "contents !important " }}>
                 <TableRow>
                   <TableCell>Menu Name</TableCell>
                   <TableCell align="center">View</TableCell>

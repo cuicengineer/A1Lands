@@ -48,6 +48,26 @@ import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 
+/** Total area from selected properties. */
+function averageTotalAreaForPropertyIds(propertyIds, getPropertyById) {
+  if (!propertyIds || propertyIds.length === 0) return 0;
+  return propertyIds.reduce((acc, propertyId) => {
+    const property = getPropertyById(propertyId);
+    const area = property?.Area || property?.area || 0;
+    return acc + Number(area || 0);
+  }, 0);
+}
+
+/** Average rate across selected properties. */
+function averageRateForPropertyIds(propertyIds, getPropertyById, getPropertyRateNumber) {
+  if (!propertyIds || propertyIds.length === 0) return 0;
+  const totalRate = propertyIds.reduce((sum, propertyId) => {
+    const property = getPropertyById(propertyId);
+    return sum + getPropertyRateNumber(property, propertyId);
+  }, 0);
+  return totalRate / propertyIds.length;
+}
+
 function PropertyGroupingForm({
   open,
   onClose,
@@ -119,6 +139,9 @@ function PropertyGroupingForm({
   const [notGroupedProperties, setNotGroupedProperties] = useState([]);
   const [propertyRevenueRates, setPropertyRevenueRates] = useState(new Map()); // Cache revenue rates by property ID
   const [linkedPropertiesForEdit, setLinkedPropertiesForEdit] = useState([]); // Linked properties for edit mode
+  /** Add mode: full async group average; shown beside "Current Revenue Rate" and drives Rate when ready */
+  const [revenueGroupAverage, setRevenueGroupAverage] = useState(null);
+  const [isRevenueGroupAveragePending, setIsRevenueGroupAveragePending] = useState(false);
 
   const formatApplicableDate = (rawDate) => {
     if (!rawDate) return "-";
@@ -309,6 +332,27 @@ function PropertyGroupingForm({
     }
 
     return { rate: propertyRate, hasRevenueRate: false };
+  };
+
+  /**
+   * Average rate from selected properties, using each property's rate or the revenue-rates API.
+   * Uses return values from fetch (not propertyRevenueRates state) so the average is correct
+   * immediately after async fetches (avoids stale closure in getPropertyRateNumber).
+   */
+  const getEffectivePropertyRateForId = async (propertyId) => {
+    const property = getPropertyById(propertyId);
+    if (!property) return 0;
+    const pr = Number(property.Rate || property.rate) || 0;
+    if (pr !== 0) return pr;
+    const rev = await fetchRevenueRateForProperty(propertyId);
+    return rev && Number(rev.rate) > 0 ? Number(rev.rate) : 0;
+  };
+
+  const computeAverageRateForPropertySelection = async (propertyIds) => {
+    if (!propertyIds || propertyIds.length === 0) return 0;
+    const values = await Promise.all(propertyIds.map((id) => getEffectivePropertyRateForId(id)));
+    const sum = values.reduce((a, b) => a + b, 0);
+    return propertyIds.length ? sum / propertyIds.length : 0;
   };
 
   useEffect(() => {
@@ -560,18 +604,13 @@ function PropertyGroupingForm({
     }
 
     if (form.property && form.property.length > 0) {
-      // Calculate total area from selected properties (API returns PascalCase)
-      const totalArea = form.property.reduce((sum, propertyId) => {
-        const property = getPropertyById(propertyId);
-        const area = property?.Area || property?.area || 0;
-        return sum + Number(area || 0);
-      }, 0);
+      // Average total area from selected properties (API returns PascalCase)
+      const totalArea = averageTotalAreaForPropertyIds(form.property, getPropertyById);
 
-      // Calculate total rate from selected properties - use cached revenue rates if property rate is 0
-      const totalRate = form.property.reduce((sum, propertyId) => {
-        const property = getPropertyById(propertyId);
-        return sum + getPropertyRateNumber(property, propertyId);
-      }, 0);
+      // Add mode: group rate set by async useEffect. Edit: sync average here.
+      const totalRate = isEditMode
+        ? averageRateForPropertyIds(form.property, getPropertyById, getPropertyRateNumber)
+        : 0;
 
       // Get unique UoMs from selected properties (API returns PascalCase)
       const uniqueUoMs = Array.from(
@@ -597,11 +636,15 @@ function PropertyGroupingForm({
 
       // Only update if the calculated values are different from current values
       // In edit mode, only update if we have meaningful calculated values
-      const shouldUpdate =
-        form.area !== totalArea ||
-        (form.uoM || "") !== uoMText ||
-        Number(form.rate || 0) !== totalRate ||
-        (form.location || "") !== locationText;
+      // (Add mode: do not touch rate here — it comes from async group average in useEffect)
+      const shouldUpdate = isEditMode
+        ? form.area !== totalArea ||
+          (form.uoM || "") !== uoMText ||
+          Number(form.rate || 0) !== totalRate ||
+          (form.location || "") !== locationText
+        : form.area !== totalArea ||
+          (form.uoM || "") !== uoMText ||
+          (form.location || "") !== locationText;
 
       // In edit mode, only update if we have calculated values (not all zeros/empty)
       const hasCalculatedValues =
@@ -610,7 +653,7 @@ function PropertyGroupingForm({
       if (shouldUpdate && (!isEditMode || hasCalculatedValues)) {
         setForm((prevForm) => ({
           ...prevForm,
-          rate: totalRate,
+          ...(isEditMode ? { rate: totalRate } : {}),
           area: totalArea,
           uoM: uoMText,
           location: locationText,
@@ -630,55 +673,46 @@ function PropertyGroupingForm({
         location: "",
       }));
     }
-  }, [form.property, rentalProperties, selectableRentalProperties, isEditMode, initialData]);
+  }, [
+    form.property,
+    rentalProperties,
+    selectableRentalProperties,
+    isEditMode,
+    initialData,
+    propertyRevenueRates,
+  ]);
 
-  // Fetch revenue rates for properties with rate 0 when properties are selected
+  // Add mode: async group average — updates read-only "Avg" beside Current Revenue Rate then Rate field
+  // (not while pending). Edit mode keeps sync rate from the auto-calculate effect above.
   useEffect(() => {
-    if (!form.property || form.property.length === 0) return;
+    if (isEditMode) return;
+
+    if (!form.property || form.property.length === 0) {
+      setIsRevenueGroupAveragePending(false);
+      setRevenueGroupAverage(null);
+      return;
+    }
 
     let cancelled = false;
 
-    const fetchRatesForProperties = async () => {
-      const fetchPromises = form.property.map(async (propertyId) => {
-        if (cancelled) return;
-        const property = getPropertyById(propertyId);
-        if (!property) return;
-
-        const propertyRate = property.Rate || property.rate || 0;
-        // Only fetch if property rate is 0 and not already cached
-        if (Number(propertyRate) === 0) {
-          // Check cache first
-          if (!propertyRevenueRates.has(Number(propertyId))) {
-            await fetchRevenueRateForProperty(propertyId);
-          }
-        }
-      });
-
-      await Promise.all(fetchPromises);
-
-      if (cancelled) return;
-
-      // Recalculate rate after fetching revenue rates
-      const totalRate = form.property.reduce((sum, propertyId) => {
-        const property = getPropertyById(propertyId);
-        return sum + getPropertyRateNumber(property, propertyId);
-      }, 0);
-
-      // Update form if rate changed
-      if (Number(form.rate || 0) !== totalRate) {
-        setForm((prevForm) => ({
-          ...prevForm,
-          rate: totalRate,
-        }));
+    const run = async () => {
+      setIsRevenueGroupAveragePending(true);
+      if (!cancelled) {
+        setForm((prev) => ({ ...prev, rate: 0 }));
       }
+      const totalRate = await computeAverageRateForPropertySelection(form.property);
+      if (cancelled) return;
+      setIsRevenueGroupAveragePending(false);
+      setRevenueGroupAverage(totalRate);
+      setForm((prev) => ({ ...prev, rate: totalRate }));
     };
 
-    fetchRatesForProperties();
+    run();
 
     return () => {
       cancelled = true;
     };
-  }, [form.property]);
+  }, [form.property, isEditMode]);
 
   const handleChange = (f, v) => {
     setForm((p) => ({
@@ -850,7 +884,7 @@ function PropertyGroupingForm({
     return false;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Apply mandatory check only for "Add New"
     if (!isEditMode) {
       const ok = validateAddNew();
@@ -871,7 +905,12 @@ function PropertyGroupingForm({
       if (!ok) return;
     }
 
-    onSubmit(form);
+    let submitPayload = { ...form };
+    if (form.property && form.property.length > 0) {
+      const avgRate = await computeAverageRateForPropertySelection(form.property);
+      submitPayload = { ...form, rate: avgRate };
+    }
+    onSubmit(submitPayload);
   };
 
   // Handle Group ID blur (when user finishes entering) - delegates to parent
@@ -1005,17 +1044,12 @@ function PropertyGroupingForm({
         }
       }
 
-      // Calculate total area from selected properties (API returns PascalCase)
-      const totalArea = selectedProperties.reduce((sum, propertyId) => {
-        const property = getPropertyById(propertyId);
-        const area = property?.Area || property?.area || 0;
-        return sum + Number(area || 0);
-      }, 0);
-      // Calculate total rate - use cached revenue rates if property rate is 0
-      const totalRate = selectedProperties.reduce((sum, propertyId) => {
-        const property = getPropertyById(propertyId);
-        return sum + getPropertyRateNumber(property, propertyId);
-      }, 0);
+      // Average total area from selected properties (API returns PascalCase)
+      const totalArea = averageTotalAreaForPropertyIds(selectedProperties, getPropertyById);
+      // Add mode: rate from async useEffect. Edit: sync average here.
+      const totalRate = isEditMode
+        ? averageRateForPropertyIds(selectedProperties, getPropertyById, getPropertyRateNumber)
+        : 0;
       // Get UoM from selected properties (API returns PascalCase)
       const uniqueUoMs = Array.from(
         new Set(
@@ -1041,7 +1075,7 @@ function PropertyGroupingForm({
       return {
         ...prevForm,
         property: selectedProperties,
-        rate: totalRate,
+        ...(isEditMode ? { rate: totalRate } : {}),
         area: totalArea,
         uoM: uoMText,
         location: autoLocation, // Auto-update location based on selected properties
@@ -1053,16 +1087,11 @@ function PropertyGroupingForm({
   const handleDeleteProperty = (propertyToDelete) => () => {
     const updatedProperties = form.property.filter((property) => property !== propertyToDelete);
 
-    // Recalculate total area after removing a property (API returns PascalCase)
-    const totalArea = updatedProperties.reduce((sum, propertyId) => {
-      const property = getPropertyById(propertyId);
-      const area = property?.Area || property?.area || 0;
-      return sum + Number(area || 0);
-    }, 0);
-    const totalRate = updatedProperties.reduce((sum, propertyId) => {
-      const property = getPropertyById(propertyId);
-      return sum + getPropertyRateNumber(property);
-    }, 0);
+    // Recalculate average total area after removing a property (API returns PascalCase)
+    const totalArea = averageTotalAreaForPropertyIds(updatedProperties, getPropertyById);
+    const totalRate = isEditMode
+      ? averageRateForPropertyIds(updatedProperties, getPropertyById, getPropertyRateNumber)
+      : 0;
     // Get UoM from remaining properties (API returns PascalCase)
     const uniqueUoMs = Array.from(
       new Set(
@@ -1079,7 +1108,7 @@ function PropertyGroupingForm({
     setForm((prevForm) => ({
       ...prevForm,
       property: updatedProperties,
-      rate: totalRate,
+      ...(isEditMode ? { rate: totalRate } : {}),
       area: totalArea,
       uoM: uoMText,
     }));
@@ -1093,128 +1122,74 @@ function PropertyGroupingForm({
           <Grid container spacing={2} mt={0.5}>
             {/* First Row: Command, Base, Class */}
             <Grid item xs={12} sm={4}>
-              <FormControl
+              <Autocomplete
                 size="small"
                 fullWidth
-                required={!isEditMode}
-                error={!isEditMode && Boolean(errors.cmdid)}
+                disableClearable
+                options={commands}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={commands.find((c) => Number(c.id) === Number(form.cmdid)) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("cmdid", newValue != null ? newValue.id : "")
+                }
+                ListboxProps={{ style: { maxHeight: 300 } }}
                 sx={{
                   minWidth: "140px",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
                 }}
-              >
-                <InputLabel
-                  id="command-label"
-                  sx={{
-                    fontSize: "1rem",
-                  }}
-                >
-                  RAC
-                </InputLabel>
-                <Select
-                  labelId="command-label"
-                  value={form.cmdid || ""}
-                  label="Command"
-                  onChange={(e) => handleChange("cmdid", e.target.value)}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                      },
-                    },
-                  }}
-                  sx={{
-                    fontSize: "1rem",
-                    "& .MuiSelect-select": {
-                      fontSize: "1rem",
-                      padding: "0 32px 0 14px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      minHeight: "45px",
-                      display: "flex",
-                      alignItems: "center",
-                    },
-                    "& .MuiSelect-icon": {
-                      display: "block !important",
-                      right: "8px",
-                    },
-                  }}
-                >
-                  {commands.map((option) => (
-                    <MenuItem
-                      key={option.id}
-                      value={option.id}
-                      sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                    >
-                      {option.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {!isEditMode && errors.cmdid && <FormHelperText>{errors.cmdid}</FormHelperText>}
-              </FormControl>
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="RAC"
+                    required={!isEditMode}
+                    error={!isEditMode && Boolean(errors.cmdid)}
+                    helperText={!isEditMode && errors.cmdid ? errors.cmdid : undefined}
+                  />
+                )}
+              />
             </Grid>
             <Grid item xs={12} sm={4}>
-              <FormControl
+              <Autocomplete
                 size="small"
                 fullWidth
-                required={!isEditMode}
-                error={!isEditMode && Boolean(errors.baseid)}
+                disableClearable
+                options={allBases.filter((base) => Number(base.cmd) === Number(form.cmdid))}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={allBases.find((b) => Number(b.id) === Number(form.baseid)) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("baseid", newValue != null ? newValue.id : "")
+                }
+                ListboxProps={{ style: { maxHeight: 300 } }}
                 sx={{
                   minWidth: "140px",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
                 }}
-              >
-                <InputLabel
-                  id="base-label"
-                  sx={{
-                    fontSize: "1rem",
-                  }}
-                >
-                  Base
-                </InputLabel>
-                <Select
-                  labelId="base-label"
-                  value={form.baseid || ""}
-                  label="Base"
-                  onChange={(e) => handleChange("baseid", e.target.value)}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                      },
-                    },
-                  }}
-                  sx={{
-                    fontSize: "1rem",
-                    "& .MuiSelect-select": {
-                      fontSize: "1rem",
-                      padding: "0 32px 0 14px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      minHeight: "45px",
-                      display: "flex",
-                      alignItems: "center",
-                    },
-                    "& .MuiSelect-icon": {
-                      display: "block !important",
-                      right: "8px",
-                    },
-                  }}
-                >
-                  {allBases
-                    .filter((base) => Number(base.cmd) === Number(form.cmdid))
-                    .map((option) => (
-                      <MenuItem
-                        key={option.id}
-                        value={option.id}
-                        sx={{ fontSize: "1rem", padding: "8px 14px" }}
-                      >
-                        {option.name}
-                      </MenuItem>
-                    ))}
-                </Select>
-                {!isEditMode && errors.baseid && <FormHelperText>{errors.baseid}</FormHelperText>}
-              </FormControl>
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="Base"
+                    required={!isEditMode}
+                    error={!isEditMode && Boolean(errors.baseid)}
+                    helperText={!isEditMode && errors.baseid ? errors.baseid : undefined}
+                  />
+                )}
+              />
             </Grid>
             <Grid item xs={12} sm={4}>
               <FormControl
@@ -1488,10 +1463,15 @@ function PropertyGroupingForm({
               <MDInput
                 label="Rate"
                 type="number"
-                value={form.rate || 0}
+                value={!isEditMode && isRevenueGroupAveragePending ? 0 : form.rate || 0}
                 size="small"
                 InputProps={{ readOnly: true }}
                 fullWidth
+                helperText={
+                  !isEditMode && isRevenueGroupAveragePending
+                    ? "Recalculating average rate…"
+                    : undefined
+                }
                 sx={{
                   "& .MuiInputBase-input": {
                     fontSize: "1rem",
@@ -1596,14 +1576,33 @@ function PropertyGroupingForm({
                     border: "1px solid #e8e8e8",
                   }}
                 >
-                  <MDTypography
-                    variant="caption"
-                    fontWeight="medium"
-                    color="text"
-                    sx={{ display: "block", mb: 1 }}
+                  <MDBox
+                    display="flex"
+                    alignItems="baseline"
+                    justifyContent="space-between"
+                    flexWrap="wrap"
+                    gap={1}
+                    mb={1}
                   >
-                    Current Revenue Rate (per property)
-                  </MDTypography>
+                    <MDTypography variant="caption" fontWeight="medium" color="text">
+                      Current Revenue Rate (per property)
+                    </MDTypography>
+                    <MDTypography
+                      variant="caption"
+                      color="info"
+                      sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+                    >
+                      Avg. revenue rate:{" "}
+                      {isRevenueGroupAveragePending
+                        ? "…"
+                        : revenueGroupAverage != null
+                        ? Number(revenueGroupAverage).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        : "—"}
+                    </MDTypography>
+                  </MDBox>
                   <MDBox component="ul" sx={{ m: 0, pl: 2.5, fontSize: "0.9rem" }}>
                     {form.property.map((propertyId) => {
                       const property = getPropertyById(propertyId);

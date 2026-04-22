@@ -12,11 +12,7 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
-import api, {
-  canCreateCurrentMenu,
-  canDeleteCurrentMenu,
-  canEditCurrentMenu,
-} from "../../../services/api.service";
+import api, { isSuperuserUser } from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
 function UserRole() {
@@ -30,9 +26,10 @@ function UserRole() {
   const [errors, setErrors] = useState({});
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(5);
-  const canCreate = canCreateCurrentMenu();
-  const canEdit = canEditCurrentMenu();
-  const canDelete = canDeleteCurrentMenu();
+  const canMutateRoles = isSuperuserUser();
+  const canCreate = canMutateRoles;
+  const canEdit = canMutateRoles;
+  const canDelete = canMutateRoles;
 
   const fetchRoles = async () => {
     try {
@@ -169,13 +166,15 @@ function UserRole() {
     setEditDraft(null);
   };
 
-  const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "80px" },
+  const dataColumns = [
     { Header: "Id", accessor: "id", align: "left", width: "60px" },
     { Header: "Role Name", accessor: "roleName", align: "left", width: "150px" },
     { Header: "Description", accessor: "description", align: "left", minWidth: "200px" },
     { Header: "Status", accessor: "status", align: "center", width: "100px" },
   ];
+  const columns = canMutateRoles
+    ? [{ Header: "Actions", accessor: "actions", align: "center", width: "80px" }, ...dataColumns]
+    : dataColumns;
 
   const renderStatusBadge = (status) => {
     return (
@@ -262,7 +261,7 @@ function UserRole() {
   const computedRows = (() => {
     const rows = [];
 
-    if (editingRowId === "__new__" && newRowDraft) {
+    if (editingRowId === "__new__" && newRowDraft && canMutateRoles) {
       rows.push({
         id: newRowDraft.id,
         roleName: renderInput("roleName", newRowDraft.roleName),
@@ -284,7 +283,7 @@ function UserRole() {
     tableRows.forEach((r) => {
       const isEditing = editingRowId === r.id;
       const draft = isEditing ? editDraft : r;
-      rows.push({
+      const baseRow = {
         id: r.id,
         roleName: isEditing ? (
           renderInput("roleName", draft.roleName)
@@ -321,7 +320,9 @@ function UserRole() {
         status: isEditing
           ? renderStatusSelect("status", draft.status)
           : renderStatusBadge(r.status),
-        actions: isEditing ? (
+      };
+      if (canMutateRoles) {
+        baseRow.actions = isEditing ? (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">
               <Icon>check</Icon>
@@ -364,8 +365,9 @@ function UserRole() {
               </IconButton>
             )}
           </MDBox>
-        ),
-      });
+        );
+      }
+      rows.push(baseRow);
     });
 
     return rows;

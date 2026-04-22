@@ -331,7 +331,7 @@ export default function AgreementProvInvoice() {
       return Number(value).toLocaleString("en-US");
     };
 
-    // Load and add PAF Logo to top right corner
+    // Load and add PAF Logo below Sales Invoice on left side
     const addLogoToPDF = () => {
       return new Promise((resolve) => {
         const logoPath = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
@@ -339,11 +339,11 @@ export default function AgreementProvInvoice() {
         img.crossOrigin = "anonymous";
         img.onload = () => {
           try {
-            // Logo dimensions and position - smaller size to avoid text collision
+            // Logo dimensions and position
             const logoWidth = 18; // Reduced size for better fit
             const logoHeight = (img.height / img.width) * logoWidth; // Maintain aspect ratio
-            const logoX = pageWidth - margin - logoWidth - 5; // Position further right with small gap from edge
-            const logoY = margin + 2; // Align top edge with invoice date text
+            const logoX = margin; // Left aligned
+            const logoY = margin + 4; // Move up to avoid text collision
 
             // Convert image to base64 and add to PDF
             const canvas = document.createElement("canvas");
@@ -376,6 +376,7 @@ export default function AgreementProvInvoice() {
     const contractEndDate = rowData.ContractEndDate || rowData.contractEndDate || "";
     const commercialOpDate =
       rowData.CommercialOperationDate || rowData.commercialOperationDate || "";
+    const tenantAddress = rowData.Address || rowData.address || "";
     const initialRentPM = rowData.InitialRentPM || rowData.initialRentPM || 0;
     const initialRentPA = rowData.InitialRentPA || rowData.initialRentPA || 0;
     const natureOfBusiness = rowData.NatureOfBusiness || rowData.natureOfBusiness || "";
@@ -390,27 +391,13 @@ export default function AgreementProvInvoice() {
     const riseDate = rowData.RiseDate || rowData.riseDate || "";
 
     // Build PDF content function
-    const buildPDFContent = () => {
+    const buildPDFContent = (resolvedTenantAddress = "") => {
       // Top Left Section - Title "Sales Invoice"
-      doc.setFontSize(14);
+      doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
-      doc.text("Sales Invoice", margin, margin + 8);
+      doc.text("Sales Invoice", margin, margin + 2);
 
-      // Top Left Section - Client/Vendor Information (below title)
-      let yPos = margin + 18;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      const clientInfo = `${contractNo}-${businessName}`;
-      doc.text(clientInfo, margin, yPos);
-      yPos += 6;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const tenantInfo = tenantNo ? `Tenant: ${tenantNo}` : "";
-      if (tenantInfo) {
-        doc.text(tenantInfo, margin, yPos);
-        yPos += 5;
-      }
+      let yPos = margin + 11;
 
       // Top Right Section - Invoice Details (dates and number)
       // Position text to the left of the logo (logo is 18mm wide + gap to prevent collision)
@@ -418,18 +405,26 @@ export default function AgreementProvInvoice() {
       const logoGap = 5; // Gap between logo and page edge
       const textLogoGap = 10; // Gap between text and logo to prevent collision
       const rightX = pageWidth - margin - logoWidth - logoGap - textLogoGap - 40; // Leave sufficient space for logo
-      yPos = margin + 2; // Start slightly below top to align with text baseline
+      const invoiceInfoX = pageWidth / 2 - 12; // Keep invoice meta in center area
+      const invoiceBlockStartY = margin + 2; // Start slightly below top to align with text baseline
+      yPos = invoiceBlockStartY;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       const invoiceDate = formatDate(commercialOpDate || contractStartDate);
-      doc.text(`Invoice date: ${invoiceDate}`, rightX, yPos);
+      doc.text("Invoice date:", invoiceInfoX, yPos);
       yPos += 5;
-      doc.text(`Due date: ${invoiceDate}`, rightX, yPos);
+      doc.text(`${invoiceDate}`, invoiceInfoX, yPos);
+      yPos += 7;
+      doc.text("Due date:", invoiceInfoX, yPos);
       yPos += 5;
-      doc.text(`Invoice number: ${contractNo}`, rightX, yPos);
+      doc.text(`${invoiceDate}`, invoiceInfoX, yPos);
+      yPos += 7;
+      doc.text("Invoice number:", invoiceInfoX, yPos);
+      yPos += 5;
+      doc.text(`${contractNo}`, invoiceInfoX, yPos);
 
       // Top Right Section - Sender/Billing Entity Information (below invoice details)
-      yPos += 8;
+      yPos = invoiceBlockStartY;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
       doc.text("General Admin Fund - Air HQs", rightX, yPos);
@@ -447,8 +442,23 @@ export default function AgreementProvInvoice() {
       doc.line(rightX, yPos, rightX + 60, yPos);
       yPos += 5;
       doc.text("Title of Account = General Admin Fund", rightX, yPos);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      const clientInfo = `${contractNo}-${businessName}`;
+      doc.text(clientInfo, margin, yPos + 1.5);
       yPos += 5;
       doc.text("IBAN = XXXXXXXXXXXXXXXXXXXXXXXX", rightX, yPos);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const tenantInfo = tenantNo ? `Tenant: ${tenantNo}` : "";
+      if (tenantInfo) {
+        doc.text(tenantInfo, margin, yPos + 2);
+      }
+      yPos += 5;
+      const tenantAddressInfo = resolvedTenantAddress ? `Address: ${resolvedTenantAddress}` : "";
+      if (tenantAddressInfo) {
+        doc.text(tenantAddressInfo, margin, yPos);
+      }
       yPos += 5;
       doc.text("Bank = Allied Bank E-9, PAF Complex Islamabad", rightX, yPos);
 
@@ -481,9 +491,28 @@ export default function AgreementProvInvoice() {
       doc.text(`Total: ${formatCurrency(totalRent)}`, totalX, yPos);
     };
 
-    // Load logo first, then build content and open PDF
-    addLogoToPDF().then(() => {
-      buildPDFContent();
+    const resolveTenantAddress = async () => {
+      const existingAddress = String(tenantAddress || "").trim();
+      if (existingAddress) return existingAddress;
+      const normalizedTenantNo = String(tenantNo || "").trim();
+      if (!normalizedTenantNo) return "";
+      try {
+        const tenantsResponse = await api.list("tenant");
+        const tenants = Array.isArray(tenantsResponse) ? tenantsResponse : [];
+        const tenant = tenants.find(
+          (t) => String(t?.tenantNo || t?.TenantNo || "").trim() === normalizedTenantNo
+        );
+        return String(tenant?.address || tenant?.Address || "").trim();
+      } catch (error) {
+        console.error("Error fetching tenant address:", error);
+        return "";
+      }
+    };
+
+    // Load logo first, then fetch tenant address, build content and open PDF
+    addLogoToPDF().then(async () => {
+      const resolvedTenantAddress = await resolveTenantAddress();
+      buildPDFContent(resolvedTenantAddress);
       const pdfBlob = doc.output("blob");
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
@@ -767,7 +796,7 @@ export default function AgreementProvInvoice() {
                 coloredShadow="info"
               >
                 <MDTypography variant="h6" color="white">
-                  Agreement Prov Invoice
+                  Agreement Invoice
                 </MDTypography>
               </MDBox>
               <MDBox pt={3} px={3}>

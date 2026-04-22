@@ -213,6 +213,33 @@ function isAhqOrSuperuserUser() {
   }
 }
 
+function isSuperuserUser() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return false;
+    const authObj = JSON.parse(raw);
+    const candidates = [
+      authObj?.role,
+      authObj?.Role,
+      authObj?.roleName,
+      authObj?.RoleName,
+      authObj?.category,
+      authObj?.Category,
+      authObj?.userRole,
+      authObj?.UserRole,
+      authObj?.username,
+      authObj?.Username,
+      authObj?.userName,
+      authObj?.UserName,
+      authObj?.unique_name,
+    ];
+    const normalized = candidates.map(normalizeAccessValue);
+    return normalized.includes("superuser");
+  } catch (e) {
+    return false;
+  }
+}
+
 function canAccessPrivilegedConfigRoute(pathnameArg) {
   const pathname =
     pathnameArg ??
@@ -222,11 +249,14 @@ function canAccessPrivilegedConfigRoute(pathnameArg) {
   const cleaned = String(pathname || "")
     .trim()
     .toLowerCase();
-  const isPrivilegedOnlyRoute =
-    cleaned.startsWith("/configuration/user-mgmt") ||
-    cleaned.startsWith("/configuration/user-role");
-  if (!isPrivilegedOnlyRoute) return true;
-  return isAhqOrSuperuserUser();
+  // User Roles: any user with Configuration menu assigned (can view), not only AHQ/superuser
+  if (cleaned.startsWith("/configuration/user-role")) {
+    return isAhqOrSuperuserUser() || canViewMenu("Configuration");
+  }
+  if (cleaned.startsWith("/configuration/user-mgmt")) {
+    return isAhqOrSuperuserUser();
+  }
+  return true;
 }
 
 function getPermissionByMenuName(menuName) {
@@ -315,6 +345,53 @@ function getLoggedInUsername() {
     ).trim();
   } catch (e) {
     return "unknown";
+  }
+}
+
+/** Category/role string from session (may be comma-separated). */
+function getLoggedInUserCategoryRaw() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return "";
+    const obj = JSON.parse(raw);
+    return String(obj?.category ?? obj?.Category ?? "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+function loggedInUserHasCategoryToken(token) {
+  const want = String(token || "")
+    .trim()
+    .toLowerCase();
+  if (!want) return false;
+  const raw = getLoggedInUserCategoryRaw();
+  if (!raw) return false;
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(want);
+}
+
+/** True when session category list includes the Base-Read role (case-insensitive). */
+function isLoggedInUserBaseReadCategory() {
+  return loggedInUserHasCategoryToken("Base-Read");
+}
+
+/** Logged-in user's assigned base id from session, or null if not present. */
+function getLoggedInUserBaseId() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    const v =
+      obj?.baseId ?? obj?.BaseId ?? obj?.userBaseId ?? obj?.UserBaseId ?? obj?.base ?? obj?.Base;
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -419,14 +496,24 @@ async function refreshAccessToken() {
 
 async function fetchWithAuth(method, path, body, headers = {}, requestOptions = {}) {
   const m = String(method || "").toUpperCase();
-  if (m === "POST" && !canCreateCurrentMenu()) {
-    throw new Error("You are not allowed to create in this module.");
-  }
-  if ((m === "PUT" || m === "PATCH") && !canEditCurrentMenu()) {
-    throw new Error("You are not allowed to edit in this module.");
-  }
-  if (m === "DELETE" && !canDeleteCurrentMenu()) {
-    throw new Error("You are not allowed to delete in this module.");
+  const pathLower = String(path || "").toLowerCase();
+  const isRoleApi = pathLower.includes("/api/role");
+  const isRoleMutation =
+    isRoleApi && (m === "POST" || m === "PUT" || m === "PATCH" || m === "DELETE");
+  if (isRoleMutation) {
+    if (!isSuperuserUser()) {
+      throw new Error("Only a superuser can create, update, or delete roles.");
+    }
+  } else {
+    if (m === "POST" && !canCreateCurrentMenu()) {
+      throw new Error("You are not allowed to create in this module.");
+    }
+    if ((m === "PUT" || m === "PATCH") && !canEditCurrentMenu()) {
+      throw new Error("You are not allowed to edit in this module.");
+    }
+    if (m === "DELETE" && !canDeleteCurrentMenu()) {
+      throw new Error("You are not allowed to delete in this module.");
+    }
   }
 
   const pathWithLeadingSlash = path.startsWith("/") ? path : `/${path}`;
@@ -616,10 +703,15 @@ const api = {
   canDeleteCurrentMenu,
   canAccessPrivilegedConfigRoute,
   isAhqOrSuperuserUser,
+  isSuperuserUser,
   getCurrentUserRole,
   getActionBy,
   getLoggedInUsername,
   getUserIPAddress,
+  getLoggedInUserBaseId,
+  isLoggedInUserBaseReadCategory,
+  getLoggedInUserCategoryRaw,
+  loggedInUserHasCategoryToken,
 };
 export default api;
 export {
@@ -633,9 +725,14 @@ export {
   canDeleteCurrentMenu,
   canAccessPrivilegedConfigRoute,
   isAhqOrSuperuserUser,
+  isSuperuserUser,
   getCurrentUserRole,
   getActionBy,
   getLoggedInUsername,
   getUserIPAddress,
+  getLoggedInUserBaseId,
+  isLoggedInUserBaseReadCategory,
+  getLoggedInUserCategoryRaw,
+  loggedInUserHasCategoryToken,
   fetchAndUpdateUserContext,
 };

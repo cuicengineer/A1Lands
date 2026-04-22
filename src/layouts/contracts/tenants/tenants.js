@@ -27,6 +27,7 @@ import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
+import { format, parseISO, isValid } from "date-fns";
 
 function TenantsForm({ open, onClose, onSubmit, initialData }) {
   const isAddMode = !initialData;
@@ -105,9 +106,8 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     const next = {};
     const required = [
       { key: "tenantNo", label: "Tenant No" },
-      { key: "ownerName", label: "Owner Name" },
+      { key: "ownerName", label: "Particular Name" },
       { key: "prefix", label: "Prefix" },
-      { key: "businessName", label: "Business Name" },
       { key: "address", label: "Address" },
       { key: "province", label: "Province" },
       { key: "city", label: "City" },
@@ -135,58 +135,43 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
+      <DialogTitle
+        component="div"
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 2,
+          fontSize: "1.25rem",
+          fontWeight: 600,
+        }}
+      >
         {initialData ? "Edit Tenant" : "New Tenant"}
+        <MDInput
+          label="Tenant No"
+          type="text"
+          value={form.tenantNo}
+          onChange={(e) => handleChange("tenantNo", e.target.value)}
+          size="small"
+          required={isAddMode}
+          error={Boolean(errors.tenantNo)}
+          helperText={errors.tenantNo}
+          sx={{
+            flex: "1 1 240px",
+            maxWidth: 400,
+            "& .MuiInputBase-input": {
+              fontSize: "1.1rem",
+              padding: "12px 14px",
+            },
+            "& .MuiInputLabel-root": {
+              fontSize: "1.1rem",
+            },
+          }}
+        />
       </DialogTitle>
       <DialogContent>
         <Grid container spacing={3} mt={1}>
-          {/* TenantNo and BusinessName - same row */}
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Tenant No"
-              type="text"
-              value={form.tenantNo}
-              onChange={(e) => handleChange("tenantNo", e.target.value)}
-              fullWidth
-              size="small"
-              required={isAddMode}
-              error={Boolean(errors.tenantNo)}
-              helperText={errors.tenantNo}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1.1rem",
-                  padding: "12px 14px",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1.1rem",
-                },
-              }}
-            />
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Business Name"
-              type="text"
-              value={form.businessName}
-              onChange={(e) => handleChange("businessName", e.target.value)}
-              fullWidth
-              size="small"
-              required={isAddMode}
-              error={Boolean(errors.businessName)}
-              helperText={errors.businessName}
-              sx={{
-                "& .MuiInputBase-input": {
-                  fontSize: "1.1rem",
-                  padding: "12px 14px",
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: "1.1rem",
-                },
-              }}
-            />
-          </Grid>
-
           {/* Prefix first, then Owner Name */}
           <Grid item xs={12} sm={2}>
             <FormControl fullWidth size="small" required={isAddMode} error={Boolean(errors.prefix)}>
@@ -217,7 +202,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
 
           <Grid item xs={12} sm={10}>
             <MDInput
-              label="Owner Name"
+              label="Particular Name"
               type="text"
               value={form.ownerName}
               onChange={(e) => handleChange("ownerName", e.target.value)}
@@ -286,12 +271,13 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 onChange={(e) => handleChange("province", e.target.value)}
               >
                 <MenuItem value="">Select</MenuItem>
-                <MenuItem value="Federal Capital">Federal Capital</MenuItem>
+                <MenuItem value="Capital">Federal</MenuItem>
                 <MenuItem value="Punjab">Punjab</MenuItem>
                 <MenuItem value="Sindh">Sindh</MenuItem>
+                <MenuItem value="KPK">KPK</MenuItem>
                 <MenuItem value="Balochistan">Balochistan</MenuItem>
                 <MenuItem value="GB">GB</MenuItem>
-                <MenuItem value="Kashmir">Kashmir</MenuItem>
+                <MenuItem value="AJK">AJK</MenuItem>
               </Select>
               {errors.province && <FormHelperText>{errors.province}</FormHelperText>}
             </FormControl>
@@ -417,7 +403,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
             />
           </Grid>
 
-          {/* Status */}
+          {/* Status and Business Name */}
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth required={isAddMode} error={Boolean(errors.status)}>
               <InputLabel id="status-label" sx={{ fontSize: "1.1rem" }}>
@@ -460,6 +446,27 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               </Select>
               {errors.status && <FormHelperText>{errors.status}</FormHelperText>}
             </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <MDInput
+              label="Business"
+              type="text"
+              value={form.businessName}
+              onChange={(e) => handleChange("businessName", e.target.value)}
+              fullWidth
+              size="small"
+              error={Boolean(errors.businessName)}
+              helperText={errors.businessName}
+              sx={{
+                "& .MuiInputBase-input": {
+                  fontSize: "1.1rem",
+                  padding: "12px 14px",
+                },
+                "& .MuiInputLabel-root": {
+                  fontSize: "1.1rem",
+                },
+              }}
+            />
           </Grid>
 
           {/* Remarks */}
@@ -524,6 +531,10 @@ export default function Tenants() {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [contactViewDialog, setContactViewDialog] = useState(false);
   const [contactData, setContactData] = useState({ type: "", value: "" });
+  const [contractsDialogOpen, setContractsDialogOpen] = useState(false);
+  const [contractsDialogLoading, setContractsDialogLoading] = useState(false);
+  const [tenantContracts, setTenantContracts] = useState([]);
+  const [selectedTenantNo, setSelectedTenantNo] = useState("");
 
   const fetchTenants = async () => {
     try {
@@ -604,6 +615,34 @@ export default function Tenants() {
     setContactData({ type: "", value: "" });
   };
 
+  const handleOpenContractsDialog = async (tenantNo) => {
+    const normalizedTenantNo = String(tenantNo || "").trim();
+    if (!normalizedTenantNo) return;
+    setSelectedTenantNo(normalizedTenantNo);
+    setContractsDialogOpen(true);
+    setContractsDialogLoading(true);
+    try {
+      const response = await api.request(
+        "GET",
+        `/api/contracts/by-tenant/${encodeURIComponent(normalizedTenantNo)}`
+      );
+      const contracts = response?.data || (Array.isArray(response) ? response : []);
+      setTenantContracts(Array.isArray(contracts) ? contracts : []);
+    } catch (error) {
+      console.error("Error fetching contracts by tenant no:", error);
+      setTenantContracts([]);
+      alert("Failed to fetch contracts. Please try again.");
+    } finally {
+      setContractsDialogLoading(false);
+    }
+  };
+
+  const handleCloseContractsDialog = () => {
+    setContractsDialogOpen(false);
+    setTenantContracts([]);
+    setSelectedTenantNo("");
+  };
+
   const handleSubmit = async (data) => {
     try {
       const formattedData = {
@@ -657,9 +696,9 @@ export default function Tenants() {
     { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
     { Header: "ID", accessor: "id", align: "center", width: "56px" },
     { Header: "Tenant No", accessor: "tenantNo", align: "left" },
-    { Header: "Owner Name", accessor: "ownerName", align: "left" },
     { Header: "Prefix", accessor: "prefix", align: "left" },
-    { Header: "Business Name", accessor: "businessName", align: "left" },
+    { Header: "Business", accessor: "businessName", align: "left" },
+    { Header: "Particular Name", accessor: "ownerName", align: "left" },
     { Header: "Address", accessor: "address", align: "left" },
     { Header: "Province", accessor: "province", align: "left" },
     { Header: "City", accessor: "city", align: "left" },
@@ -699,6 +738,39 @@ export default function Tenants() {
     },
     { Header: "NTN No", accessor: "ntnNo", align: "left" },
     { Header: "GST No", accessor: "gstNo", align: "left" },
+    {
+      Header: "Total Contracts",
+      accessor: "totalContracts",
+      align: "left",
+      Cell: (cell) => (
+        <MDButton
+          size="large"
+          variant="text"
+          color="info"
+          onClick={() => handleOpenContractsDialog(cell?.row?.original?.tenantNo)}
+          sx={{ minWidth: "auto", p: 0.5, textDecoration: "underline" }}
+        >
+          {cell?.value ?? 0}
+        </MDButton>
+      ),
+    },
+    {
+      Header: "Total Invoices",
+      accessor: "totalInvoices",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => (
+        <MDButton
+          size="large"
+          variant="text"
+          color="info"
+          onClick={() => {}}
+          sx={{ minWidth: "auto", p: 0.5, textDecoration: "underline" }}
+        >
+          {value ?? 0}
+        </MDButton>
+      ),
+    },
     {
       Header: "Status",
       accessor: "status",
@@ -857,6 +929,639 @@ export default function Tenants() {
         </DialogContent>
         <DialogActions>
           <MDButton onClick={handleCloseContactDialog} color="secondary" variant="outlined">
+            <Icon>close</Icon>&nbsp;Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={contractsDialogOpen}
+        onClose={handleCloseContractsDialog}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>{`Contracts - Tenant No: ${selectedTenantNo}`}</DialogTitle>
+        <DialogContent>
+          {contractsDialogLoading ? (
+            <MDTypography variant="body2" sx={{ mt: 1 }}>
+              Loading...
+            </MDTypography>
+          ) : tenantContracts.length === 0 ? (
+            <MDTypography variant="body2" sx={{ mt: 1 }}>
+              No contracts found.
+            </MDTypography>
+          ) : (
+            <MDBox
+              sx={{
+                maxHeight: "500px",
+                overflowY: "auto",
+                overflowX: "auto",
+                scrollbarWidth: "thin",
+                scrollbarColor: "#333333 transparent",
+                "&::-webkit-scrollbar": {
+                  width: "8px",
+                  height: "8px",
+                },
+                "&::-webkit-scrollbar-track": {
+                  background: "transparent",
+                  borderRadius: "2px",
+                },
+                "&::-webkit-scrollbar-thumb": {
+                  backgroundColor: "#333333",
+                  borderRadius: "10px",
+                  border: "2px solid transparent",
+                  backgroundClip: "padding-box",
+                  "&:hover": {
+                    backgroundColor: "#1a1a1a",
+                  },
+                },
+                "&::-webkit-scrollbar-button": {
+                  display: "none",
+                },
+              }}
+            >
+              <Card>
+                <MDBox p={2}>
+                  <MDTypography variant="caption" color="black" mb={4}>
+                    Total Active Contracts: {tenantContracts.length}
+                  </MDTypography>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "3200px" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e0e0e0", backgroundColor: "#f5f5f5" }}>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Sno
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Class
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Cmd
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Unit
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA No
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contractor Address
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Business Title
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Nature of Business
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Location
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          GP ID
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-CA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Area-BOO
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Revenue Rate Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Rental Value
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contractor Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Initial Contract Date
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract From
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Contract To
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PM
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          1st Y Rent PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Term of Payment
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Profit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase (Rate)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Increase Interval
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit Term
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Security Deposit (Rs)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          DPC (Per Day)
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Govt Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          PAF Share-PA
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Feasible
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          CA Status
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Approving Authority
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px",
+                            textAlign: "left",
+                            fontSize: "0.875rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Remarks
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tenantContracts.map((contract, index) => {
+                        const getField = (camelCase, pascalCase, altNames = []) => {
+                          if (contract[camelCase] !== undefined && contract[camelCase] !== null)
+                            return contract[camelCase];
+                          if (contract[pascalCase] !== undefined && contract[pascalCase] !== null)
+                            return contract[pascalCase];
+                          for (const alt of altNames) {
+                            if (contract[alt] !== undefined && contract[alt] !== null)
+                              return contract[alt];
+                          }
+                          return "-";
+                        };
+                        const formatDate = (dateValue) => {
+                          if (!dateValue) return "-";
+                          try {
+                            const dateStr = String(dateValue).trim();
+                            if (!dateStr) return "-";
+                            const datePart = dateStr.includes("T")
+                              ? dateStr.split("T")[0]
+                              : dateStr;
+                            const d = parseISO(datePart);
+                            if (!isValid(d)) return "-";
+                            return format(d, "dd-MMM-yyyy");
+                          } catch {
+                            return "-";
+                          }
+                        };
+                        return (
+                          <tr
+                            key={contract.id || contract.Id || index}
+                            style={{ borderBottom: "1px solid #e0e0e0" }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = "#f9f9f9";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = "transparent";
+                            }}
+                          >
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {index + 1}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("class", "Class", ["className", "ClassName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("cmd", "Cmd", ["cmdName", "CmdName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("unit", "Unit", ["unitName", "UnitName"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caNo", "CANo", ["contractNo", "ContractNo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorName", "ContractorName", [
+                                "businessName",
+                                "BusinessName",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("contractorAddress", "ContractorAddress", [
+                                "address",
+                                "Address",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("businessTitle", "BusinessTitle", ["title", "Title"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("natureOfBusiness", "NatureOfBusiness", [
+                                "nature",
+                                "Nature",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("location", "Location")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("gpId", "GPId", [
+                                "groupId",
+                                "GroupId",
+                                "gId",
+                                "GId",
+                                "grpId",
+                                "GrpId",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaCA", "AreaCA", ["areaCa", "AreaCa"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("areaBOO", "AreaBOO", ["areaBoo", "AreaBoo"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("revenueRate", "RevenueRate")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("revenueRateDate", "RevenueRateDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("rentalValue", "RentalValue")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("initialContractorName", "InitialContractorName")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(getField("initialContractDate", "InitialContractDate"))}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractFrom", "ContractFrom", [
+                                  "contractStartDate",
+                                  "ContractStartDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {formatDate(
+                                getField("contractTo", "ContractTo", [
+                                  "contractEndDate",
+                                  "ContractEndDate",
+                                ])
+                              )}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPM", "FirstYRentPM", [
+                                "initialRentPM",
+                                "InitialRentPM",
+                                "firstYearRentPM",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("firstYRentPA", "FirstYRentPA", [
+                                "initialRentPA",
+                                "InitialRentPA",
+                                "firstYearRentPA",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("termOfPayment", "TermOfPayment", [
+                                "paymentTermMonths",
+                                "PaymentTermMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("profitTerm", "ProfitTerm")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseRate", "IncreaseRate", [
+                                "increaseRatePercent",
+                                "IncreaseRatePercent",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("increaseInterval", "IncreaseInterval", [
+                                "increaseIntervalMonths",
+                                "IncreaseIntervalMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositTerm", "SecurityDepositTerm", [
+                                "sdRateMonths",
+                                "SdRateMonths",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("securityDepositRs", "SecurityDepositRs", [
+                                "securityDepositAmount",
+                                "SecurityDepositAmount",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("dpcPerDay", "DPCPerDay", ["dpc", "DPC"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("govtSharePA", "GovtSharePA", [
+                                "govtShare",
+                                "GovtShare",
+                                "govtShareCondition",
+                                "GovtShareCondition",
+                              ])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("pafSharePA", "PAFSharePA", ["pafShare", "PAFShare"])}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              <StatusBadge value={getField("status", "Status")} />
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("feasible", "Feasible")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("caStatus", "CAStatus")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("approvingAuthority", "ApprovingAuthority")}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
+                              {getField("remarks", "Remarks")}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </MDBox>
+              </Card>
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={handleCloseContractsDialog} color="secondary" variant="outlined">
             <Icon>close</Icon>&nbsp;Close
           </MDButton>
         </DialogActions>

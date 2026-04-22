@@ -12,6 +12,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
 import InputAdornment from "@mui/material/InputAdornment";
 import MDTypography from "components/MDTypography";
+import api from "services/api.service";
 
 function AddUserForm({
   open,
@@ -32,6 +33,7 @@ function AddUserForm({
   ];
 
   const [showPassword, setShowPassword] = useState(false);
+  const [getInfoLoading, setGetInfoLoading] = useState(false);
 
   const PASSWORD_POLICY_TEXT =
     "Password must be 6-12 characters long and contain at least 1 special character.";
@@ -72,6 +74,13 @@ function AddUserForm({
         ? value === "" || value === null || value === undefined
           ? ""
           : Number(value)
+        : field === "category"
+        ? Array.isArray(value)
+          ? value
+          : String(value || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
         : value;
 
     setNewRowDraft((draft) => {
@@ -115,7 +124,13 @@ function AddUserForm({
       setErrors((prev) => ({ ...prev, rank: msg }));
     }
     if (field === "category") {
-      const msg = nextValue && String(nextValue).trim() ? null : "Category is required";
+      const categoryArr = Array.isArray(nextValue)
+        ? nextValue
+        : String(nextValue || "")
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+      const msg = categoryArr.length > 0 ? null : "Category is required";
       setErrors((prev) => ({ ...prev, category: msg }));
     }
     if (field === "unitId") {
@@ -146,15 +161,31 @@ function AddUserForm({
     }
   };
 
-  const handleGetInfo = () => {
-    if (newRowDraft?.pakNo) {
-      // Mock API call or data retrieval based on PakNo
-      const userInfo = {
-        name: "Fetched Name",
-        rank: "Fetched Rank",
-        // category is now bound to user-role dropdown; don't auto-fill unknown role
-      };
-      setNewRowDraft((prev) => ({ ...prev, ...userInfo }));
+  const handleGetInfo = async () => {
+    const pak = String(newRowDraft?.pakNo || "").trim();
+    if (!pak) {
+      alert("Please enter Pak No first.");
+      return;
+    }
+    setGetInfoLoading(true);
+    try {
+      const data = await api.request(
+        "GET",
+        `/api/UserPermissions/GetInfo?pakNo=${encodeURIComponent(pak)}`
+      );
+      const d = data && typeof data === "object" ? data : {};
+      const name = d.name ?? d.Name;
+      const rank = d.rank ?? d.Rank;
+      setNewRowDraft((prev) => ({
+        ...prev,
+        ...(name != null && String(name).trim() ? { name: String(name).trim() } : {}),
+        ...(rank != null && String(rank).trim() ? { rank: String(rank).trim() } : {}),
+      }));
+    } catch (e) {
+      console.error("GetInfo failed", e);
+      alert(e?.message || "Failed to get info. Please try again.");
+    } finally {
+      setGetInfoLoading(false);
     }
   };
 
@@ -216,13 +247,24 @@ function AddUserForm({
   const renderCategorySelect = (field, value) => (
     <MDInput
       select
-      value={value || ""}
+      value={
+        Array.isArray(value)
+          ? value
+          : String(value || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+      }
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
       required
       error={Boolean(errors[field])}
       helperText={errors[field]}
+      SelectProps={{
+        multiple: true,
+        renderValue: (selected) => (Array.isArray(selected) ? selected.join(", ") : ""),
+      }}
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
@@ -339,8 +381,14 @@ function AddUserForm({
             </MDTypography>
             <MDBox display="flex" alignItems="center" gap={1}>
               {renderInput("pakNo", newRowDraft?.pakNo, true)}
-              <MDButton variant="gradient" color="info" size="small" onClick={handleGetInfo}>
-                Get Info
+              <MDButton
+                variant="gradient"
+                color="info"
+                size="small"
+                onClick={handleGetInfo}
+                disabled={getInfoLoading}
+              >
+                {getInfoLoading ? "Loading..." : "Get Info"}
               </MDButton>
             </MDBox>
           </MDBox>
@@ -403,6 +451,12 @@ function AddUserForm({
               Status
             </MDTypography>
             {renderStatusSelect("status", newRowDraft?.status)}
+          </MDBox>
+          <MDBox>
+            <MDTypography variant="caption" fontWeight="bold">
+              Appoint
+            </MDTypography>
+            {renderInput("appoint", newRowDraft?.appoint, false)}
           </MDBox>
         </MDBox>
       </DialogContent>

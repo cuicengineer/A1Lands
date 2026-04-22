@@ -13,6 +13,7 @@ import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
+import Autocomplete from "@mui/material/Autocomplete";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -49,10 +50,6 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
   const [filteredBases, setFilteredBases] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
-  const baseNameById = useMemo(
-    () => new Map(filteredBases.map((base) => [String(base.id), base.name])),
-    [filteredBases]
-  );
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -492,79 +489,144 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl size="small" fullWidth required error={!!errors.cmdId}>
-              <InputLabel id="cmd-label">RAC</InputLabel>
-              <Select
-                labelId="cmd-label"
-                value={form.cmdId}
-                label="Command"
-                onChange={(e) => handleChange("cmdId", e.target.value)}
-                sx={selectSx}
-              >
-                {commands.map((cmd) => (
-                  <MenuItem key={cmd.id} value={cmd.id}>
-                    {cmd.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {errors.cmdId && (
-                <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.cmdId}
-                </MDTypography>
+            <Autocomplete
+              size="small"
+              fullWidth
+              disableClearable
+              options={commands || []}
+              getOptionLabel={(option) => option?.name ?? ""}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={(commands || []).find((c) => Number(c.id) === Number(form.cmdId)) ?? null}
+              onChange={(_, newValue) => handleChange("cmdId", newValue != null ? newValue.id : "")}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                width: "100%",
+                fontSize: "1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": {
+                  minHeight: "45px",
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+                "& .MuiInputBase-input": {
+                  fontSize: "1rem",
+                  padding: "10px 12px",
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput {...params} label="RAC" required error={!!errors.cmdId} sx={inputSx} />
               )}
-            </FormControl>
+            />
+            {errors.cmdId && (
+              <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                {errors.cmdId}
+              </MDTypography>
+            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl
-              size="small"
-              fullWidth
-              required
-              error={!!errors.baseIds}
-              disabled={!form.cmdId}
-            >
-              <InputLabel id="base-label">
-                {isEditMode ? "Base" : "Base (Multiple Selection)"}
-              </InputLabel>
-              <Select
-                labelId="base-label"
-                multiple={!isEditMode}
-                value={isEditMode ? form.baseIds[0] || "" : form.baseIds}
-                label={isEditMode ? "Base" : "Base (Multiple Selection)"}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  handleChange("baseIds", isEditMode ? [String(value)] : value);
-                }}
-                renderValue={
-                  isEditMode
-                    ? undefined
-                    : (selected) => (
-                        <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                          {selected.map((value) => (
-                            <Chip
-                              key={value}
-                              label={baseNameById.get(String(value)) || value}
-                              size="small"
-                              sx={{ fontSize: "0.875rem" }}
-                            />
-                          ))}
-                        </MDBox>
-                      )
+            {isEditMode ? (
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={filteredBases}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={filteredBases.find((b) => Number(b.id) === Number(form.baseIds[0])) ?? null}
+                onChange={(_, newValue) =>
+                  handleChange("baseIds", newValue != null ? [String(newValue.id)] : [])
                 }
-                sx={selectSx}
-              >
-                {filteredBases.map((base) => (
-                  <MenuItem key={base.id} value={base.id}>
-                    {base.name}
-                  </MenuItem>
-                ))}
-              </Select>
-              {errors.baseIds && (
-                <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {errors.baseIds}
-                </MDTypography>
-              )}
-            </FormControl>
+                disabled={!form.cmdId}
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "10px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="Base"
+                    required
+                    error={!!errors.baseIds}
+                    sx={inputSx}
+                  />
+                )}
+              />
+            ) : (
+              <Autocomplete
+                multiple
+                disableCloseOnSelect
+                size="small"
+                fullWidth
+                options={filteredBases}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={(form.baseIds || [])
+                  .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
+                  .filter(Boolean)}
+                onChange={(_, newValue) =>
+                  handleChange(
+                    "baseIds",
+                    (newValue || []).map((b) => String(b.id))
+                  )
+                }
+                disabled={!form.cmdId}
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  width: "100%",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": {
+                    minHeight: "45px",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    padding: "10px 12px",
+                  },
+                }}
+                renderInput={(params) => (
+                  <MDInput
+                    {...params}
+                    label="Base (Multiple Selection)"
+                    required
+                    error={!!errors.baseIds}
+                    sx={inputSx}
+                  />
+                )}
+                renderTags={(value, getTagProps) =>
+                  value.map((option, index) => (
+                    <Chip
+                      key={option.id}
+                      label={option.name}
+                      size="small"
+                      sx={{ fontSize: "0.875rem" }}
+                      {...getTagProps({ index })}
+                    />
+                  ))
+                }
+              />
+            )}
+            {errors.baseIds && (
+              <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                {errors.baseIds}
+              </MDTypography>
+            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>

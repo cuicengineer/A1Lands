@@ -266,7 +266,7 @@ const routes = [
       },
       {
         type: "collapse",
-        name: "Agreement Prov Invoice",
+        name: "Agreement Invoice",
         key: "agreement-prov-invoice",
         icon: <Icon fontSize="small">receipt</Icon>,
         route: "/contracts/agreement-prov-invoice",
