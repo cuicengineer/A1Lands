@@ -12,6 +12,7 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
+import Popover from "@mui/material/Popover";
 import IconButton from "@mui/material/IconButton";
 import Autocomplete from "@mui/material/Autocomplete";
 import MDBox from "components/MDBox";
@@ -32,6 +33,80 @@ import api, {
 } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
 import { format, parseISO, isValid } from "date-fns";
+
+/** Description column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
+function DescriptionTableCell({ value }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "-";
+  const hasContent = text !== "-";
+  const showMore = hasContent && text.length > 20;
+
+  return (
+    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        component="div"
+        variant="body2"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 1,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          lineHeight: 1.35,
+        }}
+      >
+        {hasContent ? text : "-"}
+      </MDTypography>
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              textDecoration: "underline",
+            }}
+            aria-label="Show full description"
+          >
+            …
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+DescriptionTableCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
 
 function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases, initialData }) {
   const [form, setForm] = useState({
@@ -526,102 +601,61 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            {isEditMode ? (
-              <Autocomplete
-                size="small"
-                fullWidth
-                disableClearable
-                options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={filteredBases.find((b) => Number(b.id) === Number(form.baseIds[0])) ?? null}
-                onChange={(_, newValue) =>
-                  handleChange("baseIds", newValue != null ? [String(newValue.id)] : [])
-                }
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
+            <Autocomplete
+              multiple
+              disableCloseOnSelect
+              size="small"
+              fullWidth
+              options={filteredBases}
+              getOptionLabel={(option) => option?.name ?? ""}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={(form.baseIds || [])
+                .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
+                .filter(Boolean)}
+              onChange={(_, newValue) =>
+                handleChange(
+                  "baseIds",
+                  (newValue || []).map((b) => String(b.id))
+                )
+              }
+              disabled={!form.cmdId}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                width: "100%",
+                fontSize: "1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": {
+                  minHeight: "45px",
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+                "& .MuiInputBase-input": {
                   fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
+                  padding: "10px 12px",
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput
+                  {...params}
+                  label="Base (Multiple Selection)"
+                  required
+                  error={!!errors.baseIds}
+                  sx={inputSx}
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    key={option.id}
+                    label={option.name}
+                    size="small"
+                    sx={{ fontSize: "0.875rem" }}
+                    {...getTagProps({ index })}
                   />
-                )}
-              />
-            ) : (
-              <Autocomplete
-                multiple
-                disableCloseOnSelect
-                size="small"
-                fullWidth
-                options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={(form.baseIds || [])
-                  .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
-                  .filter(Boolean)}
-                onChange={(_, newValue) =>
-                  handleChange(
-                    "baseIds",
-                    (newValue || []).map((b) => String(b.id))
-                  )
-                }
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
-                  fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base (Multiple Selection)"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
-                  />
-                )}
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip
-                      key={option.id}
-                      label={option.name}
-                      size="small"
-                      sx={{ fontSize: "0.875rem" }}
-                      {...getTagProps({ index })}
-                    />
-                  ))
-                }
-              />
-            )}
+                ))
+              }
+            />
             {errors.baseIds && (
               <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                 {errors.baseIds}
@@ -926,11 +960,15 @@ export default function SharingFormula() {
   const handleSubmit = async (dataArray) => {
     try {
       const currentRecordId = currentRecord?.id || currentRecord?.Id;
+      const rows = Array.isArray(dataArray) ? dataArray : [];
       if (currentRecordId) {
-        // Update existing record
-        await sharingFormulaApi.update(currentRecordId, dataArray[0]);
+        if (rows.length > 1) {
+          await sharingFormulaApi.update(currentRecordId, rows[0]);
+          await sharingFormulaApi.create(rows.slice(1));
+        } else if (rows.length === 1) {
+          await sharingFormulaApi.update(currentRecordId, rows[0]);
+        }
       } else {
-        // Create new records
         await sharingFormulaApi.create(dataArray);
       }
       fetchSharingFormulas(pageNumber, pageSize);
@@ -1231,7 +1269,7 @@ export default function SharingFormula() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => {
-        return value || "-";
+        return <DescriptionTableCell value={value} />;
       },
     },
     {

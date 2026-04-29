@@ -16,6 +16,7 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
+import Popover from "@mui/material/Popover";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -28,6 +29,80 @@ import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import { format, parseISO, isValid } from "date-fns";
+
+/** Address column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
+function AddressTableCell({ value }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "-";
+  const hasContent = text !== "-";
+  const showMore = hasContent && text.length > 20;
+
+  return (
+    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        component="div"
+        variant="body2"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 1,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          lineHeight: 1.22,
+        }}
+      >
+        {hasContent ? text : "-"}
+      </MDTypography>
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.75rem",
+              lineHeight: 1.15,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              textDecoration: "underline",
+            }}
+            aria-label="Show full address"
+          >
+            …
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+AddressTableCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
 
 function TenantsForm({ open, onClose, onSubmit, initialData }) {
   const isAddMode = !initialData;
@@ -697,9 +772,14 @@ export default function Tenants() {
     { Header: "ID", accessor: "id", align: "center", width: "56px" },
     { Header: "Tenant No", accessor: "tenantNo", align: "left" },
     { Header: "Prefix", accessor: "prefix", align: "left" },
-    { Header: "Business", accessor: "businessName", align: "left" },
     { Header: "Particular Name", accessor: "ownerName", align: "left" },
-    { Header: "Address", accessor: "address", align: "left" },
+    {
+      Header: "Address",
+      accessor: "address",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <AddressTableCell value={value} />,
+    },
     { Header: "Province", accessor: "province", align: "left" },
     { Header: "City", accessor: "city", align: "left" },
     {
@@ -744,11 +824,17 @@ export default function Tenants() {
       align: "left",
       Cell: (cell) => (
         <MDButton
-          size="large"
+          size="small"
           variant="text"
           color="info"
           onClick={() => handleOpenContractsDialog(cell?.row?.original?.tenantNo)}
-          sx={{ minWidth: "auto", p: 0.5, textDecoration: "underline" }}
+          sx={{
+            minWidth: "auto",
+            p: 0.5,
+            textDecoration: "underline",
+            justifyContent: "flex-start",
+            alignItems: "flex-start",
+          }}
         >
           {cell?.value ?? 0}
         </MDButton>
@@ -761,16 +847,23 @@ export default function Tenants() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => (
         <MDButton
-          size="large"
+          size="small"
           variant="text"
           color="info"
           onClick={() => {}}
-          sx={{ minWidth: "auto", p: 0.5, textDecoration: "underline" }}
+          sx={{
+            minWidth: "auto",
+            p: 0.5,
+            textDecoration: "underline",
+            justifyContent: "flex-start",
+            alignItems: "flex-start",
+          }}
         >
           {value ?? 0}
         </MDButton>
       ),
     },
+    { Header: "Business", accessor: "businessName", align: "left" },
     {
       Header: "Status",
       accessor: "status",
@@ -789,7 +882,7 @@ export default function Tenants() {
         sx={{
           backgroundColor: "#f8f9fa",
           gap: "2px",
-          padding: "2px 2px",
+          padding: "1px 2px",
           borderRadius: "2px",
         }}
       >
@@ -850,6 +943,7 @@ export default function Tenants() {
               </MDBox>
               <MDBox
                 pt={3}
+                position="relative"
                 sx={{
                   display: "flex",
                   flexDirection: "column",
@@ -866,14 +960,26 @@ export default function Tenants() {
                     width: "100%",
                   },
                   "& .MuiTable-root th": {
-                    fontSize: "1.0rem !important",
+                    fontSize: "12px !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    padding: "5px 6px !important",
+                    lineHeight: 1.2,
                     borderBottom: "1px solid #d0d0d0",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    padding: "3px 6px !important",
+                    lineHeight: 1.22,
+                    fontSize: "0.8125rem !important",
                     borderBottom: "1px solid #e0e0e0",
+                  },
+                  "& .MuiTable-root td .MuiButton-root": {
+                    minHeight: "auto !important",
+                    lineHeight: 1.2,
+                    paddingTop: "1px",
+                    paddingBottom: "1px",
+                  },
+                  "& .MuiTable-root td .MuiIconButton-root": {
+                    padding: "2px",
                   },
                 }}
               >

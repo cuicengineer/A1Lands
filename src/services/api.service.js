@@ -147,6 +147,7 @@ const MENU_ROUTE_PREFIXES = [
   { menuName: "Dashboard", prefix: "/dashboard" },
   { menuName: "Configuration", prefix: "/configuration" },
   { menuName: "Contracts Mgmt", prefix: "/contracts" },
+  { menuName: "Accounts", prefix: "/accounts" },
 ];
 
 function toBooleanFlag(value) {
@@ -263,11 +264,17 @@ function getPermissionByMenuName(menuName) {
   const normalized = normalizeMenuName(menuName);
   if (!normalized) return null;
   const allPermissions = getStoredPermissions();
-  const row = allPermissions.find((item) => {
-    const name = String(item?.menuName ?? item?.MenuName ?? "").trim();
-    return normalizeMenuName(name) === normalized;
-  });
-  return row || null;
+  const find = (n) =>
+    allPermissions.find((item) => {
+      const name = String(item?.menuName ?? item?.MenuName ?? "").trim();
+      return normalizeMenuName(name) === n;
+    });
+  const direct = find(normalized);
+  if (direct) return direct;
+  if (normalized === "accounts" || normalized === "account") {
+    return find("accounts") || find("account");
+  }
+  return null;
 }
 
 function getCurrentMainMenuName(pathnameArg) {
@@ -285,7 +292,12 @@ function getCurrentMainMenuName(pathnameArg) {
 
 function canViewMenu(menuName) {
   const p = getPermissionByMenuName(menuName);
-  if (!p) return true;
+  if (!p) {
+    // Require an explicit permissions row for Accounts; otherwise the Sidenav shows it
+    // even when Assign Rights has not granted Account (getStoredPermissions has no match).
+    if (normalizeMenuName(menuName) === "accounts") return false;
+    return true;
+  }
   return toBooleanFlag(p?.canView ?? p?.CanView ?? p?.view ?? p?.View);
 }
 
@@ -372,6 +384,34 @@ function loggedInUserHasCategoryToken(token) {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean)
     .includes(want);
+}
+
+/** True when Contracts grid should ignore ApprovalStatus for Edit/Delete visibility (superuser OR Category Supervisor with AHQ RAC/base). */
+function contractsApprovalActionsBypassUser() {
+  if (isSuperuserUser()) return true;
+  if (!loggedInUserHasCategoryToken("category supervisor")) return false;
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return false;
+    const o = JSON.parse(raw);
+    const parts = [
+      o?.cmdName,
+      o?.CmdName,
+      o?.commandName,
+      o?.CommandName,
+      o?.rac,
+      o?.Rac,
+      o?.racName,
+      o?.RacName,
+      o?.baseName,
+      o?.BaseName,
+      o?.base,
+      o?.Base,
+    ];
+    return parts.some((v) => normalizeAccessValue(v) === "ahq");
+  } catch (e) {
+    return false;
+  }
 }
 
 /** True when session category list includes the Base-Read role (case-insensitive). */
@@ -712,6 +752,7 @@ const api = {
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  contractsApprovalActionsBypassUser,
 };
 export default api;
 export {
@@ -734,5 +775,6 @@ export {
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  contractsApprovalActionsBypassUser,
   fetchAndUpdateUserContext,
 };

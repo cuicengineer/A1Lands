@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import PropTypes from "prop-types";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -23,10 +23,11 @@ import Divider from "@mui/material/Divider";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import Autocomplete from "@mui/material/Autocomplete";
+import Popover from "@mui/material/Popover";
 import RentalPropertyForm from "./RentalPropertyForm";
 import rentalPropertiesApi from "services/api.rentalproperties.service";
 import uploadApi from "services/api.upload.service";
-import api, {
+import {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
@@ -47,6 +48,83 @@ const StatusBadge = ({ value }) => (
 
 StatusBadge.propTypes = {
   value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]).isRequired,
+};
+
+/** Location column: show up to 3 lines; click … to read full text in a popover (keeps table width stable). */
+function LocationTableCell({ value }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "-";
+  const hasContent = text !== "-";
+  const showMore = hasContent && text.length > 20;
+
+  return (
+    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        component="div"
+        variant="body2"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          lineHeight: 1.35,
+        }}
+      >
+        {hasContent ? text : "-"}
+      </MDTypography>
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              textDecoration: "underline",
+            }}
+            aria-label="Show full address"
+          >
+            …
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography
+              variant="body"
+              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", bgcolor: "black" }}
+            >
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+LocationTableCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
 };
 
 function RentalProperties() {
@@ -79,7 +157,6 @@ function RentalProperties() {
   const [totalCount, setTotalCount] = useState(0);
   const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [propertyTypes, setPropertyTypes] = useState([]);
   // Search is handled by shared DataTable (canSearch)
 
   const fetchRentalProperties = async (page = pageNumber, size = pageSize) => {
@@ -108,28 +185,6 @@ function RentalProperties() {
   useEffect(() => {
     fetchRentalProperties(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
-
-  useEffect(() => {
-    const fetchPropertyTypes = async () => {
-      try {
-        const response = await api.request("GET", "/api/PropertyTypes");
-        const data = response?.data ?? (Array.isArray(response) ? response : []);
-        // Normalize status: convert byte (0/1) to boolean for UI
-        const normalizedData = Array.isArray(data)
-          ? data.map((item) => ({
-              ...item,
-              status: item.status === 1 || item.status === true,
-            }))
-          : [];
-        console.log("Fetched PropertyTypes for rental properties:", normalizedData);
-        setPropertyTypes(normalizedData);
-      } catch (error) {
-        console.error("Error fetching property types:", error);
-        setPropertyTypes([]);
-      }
-    };
-    fetchPropertyTypes();
-  }, []);
 
   const [formOpen, setFormOpen] = useState(false);
   const [currentProperty, setCurrentProperty] = useState(null);
@@ -179,7 +234,6 @@ function RentalProperties() {
     const cmdId = property.cmdId ?? property.CmdId ?? null;
     const baseId = property.baseId ?? property.BaseId ?? null;
     const classId = property.classId ?? property.ClassId ?? null;
-    const propertyType = property.propertyType ?? property.PropertyType ?? null;
     const pId = property.pId ?? property.PId ?? property.pid ?? "";
     const uoM = property.uoM ?? property.UoM ?? property.uom ?? "";
     const area = property.area ?? property.Area ?? "";
@@ -187,13 +241,11 @@ function RentalProperties() {
     const remarks = property.remarks ?? property.Remarks ?? "";
     const status = property.status ?? property.Status ?? true;
 
-    console.log("Property propertyType:", propertyType, "Type:", typeof propertyType);
     setCurrentProperty({
       id: propertyId,
       cmdId: cmdId,
       baseId: baseId,
       classId: classId,
-      propertyType: propertyType ? Number(propertyType) : "",
       pId: pId,
       uoM: uoM,
       area: area,
@@ -226,10 +278,7 @@ function RentalProperties() {
         cmdId: formData.cmdId,
         baseId: formData.baseId,
         classId: formData.classId,
-        propertyType:
-          formData.propertyType && formData.propertyType !== ""
-            ? Number(formData.propertyType)
-            : null,
+        propertyType: null,
         pId: formData.pId,
         uoM: formData.uoM,
         area: formData.area,
@@ -239,7 +288,6 @@ function RentalProperties() {
       };
 
       console.log("Submitting rental property with data:", formattedData);
-      console.log("PropertyType in payload:", formattedData.propertyType);
 
       let createdOrUpdatedId = null;
       if (currentProperty) {
@@ -569,13 +617,6 @@ function RentalProperties() {
     { Header: "Base", accessor: "baseName", align: "left", width: "14%" },
     { Header: "Class", accessor: "className", align: "left", width: "14%" },
     {
-      Header: "Type",
-      accessor: "propertyTypeName",
-      align: "left",
-      width: "14%",
-      Cell: ({ value }) => value || "-",
-    },
-    {
       Header: "Property",
       accessor: "pId",
       align: "left",
@@ -600,7 +641,14 @@ function RentalProperties() {
         return combined || "-";
       },
     },
-    { Header: "Location", accessor: "location", align: "left", width: "22%" },
+    {
+      Header: "Location",
+      accessor: "location",
+      align: "left",
+      width: "22%",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <LocationTableCell value={value} />,
+    },
     {
       Header: "Remarks",
       accessor: "remarks",
@@ -685,18 +733,6 @@ function RentalProperties() {
       tableRows.map((row) => {
         // Normalize id (handle both camelCase and PascalCase)
         const normalizedId = row?.id ?? row?.Id;
-        // Find property type name by id (handle both camelCase and PascalCase)
-        const propertyTypeId = row.propertyType ?? row.PropertyType ?? row.propertytype;
-        const propertyTypeObj = propertyTypes.find(
-          (pt) => Number(pt.id) === Number(propertyTypeId)
-        );
-        const propertyTypeName =
-          propertyTypeObj?.name ||
-          row.propertyTypeName ||
-          row.PropertyTypeName ||
-          row.propertytypename ||
-          "";
-
         const baseReadAllowsActions = rowIsEditableOrDeletableByBase(row);
 
         return {
@@ -720,23 +756,8 @@ function RentalProperties() {
           baseName: row.baseName ?? row.BaseName ?? row.basename ?? row.baseId ?? row.BaseId ?? "",
           className:
             row.className ?? row.ClassName ?? row.classname ?? row.classId ?? row.ClassId ?? "",
-          propertyTypeName: propertyTypeName,
-          // Location with multiline display and proper wrapping (handle both camelCase and PascalCase)
-          location: (
-            <MDBox
-              component="span"
-              sx={{
-                display: "block",
-                whiteSpace: "normal",
-                wordBreak: "break-word",
-                overflowWrap: "break-word",
-                maxWidth: "100%",
-                lineHeight: 1.5,
-              }}
-            >
-              {row.location ?? row.Location ?? ""}
-            </MDBox>
-          ),
+          // Location string (clamped to 3 lines + popover in column Cell) — both camelCase and PascalCase
+          location: row.location ?? row.Location ?? "",
           actions: (
             <MDBox
               alignItems="left"
@@ -774,7 +795,7 @@ function RentalProperties() {
           ),
         };
       }),
-    [tableRows, propertyTypes, isBaseReadUser, userBaseId]
+    [tableRows, isBaseReadUser, userBaseId]
   );
 
   return (
@@ -810,13 +831,27 @@ function RentalProperties() {
             sx={{
               display: "flex",
               flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
+              height: "78vh",
+              minHeight: "560px",
               overflow: "hidden",
               "& .MuiTableContainer-root": {
                 flex: "1 1 0",
                 minHeight: 0,
                 overflow: "hidden",
+              },
+              "& .MuiTable-root": {
+                tableLayout: "fixed",
+                width: "100%",
+              },
+              "& .MuiTable-root th": {
+                fontSize: "1.0rem !important",
+                fontWeight: "700 !important",
+                padding: "8px 8px !important",
+                borderBottom: "1px solid #d0d0d0",
+              },
+              "& .MuiTable-root td": {
+                padding: "6px 8px !important",
+                borderBottom: "1px solid #e0e0e0",
               },
             }}
           >
@@ -906,7 +941,7 @@ function RentalProperties() {
                 stickyToolbarAndHeader
                 entriesPerPage={{
                   defaultValue: 20,
-                  entries: [10, 25, 50, 100],
+                  entries: [10, 25, 50, 100, 500, 1000],
                 }}
                 pageSize={pageSize}
                 onEntriesPerPageChange={(value) => {
@@ -1104,7 +1139,7 @@ function RentalProperties() {
         <DialogContent>
           {loadingActiveData ? (
             <MDBox display="flex" justifyContent="center" p={3}>
-              <CurrencyLoading size={50} />
+              <CurrencyLoading size={100} />
             </MDBox>
           ) : activeGroups.length === 0 ? (
             <MDTypography variant="body1" color="text" sx={{ p: 2 }}>

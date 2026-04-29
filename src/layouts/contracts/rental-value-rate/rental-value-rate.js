@@ -332,15 +332,19 @@ function RentalValueRateForm({
         type: 1, // Static value, not displayed to user
       };
 
+      const comboPayloads = (form.baseIds || []).flatMap((baseId) =>
+        (form.classIds || []).map((classId) => ({
+          ...payloadBase,
+          baseId: Number(baseId),
+          classId: Number(classId),
+        }))
+      );
+      if (comboPayloads.length === 0) return;
       const payloadToSubmit = isEditMode
-        ? { ...payloadBase, baseId: Number(form.baseIds[0]), classId: Number(form.classIds[0]) }
-        : (form.baseIds || []).flatMap((baseId) =>
-            (form.classIds || []).map((classId) => ({
-              ...payloadBase,
-              baseId: Number(baseId),
-              classId: Number(classId),
-            }))
-          );
+        ? comboPayloads.length === 1
+          ? comboPayloads[0]
+          : comboPayloads
+        : comboPayloads;
 
       const result = await onSubmit(payloadToSubmit);
 
@@ -555,128 +559,87 @@ function RentalValueRateForm({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            {isEditMode ? (
-              <Autocomplete
-                size="small"
-                fullWidth
-                disableClearable
-                options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={filteredBases.find((b) => Number(b.id) === Number(form.baseIds[0])) ?? null}
-                onChange={(_, newValue) =>
-                  handleChange("baseIds", newValue != null ? [String(newValue.id)] : [])
+            <Autocomplete
+              multiple
+              disableCloseOnSelect
+              size="small"
+              fullWidth
+              options={baseAutocompleteOptionsAddMode}
+              filterOptions={(options, state) => {
+                const input = (state.inputValue || "").toLowerCase().trim();
+                const allOpt = options.find((o) => String(o.id) === "__all__");
+                const rest = options.filter((o) => String(o.id) !== "__all__");
+                const filtered = !input
+                  ? rest
+                  : rest.filter((o) =>
+                      String(o.name || "")
+                        .toLowerCase()
+                        .includes(input)
+                    );
+                return allOpt ? [allOpt, ...filtered] : filtered;
+              }}
+              getOptionLabel={(option) => option?.name ?? ""}
+              isOptionEqualToValue={(a, b) => {
+                if (String(a?.id) === "__all__" || String(b?.id) === "__all__") {
+                  return String(a?.id) === "__all__" && String(b?.id) === "__all__";
                 }
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
-                  fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
-                  />
-                )}
-              />
-            ) : (
-              <Autocomplete
-                multiple
-                disableCloseOnSelect
-                size="small"
-                fullWidth
-                options={baseAutocompleteOptionsAddMode}
-                filterOptions={(options, state) => {
-                  const input = (state.inputValue || "").toLowerCase().trim();
-                  const allOpt = options.find((o) => String(o.id) === "__all__");
-                  const rest = options.filter((o) => String(o.id) !== "__all__");
-                  const filtered = !input
-                    ? rest
-                    : rest.filter((o) =>
-                        String(o.name || "")
-                          .toLowerCase()
-                          .includes(input)
-                      );
-                  return allOpt ? [allOpt, ...filtered] : filtered;
-                }}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => {
-                  if (String(a?.id) === "__all__" || String(b?.id) === "__all__") {
-                    return String(a?.id) === "__all__" && String(b?.id) === "__all__";
-                  }
-                  return Number(a?.id) === Number(b?.id);
-                }}
-                value={(form.baseIds || [])
-                  .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
-                  .filter(Boolean)}
-                onChange={(_, newValue) => {
-                  const raw = newValue || [];
-                  if (raw.some((o) => String(o.id) === "__all__")) {
-                    const allIds = filteredBases.map((base) => String(base.id));
-                    const allSelected =
-                      allIds.length > 0 && allIds.every((id) => form.baseIds.includes(id));
-                    handleChange("baseIds", allSelected ? [] : allIds);
-                    return;
-                  }
-                  handleChange(
-                    "baseIds",
-                    raw.map((b) => String(b.id))
-                  );
-                }}
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
-                  fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base (Multiple Selection)"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
-                  />
-                )}
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip
-                      key={option.id}
-                      label={option.name}
-                      size="small"
-                      sx={{ fontSize: "0.875rem" }}
-                      {...getTagProps({ index })}
-                    />
-                  ))
+                return Number(a?.id) === Number(b?.id);
+              }}
+              value={(form.baseIds || [])
+                .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
+                .filter(Boolean)}
+              onChange={(_, newValue) => {
+                const raw = newValue || [];
+                if (raw.some((o) => String(o.id) === "__all__")) {
+                  const allIds = filteredBases.map((base) => String(base.id));
+                  const allSelected =
+                    allIds.length > 0 && allIds.every((id) => form.baseIds.includes(id));
+                  handleChange("baseIds", allSelected ? [] : allIds);
+                  return;
                 }
-              />
-            )}
+                handleChange(
+                  "baseIds",
+                  raw.map((b) => String(b.id))
+                );
+              }}
+              disabled={!form.cmdId}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                width: "100%",
+                fontSize: "1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": {
+                  minHeight: "45px",
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+                "& .MuiInputBase-input": {
+                  fontSize: "1rem",
+                  padding: "10px 12px",
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput
+                  {...params}
+                  label="Base (Multiple Selection)"
+                  required
+                  error={!!errors.baseIds}
+                  sx={inputSx}
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    key={option.id}
+                    label={option.name}
+                    size="small"
+                    sx={{ fontSize: "0.875rem" }}
+                    {...getTagProps({ index })}
+                  />
+                ))
+              }
+            />
             {errors.baseIds && (
               <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                 {errors.baseIds}
@@ -960,11 +923,24 @@ export default function RentalValueRate() {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
   const isSuperUser =
     String(getLoggedInUsername() || "")
       .trim()
       .toLowerCase()
       .replace(/\s+/g, "") === "superuser";
+
+  const handleToggleGroup = (groupKey) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  };
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -1185,6 +1161,23 @@ export default function RentalValueRate() {
   const handleSubmit = async (data) => {
     try {
       if (currentRecord && currentRecord.id) {
+        if (Array.isArray(data) && data.length > 0) {
+          await rentalValueRateApi.update(currentRecord.id, data[0]);
+          const createdIds = [];
+          for (let i = 1; i < data.length; i += 1) {
+            const r = await rentalValueRateApi.create(data[i]);
+            const nid =
+              r?.Id ||
+              r?.id ||
+              r?.data?.Id ||
+              r?.data?.id ||
+              (Array.isArray(r?.data) ? r.data[0]?.Id || r.data[0]?.id : null);
+            if (nid) createdIds.push(nid);
+          }
+          await fetchRentalValueRates(pageNumber, pageSize);
+          handleCloseForm();
+          return { ids: [currentRecord.id, ...createdIds], id: currentRecord.id };
+        }
         await rentalValueRateApi.update(currentRecord.id, data);
       } else {
         const payloads = Array.isArray(data) ? data : [data];
@@ -1284,24 +1277,77 @@ export default function RentalValueRate() {
       accessor: "actions",
       align: "center",
       width: "72px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          // eslint-disable-next-line react/prop-types
+          const groupKey = row.original.groupKey;
+          const isExpanded = expandedGroups.has(groupKey);
+          return (
+            <MDBox
+              alignItems="left"
+              justifyContent="left"
+              sx={{
+                backgroundColor: "#f8f9fa",
+                gap: "2px",
+                padding: "2px 2px",
+                borderRadius: "2px",
+              }}
+            >
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleToggleGroup(groupKey)}
+                title={isExpanded ? "Collapse" : "Expand"}
+                sx={{ padding: "1px" }}
+              >
+                <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
+              </IconButton>
+            </MDBox>
+          );
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.actions;
+      },
     },
     {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
       width: "60px",
-    },
-    {
-      Header: "S.No",
-      accessor: "sno",
-      align: "center",
-      width: "60px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const rowId = row.original.id ?? row.original.Id;
-        const index = tableRows.findIndex((r) => (r.id ?? r.Id) === rowId);
-        return (pageNumber - 1) * pageSize + index + 1;
+        if (row.original.isGroupRow) {
+          return "";
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.attachments;
+      },
+    },
+    {
+      Header: "RAC",
+      accessor: "cmdName",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
+        if (!cmdId) return value || "-";
+        const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
+        return cmdItem ? cmdItem.name : value || "-";
+      },
+    },
+    {
+      Header: "Base",
+      accessor: "baseName",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
+        if (!baseId) return value || "-";
+        const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
+        return baseItem ? baseItem.name : value || "-";
       },
     },
     {
@@ -1334,35 +1380,15 @@ export default function RentalValueRate() {
       },
     },
     {
-      Header: "RAC",
-      accessor: "cmdName",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
-        if (!cmdId) return value || "-";
-        const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
-        return cmdItem ? cmdItem.name : value || "-";
-      },
-    },
-    {
-      Header: "Base",
-      accessor: "baseName",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
-        if (!baseId) return value || "-";
-        const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
-        return baseItem ? baseItem.name : value || "-";
-      },
-    },
-    {
       Header: "Class",
       accessor: "className",
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          return value || "-";
+        }
         const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
         if (!classId) return value || "-";
         const classItem = classes.find((c) => Number(c.id) === Number(classId));
@@ -1374,7 +1400,16 @@ export default function RentalValueRate() {
       accessor: "rate",
       align: "right",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? `${Number(value).toLocaleString()}%` : "-"),
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          const r = row?.original?.rate ?? row?.original?.Rate;
+          if (r === null || r === undefined || r === "") return "";
+          const n = Number(r);
+          return Number.isFinite(n) ? `${n.toLocaleString()}%` : "";
+        }
+        return value ? `${Number(value).toLocaleString()}%` : "-";
+      },
     },
     { Header: "Description", accessor: "description", align: "left" },
     {
@@ -1382,109 +1417,244 @@ export default function RentalValueRate() {
       accessor: "status",
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <StatusBadge value={value} />,
+      Cell: ({ value, row }) => {
+        /* eslint-disable react/prop-types -- react-table row.original */
+        if (row.original.isExpandedRow) {
+          const statusValue = row.original.status;
+          return <StatusBadge value={statusValue} />;
+        }
+        if (
+          row.original.isGroupRow &&
+          row.original.statuses &&
+          Array.isArray(row.original.statuses)
+        ) {
+          if (row.original.statuses.length > 1) {
+            return "";
+          }
+          if (row.original.statuses.length === 1) {
+            return <StatusBadge value={row.original.statuses[0]} />;
+          }
+          return "";
+        }
+        /* eslint-enable react/prop-types */
+        return <StatusBadge value={value} />;
+      },
     },
   ];
 
-  const computedRows = tableRows.map((row, index) => {
-    // Normalize id and foreign keys (handle both camelCase and PascalCase)
-    const normalizedId = row?.id ?? row?.Id;
-    const sno = (pageNumber - 1) * pageSize + index + 1;
-    const classId = row.classId ?? row.ClassId;
-    const cmdId = row.cmdId ?? row.CmdId;
-    const baseId = row.baseId ?? row.BaseId;
-
-    const classItem = classes.find((c) => Number(c.id) === Number(classId));
-    const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
-    const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
-
-    // Check IsAttachment field (handle both camelCase and PascalCase)
-    const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
-    const countValue =
-      row?.attachmentCount ??
-      row?.attachmentsCount ??
-      row?.filesCount ??
-      row?.AttachmentCount ??
-      row?.AttachmentsCount ??
-      row?.FilesCount;
-
-    // Determine if attachments exist
-    const hasAttachmentData =
-      rawIsAttachment === true ||
-      rawIsAttachment === 1 ||
-      rawIsAttachment === "1" ||
-      String(rawIsAttachment || "")
-        .trim()
-        .toLowerCase() === "true" ||
-      Number(countValue || 0) > 0;
-
-    return {
-      ...row,
-      id: normalizedId,
-      sno: sno,
-      cmdId: cmdId,
-      baseId: baseId,
-      classId: classId,
-      cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
-      baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
-      className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
-      rate: row.rate ?? row.Rate ?? 0,
-      description: row.description ?? row.Description ?? "",
-      status: row.status ?? row.Status ?? true,
-      applicableDate:
-        row.applicableDate ??
-        row.ApplicableDate ??
-        row.applicationDate ??
-        row.ApplicationDate ??
-        "",
-      attachments: (
-        <IconButton
-          size="small"
-          color={hasAttachmentData ? "success" : "error"}
-          onClick={() => handleOpenAttachments(normalizedId)}
-          title="View Attachments"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>visibility</Icon>
-        </IconButton>
-      ),
-      actions: (
-        <MDBox
-          alignItems="left"
-          justifyContent="left"
-          sx={{
-            backgroundColor: "#f8f9fa",
-            gap: "2px",
-            padding: "2px 2px",
-            borderRadius: "2px",
-          }}
-        >
-          {canEditCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditRecord(normalizedId)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-          )}
-          {canDeleteCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteRecord(normalizedId)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
-          )}
-        </MDBox>
-      ),
+  const computedRows = useMemo(() => {
+    const groupKeyOf = (r) => {
+      const cmdId = r.cmdId ?? r.CmdId ?? "";
+      const baseId = r.baseId ?? r.BaseId ?? "";
+      const rateVal = r.rate ?? r.Rate;
+      let rateSeg = "";
+      if (rateVal !== null && rateVal !== undefined && rateVal !== "") {
+        const n = Number(rateVal);
+        rateSeg = Number.isFinite(n) ? String(n) : String(rateVal).trim();
+      }
+      return `${cmdId}|${baseId}|${rateSeg}`;
     };
-  });
+
+    const enrichedRows = tableRows.map((row, index) => {
+      // Normalize id and foreign keys (handle both camelCase and PascalCase)
+      const normalizedId = row?.id ?? row?.Id;
+      const sno = (pageNumber - 1) * pageSize + index + 1;
+      const classId = row.classId ?? row.ClassId;
+      const cmdId = row.cmdId ?? row.CmdId;
+      const baseId = row.baseId ?? row.BaseId;
+
+      const classItem = classes.find((c) => Number(c.id) === Number(classId));
+      const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
+      const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
+
+      // Check IsAttachment field (handle both camelCase and PascalCase)
+      const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
+      const countValue =
+        row?.attachmentCount ??
+        row?.attachmentsCount ??
+        row?.filesCount ??
+        row?.AttachmentCount ??
+        row?.AttachmentsCount ??
+        row?.FilesCount;
+
+      // Determine if attachments exist
+      const hasAttachmentData =
+        rawIsAttachment === true ||
+        rawIsAttachment === 1 ||
+        rawIsAttachment === "1" ||
+        String(rawIsAttachment || "")
+          .trim()
+          .toLowerCase() === "true" ||
+        Number(countValue || 0) > 0;
+
+      return {
+        ...row,
+        id: normalizedId,
+        sno: sno,
+        cmdId: cmdId,
+        baseId: baseId,
+        classId: classId,
+        cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
+        baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
+        className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
+        rate: row.rate ?? row.Rate ?? 0,
+        description: row.description ?? row.Description ?? "",
+        status: row.status ?? row.Status ?? true,
+        applicableDate:
+          row.applicableDate ??
+          row.ApplicableDate ??
+          row.applicationDate ??
+          row.ApplicationDate ??
+          "",
+        attachments: (
+          <IconButton
+            size="small"
+            color={hasAttachmentData ? "success" : "error"}
+            onClick={() => handleOpenAttachments(normalizedId)}
+            title="View Attachments"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>visibility</Icon>
+          </IconButton>
+        ),
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            {canEditCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditRecord(normalizedId)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDeleteCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteRecord(normalizedId)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
+          </MDBox>
+        ),
+      };
+    });
+
+    const byKey = new Map();
+    enrichedRows.forEach((r) => {
+      const k = groupKeyOf(r);
+      if (!byKey.has(k)) {
+        byKey.set(k, []);
+      }
+      byKey.get(k).push(r);
+    });
+
+    const sortedKeys = Array.from(byKey.keys()).sort((ka, kb) => {
+      const a = byKey.get(ka)[0];
+      const b = byKey.get(kb)[0];
+      const d = String(a.applicableDate || "").localeCompare(String(b.applicableDate || ""));
+      if (d !== 0) return d;
+      return String(a.cmdName || "").localeCompare(String(b.cmdName || ""));
+    });
+
+    const result = [];
+    let topSno = 0;
+    sortedKeys.forEach((gk) => {
+      const gRows = byKey.get(gk);
+      const snoValue = (pageNumber - 1) * pageSize + ++topSno;
+
+      if (gRows.length === 1) {
+        const r = gRows[0];
+        result.push({
+          ...r,
+          sno: snoValue,
+          isGroupRow: false,
+          isExpandedRow: false,
+        });
+        return;
+      }
+
+      const firstRow = gRows[0];
+      const isExpanded = expandedGroups.has(gk);
+      const statusesSet = new Set();
+      gRows.forEach((gr) => {
+        const sv = gr.status !== undefined && gr.status !== null ? Boolean(gr.status) : null;
+        if (sv !== null) statusesSet.add(sv);
+      });
+      const statusArray = Array.from(statusesSet).sort((a, b) => {
+        if (a === b) return 0;
+        return a ? -1 : 1;
+      });
+
+      const classNameSet = new Set();
+      gRows.forEach((gr) => {
+        const n = gr.className || "";
+        if (n) classNameSet.add(n);
+      });
+      const classNamesJoined = Array.from(classNameSet).sort().join(", ");
+
+      let uniformGroupRate = null;
+      const rateTokens = gRows.map((gr) => {
+        const rv = gr.rate ?? gr.Rate;
+        if (rv === null || rv === undefined || rv === "") return "__E__";
+        const n = Number(rv);
+        return Number.isFinite(n) ? String(n) : "__BAD__";
+      });
+      if (!rateTokens.includes("__BAD__")) {
+        const uniq = new Set(rateTokens);
+        if (uniq.size === 1 && !uniq.has("__E__")) {
+          uniformGroupRate = Number([...uniq][0]);
+        }
+      }
+
+      const safeId = gk.replace(/[^a-zA-Z0-9_|.-]/g, "_");
+      result.push({
+        ...firstRow,
+        id: `group-${safeId}`,
+        sno: snoValue,
+        className: classNamesJoined,
+        classId: null,
+        ClassId: null,
+        rate: uniformGroupRate,
+        Rate: uniformGroupRate,
+        isGroupRow: true,
+        isExpandedRow: false,
+        groupKey: gk,
+        groupRows: gRows,
+        statuses: statusArray,
+        status: statusArray.length === 1 ? statusArray[0] : statusArray,
+      });
+
+      if (isExpanded) {
+        gRows.forEach((row) => {
+          result.push({
+            ...row,
+            sno: "",
+            isGroupRow: false,
+            isExpandedRow: true,
+            groupKey: gk,
+          });
+        });
+      }
+    });
+
+    return result;
+  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups]);
 
   return (
     <DashboardLayout>
@@ -1574,7 +1744,7 @@ export default function RentalValueRate() {
                   stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
-                    entries: [10, 25, 50, 100],
+                    entries: [10, 25, 50, 100, 500, 1000],
                   }}
                   pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {
@@ -1585,6 +1755,7 @@ export default function RentalValueRate() {
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
+                  autoResetFilters={false}
                   exportFileName="Rental-Value-Rate"
                   exportCellFormatter={exportCellFormatter}
                 />

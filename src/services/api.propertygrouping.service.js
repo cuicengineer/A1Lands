@@ -78,12 +78,18 @@ function getByGroup(id, pageNumber = 1, pageSize = 100) {
   return requestWithPagination("GET", `/api/PropertyGroup/ByGroup/${id}?${qs}`);
 }
 
-function notGroupedProperties(cmdId, baseId) {
-  const params = new URLSearchParams({
+function notGroupedProperties(cmdId, baseId, classId) {
+  const query = new URLSearchParams({
     cmdId: String(cmdId),
     baseId: String(baseId),
-  }).toString();
-  return requestWithPagination("GET", `/api/PropertyGroup/NotGroupedProperties?${params}`);
+  });
+  if (classId !== undefined && classId !== null && classId !== "") {
+    query.set("classId", String(classId));
+  }
+  return requestWithPagination(
+    "GET",
+    `/api/PropertyGroup/NotGroupedProperties?${query.toString()}`
+  );
 }
 
 async function removePropertyFromGroup(linkingId) {

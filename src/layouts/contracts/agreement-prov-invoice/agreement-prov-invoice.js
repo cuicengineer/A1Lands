@@ -276,7 +276,6 @@ export default function AgreementProvInvoice() {
 
   // Generate PDF for a contract row
   const generatePDF = (rowData) => {
-    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -515,12 +514,7 @@ export default function AgreementProvInvoice() {
       buildPDFContent(resolvedTenantAddress);
       const pdfBlob = doc.output("blob");
       const pdfUrl = URL.createObjectURL(pdfBlob);
-
-      if (previewWindow) {
-        previewWindow.location.href = pdfUrl;
-      } else {
-        window.open(pdfUrl, "_blank", "noopener,noreferrer");
-      }
+      window.open(pdfUrl, "_blank", "noopener,noreferrer");
 
       setTimeout(() => {
         URL.revokeObjectURL(pdfUrl);
@@ -1054,13 +1048,27 @@ export default function AgreementProvInvoice() {
                   sx={{
                     display: "flex",
                     flexDirection: "column",
-                    height: "70vh",
-                    minHeight: "400px",
+                    height: "78vh",
+                    minHeight: "560px",
                     overflow: "hidden",
                     "& .MuiTableContainer-root": {
                       flex: "1 1 0",
                       minHeight: 0,
                       overflow: "hidden",
+                    },
+                    "& .MuiTable-root": {
+                      tableLayout: "fixed",
+                      width: "100%",
+                    },
+                    "& .MuiTable-root th": {
+                      fontSize: "1.0rem !important",
+                      fontWeight: "700 !important",
+                      padding: "8px 8px !important",
+                      borderBottom: "1px solid #d0d0d0",
+                    },
+                    "& .MuiTable-root td": {
+                      padding: "6px 8px !important",
+                      borderBottom: "1px solid #e0e0e0",
                     },
                   }}
                 >

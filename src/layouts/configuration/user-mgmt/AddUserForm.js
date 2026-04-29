@@ -174,12 +174,13 @@ function AddUserForm({
         `/api/UserPermissions/GetInfo?pakNo=${encodeURIComponent(pak)}`
       );
       const d = data && typeof data === "object" ? data : {};
-      const name = d.name ?? d.Name;
-      const rank = d.rank ?? d.Rank;
+      const p = d.data && typeof d.data === "object" ? d.data : d;
+      const toField = (v) => (v == null ? "" : String(v).trim());
       setNewRowDraft((prev) => ({
         ...prev,
-        ...(name != null && String(name).trim() ? { name: String(name).trim() } : {}),
-        ...(rank != null && String(rank).trim() ? { rank: String(rank).trim() } : {}),
+        name: toField(p.full_NAME),
+        rank: toField(p.currentrank),
+        appoint: toField(p.appment),
       }));
     } catch (e) {
       console.error("GetInfo failed", e);

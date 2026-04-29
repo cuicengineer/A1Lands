@@ -70,6 +70,7 @@ import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-ra
 import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
 import SummaryOfA1Activities from "layouts/dashboard/summary";
+import BankAccounts from "layouts/accounts/bank-account/bank-account";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -191,7 +192,7 @@ const routes = [
         name: "Rental Value Rate",
         key: "rental-value-rate",
         icon: <Icon fontSize="small">monetization_on</Icon>,
-        route: "/contracts/rental-value-rate",
+        route: "/configuration/rental-value-rate",
         component: <RentalValueRate />,
       },
       {
@@ -199,7 +200,7 @@ const routes = [
         name: "Govt Share Rate",
         key: "govt-share-rate",
         icon: <Icon fontSize="small">account_balance</Icon>,
-        route: "/contracts/govt-share-rate",
+        route: "/configuration/govt-share-rate",
         component: <GovtShareRate />,
       },
       {
@@ -207,8 +208,16 @@ const routes = [
         name: "Sharing Formula",
         key: "sharing-formula",
         icon: <Icon fontSize="small">schema</Icon>,
-        route: "/contracts/sharing-formula",
+        route: "/configuration/sharing-formula",
         component: <SharingFormula />,
+      },
+      {
+        type: "collapse",
+        name: "Tenants",
+        key: "tenants",
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/configuration/tenants",
+        component: <Tenants />,
       },
       // {
       //   type: "collapse",
@@ -272,14 +281,6 @@ const routes = [
         route: "/contracts/agreement-prov-invoice",
         component: <AgreementProvInvoice />,
       },
-      {
-        type: "collapse",
-        name: "Tenants",
-        key: "tenants",
-        icon: <Icon fontSize="small">people</Icon>,
-        route: "/contracts/tenants",
-        component: <Tenants />,
-      },
       // {
       //   type: "collapse",
       //   name: "Report",
@@ -288,6 +289,22 @@ const routes = [
       //   route: "/contracts/report",
       //   component: <ContractsReport />,
       // },
+    ],
+  },
+  {
+    type: "collapse",
+    name: "Accounts",
+    key: "accounts",
+    icon: <Icon fontSize="small">account_balance_wallet</Icon>,
+    collapse: [
+      {
+        type: "collapse",
+        name: "Institutional Accts",
+        key: "accounts-bank-accounts",
+        icon: <Icon fontSize="small">account_balance</Icon>,
+        route: "/accounts/bank-accounts",
+        component: <BankAccounts />,
+      },
     ],
   },
 ];

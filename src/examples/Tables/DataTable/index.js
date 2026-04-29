@@ -357,6 +357,8 @@ function DataTable({
   stickyToolbarAndHeader,
   stickyBodyMinHeight,
   stickyBodyMaxHeight,
+  /** When true with stickyToolbarAndHeader, table body grows with row count (no inner flex clip). Parent should use a fixed height + overflow auto for scrolling. */
+  autoHeight,
   contentFitTable,
   onVisibleRowCountChange,
   autoResetFilters,
@@ -371,7 +373,7 @@ function DataTable({
   const defaultValue = entriesPerPageConfig.defaultValue ? entriesPerPageConfig.defaultValue : 20;
   const entries = entriesPerPageConfig.entries
     ? entriesPerPageConfig.entries.map((el) => el.toString())
-    : ["5", "10", "15", "20", "25"];
+    : ["5", "10", "15", "20", "50", "100", "500", "1000"];
   const baseColumns = useMemo(() => table.columns, [table]);
 
   // Function to check if a column is Actions column
@@ -936,8 +938,15 @@ function DataTable({
   if (stickyToolbarAndHeader) {
     tableContainerSx.display = "flex";
     tableContainerSx.flexDirection = "column";
-    tableContainerSx.height = "100%";
-    tableContainerSx.overflow = "hidden";
+    if (autoHeight) {
+      tableContainerSx.height = "auto";
+      tableContainerSx.minHeight = 0;
+      tableContainerSx.overflow = "visible";
+      tableContainerSx.flexShrink = 0;
+    } else {
+      tableContainerSx.height = "100%";
+      tableContainerSx.overflow = "hidden";
+    }
   }
 
   return (
@@ -1221,24 +1230,33 @@ function DataTable({
       </Menu>
       {stickyToolbarAndHeader ? (
         <MDBox
-          sx={{
-            flex: "1 1 0",
-            minHeight: stickyBodyMinHeight || "300px",
-            maxHeight: stickyBodyMaxHeight || "none",
-            overflowX: "scroll",
-            overflowY: "scroll",
-            scrollbarGutter: "stable both-edges",
-            scrollbarWidth: "thin",
-            scrollbarColor: "#333333 transparent",
-            "&::-webkit-scrollbar": { width: "8px", height: "8px" },
-            "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
-            "&::-webkit-scrollbar-thumb": {
-              backgroundColor: "#333333",
-              borderRadius: "10px",
-              "&:hover": { backgroundColor: "#1a1a1a" },
-            },
-            "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
-          }}
+          sx={
+            autoHeight
+              ? {
+                  flex: "0 0 auto",
+                  width: "100%",
+                  minHeight: 0,
+                  overflow: "visible",
+                }
+              : {
+                  flex: "1 1 0",
+                  minHeight: stickyBodyMinHeight || "300px",
+                  maxHeight: stickyBodyMaxHeight || "none",
+                  overflowX: "scroll",
+                  overflowY: "scroll",
+                  scrollbarGutter: "stable both-edges",
+                  scrollbarWidth: "thin",
+                  scrollbarColor: "#333333 transparent",
+                  "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+                  "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+                  "&::-webkit-scrollbar-thumb": {
+                    backgroundColor: "#333333",
+                    borderRadius: "10px",
+                    "&:hover": { backgroundColor: "#1a1a1a" },
+                  },
+                  "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+                }
+          }
         >
           <Table
             {...getTableProps()}
@@ -1493,6 +1511,7 @@ DataTable.defaultProps = {
   stickyToolbarAndHeader: false,
   stickyBodyMinHeight: undefined,
   stickyBodyMaxHeight: undefined,
+  autoHeight: false,
   contentFitTable: false,
   onVisibleRowCountChange: undefined,
   autoResetFilters: true,
@@ -1538,6 +1557,7 @@ DataTable.propTypes = {
   stickyToolbarAndHeader: PropTypes.bool,
   stickyBodyMinHeight: PropTypes.string,
   stickyBodyMaxHeight: PropTypes.string,
+  autoHeight: PropTypes.bool,
   contentFitTable: PropTypes.bool,
   onVisibleRowCountChange: PropTypes.func,
   autoResetFilters: PropTypes.bool,

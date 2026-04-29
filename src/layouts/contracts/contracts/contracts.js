@@ -42,6 +42,7 @@ import api, {
   canDeleteCurrentMenu,
   getActionBy,
   getUserIPAddress,
+  contractsApprovalActionsBypassUser,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import uploadApi from "services/api.upload.service";
@@ -59,11 +60,37 @@ import PropTypes from "prop-types";
 import jsPDF from "jspdf";
 import { format, parseISO, isValid } from "date-fns";
 
+/** API contract payload without identity — used to open the form as “New Contract” with prefills (clone). */
+function stripContractForClone(contract) {
+  if (!contract || typeof contract !== "object") return null;
+  const c = { ...contract };
+  delete c.Id;
+  delete c.id;
+  c.ContractNo = "";
+  c.contractNo = "";
+  const terms = c.ContractRiseTerms || c.contractRiseTerms;
+  if (Array.isArray(terms)) {
+    const mapped = terms.map((t) => {
+      if (!t || typeof t !== "object") return t;
+      const m = { ...t };
+      delete m.Id;
+      delete m.id;
+      m.ContractID = null;
+      m.contractID = null;
+      return m;
+    });
+    c.ContractRiseTerms = mapped;
+    c.contractRiseTerms = mapped;
+  }
+  return c;
+}
+
 function ContractsForm({
   open,
   onClose,
   onSubmit,
   initialData,
+  isClone = false,
   commands,
   bases,
   classes,
@@ -531,8 +558,8 @@ function ContractsForm({
       if (field === "contractStartDate") {
         updated.commercialOperationDate = value || "";
       }
-      // In New Contract, auto-fill Business Name when Tenant No is selected.
-      if (field === "tenantNo" && !initialData) {
+      // In New (or clone) mode, auto-fill Business Name when Tenant No is selected.
+      if (field === "tenantNo" && (!initialData || isClone)) {
         const selectedTenant = tenants.find(
           (t) => String(t?.tenantNo ?? "").trim() === String(value || "").trim()
         );
@@ -1352,7 +1379,7 @@ function ContractsForm({
               fontWeight="bold"
               sx={darkMode ? { color: "#ffffff !important" } : {}}
             >
-              {initialData ? "Edit Contract" : "New Contract"}
+              {initialData && !isClone ? "Edit Contract" : "New Contract"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
               <MDInput
@@ -2100,7 +2127,7 @@ function ContractsForm({
 
             <Grid item xs={12} sm={6} md={4}>
               <MDInput
-                label="DPC (%)"
+                label="DPC per day (%)"
                 type="number"
                 value={form.dpc}
                 onChange={(e) => handleChange("dpc", e.target.value)}
@@ -2113,7 +2140,7 @@ function ContractsForm({
 
             <Grid item xs={12}>
               <MDInput
-                label="Signatory"
+                label="Representative"
                 type="text"
                 value={form.signatory}
                 onChange={(e) => handleChange("signatory", e.target.value)}
@@ -3158,6 +3185,7 @@ ContractsForm.propTypes = {
   onClose: PropTypes.func.isRequired,
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
+  isClone: PropTypes.bool,
   commands: PropTypes.array.isRequired,
   bases: PropTypes.array.isRequired,
   classes: PropTypes.array.isRequired,
@@ -3172,11 +3200,12 @@ export default function Contracts() {
   const { darkMode } = controller;
   const [openForm, setOpenForm] = useState(false);
   const [currentContract, setCurrentContract] = useState(null);
+  const [isCloneMode, setIsCloneMode] = useState(false);
   const [rows, setRows] = useState([]);
 
   // Server-side pagination state (backend now paginates)
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
   const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -3218,7 +3247,7 @@ export default function Contracts() {
   const [baseFilterIds, setBaseFilterIds] = useState([]);
   const [classFilterIds, setClassFilterIds] = useState([]);
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [tableArchiveView, setTableArchiveView] = useState("all");
+  const [contractsTableFilter, setContractsTableFilter] = useState("all");
   // Increment to refetch as-of values (used on first load, send button, not on date-only change).
   const [asOfRefreshToken, setAsOfRefreshToken] = useState(1);
   // Holds only the columns that should be overridden "as of" a selected date.
@@ -3547,7 +3576,9 @@ export default function Contracts() {
         if (!asOfRefreshToken) return; // no refresh requested yet
         if (!asOfDate) {
           if (!isMounted) return;
-          setAsOfOverrideMap({ byId: new Map(), byContractNo: new Map(), asOfDate: "" });
+          const cleared = { byId: new Map(), byContractNo: new Map(), asOfDate: "" };
+          asOfOverrideMapRef.current = cleared;
+          setAsOfOverrideMap(cleared);
           return;
         }
 
@@ -3567,6 +3598,7 @@ export default function Contracts() {
 
         if (!isMounted) return;
         const nextOverrideState = { byId, byContractNo, asOfDate };
+        asOfOverrideMapRef.current = nextOverrideState;
         setAsOfOverrideMap(nextOverrideState);
 
         // Merge into currently visible rows without replacing other fields.
@@ -3578,7 +3610,9 @@ export default function Contracts() {
         console.error("Error fetching ActiveByAsOfDate:", e);
         if (!isMounted) return;
         // Keep existing grid, just clear overrides (no destructive reload).
-        setAsOfOverrideMap({ byId: new Map(), byContractNo: new Map(), asOfDate: "" });
+        const cleared = { byId: new Map(), byContractNo: new Map(), asOfDate: "" };
+        asOfOverrideMapRef.current = cleared;
+        setAsOfOverrideMap(cleared);
       }
     };
 
@@ -3595,6 +3629,7 @@ export default function Contracts() {
 
   const handleOpenForm = () => {
     if (!canCreateCurrentMenu()) return;
+    setIsCloneMode(false);
     setCurrentContract(null);
     setOpenForm(true);
   };
@@ -3602,6 +3637,7 @@ export default function Contracts() {
   const handleCloseForm = () => {
     setOpenForm(false);
     setCurrentContract(null);
+    setIsCloneMode(false);
   };
 
   const handleEditContract = async (id) => {
@@ -3610,11 +3646,37 @@ export default function Contracts() {
       // Fetch contract data from API by ID instead of using local storage/table data
       setLoading(true);
       const contract = await api.get("Contracts", id);
+      setIsCloneMode(false);
       setCurrentContract(contract);
       setOpenForm(true);
     } catch (error) {
       console.error("Error fetching contract:", error);
       alert("Failed to load contract data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloneContractFromDetails = async () => {
+    if (!canCreateCurrentMenu()) return;
+    const row = selectedContractDetails;
+    if (!row) return;
+    const contractId = row?.Id ?? row?.id;
+    if (!contractId) {
+      alert("Cannot clone: contract has no ID.");
+      return;
+    }
+    try {
+      setLoading(true);
+      const contract = await api.get("Contracts", contractId);
+      const stripped = stripContractForClone(contract);
+      setIsCloneMode(true);
+      setCurrentContract(stripped);
+      setOpenForm(true);
+      setDetailsDialogOpen(false);
+    } catch (error) {
+      console.error("Error loading contract to clone:", error);
+      alert("Failed to load contract. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -4045,7 +4107,22 @@ export default function Contracts() {
           : govt > paf
           ? "Viable"
           : "Unviable";
-        return <Chip label={label} size="small" color={label === "Viable" ? "success" : "error"} />;
+        return (
+          <Chip
+            label={
+              <MDBox component="span" display="inline" sx={{ color: "#ffffff !important" }}>
+                {label}
+              </MDBox>
+            }
+            size="small"
+            color={label === "Viable" ? "success" : "error"}
+            sx={{
+              // DataTable also forces .MuiChip-label — keep root + label in sync where cascade allows
+              color: "#ffffff !important",
+              "& .MuiChip-label": { color: "#ffffff !important" },
+            }}
+          />
+        );
       },
     },
     {
@@ -4250,7 +4327,7 @@ export default function Contracts() {
             .toLowerCase();
           const displayState =
             normalizedState === "upcoming" || normalizedState === "not started"
-              ? "Pre-mature"
+              ? "Pre-Mature"
               : normalizedState === "active"
               ? "Valid"
               : normalizedState === "expired"
@@ -4479,7 +4556,7 @@ export default function Contracts() {
             display: "inline-block",
           }}
         >
-          Rate
+          Revenue Rate(Rs)
         </MDBox>
       ),
       accessor: "groupRate",
@@ -4547,7 +4624,7 @@ export default function Contracts() {
             display: "inline-block",
           }}
         >
-          % Rate
+          RV Rate
         </MDBox>
       ),
       accessor: (row) =>
@@ -4582,12 +4659,46 @@ export default function Contracts() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
+    {
+      id: "approvalStatus",
+      Header: "Apprv By AHQ",
+      accessor: (row) => row.ApprovalStatus ?? row.approvalStatus ?? null,
+      align: "center",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => {
+        const raw = value;
+        const isApproved = raw === true || raw === 1 || raw === "1";
+        const badgeStyles = isApproved
+          ? { backgroundColor: "#d4edda", color: "#155724" }
+          : { backgroundColor: "#fff3cd", color: "#856404" };
+        const label = isApproved ? "Approved" : "Pending";
+        return (
+          <MDBox
+            sx={{
+              ...badgeStyles,
+              px: 1,
+              py: 0.35,
+              borderRadius: "999px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: "96px",
+              fontWeight: 600,
+            }}
+          >
+            {label}
+          </MDBox>
+        );
+      },
+    },
     { Header: "Remarks", accessor: "remarks", align: "left" },
     {
       Header: "Attach",
+      id: "contractAttachments",
       accessor: "contractAttachments",
       align: "center",
-      width: "16%",
+      width: "50px",
       showInTable: true,
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
@@ -4605,20 +4716,38 @@ export default function Contracts() {
             .trim()
             .toLowerCase() === "true" ||
           Number(countValue || 0) > 0;
-        return contractKey ? (
-          <IconButton
-            size="small"
-            color={hasAttachments ? "success" : "error"}
-            // eslint-disable-next-line react/prop-types
-            onClick={() => handleViewAttachments(row.original)}
-            // eslint-disable-next-line react/prop-types
-            disabled={attachmentLoading && attachmentLoadingId === contractKey}
-            title="View attachments"
+        return (
+          <MDBox
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            width="100%"
+            sx={{ m: 0, p: 0, minHeight: 28 }}
           >
-            <Icon>visibility</Icon>
-          </IconButton>
-        ) : (
-          <span>-</span>
+            {contractKey ? (
+              <IconButton
+                size="small"
+                color={hasAttachments ? "success" : "error"}
+                // eslint-disable-next-line react/prop-types
+                onClick={() => handleViewAttachments(row.original)}
+                // eslint-disable-next-line react/prop-types
+                disabled={attachmentLoading && attachmentLoadingId === contractKey}
+                title="View attachments"
+                sx={{
+                  p: "2px",
+                  m: 0,
+                  minWidth: 0,
+                  "&:hover": { backgroundColor: "action.hover" },
+                }}
+              >
+                <Icon sx={{ fontSize: "1.05rem" }}>visibility</Icon>
+              </IconButton>
+            ) : (
+              <MDTypography component="span" variant="caption" sx={{ lineHeight: 1, m: 0, p: 0 }}>
+                -
+              </MDTypography>
+            )}
+          </MDBox>
         );
       },
     },
@@ -4660,6 +4789,7 @@ export default function Contracts() {
 
   // Group contracts by selected grouping columns.
   const groupedData = useMemo(() => {
+    const approvalActionsBypass = contractsApprovalActionsBypassUser();
     // Use only PascalCase (strict API response format) - create camelCase aliases for accessors
     const normalizedRows = rows.map((row) => {
       // Look up property grouping to get Area, Rate, Location, and UoM
@@ -4828,68 +4958,105 @@ export default function Contracts() {
       // "As of Date" is used only to refresh specific numeric columns via ActiveByAsOfDate,
       // not to filter/hide the master contracts list in the grid.
       const matchesAsOfDate = true;
-      const matchesArchive =
-        tableArchiveView === "all"
-          ? true
-          : tableArchiveView === "archive"
-          ? isArchived(row.IsArchive ?? row.isArchive)
-          : (() => {
-              const st = getRowContractStateNormalized(row);
-              return st === "active" || st === "valid";
-            })();
 
-      return matchesCommand && matchesBase && matchesClass && matchesAsOfDate && matchesArchive;
+      const approvalRaw =
+        row.ApprovalStatus ?? row.approvalStatus ?? row.ApprovedStatus ?? row.approvedStatus;
+      const rowApprovalApproved = approvalRaw === true || approvalRaw === 1 || approvalRaw === "1";
+
+      let matchesArchiveComposite = true;
+      let matchesApprovalDimension = true;
+      switch (contractsTableFilter) {
+        case "all":
+          matchesArchiveComposite = true;
+          matchesApprovalDimension = true;
+          break;
+        case "valid": {
+          const st = getRowContractStateNormalized(row);
+          matchesArchiveComposite = st === "active" || st === "valid";
+          matchesApprovalDimension = true;
+          break;
+        }
+        case "archive":
+          matchesArchiveComposite = isArchived(row.IsArchive ?? row.isArchive);
+          matchesApprovalDimension = true;
+          break;
+        case "approved":
+          matchesArchiveComposite = true;
+          matchesApprovalDimension = rowApprovalApproved;
+          break;
+        case "pending":
+          matchesArchiveComposite = true;
+          matchesApprovalDimension = !rowApprovalApproved;
+          break;
+        default:
+          break;
+      }
+
+      return (
+        matchesCommand &&
+        matchesBase &&
+        matchesClass &&
+        matchesAsOfDate &&
+        matchesArchiveComposite &&
+        matchesApprovalDimension
+      );
     });
 
     // If no grouping selected, return plain rows.
     if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
-      return filteredRows.map((row) => ({
-        ...row,
-        actions: (
-          <MDBox
-            alignItems="left"
-            justifyContent="left"
-            sx={{
-              backgroundColor: "#f8f9fa",
-              gap: "2px",
-              padding: "2px 2px",
-              borderRadius: "2px",
-            }}
-          >
-            {canEditCurrentMenu() && (
-              <IconButton
-                size="small"
-                color="info"
-                onClick={() => handleEditContract(row.id)}
-                title="Edit"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>edit</Icon>
-              </IconButton>
-            )}
-            {canDeleteCurrentMenu() && (
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDeleteContract(row.id)}
-                title="Delete"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>delete</Icon>
-              </IconButton>
-            )}
-            <IconButton
-              size="small"
-              color="primary"
-              onClick={() => handleViewDetails(row)}
-              title="View Details"
-              sx={{ padding: "1px" }}
+      return filteredRows.map((row) => {
+        const approvalRaw =
+          row.ApprovalStatus ?? row.approvalStatus ?? row.ApprovedStatus ?? row.approvedStatus;
+        const isApprovedStrict = approvalRaw === true || approvalRaw === 1;
+        const showEditDeleteActions = approvalActionsBypass || !isApprovedStrict;
+        return {
+          ...row,
+          actions: (
+            <MDBox
+              alignItems="left"
+              justifyContent="left"
+              sx={{
+                backgroundColor: "#f8f9fa",
+                gap: "2px",
+                padding: "2px 2px",
+                borderRadius: "2px",
+              }}
             >
-              <Icon>visibility</Icon>
-            </IconButton>
-          </MDBox>
-        ),
-      }));
+              {canEditCurrentMenu() && showEditDeleteActions && (
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => handleEditContract(row.id)}
+                  title="Edit"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>edit</Icon>
+                </IconButton>
+              )}
+              {canDeleteCurrentMenu() && showEditDeleteActions && (
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteContract(row.id)}
+                  title="Delete"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
+              )}
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => handleViewDetails(row)}
+                title="View Details"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>visibility</Icon>
+              </IconButton>
+            </MDBox>
+          ),
+        };
+      });
     }
 
     const groups = new Map();
@@ -5029,12 +5196,16 @@ export default function Contracts() {
       });
 
       // Create group row with sums for numeric fields and blank for date/text fields
+      const groupedRowCount = groupRows.length;
+      const contractNoWithGroupCount = group.groupLabel
+        ? `${group.groupLabel} (${groupedRowCount})`
+        : `(${groupedRowCount})`;
       const groupRow = {
         // Start with first row to get structure
         ...group.rows[0],
-        // Group label in Contract No (both PascalCase and camelCase)
-        ContractNo: group.groupLabel || "-",
-        contractNo: group.groupLabel || "-",
+        // Group label in Contract No (both PascalCase and camelCase), with grouped row count
+        ContractNo: contractNoWithGroupCount,
+        contractNo: contractNoWithGroupCount,
         GrpName: group.grpName,
         grpName: group.grpName,
         // Numeric fields - use sums
@@ -5112,6 +5283,10 @@ export default function Contracts() {
       // Detail rows should show all original data (no aggregation)
       if (isExpanded) {
         group.rows.forEach((row) => {
+          const approvalRaw =
+            row.ApprovalStatus ?? row.approvalStatus ?? row.ApprovedStatus ?? row.approvedStatus;
+          const isApprovedStrict = approvalRaw === true || approvalRaw === 1;
+          const showEditDeleteActions = approvalActionsBypass || !isApprovedStrict;
           result.push({
             ...row,
             // Keep all original row data - no overrides needed
@@ -5127,7 +5302,7 @@ export default function Contracts() {
                   borderRadius: "2px",
                 }}
               >
-                {canEditCurrentMenu() && (
+                {canEditCurrentMenu() && showEditDeleteActions && (
                   <IconButton
                     size="small"
                     color="info"
@@ -5138,7 +5313,7 @@ export default function Contracts() {
                     <Icon>edit</Icon>
                   </IconButton>
                 )}
-                {canDeleteCurrentMenu() && (
+                {canDeleteCurrentMenu() && showEditDeleteActions && (
                   <IconButton
                     size="small"
                     color="error"
@@ -5171,7 +5346,7 @@ export default function Contracts() {
     commandFilterIds,
     baseFilterIds,
     classFilterIds,
-    tableArchiveView,
+    contractsTableFilter,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
@@ -5376,9 +5551,11 @@ export default function Contracts() {
     if (viewOnly) {
       // Plain text only - no UI formatting (no boxes, no grid)
       const gap = 6;
+      const rightContentPad = 8;
       const leftW = (pageWidth - 2 * margin - gap) * 0.56;
       const rightW = (pageWidth - 2 * margin - gap) * 0.44;
-      const valueColumnCenterX = margin + leftW + gap + rightW / 2;
+      const valueX = margin + leftW + gap;
+      const valueWrapWidth = Math.max(10, rightW - rightContentPad);
 
       let yPos = margin;
       doc.setFontSize(14);
@@ -5427,7 +5604,7 @@ export default function Contracts() {
         }
         doc.setFont("helvetica", "normal");
         yPos += 2;
-        doc.setDrawColor(33, 33, 33);
+        doc.setDrawColor(0, 0, 0);
         doc.setLineWidth(0.5);
         doc.line(margin, yPos, pageWidth - margin, yPos);
         yPos += 4;
@@ -5436,7 +5613,7 @@ export default function Contracts() {
         doc.text(`Contract No: ${contractNo}`, margin, yPos);
         doc.setFont("helvetica", "normal");
         yPos += lineHeight + 2;
-        doc.setDrawColor(33, 33, 33);
+        doc.setDrawColor(0, 0, 0);
         doc.setLineWidth(0.5);
         doc.line(margin, yPos, pageWidth - margin, yPos);
         yPos += 4;
@@ -5552,7 +5729,7 @@ export default function Contracts() {
           const displayVal = getDisplayValue(col, selectedContractDetails);
           const labelBlock = `${fieldSerial}. ${col.Header}:`;
           const labelLines = doc.splitTextToSize(labelBlock, leftW);
-          const valueLines = doc.splitTextToSize(String(displayVal), rightW);
+          const valueLines = doc.splitTextToSize(String(displayVal), valueWrapWidth);
           const maxLines = Math.max(labelLines.length, valueLines.length);
           for (let i = 0; i < maxLines; i += 1) {
             if (yPos > pageHeight - 20) {
@@ -5563,14 +5740,18 @@ export default function Contracts() {
               doc.text(labelLines[i], margin, yPos);
             }
             if (valueLines[i]) {
-              doc.text(valueLines[i], valueColumnCenterX, yPos, { align: "left" });
+              doc.text(valueLines[i], valueX, yPos);
             }
             yPos += lineHeight;
           }
           yPos += 2;
         });
 
-        yPos += 2;
+        yPos += 1;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 5;
       });
 
       if (contractDetailsRiseTerms.length > 0) {
@@ -5601,6 +5782,12 @@ export default function Contracts() {
           );
           yPos += lineHeight;
         });
+
+        yPos += 2;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 5;
       }
 
       if (yPos > pageHeight - 42) {
@@ -5824,38 +6011,37 @@ export default function Contracts() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  // Match tenants.js: flex column + viewport height for the grid host.
-                  height: "90vh",
-                  minHeight: "400px",
+                  height: "600px",
+                  minHeight: "600px",
                   minWidth: 0,
                   maxWidth: "100%",
                   overflow: "hidden",
+                  // Table area: at most 600px tall; shrink to row content when few rows (no large blank band).
                   "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
+                    flex: "0 0 auto",
+                    minHeight: "600px",
                     minWidth: 0,
                     width: "100%",
                     maxWidth: "100%",
-                    height: "400px",
-                    minHeight: "400px",
-                    maxHeight: "400px",
+                    height: "600px",
+                    maxHeight: "600px",
                     overflow: "hidden",
                     display: "flex",
                     flexDirection: "column",
                   },
-                  // Sticky DataTable: scroll wrapper sits after the toolbar row; Firefox needs minWidth/minHeight 0
-                  // on this flex child so the table gets a definite width and columns lay out (Chrome is more forgiving).
+                  // Sticky DataTable: scroll wrapper (MuiBox) after toolbar; default in DataTable is minHeight 300px.
+                  // Contracts: use stickyBodyMinHeight on DataTable to set 600px; keep flex minWidth 0 for layout.
+                  // Match DataTable sticky body: keep overflowX scroll so the bottom horizontal bar stays usable.
                   "& .MuiTableContainer-root > div:last-of-type:not(:first-of-type)": {
-                    flex: "1 1 0%",
+                    flex: "1 1 auto",
                     minWidth: 0,
-                    minHeight: 0,
+                    maxHeight: "100%",
                     width: "100%",
-                    maxWidth: "100%",
                     maxWidth: "400%",
                     boxSizing: "border-box",
-                    // stable scrollbar gutter skews width math in some Firefox flex+table cases
                     scrollbarGutter: "auto",
-                    overflow: "auto",
+                    overflowX: "scroll",
+                    overflowY: "auto",
                   },
                   // Kill DataTable's max-content sizing (from contentFitTable) — it explodes scrollWidth in Firefox.
                   "& .MuiTable-root": {
@@ -6179,6 +6365,7 @@ export default function Contracts() {
                         alignItems: "center",
                         justifyContent: "center",
                         gap: 1,
+                        flexWrap: "wrap",
                         mt: { xs: 1, sm: 0 },
                       }}
                     >
@@ -6192,17 +6379,19 @@ export default function Contracts() {
                       </IconButton>
                       <ToggleButtonGroup
                         exclusive
-                        value={tableArchiveView}
+                        value={contractsTableFilter}
                         onChange={(_, v) => {
-                          if (v !== null) setTableArchiveView(v);
+                          if (v !== null) setContractsTableFilter(v);
                         }}
                         size="small"
                         color="info"
-                        aria-label="Filter by archive or contract state"
+                        aria-label="Filter contracts table"
                       >
-                        <ToggleButton value="all">All</ToggleButton>
-                        <ToggleButton value="active">Valid</ToggleButton>
-                        <ToggleButton value="archive">Archive</ToggleButton>
+                        <ToggleButton value="all">ALL</ToggleButton>
+                        <ToggleButton value="valid">VALID</ToggleButton>
+                        <ToggleButton value="archive">ARCHIVE</ToggleButton>
+                        <ToggleButton value="approved">APPROVED</ToggleButton>
+                        <ToggleButton value="pending">PENDING</ToggleButton>
                       </ToggleButtonGroup>
                     </MDBox>
                   </MDBox>
@@ -6215,6 +6404,7 @@ export default function Contracts() {
                   }}
                   isSorted={false}
                   stickyToolbarAndHeader
+                  stickyBodyMinHeight="400px"
                   entriesPerPage={false}
                   pageSize={pageSize}
                   page={0}
@@ -6260,90 +6450,118 @@ export default function Contracts() {
                   initialHiddenColumns={initialHiddenColumnIds}
                   onVisibleRowCountChange={setVisibleRowCount}
                 />
-
-                {/* Server-side Pagination Footer */}
-                {totalCount > 0 && (
-                  <MDBox
-                    display="flex"
-                    flexDirection={{ xs: "column", sm: "row" }}
-                    justifyContent="flex-start"
-                    alignItems={{ xs: "flex-start", sm: "center" }}
-                    p={3}
-                    gap={2}
-                  >
-                    <MDBox mb={{ xs: 1.5, sm: 0 }} display="flex" alignItems="center" gap={1}>
-                      <FormControl size="xs" sx={{ minWidth: 12 }}>
-                        <Select
-                          value={String(pageSize)}
-                          onChange={(e) => {
-                            const value = Number(e.target.value);
-                            setPageSize(value);
-                            setPageNumber(1);
-                            fetchContracts(1, value);
-                          }}
-                          sx={{
-                            "& .MuiSelect-select": { py: 0.5, fontSize: "0.8rem" },
-                          }}
-                        >
-                          {[10, 20, 50, 100].map((size) => (
-                            <MenuItem key={size} value={String(size)}>
-                              {size}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                      <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        {visibleRowCount} of {totalCount} entries
-                      </MDTypography>
-                      {Math.ceil(totalCount / pageSize) > 1 && (
-                        <MDPagination variant="gradient" color="info">
-                          {pageNumber > 1 && (
-                            <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                              <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                            </MDPagination>
-                          )}
-
-                          {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                            .filter((p) => {
-                              const totalPages = Math.ceil(totalCount / pageSize);
-                              return (
-                                p === 1 ||
-                                p === totalPages ||
-                                (p >= pageNumber - 2 && p <= pageNumber + 2)
-                              );
-                            })
-                            .map((p, idx, arr) => {
-                              const prev = arr[idx - 1];
-                              const showEllipsis = prev && p - prev > 1;
-                              return (
-                                <React.Fragment key={p}>
-                                  {showEllipsis && (
-                                    <MDPagination item disabled>
-                                      <Icon>more_horiz</Icon>
-                                    </MDPagination>
-                                  )}
-                                  <MDPagination
-                                    item
-                                    onClick={() => setPageNumber(p)}
-                                    active={p === pageNumber}
-                                  >
-                                    {p}
-                                  </MDPagination>
-                                </React.Fragment>
-                              );
-                            })}
-
-                          {pageNumber < Math.ceil(totalCount / pageSize) && (
-                            <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                              <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                            </MDPagination>
-                          )}
-                        </MDPagination>
-                      )}
-                    </MDBox>
-                  </MDBox>
-                )}
               </MDBox>
+
+              {/* Server-side Pagination Footer (sibling to table area so it is not clipped by the grid host) */}
+              {totalCount > 0 && (
+                <MDBox
+                  display="flex"
+                  flexDirection={{ xs: "column", sm: "row" }}
+                  justifyContent="flex-start"
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                  py={1}
+                  px={2}
+                  pb={2}
+                  gap={1}
+                  sx={{
+                    fontSize: "0.7rem",
+                    "& .MuiPaginationItem-root": {
+                      fontSize: "0.7rem",
+                      minWidth: "1.5rem",
+                      height: "1.5rem",
+                    },
+                    "& .MuiPaginationItem-icon": { fontSize: "1rem" },
+                  }}
+                >
+                  <MDBox mb={{ xs: 0.5, sm: 0 }} display="flex" alignItems="center" gap={0.5}>
+                    <FormControl size="small" sx={{ minWidth: 12 }}>
+                      <Select
+                        value={String(pageSize)}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          setPageSize(value);
+                          setPageNumber(1);
+                          fetchContracts(1, value);
+                        }}
+                        sx={{
+                          fontSize: "0.7rem",
+                          "& .MuiSelect-select": { py: 0.25, fontSize: "0.7rem", minHeight: 0 },
+                          "& .MuiOutlinedInput-notchedOutline": { fontSize: "0.7rem" },
+                        }}
+                      >
+                        {[10, 20, 50, 100, 500, 1000].map((size) => (
+                          <MenuItem key={size} value={String(size)} sx={{ fontSize: "0.7rem" }}>
+                            {size}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <MDTypography
+                      variant="caption"
+                      color="secondary"
+                      fontWeight="regular"
+                      sx={{ fontSize: "0.7rem", lineHeight: 1.2 }}
+                    >
+                      {visibleRowCount} of {totalCount} entries
+                    </MDTypography>
+                    {Math.ceil(totalCount / pageSize) > 1 && (
+                      <MDPagination
+                        variant="gradient"
+                        color="info"
+                        sx={{
+                          "& .MuiPaginationItem-root": { fontSize: "0.7rem" },
+                        }}
+                      >
+                        {pageNumber > 1 && (
+                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
+                            <Icon sx={{ fontWeight: "bold", fontSize: "0.9rem" }}>
+                              chevron_left
+                            </Icon>
+                          </MDPagination>
+                        )}
+
+                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
+                          .filter((p) => {
+                            const totalPages = Math.ceil(totalCount / pageSize);
+                            return (
+                              p === 1 ||
+                              p === totalPages ||
+                              (p >= pageNumber - 2 && p <= pageNumber + 2)
+                            );
+                          })
+                          .map((p, idx, arr) => {
+                            const prev = arr[idx - 1];
+                            const showEllipsis = prev && p - prev > 1;
+                            return (
+                              <React.Fragment key={p}>
+                                {showEllipsis && (
+                                  <MDPagination item disabled>
+                                    <Icon sx={{ fontSize: "0.9rem" }}>more_horiz</Icon>
+                                  </MDPagination>
+                                )}
+                                <MDPagination
+                                  item
+                                  onClick={() => setPageNumber(p)}
+                                  active={p === pageNumber}
+                                >
+                                  {p}
+                                </MDPagination>
+                              </React.Fragment>
+                            );
+                          })}
+
+                        {pageNumber < Math.ceil(totalCount / pageSize) && (
+                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
+                            <Icon sx={{ fontWeight: "bold", fontSize: "0.9rem" }}>
+                              chevron_right
+                            </Icon>
+                          </MDPagination>
+                        )}
+                      </MDPagination>
+                    )}
+                  </MDBox>
+                </MDBox>
+              )}
             </Card>
           </Grid>
         </Grid>
@@ -6354,6 +6572,7 @@ export default function Contracts() {
         onClose={handleCloseForm}
         onSubmit={handleSubmit}
         initialData={currentContract}
+        isClone={isCloneMode}
         commands={commands}
         bases={bases}
         classes={classes}
@@ -6823,6 +7042,14 @@ export default function Contracts() {
             disabled={!selectedContractDetails}
           >
             <Icon>picture_as_pdf</Icon>&nbsp;View as PDF
+          </MDButton>
+          <MDButton
+            onClick={handleCloneContractFromDetails}
+            color="success"
+            variant="gradient"
+            disabled={!selectedContractDetails || !canCreateCurrentMenu()}
+          >
+            <Icon>content_copy</Icon>&nbsp;Clone Contract
           </MDButton>
           <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
             Close

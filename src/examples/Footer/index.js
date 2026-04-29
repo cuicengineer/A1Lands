@@ -52,17 +52,6 @@ function Footer({ company, links }) {
       px={1.5}
     >
       <MDBox
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        flexWrap="wrap"
-        color="text"
-        fontSize={size.xs}
-        px={0.01}
-      >
-        Powered By No 1 SDU
-      </MDBox>
-      <MDBox
         component="ul"
         sx={({ breakpoints }) => ({
           display: "flex",

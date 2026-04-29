@@ -1584,19 +1584,13 @@ export default function RevenueRates() {
               </MDBox>
               <MDBox
                 pt={3}
-                position="relative"
                 sx={{
-                  // Flex column so DataTable fills height; scroll is inside DataTable (sticky toolbar + header)
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "500px",
+                  minHeight: "500px",
                   overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "hidden",
-                  },
+                  position: "relative",
                   "& .MuiTable-root": {
                     tableLayout: "fixed",
                     width: "100%",
@@ -1613,52 +1607,75 @@ export default function RevenueRates() {
                   },
                 }}
               >
-                {/* Loading Overlay */}
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
-                    }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
+                {/* Scroll region: horizontal bar stays at bottom via overflow-x scroll + stable gutter */}
+                <MDBox
+                  sx={{
+                    position: "relative",
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflowX: "scroll",
+                    overflowY: "scroll",
+                    scrollbarGutter: "stable both-edges",
+                    scrollbarWidth: "thin",
+                    "&::-webkit-scrollbar": {
+                      width: "10px",
+                      height: "10px",
+                    },
+                    "&::-webkit-scrollbar-thumb": {
+                      backgroundColor: "#9e9e9e",
+                      borderRadius: "6px",
+                    },
+                  }}
+                >
+                  {/* Loading Overlay */}
+                  {loading && (
+                    <MDBox
+                      position="absolute"
+                      top={0}
+                      left={0}
+                      right={0}
+                      bottom={0}
+                      display="flex"
+                      justifyContent="center"
+                      alignItems="center"
+                      zIndex={10}
+                      sx={{
+                        backgroundColor: "rgba(255, 255, 255, 0.8)",
+                        backdropFilter: "blur(2px)",
+                      }}
+                    >
+                      <CurrencyLoading size={50} />
+                    </MDBox>
+                  )}
 
-                <DataTable
-                  table={{
-                    columns,
-                    rows: computedRows,
-                  }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100],
-                  }}
-                  pageSize={pageSize}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchRevenueRates(1, value);
-                  }}
-                  showTotalEntries={false}
-                  noEndBorder
-                  canSearch
-                  autoResetFilters={false}
-                  exportFileName="Revenue-Rates"
-                  exportCellFormatter={exportCellFormatter}
-                  onVisibleRowCountChange={setVisibleRowCount}
-                />
+                  <DataTable
+                    table={{
+                      columns,
+                      rows: computedRows,
+                    }}
+                    isSorted={false}
+                    stickyToolbarAndHeader
+                    autoHeight
+                    entriesPerPage={{
+                      defaultValue: 50,
+                      entries: [10, 25, 50, 100],
+                    }}
+                    page={0}
+                    onPageChange={() => {}}
+                    pageSize={pageSize}
+                    onEntriesPerPageChange={(value) => {
+                      setPageNumber(1);
+                      setPageSize(value);
+                    }}
+                    showTotalEntries={false}
+                    noEndBorder
+                    canSearch
+                    autoResetFilters={false}
+                    exportFileName="Revenue-Rates"
+                    exportCellFormatter={exportCellFormatter}
+                    onVisibleRowCountChange={setVisibleRowCount}
+                  />
+                </MDBox>
 
                 {/* Server-side Pagination Footer */}
                 <MDBox

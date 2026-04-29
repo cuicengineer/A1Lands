@@ -24,6 +24,7 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import Chip from "@mui/material/Chip";
+import Popover from "@mui/material/Popover";
 import Box from "@mui/material/Box";
 import OutlinedInput from "@mui/material/OutlinedInput";
 import Table from "@mui/material/Table";
@@ -68,6 +69,83 @@ function averageRateForPropertyIds(propertyIds, getPropertyById, getPropertyRate
   return totalRate / propertyIds.length;
 }
 
+/** Location column: show up to 3 lines; click … to read full text in a popover (keeps table width stable). */
+function LocationTableCell({ value }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "-";
+  const hasContent = text !== "-";
+  const showMore = hasContent && text.length > 20;
+
+  return (
+    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        component="div"
+        variant="body2"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          lineHeight: 1.25,
+        }}
+      >
+        {hasContent ? text : "-"}
+      </MDTypography>
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              textDecoration: "underline",
+            }}
+            aria-label="Show full address"
+          >
+            …
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography
+              variant="body"
+              sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", bgcolor: "black" }}
+            >
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+LocationTableCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
+
 function PropertyGroupingForm({
   open,
   onClose,
@@ -79,6 +157,7 @@ function PropertyGroupingForm({
   classes,
   allPropertyGroupings = [],
   onGroupIdBlur,
+  propertyTypes = [],
 }) {
   const isEditMode = Boolean(initialData);
   const normalizePropertyIds = (data) => {
@@ -121,6 +200,7 @@ function PropertyGroupingForm({
     cmdid: "",
     baseid: "",
     classid: "",
+    propertyType: "",
     property: [],
     gId: "",
     rate: 0,
@@ -363,7 +443,7 @@ function PropertyGroupingForm({
         setNotGroupedProperties([]);
         return;
       }
-      if (!form.cmdid || !form.baseid) {
+      if (!form.cmdid || !form.baseid || !form.classid) {
         setNotGroupedProperties([]);
         return;
       }
@@ -371,7 +451,8 @@ function PropertyGroupingForm({
       try {
         const response = await propertyGroupingApi.notGroupedProperties(
           Number(form.cmdid),
-          Number(form.baseid)
+          Number(form.baseid),
+          Number(form.classid)
         );
         // Handle both paginated and direct array responses
         let options = [];
@@ -397,7 +478,14 @@ function PropertyGroupingForm({
           }))
           .filter((opt) => opt.id !== null);
 
-        if (!cancelled) setNotGroupedProperties(normalizedOptions);
+        const classIdNum = Number(form.classid);
+        const scopedToClass = normalizedOptions.filter((opt) => {
+          const cid = opt.ClassId ?? opt.classId;
+          if (cid === undefined || cid === null || cid === "") return true;
+          return Number(cid) === classIdNum;
+        });
+
+        if (!cancelled) setNotGroupedProperties(scopedToClass);
       } catch (error) {
         console.error("Error fetching not-grouped properties:", error);
         if (!cancelled) setNotGroupedProperties([]);
@@ -408,7 +496,7 @@ function PropertyGroupingForm({
     return () => {
       cancelled = true;
     };
-  }, [open, isEditMode, form.cmdid, form.baseid]);
+  }, [open, isEditMode, form.cmdid, form.baseid, form.classid]);
 
   const selectableRentalProperties = useMemo(() => {
     if (isEditMode) {
@@ -496,6 +584,7 @@ function PropertyGroupingForm({
       const location = initialData.Location || "";
       const area = initialData.Area || "";
       const remarks = initialData.Remarks || "";
+      const propertyTypeRaw = initialData.PropertyType ?? initialData.propertyType ?? "";
       const status = initialData.Status !== undefined ? initialData.Status : true;
       const isDeleted = initialData.IsDeleted !== undefined ? initialData.IsDeleted : false;
 
@@ -503,6 +592,8 @@ function PropertyGroupingForm({
         cmdid: cmdId ? Number(cmdId) : "",
         baseid: baseId ? Number(baseId) : "",
         classid: classId ? Number(classId) : "",
+        propertyType:
+          propertyTypeRaw !== "" && propertyTypeRaw != null ? Number(propertyTypeRaw) : "",
         property: normalizedPropertyIds,
         gId: gId,
         rate: Number(rate) || 0,
@@ -534,6 +625,7 @@ function PropertyGroupingForm({
         cmdid: "",
         baseid: "",
         classid: "",
+        propertyType: "",
         property: [],
         gId: "",
         rate: 0,
@@ -717,9 +809,19 @@ function PropertyGroupingForm({
   const handleChange = (f, v) => {
     setForm((p) => ({
       ...p,
-      [f]: f === "area" ? Number(v) : f === "status" || f === "isDeleted" ? Boolean(v) : v,
-      ...(f === "cmdid" && { baseid: "", property: [] }),
-      ...(f === "baseid" && { property: [] }),
+      [f]:
+        f === "area"
+          ? Number(v)
+          : f === "propertyType"
+          ? v === "" || v == null
+            ? ""
+            : Number(v)
+          : f === "status" || f === "isDeleted"
+          ? Boolean(v)
+          : v,
+      ...(f === "cmdid" && { baseid: "", classid: "", property: [] }),
+      ...(f === "baseid" && { classid: "", property: [] }),
+      ...(f === "classid" && { property: [] }),
     }));
     // clear field-level error on change
     if (errors?.[f]) setErrors((prev) => ({ ...prev, [f]: undefined }));
@@ -1253,6 +1355,57 @@ function PropertyGroupingForm({
               </FormControl>
             </Grid>
 
+            <Grid item xs={12} sm={4}>
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={[
+                  { id: null, name: "None" },
+                  ...(propertyTypes || []).filter((pt) => pt.status === 1 || pt.status === true),
+                ]}
+                getOptionLabel={(option) => option?.name ?? ""}
+                isOptionEqualToValue={(a, b) => {
+                  if (a == null && b == null) return true;
+                  if (!a || !b) return false;
+                  if (a.id == null && b.id == null) return true;
+                  if (a.id == null || b.id == null) return false;
+                  return Number(a.id) === Number(b.id);
+                }}
+                value={
+                  form.propertyType === "" || form.propertyType == null
+                    ? { id: null, name: "None" }
+                    : (propertyTypes || [])
+                        .filter((pt) => pt.status === 1 || pt.status === true)
+                        .find((pt) => Number(pt.id) === Number(form.propertyType)) ?? {
+                        id: null,
+                        name: "None",
+                      }
+                }
+                onChange={(_, newValue) =>
+                  handleChange(
+                    "propertyType",
+                    newValue != null && newValue.id != null && newValue.id !== ""
+                      ? Number(newValue.id)
+                      : ""
+                  )
+                }
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                sx={{
+                  minWidth: "140px",
+                  fontSize: "1rem",
+                  "& .MuiInputBase-root": { minHeight: "45px" },
+                  "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+                  "& .MuiInputBase-input": {
+                    fontSize: "1rem",
+                    paddingTop: 0,
+                    paddingBottom: 0,
+                  },
+                }}
+                renderInput={(params) => <MDInput {...params} label="Property Type" />}
+              />
+            </Grid>
+
             {/* Property */}
             <Grid item xs={12} sm={6}>
               <FormControl
@@ -1277,7 +1430,7 @@ function PropertyGroupingForm({
                   multiple
                   value={form.property || []}
                   onChange={handlePropertyChange}
-                  disabled={isEditMode}
+                  disabled={isEditMode || !form.classid}
                   input={<OutlinedInput id="select-multiple-chip" label="Property" />}
                   MenuProps={{
                     PaperProps: {
@@ -1352,19 +1505,73 @@ function PropertyGroupingForm({
                       }
                     }
 
+                    const rawArea = option?.Area ?? option?.area;
+                    const uoMCompact = option?.UoM ?? option?.uoM ?? "";
+                    const areaDisplay =
+                      rawArea !== null && rawArea !== undefined && rawArea !== ""
+                        ? `${Number(rawArea).toLocaleString(undefined, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 4,
+                          })}${uoMCompact ? ` (${uoMCompact})` : ""}`
+                        : "—";
+                    const locDisplayRaw = option?.Location ?? option?.location ?? "";
+                    const locDisplay = String(locDisplayRaw).trim()
+                      ? String(locDisplayRaw).trim()
+                      : "—";
+
                     return (
                       <MenuItem
                         key={optionId}
                         value={optionId}
                         disabled={isDuplicateName || isDifferentUoM}
-                        sx={{ fontSize: "1rem", padding: "8px 14px" }}
+                        sx={{
+                          fontSize: "1rem",
+                          padding: "8px 14px",
+                          alignItems: "flex-start",
+                        }}
                         title={
                           isDifferentUoM
                             ? "Properties with different UoM cannot be grouped together"
                             : ""
                         }
                       >
-                        {optionLabel}
+                        <MDBox
+                          sx={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            alignItems: "baseline",
+                            columnGap: 1,
+                            rowGap: 0.25,
+                            width: "100%",
+                            py: 0.25,
+                          }}
+                        >
+                          <MDTypography
+                            component="span"
+                            sx={{
+                              fontSize: "1rem",
+                              lineHeight: 1.35,
+                              wordBreak: "break-word",
+                              color: "#111111",
+                            }}
+                          >
+                            {optionLabel}
+                          </MDTypography>
+                          <MDTypography
+                            variant="caption"
+                            component="span"
+                            sx={{
+                              fontSize: "0.72rem",
+                              lineHeight: 1.3,
+                              color: "#111111",
+                              wordBreak: "break-word",
+                              flex: "1 1 auto",
+                              minWidth: 0,
+                            }}
+                          >
+                            Area: {areaDisplay} · Location: {locDisplay}
+                          </MDTypography>
+                        </MDBox>
                       </MenuItem>
                     );
                   })}
@@ -1404,7 +1611,6 @@ function PropertyGroupingForm({
                 onChange={(e) => handleChange("location", e.target.value)}
                 fullWidth
                 size="small"
-                InputProps={{ readOnly: true }}
                 required={!isEditMode}
                 error={!isEditMode && Boolean(errors.location)}
                 helperText={!isEditMode ? errors.location : ""}
@@ -1665,6 +1871,7 @@ PropertyGroupingForm.propTypes = {
   classes: PropTypes.array.isRequired,
   allPropertyGroupings: PropTypes.array,
   onGroupIdBlur: PropTypes.func,
+  propertyTypes: PropTypes.array,
 };
 
 export { PropertyGroupingForm };
@@ -1698,10 +1905,34 @@ export default function PropertyGrouping() {
 
   // Pagination state for main table
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
   const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [propertyTypes, setPropertyTypes] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPropertyTypes = async () => {
+      try {
+        const response = await api.request("GET", "/api/PropertyTypes");
+        const data = response?.data ?? (Array.isArray(response) ? response : []);
+        const normalized = Array.isArray(data)
+          ? data.map((item) => ({
+              ...item,
+              status: item.status === 1 || item.status === true,
+            }))
+          : [];
+        if (!cancelled) setPropertyTypes(normalized);
+      } catch (e) {
+        if (!cancelled) setPropertyTypes([]);
+      }
+    };
+    loadPropertyTypes();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Pagination state for linked properties dialog
   const [linkedPropertiesPageNumber, setLinkedPropertiesPageNumber] = useState(1);
@@ -1816,7 +2047,7 @@ export default function PropertyGrouping() {
     if (commands.length === 0) fetchCommands();
     // Note: bases list for the form is fetched inside PropertyGroupingForm (allBases)
     if (classes.length === 0) fetchClasses();
-    // Only fetch rentalProperties for Edit mode; Add New uses notGroupedProperties (fetched by form when RAC/Base selected)
+    // Only fetch rentalProperties for Edit mode; Add New uses notGroupedProperties (fetched when RAC/Base/Class are selected)
     if (currentPropertyGrouping && rentalProperties.length === 0) fetchRentalProperties();
   }, [openForm, currentPropertyGrouping, commands.length, classes.length, rentalProperties.length]);
 
@@ -1890,7 +2121,14 @@ export default function PropertyGrouping() {
             }))
             .filter((opt) => opt.Id !== null);
 
-          setAvailablePropertiesForLinking(normalizedOptions);
+          const classIdNum = Number(classId);
+          const scopedToClass = normalizedOptions.filter((opt) => {
+            const cid = opt.ClassId ?? opt.classId;
+            if (cid === undefined || cid === null || cid === "") return true;
+            return Number(cid) === classIdNum;
+          });
+
+          setAvailablePropertiesForLinking(scopedToClass);
         } catch (error) {
           console.error("Error fetching not-grouped properties for linking:", error);
           setAvailablePropertiesForLinking([]);
@@ -2287,19 +2525,27 @@ export default function PropertyGrouping() {
       Header: "Actions",
       accessor: "actions",
       align: "center",
-      width: "10%",
+      width: "96px",
     },
-    { Header: "ID", accessor: "id", align: "left", width: "5%" },
-    { Header: "RAC", accessor: "cmdName", align: "left", width: "12%" },
-    { Header: "Base", accessor: "baseName", align: "left", width: "12%" },
-    { Header: "Class", accessor: "className", align: "left", width: "12%" },
-    { Header: "Group ID", accessor: "gId", align: "left", width: "12%" },
-    { Header: "Rate", accessor: "rate", align: "right", width: "15%" },
+    { Header: "ID", accessor: "id", align: "left", width: "72px" },
+    { Header: "RAC", accessor: "cmdName", align: "left", width: "132px" },
+    { Header: "Base", accessor: "baseName", align: "left", width: "128px" },
+    { Header: "Class", accessor: "className", align: "left", width: "128px" },
+    {
+      Header: "Type",
+      accessor: "propertyTypeName",
+      align: "left",
+      width: "124px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => value || "-",
+    },
+    { Header: "Group ID", accessor: "gId", align: "left", width: "128px" },
+    { Header: "Rate", accessor: "rate", align: "right", width: "108px" },
     {
       Header: "Area (UoM)",
       accessor: "area",
       align: "right",
-      width: "15%",
+      width: "152px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2312,14 +2558,21 @@ export default function PropertyGrouping() {
         return combined || "-";
       },
     },
-    { Header: "Location", accessor: "location", align: "left", width: "13%" },
-    { Header: "Remarks", accessor: "remarks", align: "left" },
-    { Header: "Props", accessor: "attachedproperties", align: "left" },
+    {
+      Header: "Location",
+      accessor: "location",
+      align: "left",
+      width: "228px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <LocationTableCell value={value} />,
+    },
+    { Header: "Remarks", accessor: "remarks", align: "left", width: "196px" },
+    { Header: "Props", accessor: "attachedproperties", align: "left", width: "152px" },
     {
       Header: "Status",
       accessor: "status",
       align: "center",
-      width: "10%",
+      width: "104px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
@@ -2327,7 +2580,7 @@ export default function PropertyGrouping() {
       Header: "Linked",
       accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
-      width: "12%",
+      width: "96px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2353,7 +2606,7 @@ export default function PropertyGrouping() {
       Header: "Contracts",
       accessor: "activeContracts",
       align: "center",
-      width: "12%",
+      width: "104px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2543,6 +2796,7 @@ export default function PropertyGrouping() {
       const remarks = pg.Remarks || "";
       const area = pg.Area || "";
       const rate = pg.Rate || 0;
+      const ptRaw = pg.PropertyType ?? pg.propertyType ?? "";
       const status = pg.Status !== undefined ? pg.Status : true;
       const isDeleted = pg.IsDeleted !== undefined ? pg.IsDeleted : false;
 
@@ -2555,6 +2809,7 @@ export default function PropertyGrouping() {
         cmdid: cmdId ? Number(cmdId) : "",
         baseid: baseId ? Number(baseId) : "",
         classid: classId ? Number(classId) : "",
+        propertyType: ptRaw !== "" && ptRaw != null && ptRaw !== undefined ? Number(ptRaw) : "",
         gId: gId,
         uoM: uoM,
         location: location,
@@ -2672,6 +2927,11 @@ export default function PropertyGrouping() {
         ? data.property.map((propId) => Number(propId))
         : [];
 
+      const propertyTypeValue =
+        data.propertyType !== "" && data.propertyType != null && data.propertyType !== undefined
+          ? Number(data.propertyType)
+          : null;
+
       const formattedData = {
         cmdId: Number(data.cmdid),
         baseId: Number(data.baseid),
@@ -2682,6 +2942,7 @@ export default function PropertyGrouping() {
         location: data.location || "",
         area: Number(data.area) || 0,
         remarks: data.remarks || "",
+        PropertyType: propertyTypeValue,
         property: data.property.join(", "), // Keep existing property field as joined string
         PropertyGroupLinkings: propertyGroupLinkings, // New field: list of property IDs
         status: Boolean(data.status),
@@ -2710,7 +2971,7 @@ export default function PropertyGrouping() {
         alert("Cannot insert Duplicate Group ID");
         return;
       }
-      alert("ERROR:  Check Duplicate Group ID or Please try again.");
+      alert("ERROR:  Check Group ID duplicate or Contracts Binded.");
     }
   };
 
@@ -2763,6 +3024,11 @@ export default function PropertyGrouping() {
         .filter((name) => String(name || "").trim().length > 0)
         .join(", ");
     })();
+    const propertyTypeId = row.PropertyType ?? row.propertyType;
+    const propertyTypeObj = propertyTypes.find((pt) => Number(pt.id) === Number(propertyTypeId));
+    const propertyTypeName =
+      propertyTypeObj?.name || row.PropertyTypeName || row.propertyTypeName || "";
+
     return {
       id: normalizedId,
       cmdId: row.CmdId,
@@ -2771,6 +3037,7 @@ export default function PropertyGrouping() {
       cmdName: row.CmdName || "",
       baseName: row.BaseName || "",
       className: row.ClassName || "",
+      propertyTypeName,
       gId: row.GId || "",
       rate: Number(row.Rate || 0),
       area: Number(row.Area || 0),
@@ -2849,128 +3116,156 @@ export default function PropertyGrouping() {
               </MDBox>
               <MDBox
                 pt={3}
-                position="relative"
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "500px",
+                  minHeight: "500px",
                   overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "hidden",
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
-                  },
-                  // DataTable uses custom <td> cells that default to nowrap + inner width:max-content.
-                  // Force wrapping + constrain inner wrapper so text never overlaps adjacent columns.
-                  "& table th, & table td": {
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
-                    verticalAlign: "top",
-                  },
-                  "& table td > div": {
-                    display: "block !important",
-                    width: "100% !important",
-                    maxWidth: "100% !important",
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
-                  },
-                  "& table td > div > *": {
-                    maxWidth: "100% !important",
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
-                  },
-                  // Base header styling – keep short headers on one line
-                  "& .MuiTable-root th": {
-                    fontSize: "1.05rem !important",
-                    fontWeight: "700 !important",
-                    padding: "10px 10px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  // Allow only long-text headers to wrap if needed (Location, Remarks)
-                  "& .MuiTable-root th:nth-of-type(10), & .MuiTable-root th:nth-of-type(11)": {
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "break-word !important",
-                  },
-                  "& .MuiTable-root td": {
-                    padding: "8px 10px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                  // Let only Location and Remarks cell content wrap to multiple lines
-                  "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "break-word !important",
-                  },
-                  // Tighten spacing for numeric-ish columns (ID, Group ID, Area)
-                  // 2 = ID, 6 = Group ID, 8 = Area
-                  "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(6), & .MuiTable-root td:nth-of-type(6), & .MuiTable-root th:nth-of-type(8), & .MuiTable-root td:nth-of-type(8)":
-                    {
-                      paddingLeft: "6px !important",
-                      paddingRight: "6px !important",
-                    },
-                  // ID column: fixed, single-line numeric
-                  "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-                    whiteSpace: "nowrap !important",
-                    width: "56px !important",
-                    minWidth: "56px !important",
-                    maxWidth: "56px !important",
-                    textAlign: "center !important",
-                  },
+                  position: "relative",
                 }}
               >
-                {/* Loading Overlay */}
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
+                {/* Single scrollport: toolbar+table grow with rows (autoHeight); bar gutter keeps H-scroll space */}
+                <MDBox
+                  sx={{
+                    position: "relative",
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    overflowX: "scroll",
+                    overflowY: "scroll",
+                    scrollbarGutter: "stable both-edges",
+                    WebkitOverflowScrolling: "touch",
+                    scrollbarWidth: "thin",
+                    scrollbarColor: "#6b6b6b #e8e8e8",
+                    "&::-webkit-scrollbar": {
+                      width: "10px",
+                      height: "12px",
+                    },
+                    "&::-webkit-scrollbar-track": {
+                      backgroundColor: "#e8e8e8",
+                      borderRadius: "6px",
+                    },
+                    "&::-webkit-scrollbar-thumb": {
+                      backgroundColor: "#6b6b6b",
+                      borderRadius: "6px",
+                      border: "2px solid #e8e8e8",
+                      "&:hover": { backgroundColor: "#4a4a4a" },
+                    },
+                    "&::-webkit-scrollbar-corner": {
+                      backgroundColor: "#e8e8e8",
+                    },
+                    "& .MuiTable-root": {
+                      tableLayout: "auto",
+                      width: "max-content",
+                      minWidth: "max(100%, 1640px)",
+                    },
+                    // DataTable uses custom <td> cells that default to nowrap + inner width:max-content.
+                    // Force wrapping + constrain inner wrapper so text never overlaps adjacent columns.
+                    "& table th, & table td": {
+                      whiteSpace: "normal !important",
+                      wordBreak: "break-word !important",
+                      overflowWrap: "anywhere !important",
+                      verticalAlign: "top",
+                    },
+                    "& table td > div": {
+                      display: "block !important",
+                      width: "100% !important",
+                      maxWidth: "100% !important",
+                      whiteSpace: "normal !important",
+                      wordBreak: "break-word !important",
+                      overflowWrap: "anywhere !important",
+                    },
+                    "& table td > div > *": {
+                      maxWidth: "100% !important",
+                      whiteSpace: "normal !important",
+                      wordBreak: "break-word !important",
+                      overflowWrap: "anywhere !important",
+                    },
+                    // Compact rows
+                    "& .MuiTable-root th": {
+                      fontSize: "0.875rem !important",
+                      fontWeight: "700 !important",
+                      padding: "6px 10px !important",
+                      lineHeight: 1.25,
+                      borderBottom: "1px solid #d0d0d0",
+                      whiteSpace: "nowrap",
+                    },
+                    "& .MuiTable-root th:nth-of-type(10), & .MuiTable-root th:nth-of-type(11)": {
+                      whiteSpace: "normal !important",
+                      wordBreak: "break-word !important",
+                      overflowWrap: "break-word !important",
+                    },
+                    "& .MuiTable-root td": {
+                      padding: "4px 10px !important",
+                      lineHeight: 1.3,
+                      borderBottom: "1px solid #e8e8e8",
+                      whiteSpace: "nowrap",
+                    },
+                    "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
+                      whiteSpace: "normal !important",
+                      wordBreak: "break-word !important",
+                      overflowWrap: "break-word !important",
+                    },
+                    "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(7), & .MuiTable-root td:nth-of-type(7), & .MuiTable-root th:nth-of-type(9), & .MuiTable-root td:nth-of-type(9)":
+                      {
+                        paddingLeft: "4px !important",
+                        paddingRight: "4px !important",
+                      },
+                    "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
+                      whiteSpace: "nowrap !important",
+                      width: "72px !important",
+                      minWidth: "72px !important",
+                      maxWidth: "88px !important",
+                      textAlign: "center !important",
+                    },
+                  }}
+                >
+                  {/* Loading Overlay */}
+                  {loading && (
+                    <MDBox
+                      position="absolute"
+                      top={0}
+                      left={0}
+                      right={0}
+                      bottom={0}
+                      display="flex"
+                      justifyContent="center"
+                      alignItems="center"
+                      zIndex={10}
+                      sx={{
+                        backgroundColor: "rgba(255, 255, 255, 0.8)",
+                        backdropFilter: "blur(2px)",
+                      }}
+                    >
+                      <CurrencyLoading size={50} />
+                    </MDBox>
+                  )}
+                  <DataTable
+                    table={{ columns, rows: computedRows }}
+                    isSorted={false}
+                    stickyToolbarAndHeader
+                    autoHeight
+                    entriesPerPage={{
+                      defaultValue: 20,
+                      entries: [10, 25, 50, 100, 500, 1000],
                     }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
-                <DataTable
-                  table={{ columns, rows: computedRows }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100],
-                  }}
-                  pageSize={pageSize}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchPropertyGroupings(1, value);
-                  }}
-                  showTotalEntries={false}
-                  noEndBorder
-                  canSearch
-                  autoResetFilters={false}
-                  pagination={{ variant: "gradient", color: "info" }}
-                  exportFileName="Property-Grouping"
-                  onVisibleRowCountChange={setVisibleRowCount}
-                />
+                    page={0}
+                    onPageChange={() => {}}
+                    pageSize={pageSize}
+                    onEntriesPerPageChange={(value) => {
+                      setPageSize(value);
+                      setPageNumber(1);
+                      fetchPropertyGroupings(1, value);
+                    }}
+                    showTotalEntries={false}
+                    noEndBorder
+                    canSearch
+                    autoResetFilters={false}
+                    pagination={{ variant: "gradient", color: "info" }}
+                    exportFileName="Property-Grouping"
+                    onVisibleRowCountChange={setVisibleRowCount}
+                  />
+                </MDBox>
 
                 {/* Custom Pagination Footer */}
                 {totalCount > 0 && (
@@ -3070,6 +3365,7 @@ export default function PropertyGrouping() {
         classes={classes}
         allPropertyGroupings={allPropertyGroupings}
         onGroupIdBlur={handleViewActiveContractsForGroup}
+        propertyTypes={propertyTypes}
       />
       {/* Linked Properties Dialog */}
       <Dialog
@@ -3214,7 +3510,7 @@ export default function PropertyGrouping() {
                     <Autocomplete
                       disableClearable
                       value={linkedPropertiesPageSize.toString()}
-                      options={["25", "50", "100", "200"]}
+                      options={["25", "50", "100", "200", "500", "1000"]}
                       onChange={(event, newValue) => {
                         handleLinkedPropertiesPageSizeChange(parseInt(newValue, 10));
                       }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -17,6 +17,7 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
+import Popover from "@mui/material/Popover";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -34,6 +35,80 @@ import api, {
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import { format, parseISO, isValid } from "date-fns";
+
+/** Description column: up to 2 lines; click … for full text in a popover (same pattern as rental-properties Location). */
+function DescriptionTableCell({ value }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "-";
+  const hasContent = text !== "-";
+  const showMore = hasContent && text.length > 32;
+
+  return (
+    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        component="div"
+        variant="body2"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+          lineHeight: 1.35,
+        }}
+      >
+        {hasContent ? text : "-"}
+      </MDTypography>
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              textDecoration: "underline",
+            }}
+            aria-label="Show full description"
+          >
+            …
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+DescriptionTableCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
 
 function GovtShareRateForm({
   open,
@@ -372,15 +447,19 @@ function GovtShareRateForm({
     };
 
     try {
+      const comboPayloads = (form.baseIds || []).flatMap((baseId) =>
+        (form.classIds || []).map((classId) => ({
+          ...payloadBase,
+          baseId: Number(baseId),
+          classId: Number(classId),
+        }))
+      );
+      if (comboPayloads.length === 0) return;
       const payloadToSubmit = isEditMode
-        ? { ...payloadBase, baseId: Number(form.baseIds[0]), classId: Number(form.classIds[0]) }
-        : (form.baseIds || []).flatMap((baseId) =>
-            (form.classIds || []).map((classId) => ({
-              ...payloadBase,
-              baseId: Number(baseId),
-              classId: Number(classId),
-            }))
-          );
+        ? comboPayloads.length === 1
+          ? comboPayloads[0]
+          : comboPayloads
+        : comboPayloads;
 
       const result = await onSubmit(payloadToSubmit);
 
@@ -615,102 +694,61 @@ function GovtShareRateForm({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            {isEditMode ? (
-              <Autocomplete
-                size="small"
-                fullWidth
-                disableClearable
-                options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={filteredBases.find((b) => Number(b.id) === Number(form.baseIds[0])) ?? null}
-                onChange={(_, newValue) =>
-                  handleChange("baseIds", newValue != null ? [String(newValue.id)] : [])
-                }
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
+            <Autocomplete
+              multiple
+              disableCloseOnSelect
+              size="small"
+              fullWidth
+              options={filteredBases}
+              getOptionLabel={(option) => option?.name ?? ""}
+              isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+              value={(form.baseIds || [])
+                .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
+                .filter(Boolean)}
+              onChange={(_, newValue) =>
+                handleChange(
+                  "baseIds",
+                  (newValue || []).map((b) => String(b.id))
+                )
+              }
+              disabled={!form.cmdId}
+              ListboxProps={{ style: { maxHeight: 300 } }}
+              sx={{
+                width: "100%",
+                fontSize: "1rem",
+                "& .MuiInputBase-root": { minHeight: "45px" },
+                "& .MuiOutlinedInput-root": { minHeight: "45px" },
+                "& .MuiAutocomplete-inputRoot": {
+                  minHeight: "45px",
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                },
+                "& .MuiInputBase-input": {
                   fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
+                  padding: "10px 12px",
+                },
+              }}
+              renderInput={(params) => (
+                <MDInput
+                  {...params}
+                  label="Base (Multiple Selection)"
+                  required
+                  error={!!errors.baseIds}
+                  sx={inputSx}
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    key={option.id}
+                    label={option.name}
+                    size="small"
+                    sx={{ fontSize: "0.875rem" }}
+                    {...getTagProps({ index })}
                   />
-                )}
-              />
-            ) : (
-              <Autocomplete
-                multiple
-                disableCloseOnSelect
-                size="small"
-                fullWidth
-                options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
-                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={(form.baseIds || [])
-                  .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
-                  .filter(Boolean)}
-                onChange={(_, newValue) =>
-                  handleChange(
-                    "baseIds",
-                    (newValue || []).map((b) => String(b.id))
-                  )
-                }
-                disabled={!form.cmdId}
-                ListboxProps={{ style: { maxHeight: 300 } }}
-                sx={{
-                  width: "100%",
-                  fontSize: "1rem",
-                  "& .MuiInputBase-root": { minHeight: "45px" },
-                  "& .MuiOutlinedInput-root": { minHeight: "45px" },
-                  "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
-                    paddingTop: 0,
-                    paddingBottom: 0,
-                  },
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                    padding: "10px 12px",
-                  },
-                }}
-                renderInput={(params) => (
-                  <MDInput
-                    {...params}
-                    label="Base (Multiple Selection)"
-                    required
-                    error={!!errors.baseIds}
-                    sx={inputSx}
-                  />
-                )}
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip
-                      key={option.id}
-                      label={option.name}
-                      size="small"
-                      sx={{ fontSize: "0.875rem" }}
-                      {...getTagProps({ index })}
-                    />
-                  ))
-                }
-              />
-            )}
+                ))
+              }
+            />
             {errors.baseIds && (
               <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                 {errors.baseIds}
@@ -1008,7 +1046,7 @@ export default function GovtShareRate() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1017,11 +1055,24 @@ export default function GovtShareRate() {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
   const isSuperUser =
     String(getLoggedInUsername() || "")
       .trim()
       .toLowerCase()
       .replace(/\s+/g, "") === "superuser";
+
+  const handleToggleGroup = (groupKey) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  };
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -1287,6 +1338,22 @@ export default function GovtShareRate() {
 
       if (isEdit) {
         const recordId = currentRecord.Id || currentRecord.id;
+        if (Array.isArray(data) && data.length > 0) {
+          await govtShareRateApi.update(recordId, data[0]);
+          const createdIds = [];
+          for (let i = 1; i < data.length; i += 1) {
+            const r = await govtShareRateApi.create(data[i]);
+            const nid =
+              r?.Id ||
+              r?.id ||
+              r?.data?.Id ||
+              r?.data?.id ||
+              (Array.isArray(r?.data) ? r.data[0]?.Id || r.data[0]?.id : null);
+            if (nid) createdIds.push(nid);
+          }
+          await fetchGovtShareRates(pageNumber, pageSize);
+          return { ids: [recordId, ...createdIds], id: recordId };
+        }
         savedRecord = await govtShareRateApi.update(recordId, data);
       } else {
         const payloads = Array.isArray(data) ? data : [data];
@@ -1397,12 +1464,54 @@ export default function GovtShareRate() {
       accessor: "actions",
       align: "center",
       width: "72px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          // eslint-disable-next-line react/prop-types
+          const groupKey = row.original.groupKey;
+          const isExpanded = expandedGroups.has(groupKey);
+          return (
+            <MDBox
+              alignItems="left"
+              justifyContent="left"
+              sx={{
+                backgroundColor: "#f8f9fa",
+                gap: "2px",
+                padding: "2px 2px",
+                borderRadius: "2px",
+              }}
+            >
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleToggleGroup(groupKey)}
+                title={isExpanded ? "Collapse" : "Expand"}
+                sx={{ padding: "1px" }}
+              >
+                <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
+              </IconButton>
+            </MDBox>
+          );
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.actions;
+      },
     },
     {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
       width: "60px",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row.original.isGroupRow) {
+          return "";
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.attachments;
+      },
     },
     {
       Header: "S.No",
@@ -1412,9 +1521,11 @@ export default function GovtShareRate() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        const rowId = row.original.id ?? row.original.Id;
-        const index = tableRows.findIndex((r) => (r.id ?? r.Id) === rowId);
-        return (pageNumber - 1) * pageSize + index + 1;
+        if (row.original.isExpandedRow) {
+          return "";
+        }
+        // eslint-disable-next-line react/prop-types
+        return row.original.sno != null && row.original.sno !== "" ? row.original.sno : "-";
       },
     },
     {
@@ -1474,6 +1585,10 @@ export default function GovtShareRate() {
       width: classAndConfigGridColumnWidth,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          return value || "-";
+        }
         const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
         if (!classId) return value || "-";
         const classItem = classes.find((c) => Number(c.id) === Number(classId));
@@ -1491,116 +1606,249 @@ export default function GovtShareRate() {
       accessor: "rate",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (value ? `${Number(value).toLocaleString()}%` : "-"),
+      Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          return "";
+        }
+        return value ? `${Number(value).toLocaleString()}%` : "-";
+      },
     },
-    { Header: "Description", accessor: "description", align: "left" },
+    {
+      Header: "Description",
+      accessor: "description",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        /* eslint-disable-next-line react/prop-types -- react-table row.original */
+        if (row?.original?.isGroupRow) {
+          return "";
+        }
+        return <DescriptionTableCell value={value} />;
+      },
+    },
     {
       Header: "Status",
       accessor: "status",
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <StatusBadge value={value} />,
+      Cell: ({ value, row }) => {
+        /* eslint-disable react/prop-types -- react-table row.original */
+        if (row.original.isExpandedRow) {
+          const statusValue = row.original.status;
+          return <StatusBadge value={statusValue} />;
+        }
+        if (
+          row.original.isGroupRow &&
+          row.original.statuses &&
+          Array.isArray(row.original.statuses)
+        ) {
+          if (row.original.statuses.length > 1) {
+            return "";
+          }
+          if (row.original.statuses.length === 1) {
+            return <StatusBadge value={row.original.statuses[0]} />;
+          }
+          return "";
+        }
+        /* eslint-enable react/prop-types */
+        return <StatusBadge value={value} />;
+      },
     },
   ];
 
-  const computedRows = tableRows.map((row, index) => {
-    // Normalize id and foreign keys (handle both camelCase and PascalCase)
-    const normalizedId = row?.id ?? row?.Id;
-    const sno = (pageNumber - 1) * pageSize + index + 1;
-    const classId = row.classId ?? row.ClassId;
-    const cmdId = row.cmdId ?? row.CmdId;
-    const baseId = row.baseId ?? row.BaseId;
-
-    const classItem = classes.find((c) => Number(c.id) === Number(classId));
-    const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
-    const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
-
-    const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
-    const countValue =
-      row?.attachmentCount ??
-      row?.attachmentsCount ??
-      row?.filesCount ??
-      row?.AttachmentCount ??
-      row?.AttachmentsCount ??
-      row?.FilesCount;
-    const hasAttachmentByCount = Number(countValue || 0) > 0;
-    const hasAttachmentData =
-      rawIsAttachment === true ||
-      rawIsAttachment === 1 ||
-      rawIsAttachment === "1" ||
-      String(rawIsAttachment || "")
-        .trim()
-        .toLowerCase() === "true" ||
-      hasAttachmentByCount;
-
-    return {
-      ...row,
-      id: normalizedId,
-      sno: sno,
-      cmdId: cmdId,
-      baseId: baseId,
-      classId: classId,
-      cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
-      baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
-      className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
-      config: row.Config ?? row.config ?? "",
-      applicableDate:
-        row.ApplicableDate ??
-        row.applicableDate ??
-        row.ApplicationDate ??
-        row.applicationDate ??
-        "",
-      rate: row.rate ?? row.Rate ?? 0,
-      description: row.description ?? row.Description ?? "",
-      status: row.status ?? row.Status ?? true,
-      attachments: (
-        <IconButton
-          size="small"
-          color={hasAttachmentData ? "success" : "error"}
-          onClick={() => handleOpenAttachments(normalizedId)}
-          title="View Attachments"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>visibility</Icon>
-        </IconButton>
-      ),
-      actions: (
-        <MDBox
-          alignItems="left"
-          justifyContent="left"
-          sx={{
-            backgroundColor: "#f8f9fa",
-            gap: "2px",
-            padding: "2px 2px",
-            borderRadius: "2px",
-          }}
-        >
-          {canEditCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditRecord(normalizedId)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-          )}
-          {canDeleteCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteRecord(normalizedId)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
-          )}
-        </MDBox>
-      ),
+  const computedRows = useMemo(() => {
+    const groupKeyOf = (r) => {
+      const cmdId = r.cmdId ?? r.CmdId ?? "";
+      const baseId = r.baseId ?? r.BaseId ?? "";
+      return `${cmdId}|${baseId}`;
     };
-  });
+
+    const enrichedRows = tableRows.map((row, index) => {
+      // Normalize id and foreign keys (handle both camelCase and PascalCase)
+      const normalizedId = row?.id ?? row?.Id;
+      const sno = (pageNumber - 1) * pageSize + index + 1;
+      const classId = row.classId ?? row.ClassId;
+      const cmdId = row.cmdId ?? row.CmdId;
+      const baseId = row.baseId ?? row.BaseId;
+
+      const classItem = classes.find((c) => Number(c.id) === Number(classId));
+      const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
+      const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
+
+      const rawIsAttachment = row?.IsAttachment ?? row?.isAttachment;
+      const countValue =
+        row?.attachmentCount ??
+        row?.attachmentsCount ??
+        row?.filesCount ??
+        row?.AttachmentCount ??
+        row?.AttachmentsCount ??
+        row?.FilesCount;
+      const hasAttachmentByCount = Number(countValue || 0) > 0;
+      const hasAttachmentData =
+        rawIsAttachment === true ||
+        rawIsAttachment === 1 ||
+        rawIsAttachment === "1" ||
+        String(rawIsAttachment || "")
+          .trim()
+          .toLowerCase() === "true" ||
+        hasAttachmentByCount;
+
+      return {
+        ...row,
+        id: normalizedId,
+        sno: sno,
+        cmdId: cmdId,
+        baseId: baseId,
+        classId: classId,
+        cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
+        baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
+        className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
+        config: row.Config ?? row.config ?? "",
+        applicableDate:
+          row.ApplicableDate ??
+          row.applicableDate ??
+          row.ApplicationDate ??
+          row.applicationDate ??
+          "",
+        rate: row.rate ?? row.Rate ?? 0,
+        description: row.description ?? row.Description ?? "",
+        status: row.status ?? row.Status ?? true,
+        attachments: (
+          <IconButton
+            size="small"
+            color={hasAttachmentData ? "success" : "error"}
+            onClick={() => handleOpenAttachments(normalizedId)}
+            title="View Attachments"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>visibility</Icon>
+          </IconButton>
+        ),
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa",
+              gap: "2px",
+              padding: "2px 2px",
+              borderRadius: "2px",
+            }}
+          >
+            {canEditCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditRecord(normalizedId)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDeleteCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteRecord(normalizedId)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
+          </MDBox>
+        ),
+      };
+    });
+
+    const byKey = new Map();
+    enrichedRows.forEach((r) => {
+      const k = groupKeyOf(r);
+      if (!byKey.has(k)) {
+        byKey.set(k, []);
+      }
+      byKey.get(k).push(r);
+    });
+
+    const sortedKeys = Array.from(byKey.keys()).sort((ka, kb) => {
+      const a = byKey.get(ka)[0];
+      const b = byKey.get(kb)[0];
+      const d = String(a.applicableDate || "").localeCompare(String(b.applicableDate || ""));
+      if (d !== 0) return d;
+      return String(a.cmdName || "").localeCompare(String(b.cmdName || ""));
+    });
+
+    const result = [];
+    let topSno = 0;
+    sortedKeys.forEach((gk) => {
+      const gRows = byKey.get(gk);
+      const snoValue = (pageNumber - 1) * pageSize + ++topSno;
+
+      if (gRows.length === 1) {
+        const r = gRows[0];
+        result.push({
+          ...r,
+          sno: snoValue,
+          isGroupRow: false,
+          isExpandedRow: false,
+        });
+        return;
+      }
+
+      const firstRow = gRows[0];
+      const isExpanded = expandedGroups.has(gk);
+      const statusesSet = new Set();
+      gRows.forEach((gr) => {
+        const sv = gr.status !== undefined && gr.status !== null ? Boolean(gr.status) : null;
+        if (sv !== null) statusesSet.add(sv);
+      });
+      const statusArray = Array.from(statusesSet).sort((a, b) => {
+        if (a === b) return 0;
+        return a ? -1 : 1;
+      });
+
+      const classNameSet = new Set();
+      gRows.forEach((gr) => {
+        const n = gr.className || "";
+        if (n) classNameSet.add(n);
+      });
+      const classNamesJoined = Array.from(classNameSet).sort().join(", ");
+
+      const safeId = gk.replace(/[^a-zA-Z0-9_|.-]/g, "_");
+      result.push({
+        ...firstRow,
+        id: `group-${safeId}`,
+        sno: snoValue,
+        className: classNamesJoined,
+        classId: null,
+        ClassId: null,
+        rate: null,
+        Rate: null,
+        isGroupRow: true,
+        isExpandedRow: false,
+        groupKey: gk,
+        groupRows: gRows,
+        statuses: statusArray,
+        status: statusArray.length === 1 ? statusArray[0] : statusArray,
+      });
+
+      if (isExpanded) {
+        gRows.forEach((row) => {
+          result.push({
+            ...row,
+            sno: "",
+            isGroupRow: false,
+            isExpandedRow: true,
+            groupKey: gk,
+          });
+        });
+      }
+    });
+
+    return result;
+  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups]);
 
   return (
     <DashboardLayout>
@@ -1637,8 +1885,8 @@ export default function GovtShareRate() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "78vh",
+                  minHeight: "560px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
@@ -1690,7 +1938,7 @@ export default function GovtShareRate() {
                   stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
-                    entries: [10, 25, 50, 100],
+                    entries: [10, 25, 50, 100, 500, 1000],
                   }}
                   pageSize={pageSize}
                   onEntriesPerPageChange={(value) => {

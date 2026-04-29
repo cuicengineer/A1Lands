@@ -70,7 +70,6 @@ function RentalPropertyForm({
     cmdId: "",
     baseId: "",
     classId: "",
-    propertyType: "",
     pId: "",
     uoM: "",
     area: 0,
@@ -84,7 +83,6 @@ function RentalPropertyForm({
   const [bases, setBases] = useState([]);
   const [allBases, setAllBases] = useState([]); // New state to store all bases
   const [classes, setClasses] = useState([]);
-  const [propertyTypes, setPropertyTypes] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [existingFiles, setExistingFiles] = useState([]);
@@ -118,19 +116,6 @@ function RentalPropertyForm({
       }
     };
 
-    const fetchPropertyTypes = async () => {
-      try {
-        const response = await api.request("GET", "/api/PropertyTypes");
-        const data = response?.data ?? (Array.isArray(response) ? response : []);
-        // Filter only active property types (status === 1 or status === true)
-        const activePropertyTypes = data.filter((pt) => pt.status === 1 || pt.status === true);
-        console.log("Fetched active property types in form:", activePropertyTypes);
-        setPropertyTypes(activePropertyTypes);
-      } catch (error) {
-        console.error("Error fetching property types:", error);
-      }
-    };
-
     // Only fetch dropdown lists when the dialog is opened (Add/Edit)
     if (!open) return;
 
@@ -138,8 +123,8 @@ function RentalPropertyForm({
     if (commands.length === 0) fetchCommands();
     if (classes.length === 0) fetchClasses();
     if (allBases.length === 0) fetchAllBases();
-    if (propertyTypes.length === 0) fetchPropertyTypes();
-  }, [open, commands.length, classes.length, allBases.length, propertyTypes.length]);
+    if (allBases.length === 0) fetchAllBases();
+  }, [open, commands.length, classes.length, allBases.length]);
 
   useEffect(() => {
     if (form.cmdId && allBases.length > 0) {
@@ -153,18 +138,10 @@ function RentalPropertyForm({
   useEffect(() => {
     setErrors({});
     if (initialData) {
-      console.log("Setting form from initialData:", initialData);
-      console.log(
-        "initialData.propertyType:",
-        initialData.propertyType,
-        "Type:",
-        typeof initialData.propertyType
-      );
       const newForm = {
         cmdId: initialData.cmdId || "",
         baseId: initialData.baseId || "",
         classId: initialData.classId || "",
-        propertyType: initialData.propertyType ? Number(initialData.propertyType) : "",
         pId: initialData.pId || "",
         uoM: initialData.uoM || "",
         area: initialData.area || 0,
@@ -173,12 +150,6 @@ function RentalPropertyForm({
         status:
           initialData.status === true || initialData.status === 1 || initialData.status === "1",
       };
-      console.log(
-        "New form with propertyType:",
-        newForm.propertyType,
-        "Type:",
-        typeof newForm.propertyType
-      );
       let currentFilteredBases = [];
       if (newForm.cmdId && allBases.length > 0) {
         currentFilteredBases = allBases.filter(
@@ -206,7 +177,6 @@ function RentalPropertyForm({
           cmdId: base.cmd != null ? Number(base.cmd) : "",
           baseId: base.id != null ? Number(base.id) : "",
           classId: "",
-          propertyType: "",
           pId: "",
           uoM: "",
           area: 0,
@@ -220,7 +190,6 @@ function RentalPropertyForm({
           cmdId: "",
           baseId: "",
           classId: "",
-          propertyType: "",
           pId: "",
           uoM: "",
           area: 0,
@@ -235,7 +204,6 @@ function RentalPropertyForm({
         cmdId: "",
         baseId: "",
         classId: "",
-        propertyType: "",
         pId: "",
         uoM: "",
         area: 0,
@@ -297,14 +265,7 @@ function RentalPropertyForm({
 
     setForm((prevForm) => ({
       ...prevForm,
-      [field]:
-        field === "area"
-          ? Number(normalizedValue)
-          : field === "propertyType"
-          ? normalizedValue
-            ? Number(normalizedValue)
-            : ""
-          : normalizedValue,
+      [field]: field === "area" ? Number(normalizedValue) : normalizedValue,
       ...(field === "cmdId" && lockedBaseId == null && { baseId: "" }), // Reset baseId when cmdId changes (not when Base is fixed)
     }));
     if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -460,13 +421,6 @@ function RentalPropertyForm({
     { label: "RAC", key: "cmdId", type: "select", options: commands, mandatory: true },
     { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
     { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
-    {
-      label: "Property Type",
-      key: "propertyType",
-      type: "select",
-      options: propertyTypes.map((pt) => ({ id: pt.id, name: pt.name })),
-      mandatory: false,
-    },
     { label: "Property ID", key: "pId", mandatory: isAddMode },
     { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS, mandatory: isAddMode },
     { label: "Area", key: "area", type: "number", mandatory: isAddMode },
