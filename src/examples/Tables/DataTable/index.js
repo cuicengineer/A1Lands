@@ -88,6 +88,67 @@ function extractText(value) {
   }
 }
 
+/**
+ * Zebra + nested-group row tinting (e.g. Govt Share Rate: RAC → rate subgroup → details).
+ * Govt sets `nestedExpandedGroupDetail` on rows under an expanded rate subgroup.
+ */
+function groupedRowBodyStyle(darkMode, rowIndex, original) {
+  const orig = original || {};
+  const isNestedExpandedDetail = Boolean(orig.nestedExpandedGroupDetail);
+  const isExpandedTier1 = Boolean(orig.isExpandedRow) && !isNestedExpandedDetail;
+  const isRateSubgroupParent = Boolean(orig.isGroupRow && orig.isRateSubGroupRow);
+  const even = rowIndex % 2 === 0;
+  const zebraBgColor = even ? "#f0f0f0" : "#ffffff";
+
+  const tier1Bg = darkMode
+    ? even
+      ? "rgb(48, 82, 126)"
+      : "rgb(42, 71, 112)"
+    : even
+    ? "#e3f2fd"
+    : "#f0f7fc";
+
+  /** Rate subgroup header + its expanded detail rows (same fill). */
+  const subgroupRowBg = "#b4c7cc";
+
+  let defaultBgColor = zebraBgColor;
+  let stripeSx = {};
+  let rowHighlight = null;
+
+  if (isNestedExpandedDetail) {
+    defaultBgColor = subgroupRowBg;
+    rowHighlight = "nestedExpanded";
+    stripeSx = {
+      boxShadow: darkMode
+        ? "inset 5px 0 0 rgb(129,199,132), inset 0 0 0 1px rgba(165,214,167,0.32)"
+        : "inset 3px 0 0 rgba(46,125,50,0.5)",
+      "& td:first-of-type": { paddingLeft: "28px !important" },
+    };
+  } else if (isRateSubgroupParent) {
+    defaultBgColor = subgroupRowBg;
+    rowHighlight = "rateSubgroup";
+    stripeSx = {
+      boxShadow: darkMode
+        ? "inset 5px 0 0rgba(239, 255, 11, 0.16), inset 0 0 0 1px rgba(186,104,255,0.22)"
+        : "inset 3px 0 0 rgba(236, 212, 250, 0.48)",
+      "& td:first-of-type": { paddingLeft: "22px !important" },
+    };
+  } else if (isExpandedTier1) {
+    defaultBgColor = tier1Bg;
+    rowHighlight = "expanded";
+    stripeSx = {
+      boxShadow: darkMode
+        ? "inset 5px 0 0 rgb(144,202,249), inset 0 0 0 1px rgba(144,202,249,0.45)"
+        : "inset 3px 0 0 rgba(25,118,210,0.35)",
+      "& td:first-of-type": { paddingLeft: "24px !important" },
+    };
+  }
+
+  const inheritRowBackground = isExpandedTier1 || isNestedExpandedDetail || isRateSubgroupParent;
+
+  return { defaultBgColor, stripeSx, inheritRowBackground, rowHighlight };
+}
+
 const BLANK_VALUE_TOKEN = "__BLANK__";
 const STATUS_ACTIVE_KEY = 1;
 const STATUS_INACTIVE_KEY = 0;
@@ -363,6 +424,8 @@ function DataTable({
   onVisibleRowCountChange,
   autoResetFilters,
   toolbarStart,
+  /** Optional extra react-table filter types merged with defaults (column.filter must reference a key). */
+  extraFilterTypes,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -490,18 +553,52 @@ function DataTable({
   const filterTypes = useMemo(
     () => ({
       // Multi-select filter: include rows where the cell value matches any selected token.
+      // Group header rows may show comma-aggregated values (e.g. Base "KBH, NRK"); match if any
+      // segment matches any selected token. If the user selects the aggregate token itself, detail
+      // rows (single-base tokens) still match via segment expansion.
       includesOneOf: (rowsToFilter, id, filterValue) => {
         if (!Array.isArray(filterValue) || filterValue.length === 0) return rowsToFilter;
         const allowed = new Set(filterValue);
         const colId = Array.isArray(id) ? id[0] : id;
+        // When the filter list contains an aggregate like "KBH, NRK", detail rows still have
+        // single-base tokens; match those rows if their token is any segment of a selected aggregate.
+        const tokenMatchesAllowed = (token) => {
+          if (allowed.has(token)) return true;
+          for (const sel of allowed) {
+            const agg = extractText(sel).trim();
+            if (agg.includes(",")) {
+              const seg = agg
+                .split(",")
+                .map((p) => normalizeValueToken(p.trim(), { id: colId }))
+                .filter((p) => p && p !== BLANK_VALUE_TOKEN);
+              if (seg.includes(token)) return true;
+            }
+          }
+          return false;
+        };
         return rowsToFilter.filter((row) => {
-          // eslint-disable-next-line react/prop-types
+          /* eslint-disable react/prop-types -- react-table Row shape (original, values) */
           const token = normalizeValueToken(row.values?.[colId], { id: colId });
-          return allowed.has(token);
+          if (tokenMatchesAllowed(token)) return true;
+          const orig = row.original;
+          if (orig?.isGroupRow) {
+            const raw = row.values?.[colId];
+            const fullText = extractText(raw).trim();
+            if (fullText.includes(",")) {
+              const parts = fullText
+                .split(",")
+                .map((p) => normalizeValueToken(p.trim(), { id: colId }))
+                .filter((p) => p && p !== BLANK_VALUE_TOKEN);
+              return parts.some((p) => tokenMatchesAllowed(p));
+            }
+          }
+          return false;
+          /* eslint-enable react/prop-types */
         });
       },
+      ...(extraFilterTypes && typeof extraFilterTypes === "object" ? extraFilterTypes : {}),
     }),
-    []
+    [extraFilterTypes]
   );
 
   const defaultColumn = useMemo(
@@ -1290,7 +1387,13 @@ function DataTable({
                       align={column.align ? column.align : "left"}
                       sorted={setSortedValue(column)}
                       filterNode={
-                        isFilterableColumn(column) ? <ColumnValueFilter column={column} /> : null
+                        isFilterableColumn(column) ? (
+                          typeof column.Filter === "function" ? (
+                            <column.Filter column={column} />
+                          ) : (
+                            <ColumnValueFilter column={column} />
+                          )
+                        ) : null
                       }
                       draggable
                       onDragStart={() => {
@@ -1314,40 +1417,41 @@ function DataTable({
               ))}
             </MDBox>
             <TableBody {...getTableBodyProps()}>
-              {page.map((row, key) => {
-                prepareRow(row);
-                // Check for custom row styling
-                // eslint-disable-next-line react/prop-types
-                const customRowStyle = row?.original?.__rowStyle || {};
-                // eslint-disable-next-line react/prop-types
-                const customRowClassName = row?.original?.__rowClassName || "";
-                const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
+              {page.map((rtBodyRow, key) => {
+                prepareRow(rtBodyRow);
+                const rowOriginal = rtBodyRow.original;
+                const customRowStyle = rowOriginal?.__rowStyle || {};
+                const customRowClassName = rowOriginal?.__rowClassName || "";
+                const { defaultBgColor, stripeSx, inheritRowBackground, rowHighlight } =
+                  groupedRowBodyStyle(darkMode, key, rowOriginal);
                 const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
 
                 return (
                   <TableRow
                     key={key}
                     // eslint-disable-next-line react/prop-types
-                    {...row.getRowProps()}
+                    {...rtBodyRow.getRowProps()}
                     className={customRowClassName}
                     sx={{
                       backgroundColor: rowBgColor,
+                      ...stripeSx,
                       ...customRowStyle,
                     }}
                   >
                     {/* eslint-disable-next-line react/prop-types */}
-                    {row.cells.map((cell, idx) => {
+                    {rtBodyRow.cells.map((cell, idx) => {
                       const isEvenRow = key % 2 === 0;
-                      // eslint-disable-next-line react/prop-types
-                      const isDisabledRow = Boolean(row?.original?.__disabledRow);
+                      const isDisabledRow = Boolean(rowOriginal?.__disabledRow);
                       return (
                         <DataTableBodyCell
+                          {...cell.getCellProps()}
                           key={idx}
                           noBorder={noEndBorder && rows.length - 1 === key}
                           align={cell.column.align ? cell.column.align : "left"}
                           isEvenRow={isEvenRow}
                           disabledRow={isDisabledRow}
-                          {...cell.getCellProps()}
+                          tintBackground={inheritRowBackground ? rowBgColor : ""}
+                          rowHighlight={rowHighlight ?? undefined}
                         >
                           {cell.render("Cell")}
                         </DataTableBodyCell>
@@ -1382,7 +1486,13 @@ function DataTable({
                     align={column.align ? column.align : "left"}
                     sorted={setSortedValue(column)}
                     filterNode={
-                      isFilterableColumn(column) ? <ColumnValueFilter column={column} /> : null
+                      isFilterableColumn(column) ? (
+                        typeof column.Filter === "function" ? (
+                          <column.Filter column={column} />
+                        ) : (
+                          <ColumnValueFilter column={column} />
+                        )
+                      ) : null
                     }
                     draggable
                     onDragStart={() => {
@@ -1406,38 +1516,40 @@ function DataTable({
             ))}
           </MDBox>
           <TableBody {...getTableBodyProps()}>
-            {page.map((row, key) => {
-              prepareRow(row);
-              // eslint-disable-next-line react/prop-types
-              const customRowStyle = row?.original?.__rowStyle || {};
-              // eslint-disable-next-line react/prop-types
-              const customRowClassName = row?.original?.__rowClassName || "";
-              const defaultBgColor = key % 2 === 0 ? "#f0f0f0" : "#ffffff";
+            {page.map((rtBodyRow, key) => {
+              prepareRow(rtBodyRow);
+              const rowOriginal = rtBodyRow.original;
+              const customRowStyle = rowOriginal?.__rowStyle || {};
+              const customRowClassName = rowOriginal?.__rowClassName || "";
+              const { defaultBgColor, stripeSx, inheritRowBackground, rowHighlight } =
+                groupedRowBodyStyle(darkMode, key, rowOriginal);
               const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
               return (
                 <TableRow
                   key={key}
                   // eslint-disable-next-line react/prop-types
-                  {...row.getRowProps()}
+                  {...rtBodyRow.getRowProps()}
                   className={customRowClassName}
                   sx={{
                     backgroundColor: rowBgColor,
+                    ...stripeSx,
                     ...customRowStyle,
                   }}
                 >
                   {/* eslint-disable-next-line react/prop-types */}
-                  {row.cells.map((cell, idx) => {
+                  {rtBodyRow.cells.map((cell, idx) => {
                     const isEvenRow = key % 2 === 0;
-                    // eslint-disable-next-line react/prop-types
-                    const isDisabledRow = Boolean(row?.original?.__disabledRow);
+                    const isDisabledRow = Boolean(rowOriginal?.__disabledRow);
                     return (
                       <DataTableBodyCell
+                        {...cell.getCellProps()}
                         key={idx}
                         noBorder={noEndBorder && rows.length - 1 === key}
                         align={cell.column.align ? cell.column.align : "left"}
                         isEvenRow={isEvenRow}
                         disabledRow={isDisabledRow}
-                        {...cell.getCellProps()}
+                        tintBackground={inheritRowBackground ? rowBgColor : ""}
+                        rowHighlight={rowHighlight ?? undefined}
                       >
                         {cell.render("Cell")}
                       </DataTableBodyCell>
@@ -1516,6 +1628,7 @@ DataTable.defaultProps = {
   onVisibleRowCountChange: undefined,
   autoResetFilters: true,
   toolbarStart: null,
+  extraFilterTypes: null,
 };
 
 // Typechecking props for the DataTable
@@ -1562,6 +1675,7 @@ DataTable.propTypes = {
   onVisibleRowCountChange: PropTypes.func,
   autoResetFilters: PropTypes.bool,
   toolbarStart: PropTypes.node,
+  extraFilterTypes: PropTypes.object,
 };
 
 export default DataTable;

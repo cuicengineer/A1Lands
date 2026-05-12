@@ -6,23 +6,8 @@ if (!RAW_API_BASE) {
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const LAST_ACTIVITY_KEY = "lastActivityAt";
-const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
-
-function getLastActivityTs() {
-  try {
-    const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
-    const ts = Number(raw);
-    return Number.isFinite(ts) ? ts : 0;
-  } catch (e) {
-    return 0;
-  }
-}
-
-function isUserInactive() {
-  const lastTs = getLastActivityTs();
-  if (!lastTs) return false;
-  return Date.now() - lastTs >= INACTIVITY_TIMEOUT_MS;
-}
+const LOGOUT_EVENT_KEY = "auth:logout";
+const TOKEN_REFRESH_SKEW_SECONDS = 60;
 
 function tryParseJwtPayload(token) {
   try {
@@ -46,6 +31,18 @@ function isJwtExpiredOrNearExpiry(token, skewSeconds = 60) {
   if (!exp || typeof exp !== "number") return true; // if we can't determine, be conservative
   const nowSeconds = Math.floor(Date.now() / 1000);
   return exp <= nowSeconds + skewSeconds;
+}
+
+function getAccessTokenExpiryMs() {
+  const token = getStoredAccessToken();
+  const payload = tryParseJwtPayload(token);
+  const exp = payload?.exp;
+  return exp && typeof exp === "number" ? exp * 1000 : null;
+}
+
+function isAuthRefreshPath(path) {
+  const lower = String(path || "").toLowerCase();
+  return lower.includes("/api/login") || lower.includes("/api/login/refresh");
 }
 
 function getStoredAccessToken() {
@@ -76,34 +73,100 @@ function clearStoredAuth() {
     localStorage.removeItem("authToken");
     localStorage.removeItem("accessToken");
     localStorage.removeItem("auth");
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
   } catch (e) {
     // ignore
   }
 }
 
-function redirectToLogin(reason) {
-  // Refresh token is HttpOnly cookie; frontend can't read it.
-  // If refresh fails (401/403) we assume refresh token is missing/expired -> force re-login.
-  console.log("refresh token missing", reason || "");
-  console.warn(
-    "Auth refresh failed. Common causes: refresh cookie not stored/sent (check SameSite/Secure), or frontend not running on HTTPS while cookie is Secure."
-  );
-  // Keep user on screen while actively working; App.js enforces 5-min idle logout.
-  if (!isUserInactive()) {
-    console.warn("Skipping forced logout because user is still active.", reason || "");
-    return;
-  }
-
-  clearStoredAuth();
+function redirectToLogin() {
   try {
-    if (typeof window !== "undefined" && window.location) {
-      if (window.location.pathname !== "/") {
-        window.location.assign("/");
-      }
+    if (typeof window !== "undefined" && window.location?.pathname !== "/login") {
+      window.location.assign("/login");
     }
   } catch (e) {
     // ignore
   }
+}
+
+function logoutEverywhere(reason = "logout", options = {}) {
+  const { broadcast = true } = options || {};
+  clearStoredAuth();
+  try {
+    if (broadcast && typeof localStorage !== "undefined") {
+      localStorage.setItem(LOGOUT_EVENT_KEY, `${Date.now()}:${reason}`);
+    }
+  } catch (e) {
+    // ignore
+  }
+  redirectToLogin();
+}
+
+function handleAuthStorageEvent(event) {
+  if (!event) return;
+  if (event.key === LOGOUT_EVENT_KEY || (event.key === "auth" && event.newValue === null)) {
+    logoutEverywhere("cross-tab", { broadcast: false });
+  }
+}
+
+function handleUnauthorized(reason = "unauthorized") {
+  logoutEverywhere(reason, { broadcast: true });
+}
+
+function getAxiosRequestUrl(config) {
+  return config?.url || config?.baseURL || "";
+}
+
+function setupAxiosInterceptors(axiosInstance) {
+  if (!axiosInstance?.interceptors?.request || !axiosInstance?.interceptors?.response) return null;
+  const requestId = axiosInstance.interceptors.request.use(async (config) => {
+    const requestUrl = getAxiosRequestUrl(config);
+    if (!isAuthRefreshPath(requestUrl)) {
+      const token = getStoredAccessToken();
+      if (token && isJwtExpiredOrNearExpiry(token, TOKEN_REFRESH_SKEW_SECONDS)) {
+        await refreshAccessToken();
+      }
+      const nextToken = getStoredAccessToken();
+      if (nextToken) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${nextToken}`;
+      }
+    }
+    config.withCredentials = true;
+    return config;
+  });
+  const responseId = axiosInstance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const originalRequest = error?.config || {};
+      const requestUrl = getAxiosRequestUrl(originalRequest);
+      if (
+        error?.response?.status === 401 &&
+        !originalRequest._authRetried &&
+        !isAuthRefreshPath(requestUrl)
+      ) {
+        try {
+          const token = await refreshAccessToken();
+          originalRequest._authRetried = true;
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          originalRequest.withCredentials = true;
+          return axiosInstance(originalRequest);
+        } catch (refreshErr) {
+          return Promise.reject(refreshErr);
+        }
+      }
+      if (error?.response?.status === 401 && !isAuthRefreshPath(requestUrl)) {
+        handleUnauthorized("axios-401");
+      }
+      return Promise.reject(error);
+    }
+  );
+  return { requestId, responseId };
+}
+
+if (typeof window !== "undefined" && window.axios) {
+  setupAxiosInterceptors(window.axios);
 }
 
 // Lightweight cache for role to avoid repeated localStorage parse (RBAC checks)
@@ -481,7 +544,7 @@ async function refreshAccessToken() {
       credentials: "include",
     });
     if (res.status === 401 || res.status === 403) {
-      redirectToLogin(`refresh failed (${res.status})`);
+      handleUnauthorized(`refresh failed (${res.status})`);
       throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
     if (!res.ok) {
@@ -510,7 +573,7 @@ async function refreshAccessToken() {
       data?.data?.token ||
       data?.data?.Token;
     if (!nextToken) {
-      redirectToLogin("refresh succeeded but no access token returned");
+      handleUnauthorized("refresh succeeded but no access token returned");
       throw new Error("Refresh response did not include access token");
     }
     storeAccessToken(nextToken);
@@ -592,18 +655,34 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
     fetchOptions.body = isFormData || isString ? body : JSON.stringify(body);
   }
 
+  const currentToken = getStoredAccessToken();
+  if (
+    currentToken &&
+    isJwtExpiredOrNearExpiry(currentToken, TOKEN_REFRESH_SKEW_SECONDS) &&
+    !isAuthRefreshPath(pathWithLeadingSlash)
+  ) {
+    try {
+      await refreshAccessToken();
+      const nextToken = getStoredAccessToken();
+      if (nextToken) finalHeaders.Authorization = `Bearer ${nextToken}`;
+    } catch (refreshErr) {
+      // refreshAccessToken handles logout when refresh is unauthorized.
+    }
+  }
+
   const res = await fetch(url, fetchOptions);
 
   // If access token expired, refresh using HttpOnly cookie then retry ONCE.
-  const currentToken = getStoredAccessToken();
-  const tokenLikelyExpired = currentToken ? isJwtExpiredOrNearExpiry(currentToken, 60) : false;
+  const tokenAfterRequest = getStoredAccessToken();
+  const tokenLikelyExpired = tokenAfterRequest
+    ? isJwtExpiredOrNearExpiry(tokenAfterRequest, TOKEN_REFRESH_SKEW_SECONDS)
+    : false;
   const shouldTryRefresh =
     res.status === 401 &&
-    Boolean(currentToken) &&
+    Boolean(tokenAfterRequest) &&
     tokenLikelyExpired &&
     !requestOptions?._retried &&
-    !String(pathWithLeadingSlash).toLowerCase().includes("/api/login") &&
-    !String(pathWithLeadingSlash).toLowerCase().includes("/api/login/refresh");
+    !isAuthRefreshPath(pathWithLeadingSlash);
 
   if (shouldTryRefresh) {
     try {
@@ -616,6 +695,10 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
       // If refresh token missing/expired, refreshAccessToken already redirected.
       // Fall through to standard error handling below.
     }
+  }
+
+  if (res.status === 401 && !isAuthRefreshPath(pathWithLeadingSlash)) {
+    handleUnauthorized("fetch-401");
   }
 
   return res;
@@ -732,7 +815,11 @@ const api = {
   request,
   requestRaw,
   refreshAccessToken,
+  getAccessTokenExpiryMs,
   fetchAndUpdateUserContext,
+  logoutEverywhere,
+  handleAuthStorageEvent,
+  setupAxiosInterceptors,
   isOperatorUser,
   getStoredPermissions,
   getCurrentMainMenuName,
@@ -777,4 +864,8 @@ export {
   loggedInUserHasCategoryToken,
   contractsApprovalActionsBypassUser,
   fetchAndUpdateUserContext,
+  logoutEverywhere,
+  handleAuthStorageEvent,
+  setupAxiosInterceptors,
+  getAccessTokenExpiryMs,
 };

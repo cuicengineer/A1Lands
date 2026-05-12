@@ -50,31 +50,31 @@ StatusBadge.propTypes = {
   value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]).isRequired,
 };
 
-/** Location column: show up to 3 lines; click … to read full text in a popover (keeps table width stable). */
+/** Location column: show first 30 characters; click … to read full text in a popover. */
 function LocationTableCell({ value }) {
   const [anchor, setAnchor] = useState(null);
   const text = value != null && String(value).trim() !== "" ? String(value) : "-";
   const hasContent = text !== "-";
-  const showMore = hasContent && text.length > 20;
+  const showMore = hasContent && text.length > 30;
+  const displayText = showMore ? text.slice(0, 30) : text;
 
   return (
     <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
-      <MDTypography
-        component="div"
-        variant="body2"
+      <MDBox
+        component="span"
         sx={{
           flex: 1,
           minWidth: 0,
-          display: "-webkit-box",
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
-          lineHeight: 1.35,
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          lineHeight: "inherit",
+          color: "#111111 !important",
         }}
       >
-        {hasContent ? text : "-"}
-      </MDTypography>
+        {hasContent ? displayText : "-"}
+      </MDBox>
       {showMore && (
         <>
           <MDBox
@@ -610,17 +610,16 @@ function RentalProperties() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "15%" },
-    { Header: "Status", accessor: "status", align: "center", width: "10%", Cell: StatusBadge },
-    { Header: "Id", accessor: "id", align: "left", width: "7%" },
-    { Header: "RAC", accessor: "cmdName", align: "left", width: "14%" },
-    { Header: "Base", accessor: "baseName", align: "left", width: "14%" },
-    { Header: "Class", accessor: "className", align: "left", width: "14%" },
+    { Header: "Actions", accessor: "actions", align: "center" },
+    { Header: "Status", accessor: "status", align: "center", Cell: StatusBadge },
+    { Header: "Id", accessor: "id", align: "left" },
+    { Header: "RAC", accessor: "cmdName", align: "left" },
+    { Header: "Base", accessor: "baseName", align: "left" },
+    { Header: "Class", accessor: "className", align: "left" },
     {
       Header: "Property",
       accessor: "pId",
       align: "left",
-      width: "20%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
@@ -630,7 +629,6 @@ function RentalProperties() {
       Header: "Area(UoM)",
       accessor: "area",
       align: "right",
-      width: "21%",
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
         const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
@@ -645,7 +643,6 @@ function RentalProperties() {
       Header: "Location",
       accessor: "location",
       align: "left",
-      width: "22%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <LocationTableCell value={value} />,
     },
@@ -662,7 +659,6 @@ function RentalProperties() {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
-      width: "16%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -705,7 +701,6 @@ function RentalProperties() {
       Header: "Groups",
       accessor: "activeGroups",
       align: "center",
-      width: "20%",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -837,21 +832,28 @@ function RentalProperties() {
               "& .MuiTableContainer-root": {
                 flex: "1 1 0",
                 minHeight: 0,
-                overflow: "hidden",
+                overflow: "auto",
               },
               "& .MuiTable-root": {
-                tableLayout: "fixed",
-                width: "100%",
+                tableLayout: "auto",
+                width: "max-content",
+                borderCollapse: "collapse",
               },
               "& .MuiTable-root th": {
                 fontSize: "1.0rem !important",
                 fontWeight: "700 !important",
-                padding: "8px 8px !important",
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
                 borderBottom: "1px solid #d0d0d0",
+                whiteSpace: "nowrap",
               },
               "& .MuiTable-root td": {
-                padding: "6px 8px !important",
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
                 borderBottom: "1px solid #e0e0e0",
+                whiteSpace: "nowrap",
               },
             }}
           >
@@ -882,54 +884,34 @@ function RentalProperties() {
                 minHeight: 0,
                 overflow: "hidden",
                 "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
-                },
-                // DataTable uses custom <td> cells that default to nowrap + inner width:max-content.
-                // Force wrapping + constrain inner wrapper so text never overlaps adjacent columns.
-                "& table th, & table td": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "break-word !important",
-                  verticalAlign: "top",
-                },
-                "& table td > div": {
-                  display: "block !important",
-                  width: "100% !important",
-                  maxWidth: "100% !important",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "break-word !important",
-                },
-                "& table td > div > *": {
-                  maxWidth: "100% !important",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "break-word !important",
-                },
-                // Location column specific styling - ensure no overflow
-                "& table td[data-column='location'], & table th[data-column='location']": {
-                  maxWidth: "200px !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "break-word !important",
+                  tableLayout: "auto",
+                  width: "max-content",
+                  borderCollapse: "collapse",
                 },
                 "& .MuiTable-root th": {
                   fontSize: "1.05rem !important",
                   fontWeight: "700 !important",
-                  padding: "10px 10px !important",
+                  width: "auto !important",
+                  minWidth: "0 !important",
+                  padding: "1px 4px !important",
                   borderBottom: "1px solid #d0d0d0",
+                  whiteSpace: "nowrap",
                 },
                 "& .MuiTable-root td": {
-                  padding: "8px 10px !important",
+                  width: "auto !important",
+                  minWidth: "0 !important",
+                  padding: "1px 4px !important",
                   borderBottom: "1px solid #e0e0e0",
+                  whiteSpace: "nowrap",
                 },
-                // Tighten spacing for numeric-ish columns after reordering:
-                // 3 = Id, 7 = Property ID, 9 = Area
-                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3), & .MuiTable-root th:nth-of-type(7), & .MuiTable-root td:nth-of-type(7), & .MuiTable-root th:nth-of-type(9), & .MuiTable-root td:nth-of-type(9)":
-                  {
-                    paddingLeft: "6px !important",
-                    paddingRight: "6px !important",
-                  },
+                "& table td > div": {
+                  maxWidth: "100% !important",
+                },
+                "& .MuiTable-root td:nth-of-type(9)": {
+                  whiteSpace: "normal !important",
+                  wordBreak: "break-word !important",
+                  overflowWrap: "break-word !important",
+                },
               }}
             >
               <DataTable
@@ -943,17 +925,19 @@ function RentalProperties() {
                   defaultValue: 20,
                   entries: [10, 25, 50, 100, 500, 1000],
                 }}
+                page={0}
+                onPageChange={() => {}}
                 pageSize={pageSize}
                 onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
                   setPageNumber(1);
-                  fetchRentalProperties(1, value);
+                  setPageSize(value);
                 }}
                 showTotalEntries={false}
                 noEndBorder
                 canSearch
                 exportFileName="Rental-Properties"
                 onVisibleRowCountChange={setVisibleRowCount}
+                contentFitTable
               />
             </MDBox>
 

@@ -82,6 +82,11 @@ const routes = [
     component: <A1Login />,
   },
   {
+    key: "a1-login-route",
+    route: "/login",
+    component: <A1Login />,
+  },
+  {
     type: "collapse",
     name: "Dashboard",
     key: "dashboard",
@@ -299,7 +304,7 @@ const routes = [
     collapse: [
       {
         type: "collapse",
-        name: "Institutional Accts",
+        name: "Inst. Bank Accts",
         key: "accounts-bank-accounts",
         icon: <Icon fontSize="small">account_balance</Icon>,
         route: "/accounts/bank-accounts",

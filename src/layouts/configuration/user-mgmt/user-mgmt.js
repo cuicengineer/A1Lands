@@ -35,6 +35,15 @@ import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
 import { useMaterialUIController } from "context";
 
+/** Dashboard menu row: View is always granted and cannot be unchecked in Assign Rights. */
+function isDashboardRightsMenu(menuName) {
+  return (
+    String(menuName || "")
+      .trim()
+      .toLowerCase() === "dashboard"
+  );
+}
+
 function UserMgmt() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -142,6 +151,7 @@ function UserMgmt() {
     if (editingRowId) return;
     const defaultCmdId = commandOptions[0]?.id || "";
     const isAhq = defaultCmdId ? isAhqCommand(defaultCmdId) : false;
+    const firstBaseForCmd = baseOptions.find((b) => b.cmdId === Number(defaultCmdId));
     setNewRowDraft({
       id: 0,
       username: "",
@@ -151,8 +161,8 @@ function UserMgmt() {
       rank: "",
       appoint: "",
       category: [],
-      unitId: isAhq ? null : "",
-      baseId: isAhq ? null : "",
+      unitId: "",
+      baseId: isAhq && firstBaseForCmd ? firstBaseForCmd.id : "",
       cmdId: defaultCmdId,
       levelId: isAhq ? 1 : 2,
       status: 1,
@@ -264,12 +274,6 @@ function UserMgmt() {
     ) {
       errs.baseId = "Base is required";
     }
-    if (
-      !ahqSelected &&
-      (draft?.unitId === "" || draft?.unitId === null || draft?.unitId === undefined)
-    ) {
-      errs.unitId = "Unit ID is required";
-    }
     if (draft?.levelId === "" || draft?.levelId === null || draft?.levelId === undefined) {
       errs.levelId = "Level ID is required";
     }
@@ -321,21 +325,20 @@ function UserMgmt() {
             updatedDraft.unitId = null;
             updatedDraft.levelId = null;
           } else if (isAhqCommand(nextValue)) {
-            updatedDraft.baseId = null;
-            updatedDraft.BaseId = null;
-            updatedDraft.unitId = null;
+            const filteredBases = baseOptions.filter((base) => base.cmdId === Number(nextValue));
+            const pick = filteredBases.length > 0 ? filteredBases[0].id : "";
+            updatedDraft.baseId = pick;
+            updatedDraft.BaseId = pick;
             updatedDraft.levelId = 1;
           } else {
             const filteredBases = baseOptions.filter((base) => base.cmdId === Number(nextValue));
-            updatedDraft.baseId = filteredBases.length > 0 ? filteredBases[0].id : "";
+            const pick = filteredBases.length > 0 ? filteredBases[0].id : "";
+            updatedDraft.baseId = pick;
+            updatedDraft.BaseId = pick;
             if (!updatedDraft.levelId || Number(updatedDraft.levelId) === 1) {
               updatedDraft.levelId = 2;
             }
           }
-        }
-        if (field === "CmdId") {
-          const filteredBases = baseOptions.filter((base) => base.cmdId === nextValue);
-          updatedDraft.BaseId = filteredBases.length > 0 ? filteredBases[0].id : "";
         }
         return updatedDraft;
       });
@@ -369,10 +372,10 @@ function UserMgmt() {
               .map((v) => v.trim())
               .filter(Boolean)
         ).join(","),
-        unitId: ahqSelected ? null : newRowDraft.unitId ? Number(newRowDraft.unitId) : null,
+        unitId: null,
         status: Number(newRowDraft.status),
         cmdId: Number(newRowDraft.cmdId),
-        baseId: ahqSelected ? null : newRowDraft.baseId ? Number(newRowDraft.baseId) : null,
+        baseId: newRowDraft.baseId ? Number(newRowDraft.baseId) : null,
         levelId: computedLevelId,
       };
       const created = await api.create("User", payload);
@@ -418,8 +421,11 @@ function UserMgmt() {
           ).join(","),
           status: Number(editDraft.status) === 1 ? 1 : 0, // Ensure status is 1 or 0
           cmdId: Number(editDraft.cmdId),
-          baseId: ahqSelected ? null : editDraft.baseId ? Number(editDraft.baseId) : null,
-          unitId: ahqSelected ? null : editDraft.unitId ? Number(editDraft.unitId) : null,
+          baseId: editDraft.baseId ? Number(editDraft.baseId) : null,
+          unitId:
+            editDraft.unitId !== "" && editDraft.unitId !== null && editDraft.unitId !== undefined
+              ? Number(editDraft.unitId)
+              : null,
           levelId: ahqSelected ? 1 : editDraft.levelId ? Number(editDraft.levelId) : null,
         };
 
@@ -552,11 +558,12 @@ function UserMgmt() {
     setRightsDraftRows(
       menus.map((menuName) => {
         const existing = rightsLookup[normalizeMenuKey(menuName)] || {};
+        const isDashboardRow = isDashboardRightsMenu(menuName);
         return {
           menuName,
-          view: toBoolean(
-            existing?.canView ?? existing?.CanView ?? existing?.view ?? existing?.View
-          ),
+          view: isDashboardRow
+            ? true
+            : toBoolean(existing?.canView ?? existing?.CanView ?? existing?.view ?? existing?.View),
           create: toBoolean(
             existing?.canCreate ?? existing?.CanCreate ?? existing?.create ?? existing?.Create
           ),
@@ -583,6 +590,7 @@ function UserMgmt() {
   };
 
   const handleRightsToggle = (menuName, field) => {
+    if (field === "view" && isDashboardRightsMenu(menuName)) return;
     setRightsDraftRows((prev) =>
       prev.map((row) =>
         row.menuName === menuName
@@ -681,8 +689,6 @@ function UserMgmt() {
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
-        const ahqSelected = isAhqCommand(draft?.cmdId);
-        if (ahqSelected) return "-";
         return isEditing
           ? renderBaseSelect(
               "baseId",
@@ -693,7 +699,6 @@ function UserMgmt() {
           : baseOptions.find((base) => base.id === Number(value))?.name || value;
       },
     },
-    { Header: "Unit", accessor: "unitId", align: "left" },
     {
       Header: "Level ID",
       accessor: "levelId",
@@ -1053,9 +1058,7 @@ function UserMgmt() {
         cmdId: isEditing
           ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
           : commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
-        baseId: isAhqCommand(draft?.cmdId)
-          ? "-"
-          : isEditing
+        baseId: isEditing
           ? renderBaseSelect(
               "baseId",
               draft.baseId ? Number(draft.baseId) : "",
@@ -1063,11 +1066,6 @@ function UserMgmt() {
               false
             )
           : baseOptions.find((base) => base.id === Number(r.baseId))?.name || r.baseId,
-        unitId: isAhqCommand(draft?.cmdId)
-          ? "-"
-          : isEditing
-          ? renderInput("unitId", Number(draft.unitId), false, false)
-          : Number(r.unitId),
         levelId: isEditing
           ? renderLevelSelect(
               "levelId",
@@ -1221,9 +1219,8 @@ function UserMgmt() {
                   padding: "8px 10px !important",
                   borderBottom: "1px solid #e0e0e0",
                 },
-                // Tighten spacing for numeric-ish columns after reordering:
-                // 2 = Id, 11 = Unit
-                "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(11), & .MuiTable-root td:nth-of-type(11)":
+                // Tighten spacing for numeric Id column after Actions / optional S.No
+                "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)":
                   {
                     paddingLeft: "6px !important",
                     paddingRight: "6px !important",
@@ -1295,6 +1292,7 @@ function UserMgmt() {
                         checked={row.view}
                         onChange={() => handleRightsToggle(row.menuName, "view")}
                         size="small"
+                        disabled={isDashboardRightsMenu(row.menuName)}
                       />
                     </TableCell>
                     <TableCell align="center">

@@ -45,7 +45,11 @@ import createCache from "@emotion/cache";
 
 // Material Dashboard 2 React routes
 import routes from "routes";
-import api, { canViewCurrentMenu } from "services/api.service";
+import api, {
+  canViewCurrentMenu,
+  handleAuthStorageEvent,
+  logoutEverywhere,
+} from "services/api.service";
 
 // Material Dashboard 2 React contexts
 import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "context";
@@ -56,6 +60,8 @@ import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
 const LAST_ACTIVITY_KEY = "lastActivityAt";
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 const SLIDING_TOKEN_REFRESH_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_BEFORE_EXPIRY_MS = 60 * 1000;
+const MIN_TOKEN_REFRESH_DELAY_MS = 30 * 1000;
 
 export default function App() {
   const [controller, dispatch] = useMaterialUIController();
@@ -141,18 +147,7 @@ export default function App() {
     };
 
     const clearAuthAndLogout = () => {
-      try {
-        localStorage.removeItem("token");
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("auth");
-        localStorage.removeItem(LAST_ACTIVITY_KEY);
-      } catch (e) {
-        // ignore
-      }
-      if (window.location.pathname !== "/") {
-        window.location.assign("/");
-      }
+      logoutEverywhere("inactive");
     };
 
     const resetInactivityTimer = () => {
@@ -180,6 +175,7 @@ export default function App() {
       resetInactivityTimer();
     };
     const handleStorage = (event) => {
+      handleAuthStorageEvent(event);
       if (event.key === LAST_ACTIVITY_KEY && hasAccessToken()) {
         resetInactivityTimer();
       }
@@ -198,9 +194,10 @@ export default function App() {
     };
   }, [pathname]);
 
-  // While the user is active (same window as inactivity), periodically refresh so the server refresh token stays valid during work.
+  // While the user is active, silently refresh just before the access token expires.
   useEffect(() => {
     if (!hasAccessToken()) return undefined;
+    let refreshTimer;
     const isWorkingSession = () => {
       try {
         const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
@@ -211,12 +208,44 @@ export default function App() {
         return false;
       }
     };
-    const tick = () => {
+
+    const scheduleRefresh = () => {
+      clearTimeout(refreshTimer);
       if (!hasAccessToken() || !isWorkingSession()) return;
-      api.refreshAccessToken().catch(() => {});
+      const expiresAt = api.getAccessTokenExpiryMs();
+      const delay = expiresAt
+        ? Math.max(
+            expiresAt - Date.now() - TOKEN_REFRESH_BEFORE_EXPIRY_MS,
+            MIN_TOKEN_REFRESH_DELAY_MS
+          )
+        : SLIDING_TOKEN_REFRESH_MS;
+      refreshTimer = setTimeout(() => {
+        if (!hasAccessToken() || !isWorkingSession()) return;
+        api
+          .refreshAccessToken()
+          .catch(() => {})
+          .finally(scheduleRefresh);
+      }, delay);
     };
-    const id = setInterval(tick, SLIDING_TOKEN_REFRESH_MS);
-    return () => clearInterval(id);
+
+    const handleStorage = (event) => {
+      handleAuthStorageEvent(event);
+      if (
+        event.key === LAST_ACTIVITY_KEY ||
+        event.key === "token" ||
+        event.key === "authToken" ||
+        event.key === "accessToken"
+      ) {
+        scheduleRefresh();
+      }
+    };
+
+    scheduleRefresh();
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      clearTimeout(refreshTimer);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, [pathname]);
 
   const getRoutes = (allRoutes) =>

@@ -14,6 +14,55 @@ import InputAdornment from "@mui/material/InputAdornment";
 import MDTypography from "components/MDTypography";
 import api from "services/api.service";
 
+function normalizeCategoryArr(value) {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
+  return String(value || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** Role names matching these patterns cannot be combined (Add New User only). */
+function categoryTokenIsSupervisor(token) {
+  return /\bsupervisor\b/i.test(String(token || ""));
+}
+
+function categoryTokenIsOperator(token) {
+  return /\boperator\b/i.test(String(token || ""));
+}
+
+function categoryHasSupervisorOperatorConflict(selection) {
+  const arr = normalizeCategoryArr(selection);
+  return arr.some(categoryTokenIsSupervisor) && arr.some(categoryTokenIsOperator);
+}
+
+/**
+ * Keeps Supervisor- and Operator-type roles mutually exclusive by dropping conflicting tokens,
+ * preferably the one added in this change.
+ */
+function resolveCategorySupervisorOperatorExclusivity(prevSelection, proposedSelection) {
+  let arr = normalizeCategoryArr(proposedSelection);
+  const prevArr = normalizeCategoryArr(prevSelection);
+  if (!categoryHasSupervisorOperatorConflict(arr)) return arr;
+
+  const addedInOrder = arr.filter((x) => !prevArr.includes(x));
+  while (categoryHasSupervisorOperatorConflict(arr) && addedInOrder.length > 0) {
+    const token = addedInOrder.pop();
+    arr = arr.filter((x) => x !== token);
+  }
+  while (categoryHasSupervisorOperatorConflict(arr)) {
+    const opIdx = arr.findIndex(categoryTokenIsOperator);
+    if (opIdx >= 0) {
+      arr = arr.slice(0, opIdx).concat(arr.slice(opIdx + 1));
+      continue;
+    }
+    const sIdx = arr.findIndex(categoryTokenIsSupervisor);
+    if (sIdx >= 0) arr = arr.slice(0, sIdx).concat(arr.slice(sIdx + 1));
+    else break;
+  }
+  return arr;
+}
+
 function AddUserForm({
   open,
   handleClose,
@@ -67,7 +116,7 @@ function AddUserForm({
   };
 
   const handleChange = (field, value) => {
-    const nextValue =
+    let nextValue =
       field === "status" || field === "cmdId"
         ? Number(value)
         : field === "baseId"
@@ -83,13 +132,20 @@ function AddUserForm({
               .filter(Boolean)
         : value;
 
+    if (field === "category") {
+      nextValue = resolveCategorySupervisorOperatorExclusivity(newRowDraft?.category, nextValue);
+    }
+
     setNewRowDraft((draft) => {
       const updatedDraft = { ...draft, [field]: nextValue };
       if (field === "cmdId") {
         const ahqSelected = isAhqCommand(nextValue);
+        const filteredBases = (baseOptions || []).filter(
+          (base) => base.cmdId === Number(nextValue)
+        );
+        const firstBaseId = filteredBases.length > 0 ? filteredBases[0].id : "";
         if (ahqSelected) {
-          updatedDraft.baseId = null;
-          updatedDraft.unitId = null;
+          updatedDraft.baseId = firstBaseId;
           updatedDraft.levelId = 1;
         } else {
           // Base is optional for non-AHQ in Add New User.
@@ -132,14 +188,6 @@ function AddUserForm({
             .filter(Boolean);
       const msg = categoryArr.length > 0 ? null : "Category is required";
       setErrors((prev) => ({ ...prev, category: msg }));
-    }
-    if (field === "unitId") {
-      const msg = isAhqCommand(newRowDraft?.cmdId)
-        ? null
-        : nextValue && String(nextValue).trim()
-        ? null
-        : "Unit ID is required";
-      setErrors((prev) => ({ ...prev, unitId: msg }));
     }
     if (field === "cmdId") {
       const msg =
@@ -417,22 +465,12 @@ function AddUserForm({
             </MDTypography>
             {renderCommandSelect("cmdId", newRowDraft?.cmdId)}
           </MDBox>
-          {!isAhqCommand(newRowDraft?.cmdId) && (
-            <MDBox>
-              <MDTypography variant="caption" fontWeight="bold">
-                Base
-              </MDTypography>
-              {renderBaseSelect("baseId", newRowDraft?.baseId, newRowDraft?.cmdId)}
-            </MDBox>
-          )}
-          {!isAhqCommand(newRowDraft?.cmdId) && (
-            <MDBox>
-              <MDTypography variant="caption" fontWeight="bold">
-                Unit ID
-              </MDTypography>
-              {renderInput("unitId", newRowDraft?.unitId, true)}
-            </MDBox>
-          )}
+          <MDBox>
+            <MDTypography variant="caption" fontWeight="bold">
+              Base
+            </MDTypography>
+            {renderBaseSelect("baseId", newRowDraft?.baseId, newRowDraft?.cmdId)}
+          </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
               Level ID

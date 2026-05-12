@@ -42,7 +42,11 @@ import {
   setWhiteSidenav,
   setHasUserManuallyToggledSidenav,
 } from "context";
-import { canAccessPrivilegedConfigRoute, canViewMenu } from "services/api.service";
+import {
+  canAccessPrivilegedConfigRoute,
+  canViewMenu,
+  logoutEverywhere,
+} from "services/api.service";
 
 // Images
 import adminProfile from "assets/images/bruce-mars.PNG";
@@ -94,15 +98,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const handleCloseUserMenu = () => setOpenUserMenu(null);
   const handleLogout = () => {
     handleCloseUserMenu();
-    try {
-      localStorage.removeItem("token");
-      localStorage.removeItem("authToken");
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("auth");
-    } catch (e) {
-      // ignore
-    }
-    navigate("/");
+    logoutEverywhere("manual");
   };
 
   const readLoggedInUser = () => {

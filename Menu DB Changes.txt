@@ -1,152 +1,210 @@
+inst bank accoutns +table change6s:
+
+
+
+--6-
 USE [A1Lands]
 GO
-/****** Object:  StoredProcedure [dbo].[GetPropertyDashboardSummary]    Script Date: 08/04/2026 1:56:37 pm ******/
+/****** Object:  StoredProcedure [dbo].[sp_GetActiveContractsAsOfDate]    Script Date: 12/05/2026 10:37:21 pm ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-ALTER PROCEDURE [dbo].[GetPropertyDashboardSummary]
-    @CmdId INT = NULL,
-    @BaseId INT = NULL
+ALTER PROCEDURE [dbo].[sp_GetActiveContractsAsOfDate]
+    @AsOfDate DATE
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    ---------------------------------------------------
-    -- Result Set 1: Property Summary
-    ---------------------------------------------------
     SELECT
-        'PropertySummary' AS DataSetName,  -- Name of this result set
-        p.CmdId,
-        p.BaseId,
-        p.ClassId,
-        COUNT(*) AS PropertyCount,
-        ROUND(SUM(ISNULL(p.Rate, 0)) / 1000000.0, 6) AS ClassRevenue_Million,
-        SUM(COUNT(*)) OVER (PARTITION BY p.CmdId, p.BaseId) AS TotalProperties,
-        ROUND(
-            SUM(SUM(ISNULL(p.Rate, 0))) OVER (PARTITION BY p.CmdId, p.BaseId) / 1000000.0, 
-            6
-        ) AS TotalRevenue_Million
-    FROM dbo.vw_PropertyLatestRates p
-    WHERE (@CmdId IS NULL OR p.CmdId = @CmdId)
-      AND (@BaseId IS NULL OR p.BaseId = @BaseId)
-    GROUP BY p.CmdId, p.BaseId, p.ClassId
-    ORDER BY p.CmdId, p.BaseId, p.ClassId;
+        c.Id,
+        c.ContractNo,
+        ContractState =
+        CASE
+			WHEN @AsOfDate < c.ContractStartDate THEN 'Pre-Mature'
+			WHEN @AsOfDate > c.ContractEndDate THEN 'Terminated'
+			WHEN DATEDIFF(MONTH, @AsOfDate, c.ContractEndDate) < 4 THEN 'Expiring'
+			--WHEN @AsOfDate > c.ContractStartDate THEN 'Pre-Mature'
+			ELSE 'Valid'
+		 END,
+		CurrRentPA = 777,
+		RRFY ='999',
+		AHQShare = 0,
+		RACShare = 0,
+		BaseShare = 0,
+		FY =
+CASE
+    WHEN @AsOfDate > c.ContractEndDate
+    THEN
+        CASE
+            WHEN MONTH(c.ContractEndDate) > 6
+                THEN
+                    CAST(YEAR(c.ContractEndDate) AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(c.ContractEndDate) + 1 AS VARCHAR(4)), 2)
+            ELSE
+                    CAST(YEAR(c.ContractEndDate) - 1 AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(c.ContractEndDate) AS VARCHAR(4)), 2)
+        END
 
+    ELSE
+        CASE
+            WHEN MONTH(@AsOfDate) > 6
+                THEN
+                    CAST(YEAR(@AsOfDate) AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(@AsOfDate) + 1 AS VARCHAR(4)), 2)
+            ELSE
+                    CAST(YEAR(@AsOfDate) - 1 AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(@AsOfDate) AS VARCHAR(4)), 2)
+        END
+END,
+        ISNULL(calc.AreaBase,-99) AreaBase,
+        ISNULL(calc.RateBase  ,-99)
+		as GroupRate,
 
-    ---------------------------------------------------
-    -- Result Set 2: Contracts Summary
-    ---------------------------------------------------
-    SELECT
-        'ContractsSummary' AS DataSetName,  -- Name of this result set
-        c.CmdId,
-        c.BaseId,
-        COUNT(*) AS TotalContracts,
-        SUM(CASE 
-            WHEN Status = 1 
-             AND IsDeleted = 0 
-             AND ContractEndDate >= GETDATE()
-            THEN 1 ELSE 0 END) AS ActiveContracts,
-        SUM(CASE 
-            WHEN Status = 1 
-             AND IsDeleted = 0 
-             AND ContractEndDate < GETDATE()
-            THEN 1 ELSE 0 END) AS ExpiredContracts,
-        SUM(CASE 
-            WHEN Status = 1 
-             AND IsDeleted = 0 
-             AND ContractEndDate BETWEEN GETDATE() AND DATEADD(DAY, 30, GETDATE())
-            THEN 1 ELSE 0 END) AS BorderLineContracts,
-        SUM(CASE 
-            WHEN Status <> 1 
-             AND IsDeleted = 0
-            THEN 1 ELSE 0 END) AS ClosedContracts
-    FROM dbo.Contracts c WITH (NOLOCK)
-    WHERE IsDeleted = 0
-      AND (@CmdId IS NULL OR c.CmdId = @CmdId)
-      AND (@BaseId IS NULL OR c.BaseId = @BaseId)
-    GROUP BY c.CmdId, c.BaseId
-    ORDER BY c.CmdId, c.BaseId;
+        CAST(ROUND(rvRate.Rate,0) AS BIGINT) AS RentalValueRate,--Auto_RentalValueRatePercent,
+        rvRate.ApplicableDate AS Auto_RentalValueRateAppDate,
 
+        CAST(ROUND(govRate.Rate,0) AS BIGINT) AS Auto_GovtSharePercent,
+        govRate.ApplicableDate AS Auto_GovtShareRateAppDate,
 
-    ---------------------------------------------------
-    -- Result Set 3: Govt vs PAF Share (Latest Rates)
-    ---------------------------------------------------
-    ;WITH LatestShareRates AS
+        calc.RentalValue,
+		
+        calc.GovtShare,
+        calc.PAFShare,
+
+        Viability =
+        CASE
+            WHEN c.InitialRentPA IS NOT NULL
+                 AND calc.GovtShare IS NOT NULL
+                 AND c.InitialRentPA <= calc.GovtShare
+            THEN N'Unviable'
+            WHEN c.InitialRentPA IS NOT NULL
+                 AND calc.GovtShare IS NOT NULL
+            THEN N'Viable'
+            ELSE NULL
+        END
+		, 0 as due, 0 as paid, 0 as rcvable, 'Overpaid' as invoices  -- Overpaid,Partial,Full Paid, Unpaid
+    FROM dbo.Contracts c
+
+    LEFT JOIN dbo.Commands cmd
+        ON cmd.Id = c.CmdId
+        AND (cmd.IsDeleted = 0 OR cmd.IsDeleted IS NULL)
+
+    LEFT JOIN dbo.Bases b
+        ON b.Id = c.BaseId
+        AND (b.IsDeleted = 0 OR b.IsDeleted IS NULL)
+
+    LEFT JOIN dbo.Classes cls
+        ON cls.Id = c.ClassId
+        AND (cls.IsDeleted = 0 OR cls.IsDeleted IS NULL)
+
+    LEFT JOIN dbo.vw_LatestRevenueRates pg
+        ON pg.Id = c.GrpId
+		AND pg.Fiscal = (CASE
+            WHEN MONTH(@AsOfDate) >= 6
+                THEN
+                    CAST(YEAR(@AsOfDate) AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(@AsOfDate) + 1 AS VARCHAR(4)), 2)
+            ELSE
+                    CAST(YEAR(@AsOfDate) - 1 AS VARCHAR(4))
+                    + '-'
+                    + RIGHT(CAST(YEAR(@AsOfDate) AS VARCHAR(4)), 2)
+        END)
+
+    OUTER APPLY
     (
-        SELECT 
-            s.ClassId,
-            s.CmdId,
-            s.BaseId,
-            s.Type,
-            s.Rate,
-            ROW_NUMBER() OVER 
-            (
-                PARTITION BY s.ClassId, s.Type, s.CmdId, s.BaseId
-                ORDER BY s.ApplicableDate DESC, s.Id DESC
-            ) AS rn
-        FROM dbo.RentalValueGovtShareRates s WITH (NOLOCK)
-        WHERE IsDeleted = 0
-          AND Status = 1
-          AND (@CmdId IS NULL OR s.CmdId = @CmdId)
-          AND (@BaseId IS NULL OR s.BaseId = @BaseId)
-    )
+        SELECT TOP (1) rv.*
+        FROM dbo.RentalValueGovtShareRates rv
+        WHERE
+            rv.CmdId = c.CmdId
+            AND rv.BaseId = c.BaseId
+            AND rv.ClassId = c.ClassId
+            AND rv.Type = 1
+            AND (rv.IsDeleted = 0 OR rv.IsDeleted IS NULL)
+            AND (rv.Status = 1 OR rv.Status IS NULL)
+            AND rv.ApplicableDate <= @AsOfDate
+            AND (rv.DeactiveDate IS NULL OR rv.DeactiveDate >= @AsOfDate)
+        ORDER BY rv.ApplicableDate DESC
+    ) rvRate
 
-    SELECT
-        'GovtPAFShare' AS DataSetName,  -- Name of this result set
-        CmdId,
-        BaseId,
-        ClassId,
-        SUM(CASE 
-            WHEN Type = 1 AND rn = 1 
-            THEN Rate ELSE 0 END) AS GovtShare,
-        SUM(CASE 
-            WHEN Type = 2 AND rn = 1 
-            THEN Rate ELSE 0 END) AS PAFShare
-    FROM LatestShareRates
-    WHERE rn = 1
-    GROUP BY CmdId, BaseId, ClassId
-    ORDER BY CmdId, BaseId, ClassId;
+    OUTER APPLY
+    (
+        SELECT TOP (1) gv.*
+        FROM dbo.RentalValueGovtShareRates gv
+        WHERE
+            gv.CmdId = c.CmdId
+            AND gv.BaseId = c.BaseId
+            AND gv.ClassId = c.ClassId
+            AND gv.Type = 2
+            AND (gv.IsDeleted = 0 OR gv.IsDeleted IS NULL)
+            AND (gv.Status = 1 OR gv.Status IS NULL)
+            AND gv.ApplicableDate <= @AsOfDate
+            AND (gv.DeactiveDate IS NULL OR gv.DeactiveDate >= @AsOfDate)
+        ORDER BY gv.ApplicableDate DESC
+    ) govRate
 
-END;
+    CROSS APPLY
+    (
+        SELECT
+            AreaBase = COALESCE(pg.Area, c.GroupArea),
+            RateBase = pg.Rate  --COALESCE(pg.Rate, c.GroupRate)
+    ) base
 
+    CROSS APPLY
+    (
+        SELECT
+            AreaBase = base.AreaBase,
+            RateBase = base.RateBase,
 
+            RentalValue =
+                CASE
+                    WHEN base.AreaBase IS NOT NULL
+                     AND base.RateBase IS NOT NULL
+                     AND rvRate.Rate IS NOT NULL
+                    THEN CAST(ROUND(base.AreaBase * base.RateBase * ROUND(rvRate.Rate,0) / 100.0,0) AS BIGINT)
+                END,
 
+            GovtShare = 
+                CASE
+                    WHEN base.AreaBase IS NOT NULL
+                     AND base.RateBase IS NOT NULL
+                     AND rvRate.Rate IS NOT NULL
+                     AND govRate.Rate IS NOT NULL
+					 AND isnull(govRate.Config,'') <>'Annual Rent'
+                    THEN CAST(ROUND(base.AreaBase * base.RateBase * ROUND(rvRate.Rate,0) * ROUND(govRate.Rate,0) / 10000.0,0) AS BIGINT)
+				ELSE
+	  				CASE WHEN 
+                      govRate.Rate IS NOT NULL
+					 AND govRate.Config = 'Annual Rent'
+                    THEN CAST(ROUND( c.InitialRentPA * ROUND(govRate.Rate,0) / 100.0,0) AS BIGINT)
+					END
+                END
+				,
 
+            PAFShare =
+                CASE
+                    WHEN base.AreaBase IS NOT NULL
+                     AND base.RateBase IS NOT NULL
+                     AND rvRate.Rate IS NOT NULL
+                     AND govRate.Rate IS NOT NULL
+                    THEN CAST(
+                        ROUND(base.AreaBase * base.RateBase * ROUND(rvRate.Rate,0) / 100.0,0)
+                        -
+                        ROUND(base.AreaBase * base.RateBase * ROUND(rvRate.Rate,0) * ROUND(govRate.Rate,0) / 10000.0,0)
+                    AS BIGINT)
+                END
+    ) calc
 
+    WHERE
+        (c.IsDeleted = 0 OR c.IsDeleted IS NULL)
+        --AND c.Status = 1
 
-USE [A1Lands]
-GO
+    ORDER BY
+        c.Id DESC;
 
-/****** Object:  View [dbo].[vw_PropertyLatestRates]    Script Date: 08/04/2026 1:57:00 pm ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-
-ALTER VIEW [dbo].[vw_PropertyLatestRates]
-AS
-SELECT 
-    p.Id AS PropertyId,
-    p.ClassId,
-    p.CmdId,
-    p.BaseId,
-    r.Rate
-FROM A1Lands.dbo.RentalProperties p WITH (NOLOCK)
-OUTER APPLY
-(
-    SELECT TOP 1 rr.Rate
-    FROM A1Lands.dbo.RevenueRates rr WITH (NOLOCK)
-    WHERE rr.PropertyId = p.Id
-      AND rr.IsDeleted = 0
-      AND rr.Status = 1
-    ORDER BY rr.ApplicableDate DESC, rr.Id DESC
-) r
-WHERE p.IsDeleted = 0
-  AND p.Status = 1;
-GO
-
-
+END

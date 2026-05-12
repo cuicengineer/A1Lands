@@ -10,6 +10,8 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
 import CurrencyLoading from "components/CurrencyLoading";
 import Divider from "@mui/material/Divider";
 import MDBox from "components/MDBox";
@@ -38,6 +40,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  isSuperuserUser,
 } from "services/api.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
@@ -69,31 +72,31 @@ function averageRateForPropertyIds(propertyIds, getPropertyById, getPropertyRate
   return totalRate / propertyIds.length;
 }
 
-/** Location column: show up to 3 lines; click … to read full text in a popover (keeps table width stable). */
+/** Location column: show first 30 characters; click … to read full text in a popover. */
 function LocationTableCell({ value }) {
   const [anchor, setAnchor] = useState(null);
   const text = value != null && String(value).trim() !== "" ? String(value) : "-";
   const hasContent = text !== "-";
-  const showMore = hasContent && text.length > 20;
+  const showMore = hasContent && text.length > 30;
+  const displayText = showMore ? text.slice(0, 30) : text;
 
   return (
     <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
-      <MDTypography
-        component="div"
-        variant="body2"
+      <MDBox
+        component="span"
         sx={{
           flex: 1,
           minWidth: 0,
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
-          lineHeight: 1.25,
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          lineHeight: "inherit",
+          color: "#111111 !important",
         }}
       >
-        {hasContent ? text : "-"}
-      </MDTypography>
+        {hasContent ? displayText : "-"}
+      </MDBox>
       {showMore && (
         <>
           <MDBox
@@ -145,6 +148,257 @@ function LocationTableCell({ value }) {
 LocationTableCell.propTypes = {
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
 };
+
+const PROPERTY_GROUPING_GRID_MONEY_FALLBACK_KEYS = {
+  rate: ["rate", "Rate"],
+};
+
+function normalizePropertyGroupingMoneyRawToNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  const n = Number(s.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function parsePropertyGroupingGridRowMoneyNumber(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = PROPERTY_GROUPING_GRID_MONEY_FALLBACK_KEYS[columnId] || [];
+  const isMissing = (v) =>
+    v === undefined || v === null || (typeof v === "string" && v.trim() === "") || v === "";
+  if (isMissing(raw) && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (!isMissing(v)) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return normalizePropertyGroupingMoneyRawToNumber(raw);
+}
+
+function propertyGroupingMoneyApproxEqual(a, b) {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= 1e-6 * scale;
+}
+
+function propertyGroupingGridMoneyCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowN = parsePropertyGroupingGridRowMoneyNumber(row, columnId);
+    if (rowN === null) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") {
+      const ref = normalizePropertyGroupingMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN > ref;
+    }
+    if (mode === "lte") {
+      const ref = normalizePropertyGroupingMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN <= ref;
+    }
+    if (mode === "eq") {
+      const ref = normalizePropertyGroupingMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return propertyGroupingMoneyApproxEqual(rowN, ref);
+    }
+    if (mode === "between") {
+      const a = normalizePropertyGroupingMoneyRawToNumber(filterValue.valueFrom);
+      const b = normalizePropertyGroupingMoneyRawToNumber(filterValue.valueTo);
+      if (a === null || b === null) return false;
+      const low = Math.min(a, b);
+      const high = Math.max(a, b);
+      return rowN >= low && rowN <= high;
+    }
+    return true;
+  });
+}
+
+function PropertyGroupingMoneyColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Amount";
+  const modeLabelId = `property-grouping-money-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refAmt, setRefAmt] = useState("");
+  const [endAmt, setEndAmt] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefAmt("");
+      setEndAmt("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefAmt(fv.valueFrom != null ? String(fv.valueFrom) : "");
+      setEndAmt(fv.valueTo != null ? String(fv.valueTo) : "");
+    } else {
+      setMode(["gt", "lte", "eq"].includes(fv.mode) ? fv.mode : "none");
+      setRefAmt(fv.value != null ? String(fv.value) : "");
+      setEndAmt("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lte" || mode === "eq") {
+      if (!String(refAmt).trim()) return;
+      column.setFilter({ mode, value: refAmt.trim() });
+    } else if (mode === "between") {
+      if (!String(refAmt).trim() || !String(endAmt).trim()) return;
+      column.setFilter({
+        mode: "between",
+        valueFrom: refAmt.trim(),
+        valueTo: endAmt.trim(),
+      });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefAmt("");
+    setEndAmt("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel}`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No amount filter</MenuItem>
+              <MenuItem value="gt">Greater than</MenuItem>
+              <MenuItem value="lte">Less than or equal to</MenuItem>
+              <MenuItem value="eq">Equal to</MenuItem>
+              <MenuItem value="between">Price range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lte" || mode === "eq") && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Reference amount
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Lower bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                Upper bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={endAmt}
+                onChange={(e) => setEndAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+PropertyGroupingMoneyColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES = Object.freeze({
+  propertyGroupingMoneyCompare: propertyGroupingGridMoneyCompare,
+});
 
 function PropertyGroupingForm({
   open,
@@ -1034,6 +1288,12 @@ function PropertyGroupingForm({
     // Validate rates for newly added properties
     const prevIds = Array.isArray(form.property) ? form.property : [];
     const addedIds = selectedProperties.filter((id) => !prevIds.includes(id));
+    const selectedClassName = String(
+      classes.find((option) => Number(option.id) === Number(form.classid))?.name || ""
+    )
+      .trim()
+      .toUpperCase();
+    const isHBClassSelected = selectedClassName === "HB";
 
     if (addedIds.length > 0) {
       // Check rates for newly added properties
@@ -1048,7 +1308,7 @@ function PropertyGroupingForm({
           // Property rate is 0, fetch from revenue rates
           const rateInfo = await getPropertyRateWithRevenueRate(property, id);
 
-          if (rateInfo.rate === 0) {
+          if (rateInfo.rate === 0 && !isHBClassSelected) {
             // No rate found in property or revenue rates
             const propertyLabel = getPropertyLabel(id);
             alert(
@@ -1877,6 +2137,32 @@ PropertyGroupingForm.propTypes = {
 export { PropertyGroupingForm };
 
 export default function PropertyGrouping() {
+  const urlGrpIdFilter = useMemo(() => {
+    const readFromSearch = (searchText) => {
+      try {
+        const params = new URLSearchParams(String(searchText || ""));
+        return String(params.get("grpId") || "").trim();
+      } catch {
+        return "";
+      }
+    };
+
+    const fromSearch =
+      typeof window !== "undefined" ? readFromSearch(window.location?.search || "") : "";
+    if (fromSearch) return fromSearch.toLowerCase();
+
+    // Support hash-based URLs as fallback: ...#/contracts/property-grouping?grpId=...
+    if (typeof window !== "undefined") {
+      const hash = String(window.location?.hash || "");
+      const queryIndex = hash.indexOf("?");
+      if (queryIndex >= 0) {
+        const fromHash = readFromSearch(hash.slice(queryIndex));
+        if (fromHash) return fromHash.toLowerCase();
+      }
+    }
+    return "";
+  }, []);
+
   const [openForm, setOpenForm] = useState(false);
   const [currentPropertyGrouping, setCurrentPropertyGrouping] = useState(null);
   const [rows, setRows] = useState([]);
@@ -2525,27 +2811,31 @@ export default function PropertyGrouping() {
       Header: "Actions",
       accessor: "actions",
       align: "center",
-      width: "96px",
     },
-    { Header: "ID", accessor: "id", align: "left", width: "72px" },
-    { Header: "RAC", accessor: "cmdName", align: "left", width: "132px" },
-    { Header: "Base", accessor: "baseName", align: "left", width: "128px" },
-    { Header: "Class", accessor: "className", align: "left", width: "128px" },
+    { Header: "ID", accessor: "id", align: "left" },
+    { Header: "RAC", accessor: "cmdName", align: "left" },
+    { Header: "Base", accessor: "baseName", align: "left" },
+    { Header: "Class", accessor: "className", align: "left" },
     {
       Header: "Type",
       accessor: "propertyTypeName",
       align: "left",
-      width: "124px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => value || "-",
     },
-    { Header: "Group ID", accessor: "gId", align: "left", width: "128px" },
-    { Header: "Rate", accessor: "rate", align: "right", width: "108px" },
+    { Header: "Group ID", accessor: "gId", align: "left" },
+    {
+      id: "rate",
+      Header: "Rate",
+      accessor: "rate",
+      align: "center",
+      filter: "propertyGroupingMoneyCompare",
+      Filter: PropertyGroupingMoneyColumnFilter,
+    },
     {
       Header: "Area (UoM)",
       accessor: "area",
-      align: "right",
-      width: "152px",
+      align: "center",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2562,17 +2852,14 @@ export default function PropertyGrouping() {
       Header: "Location",
       accessor: "location",
       align: "left",
-      width: "228px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <LocationTableCell value={value} />,
     },
-    { Header: "Remarks", accessor: "remarks", align: "left", width: "196px" },
-    { Header: "Props", accessor: "attachedproperties", align: "left", width: "152px" },
+    { Header: "Remarks", accessor: "remarks", align: "left" },
     {
       Header: "Status",
       accessor: "status",
       align: "center",
-      width: "104px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => <StatusBadge value={value} />,
     },
@@ -2580,7 +2867,6 @@ export default function PropertyGrouping() {
       Header: "Linked",
       accessor: "linkedProperties", // Accessor matches field in computedRows
       align: "center",
-      width: "96px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2606,7 +2892,6 @@ export default function PropertyGrouping() {
       Header: "Contracts",
       accessor: "activeContracts",
       align: "center",
-      width: "104px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -2971,119 +3256,134 @@ export default function PropertyGrouping() {
         alert("Cannot insert Duplicate Group ID");
         return;
       }
+      if (currentPropertyGrouping && isSuperuserUser()) {
+        fetchPropertyGroupings(pageNumber, pageSize);
+        setCurrentPropertyGrouping(null);
+        handleCloseForm();
+        return;
+      }
       alert("ERROR:  Check Group ID duplicate or Contracts Binded.");
     }
   };
 
-  const computedRows = rows.map((row) => {
-    // API returns PascalCase
-    const normalizedId = row.Id;
-    const linkedPropertyNames = (() => {
-      const namesFromLinkings = Array.isArray(row.PropertyGroupLinkings)
-        ? row.PropertyGroupLinkings.map((link) => {
-            if (!link) return "";
-            if (typeof link === "string") return link.trim();
-            if (typeof link === "number") return getPropertyName(link);
-            if (typeof link === "object") {
-              if (link.PropertyName || link.PId) {
-                return String(link.PropertyName || link.PId || "").trim();
+  const computedRows = rows
+    .map((row) => {
+      // API returns PascalCase
+      const normalizedId = row.Id;
+      const linkedPropertyNames = (() => {
+        const namesFromLinkings = Array.isArray(row.PropertyGroupLinkings)
+          ? row.PropertyGroupLinkings.map((link) => {
+              if (!link) return "";
+              if (typeof link === "string") return link.trim();
+              if (typeof link === "number") return getPropertyName(link);
+              if (typeof link === "object") {
+                if (link.PropertyName || link.PId) {
+                  return String(link.PropertyName || link.PId || "").trim();
+                }
+                const nested = link.Property;
+                if (nested && typeof nested === "object") {
+                  return String(nested.PropertyName || nested.PId || "").trim();
+                }
+                const pid = link.PropertyId || link.PropId || link.Id;
+                return pid ? getPropertyName(pid) : "";
               }
-              const nested = link.Property;
-              if (nested && typeof nested === "object") {
-                return String(nested.PropertyName || nested.PId || "").trim();
+              return "";
+            }).filter((name) => String(name || "").trim().length > 0)
+          : [];
+
+        if (namesFromLinkings.length > 0) {
+          return namesFromLinkings.join(", ");
+        }
+
+        const fallbackIds = Array.isArray(row.PropertyGroupLinkings)
+          ? row.PropertyGroupLinkings.map((link) => {
+              if (link == null) return null;
+              if (typeof link === "number" || typeof link === "string") return Number(link);
+              if (typeof link === "object") {
+                const pid = link.PropertyId || link.PropId || link.Id;
+                return pid ? Number(pid) : null;
               }
-              const pid = link.PropertyId || link.PropId || link.Id;
-              return pid ? getPropertyName(pid) : "";
-            }
-            return "";
-          }).filter((name) => String(name || "").trim().length > 0)
-        : [];
+              return null;
+            }).filter((id) => id !== null && Number.isFinite(id))
+          : typeof row.Property === "string"
+          ? row.Property.split(",")
+              .map((x) => Number(String(x).trim()))
+              .filter((id) => Number.isFinite(id))
+          : [];
 
-      if (namesFromLinkings.length > 0) {
-        return namesFromLinkings.join(", ");
-      }
+        return Array.from(new Set(fallbackIds))
+          .map((id) => getPropertyName(id))
+          .filter((name) => String(name || "").trim().length > 0)
+          .join(", ");
+      })();
+      const propertyTypeId = row.PropertyType ?? row.propertyType;
+      const propertyTypeObj = propertyTypes.find((pt) => Number(pt.id) === Number(propertyTypeId));
+      const propertyTypeName =
+        propertyTypeObj?.name || row.PropertyTypeName || row.propertyTypeName || "";
 
-      const fallbackIds = Array.isArray(row.PropertyGroupLinkings)
-        ? row.PropertyGroupLinkings.map((link) => {
-            if (link == null) return null;
-            if (typeof link === "number" || typeof link === "string") return Number(link);
-            if (typeof link === "object") {
-              const pid = link.PropertyId || link.PropId || link.Id;
-              return pid ? Number(pid) : null;
-            }
-            return null;
-          }).filter((id) => id !== null && Number.isFinite(id))
-        : typeof row.Property === "string"
-        ? row.Property.split(",")
-            .map((x) => Number(String(x).trim()))
-            .filter((id) => Number.isFinite(id))
-        : [];
-
-      return Array.from(new Set(fallbackIds))
-        .map((id) => getPropertyName(id))
-        .filter((name) => String(name || "").trim().length > 0)
-        .join(", ");
-    })();
-    const propertyTypeId = row.PropertyType ?? row.propertyType;
-    const propertyTypeObj = propertyTypes.find((pt) => Number(pt.id) === Number(propertyTypeId));
-    const propertyTypeName =
-      propertyTypeObj?.name || row.PropertyTypeName || row.propertyTypeName || "";
-
-    return {
-      id: normalizedId,
-      cmdId: row.CmdId,
-      baseId: row.BaseId,
-      classId: row.ClassId,
-      cmdName: row.CmdName || "",
-      baseName: row.BaseName || "",
-      className: row.ClassName || "",
-      propertyTypeName,
-      gId: row.GId || "",
-      rate: Number(row.Rate || 0),
-      area: Number(row.Area || 0),
-      uoM: row.UoM || "",
-      location: row.Location || "",
-      remarks: row.Remarks || "",
-      attachedproperties: row.attachedproperties || row.attachedproperties || "",
-      status: row.Status,
-      linkedProperties: linkedPropertyNames,
-      actions: (
-        <MDBox
-          alignItems="left"
-          justifyContent="left"
-          sx={{
-            backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
-            gap: "2px", // Small gap between icons
-            padding: "2px 2px", // Compact padding
-            borderRadius: "2px",
-          }}
-        >
-          {canEditCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditPropertyGrouping(normalizedId)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-          )}
-          {canDeleteCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeletePropertyGrouping(normalizedId)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
-          )}
-        </MDBox>
-      ),
-    };
-  });
+      return {
+        id: normalizedId,
+        cmdId: row.CmdId,
+        baseId: row.BaseId,
+        classId: row.ClassId,
+        cmdName: row.CmdName || "",
+        baseName: row.BaseName || "",
+        className: row.ClassName || "",
+        propertyTypeName,
+        gId: row.GId || "",
+        rate: Number(row.Rate || 0),
+        area: Number(row.Area || 0),
+        uoM: row.UoM || "",
+        location: row.Location || "",
+        remarks: row.Remarks || "",
+        attachedproperties: row.attachedproperties || row.attachedproperties || "",
+        status: row.Status,
+        linkedProperties: linkedPropertyNames,
+        actions: (
+          <MDBox
+            alignItems="left"
+            justifyContent="left"
+            sx={{
+              backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
+              gap: "2px", // Small gap between icons
+              padding: "2px 2px", // Compact padding
+              borderRadius: "2px",
+            }}
+          >
+            {canEditCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="info"
+                onClick={() => handleEditPropertyGrouping(normalizedId)}
+                title="Edit"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            )}
+            {canDeleteCurrentMenu() && (
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeletePropertyGrouping(normalizedId)}
+                title="Delete"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            )}
+          </MDBox>
+        ),
+      };
+    })
+    .filter((row) => {
+      if (!urlGrpIdFilter) return true;
+      return (
+        String(row.gId || "")
+          .trim()
+          .toLowerCase() === urlGrpIdFilter
+      );
+    });
 
   return (
     <DashboardLayout>
@@ -3119,8 +3419,8 @@ export default function PropertyGrouping() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "500px",
-                  minHeight: "500px",
+                  height: "88vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   position: "relative",
                 }}
@@ -3157,65 +3457,36 @@ export default function PropertyGrouping() {
                     "& .MuiTable-root": {
                       tableLayout: "auto",
                       width: "max-content",
-                      minWidth: "max(100%, 1640px)",
+                      borderCollapse: "collapse",
                     },
-                    // DataTable uses custom <td> cells that default to nowrap + inner width:max-content.
-                    // Force wrapping + constrain inner wrapper so text never overlaps adjacent columns.
-                    "& table th, & table td": {
-                      whiteSpace: "normal !important",
-                      wordBreak: "break-word !important",
-                      overflowWrap: "anywhere !important",
-                      verticalAlign: "top",
-                    },
-                    "& table td > div": {
-                      display: "block !important",
-                      width: "100% !important",
-                      maxWidth: "100% !important",
-                      whiteSpace: "normal !important",
-                      wordBreak: "break-word !important",
-                      overflowWrap: "anywhere !important",
-                    },
-                    "& table td > div > *": {
-                      maxWidth: "100% !important",
-                      whiteSpace: "normal !important",
-                      wordBreak: "break-word !important",
-                      overflowWrap: "anywhere !important",
-                    },
-                    // Compact rows
                     "& .MuiTable-root th": {
                       fontSize: "0.875rem !important",
                       fontWeight: "700 !important",
-                      padding: "6px 10px !important",
+                      width: "auto !important",
+                      minWidth: "0 !important",
+                      padding: "1px 4px !important",
                       lineHeight: 1.25,
                       borderBottom: "1px solid #d0d0d0",
                       whiteSpace: "nowrap",
                     },
-                    "& .MuiTable-root th:nth-of-type(10), & .MuiTable-root th:nth-of-type(11)": {
-                      whiteSpace: "normal !important",
-                      wordBreak: "break-word !important",
-                      overflowWrap: "break-word !important",
-                    },
                     "& .MuiTable-root td": {
-                      padding: "4px 10px !important",
+                      width: "auto !important",
+                      minWidth: "0 !important",
+                      padding: "1px 4px !important",
                       lineHeight: 1.3,
                       borderBottom: "1px solid #e8e8e8",
                       whiteSpace: "nowrap",
+                    },
+                    "& table td > div": {
+                      maxWidth: "100% !important",
                     },
                     "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
                       whiteSpace: "normal !important",
                       wordBreak: "break-word !important",
                       overflowWrap: "break-word !important",
                     },
-                    "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(7), & .MuiTable-root td:nth-of-type(7), & .MuiTable-root th:nth-of-type(9), & .MuiTable-root td:nth-of-type(9)":
-                      {
-                        paddingLeft: "4px !important",
-                        paddingRight: "4px !important",
-                      },
                     "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
                       whiteSpace: "nowrap !important",
-                      width: "72px !important",
-                      minWidth: "72px !important",
-                      maxWidth: "88px !important",
                       textAlign: "center !important",
                     },
                   }}
@@ -3264,6 +3535,8 @@ export default function PropertyGrouping() {
                     pagination={{ variant: "gradient", color: "info" }}
                     exportFileName="Property-Grouping"
                     onVisibleRowCountChange={setVisibleRowCount}
+                    extraFilterTypes={PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES}
+                    contentFitTable
                   />
                 </MDBox>
 

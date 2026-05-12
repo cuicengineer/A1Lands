@@ -20,6 +20,8 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
@@ -40,6 +42,478 @@ import DataTable from "examples/Tables/DataTable";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import { format, parseISO, isValid } from "date-fns";
+
+const REVENUE_RATES_GRID_DATE_FALLBACK_KEYS = {
+  applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
+};
+
+function parseRevenueRatesGridDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = REVENUE_RATES_GRID_DATE_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function revenueRatesGridDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseRevenueRatesGridDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+function RevenueRatesDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `revenue-rates-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+RevenueRatesDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const REVENUE_RATES_GRID_MONEY_FALLBACK_KEYS = {
+  rate: ["rate", "Rate"],
+};
+
+function normalizeRevenueRatesMoneyRawToNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  const n = Number(s.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseRevenueRatesGridRowMoneyNumber(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = REVENUE_RATES_GRID_MONEY_FALLBACK_KEYS[columnId] || [];
+  const isMissing = (v) =>
+    v === undefined || v === null || (typeof v === "string" && v.trim() === "") || v === "";
+  if (isMissing(raw) && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (!isMissing(v)) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return normalizeRevenueRatesMoneyRawToNumber(raw);
+}
+
+function revenueRatesMoneyApproxEqual(a, b) {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= 1e-6 * scale;
+}
+
+function revenueRatesGridMoneyCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowN = parseRevenueRatesGridRowMoneyNumber(row, columnId);
+    if (rowN === null) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") {
+      const ref = normalizeRevenueRatesMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN > ref;
+    }
+    if (mode === "lte") {
+      const ref = normalizeRevenueRatesMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN <= ref;
+    }
+    if (mode === "eq") {
+      const ref = normalizeRevenueRatesMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return revenueRatesMoneyApproxEqual(rowN, ref);
+    }
+    if (mode === "between") {
+      const a = normalizeRevenueRatesMoneyRawToNumber(filterValue.valueFrom);
+      const b = normalizeRevenueRatesMoneyRawToNumber(filterValue.valueTo);
+      if (a === null || b === null) return false;
+      const low = Math.min(a, b);
+      const high = Math.max(a, b);
+      return rowN >= low && rowN <= high;
+    }
+    return true;
+  });
+}
+
+function RevenueRatesMoneyColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Amount";
+  const modeLabelId = `revenue-rates-money-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refAmt, setRefAmt] = useState("");
+  const [endAmt, setEndAmt] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefAmt("");
+      setEndAmt("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefAmt(fv.valueFrom != null ? String(fv.valueFrom) : "");
+      setEndAmt(fv.valueTo != null ? String(fv.valueTo) : "");
+    } else {
+      setMode(["gt", "lte", "eq"].includes(fv.mode) ? fv.mode : "none");
+      setRefAmt(fv.value != null ? String(fv.value) : "");
+      setEndAmt("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lte" || mode === "eq") {
+      if (!String(refAmt).trim()) return;
+      column.setFilter({ mode, value: refAmt.trim() });
+    } else if (mode === "between") {
+      if (!String(refAmt).trim() || !String(endAmt).trim()) return;
+      column.setFilter({
+        mode: "between",
+        valueFrom: refAmt.trim(),
+        valueTo: endAmt.trim(),
+      });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefAmt("");
+    setEndAmt("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel}`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No amount filter</MenuItem>
+              <MenuItem value="gt">Greater than</MenuItem>
+              <MenuItem value="lte">Less than or equal to</MenuItem>
+              <MenuItem value="eq">Equal to</MenuItem>
+              <MenuItem value="between">Price range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lte" || mode === "eq") && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Reference amount
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Lower bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                Upper bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={endAmt}
+                onChange={(e) => setEndAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+RevenueRatesMoneyColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES = Object.freeze({
+  revenueRatesDateCompare: revenueRatesGridDateCompare,
+  revenueRatesMoneyCompare: revenueRatesGridMoneyCompare,
+});
 
 function RevenueRatesForm({
   open,
@@ -1316,17 +1790,18 @@ export default function RevenueRates() {
       Header: "Actions",
       accessor: "actions",
       align: "center",
-      width: "72px",
     },
-    { Header: "ID", accessor: "id", align: "center", width: "56px" },
+    { Header: "ID", accessor: "id", align: "center" },
     {
       Header: "Property",
-      accessor: "propertyId",
+      accessor: "propertyName",
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
-        const propId = value ?? row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        // Filter/search must run on text (propertyName), while preserving fallback for old rows.
+        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+        const textValue = value ?? row?.original?.propertyName ?? "";
+        if (textValue && String(textValue).trim() !== "") return String(textValue);
         if (!propId) return "-";
         const property = rentalProperties.find((p) => Number(p.id) === Number(propId));
         return property ? property.pId ?? property.pid ?? property.PId ?? "" : String(propId);
@@ -1383,9 +1858,12 @@ export default function RevenueRates() {
       },
     },
     {
+      id: "applicableDate",
       Header: "Applicable Date",
       accessor: "applicableDate",
       align: "left",
+      filter: "revenueRatesDateCompare",
+      Filter: RevenueRatesDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const dateValue =
@@ -1394,9 +1872,22 @@ export default function RevenueRates() {
       },
     },
     {
+      Header: "RR FY",
+      accessor: "fiscal",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const v = value ?? row?.original?.fiscal ?? row?.original?.Fiscal ?? "";
+        return v !== null && v !== undefined && String(v).trim() !== "" ? String(v) : "-";
+      },
+    },
+    {
+      id: "rate",
       Header: "Revenue Rate",
       accessor: "rate",
       align: "left",
+      filter: "revenueRatesMoneyCompare",
+      Filter: RevenueRatesMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // Handle both camelCase and PascalCase - use value from accessor first, then fallback
@@ -1492,6 +1983,7 @@ export default function RevenueRates() {
       propertyName: propertyName,
       rate: row.rate ?? row.Rate ?? 0,
       applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
+      fiscal: row.fiscal ?? row.Fiscal ?? "",
       deactiveDate: row.deactiveDate ?? row.DeactiveDate ?? null,
       status: row.status ?? row.Status ?? true,
       cmdName: resolvedCmdName,
@@ -1587,23 +2079,30 @@ export default function RevenueRates() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "500px",
-                  minHeight: "500px",
+                  height: "88vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   position: "relative",
                   "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
+                    tableLayout: "auto",
+                    width: "max-content",
+                    borderCollapse: "collapse",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "1.0rem !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
@@ -1673,7 +2172,9 @@ export default function RevenueRates() {
                     autoResetFilters={false}
                     exportFileName="Revenue-Rates"
                     exportCellFormatter={exportCellFormatter}
+                    extraFilterTypes={REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES}
                     onVisibleRowCountChange={setVisibleRowCount}
+                    contentFitTable
                   />
                 </MDBox>
 

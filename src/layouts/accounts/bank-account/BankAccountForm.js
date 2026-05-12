@@ -41,6 +41,46 @@ const MAX_ATTACHMENT_FILES = 5;
 const MAX_REMARKS_CHARS = 500;
 const MAX_REFERENCE_WORDS = 130;
 
+/** Bank account form: RAC / Base lists and quick-add (POST) use this controller. */
+const ACC_RAC_BASES_ENTITY = "AccRacBase";
+
+function unwrapAccRacBasesList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.Items)) return res.Items;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.Data)) return res.Data;
+  return [];
+}
+
+function unwrapAccRacBaseRow(res) {
+  if (Array.isArray(res)) return res[0] || null;
+  if (Array.isArray(res?.data)) return res.data[0] || null;
+  if (Array.isArray(res?.Data)) return res.Data[0] || null;
+  if (res?.data && typeof res.data === "object") return res.data;
+  if (res?.Data && typeof res.Data === "object") return res.Data;
+  return res && typeof res === "object" ? res : null;
+}
+
+function toAccRacBaseId(value) {
+  if (value == null) return "";
+  return String(value).trim();
+}
+
+function mapAccRacBasesRow(row, fallbackId = "") {
+  const id = toAccRacBaseId(row?.id ?? row?.Id ?? fallbackId);
+  const name = String(row?.name ?? row?.Name ?? "").trim();
+  return { id, name };
+}
+
+function mergeAccRacBaseOption(options, option) {
+  if (!option?.id || !option?.name) return options;
+  const exists = options.some((item) => String(item.id) === String(option.id));
+  return exists
+    ? options.map((item) => (String(item.id) === String(option.id) ? option : item))
+    : [option, ...options];
+}
+
 /** Limits text to at most `maxWords` words (split on whitespace); used for Reference field. */
 function limitReferenceWords(text, maxWords) {
   const s = String(text ?? "");
@@ -135,6 +175,7 @@ function validateForm(form) {
 
 function toPayload(form, bankOptions = []) {
   const cmdId = form.racId === "" || form.racId == null ? null : Number(form.racId) || form.racId;
+  const baseId = form.baseId === "" ? null : Number(form.baseId) || form.baseId;
   const ibanNormalized = normalizeIban(form.accountNoIban);
   const currencyStored =
     form.currency === "Other"
@@ -148,41 +189,34 @@ function toPayload(form, bankOptions = []) {
           .trim()
           .slice(0, 20)
       : String(form.accountType ?? "").trim();
-  const bid = form.bankId === "" ? null : Number(form.bankId);
+  const bid = form.bankId === "" ? null : String(form.bankId);
   const bankRow =
-    bid != null && !Number.isNaN(bid)
-      ? bankOptions.find((b) => Number(b?.id) === Number(bid))
-      : null;
-  const bankNameStored = bankRow ? String(bankRow.label ?? bankRow.name ?? "").trim() : "";
+    bid != null ? bankOptions.find((b) => String(b?.id ?? b?.Id ?? "") === bid) : null;
+  const bankNameStored = bankRow
+    ? String(bankRow.name ?? bankRow.Name ?? bankRow.label ?? "").trim()
+    : "";
   return {
-    openingDate: form.openingDate,
-    racId: cmdId,
-    cmdId,
-    baseId: form.baseId === "" ? null : Number(form.baseId) || form.baseId,
-    fundingSource: form.fundingSource,
-    fundName: form.fundName,
-    titleOfAccount: form.titleOfAccount,
-    bankId: form.bankId === "" ? null : Number(form.bankId) || form.bankId,
+    OpeningDate: form.openingDate,
+    CmdId: cmdId,
+    BaseId: baseId,
+    FundingSource: form.fundingSource || null,
+    FundName: form.fundName || null,
+    TitleOfAccount: form.titleOfAccount || null,
     BankName: bankNameStored || null,
-    bankName: bankNameStored || null,
-    branchCode: form.branchCode === "" ? null : String(form.branchCode).trim(),
-    branchAddress: form.branchAddress,
-    accountNoIban: ibanNormalized || null,
-    AccountNoIban: ibanNormalized || null,
-    IBAN: ibanNormalized || null,
-    currency: currencyStored,
-    type: accountTypeStored || null,
+    BranchCode: form.branchCode === "" ? null : String(form.branchCode).trim(),
+    BranchAddress: form.branchAddress || null,
+    IBAN: ibanNormalized || "",
+    Currency: currencyStored || null,
     AccountType: accountTypeStored || null,
-    accountType: accountTypeStored || null,
-    signatoryDate: form.signatoryDate || null,
-    signatory1: form.signatory1?.trim() || "",
-    signatory2: form.signatory2?.trim() || "",
-    signatory3: form.signatory3?.trim() || "",
-    status: form.status,
-    statusDate: form.statusDate || null,
-    remarks: String(form.remarks ?? "").slice(0, MAX_REMARKS_CHARS),
-    authority: form.authority,
-    reference: limitReferenceWords(form.reference ?? "", MAX_REFERENCE_WORDS),
+    SignatoryDate: form.signatoryDate || null,
+    Signatory1: form.signatory1?.trim() || "",
+    Signatory2: form.signatory2?.trim() || "",
+    Signatory3: form.signatory3?.trim() || null,
+    StatusDate: form.statusDate || null,
+    Remarks: String(form.remarks ?? "").slice(0, MAX_REMARKS_CHARS) || null,
+    Authority: form.authority || null,
+    Reference: limitReferenceWords(form.reference ?? "", MAX_REFERENCE_WORDS) || null,
+    AccStatus: form.status || null,
   };
 }
 
@@ -225,11 +259,18 @@ function initialDataToFormOverrides(data) {
   return {
     openingDate: data.openingDate ?? data.OpeningDate ?? "",
     racId: data.racId ?? data.RacId ?? "",
-    baseId: data.baseId ?? data.BaseId ?? data.formationId ?? data.FormationId ?? "",
+    baseId:
+      data.baseId ??
+      data.BaseId ??
+      data.unitId ??
+      data.UnitId ??
+      data.formationId ??
+      data.FormationId ??
+      "",
     fundingSource: data.fundingSource ?? data.FundingSource ?? "Public Fund",
     fundName: data.fundName ?? data.FundName ?? "",
     titleOfAccount: data.titleOfAccount ?? data.TitleOfAccount ?? "",
-    bankId: data.bankId ?? data.BankId ?? "",
+    bankId: String(data.bankId ?? data.BankId ?? data.bankListsId ?? data.BankListsId ?? "").trim(),
     branchCode: data.branchCode ?? data.BranchCode ?? "",
     branchAddress: data.branchAddress ?? data.BranchAddress ?? "",
     accountNoIban:
@@ -247,7 +288,7 @@ function initialDataToFormOverrides(data) {
     signatory1: data.signatory1 ?? data.Signatory1 ?? "",
     signatory2: data.signatory2 ?? data.Signatory2 ?? "",
     signatory3: data.signatory3 ?? data.Signatory3 ?? "",
-    status: data.status ?? data.Status ?? "Active",
+    status: data.accStatus ?? data.AccStatus ?? data.status ?? data.Status ?? "Active",
     statusDate: data.statusDate ?? data.StatusDate ?? "",
     remarks: String(data.remarks ?? data.Remarks ?? "").slice(0, MAX_REMARKS_CHARS),
     authority: data.authority ?? data.Authority ?? "Air HQs",
@@ -274,14 +315,21 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
-  const [commandOptions, setCommandOptions] = useState([]);
+  const [racOptions, setRacOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
   const [bankOptions, setBankOptions] = useState([]);
   const [loadingLists, setLoadingLists] = useState(true);
+  const [loadingBases, setLoadingBases] = useState(false);
+  const [quickAddType, setQuickAddType] = useState(null);
+  const [quickAddName, setQuickAddName] = useState("");
+  const [quickAddError, setQuickAddError] = useState("");
+  const [quickAddSubmitting, setQuickAddSubmitting] = useState(false);
+  const canQuickAddRacBase = canCreateCurrentMenu();
 
   const openingDateInputRef = useRef(null);
   const signatoryDateInputRef = useRef(null);
   const statusDateInputRef = useRef(null);
+  const bankEditSyncRef = useRef(null);
 
   const toDisplayDate = (isoStr) => {
     if (!isoStr || typeof isoStr !== "string") return "";
@@ -302,14 +350,59 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     }
   };
 
+  /** Same family/size/weight for field values and their labels (incl. dropdowns). */
+  const fieldFont = {
+    fontFamily: "inherit",
+    fontSize: "1rem",
+    fontWeight: 400,
+    lineHeight: 1.5,
+  };
+
   const inputSx = {
     "& .MuiInputBase-input": {
-      fontSize: "1rem",
-      padding: "10px 12px",
+      ...fieldFont,
+      padding: "10px 14px",
       minHeight: "45px",
     },
     "& .MuiInputLabel-root": {
-      fontSize: "1rem",
+      ...fieldFont,
+    },
+  };
+
+  const selectFormControlSx = {
+    "& .MuiInputLabel-root": { ...fieldFont },
+    "& .MuiSelect-select": {
+      ...fieldFont,
+      minHeight: "45px !important",
+      display: "flex",
+      alignItems: "center",
+      paddingTop: "10px",
+      paddingBottom: "10px",
+    },
+  };
+
+  const textFieldSx = {
+    ...inputSx,
+    "& .MuiOutlinedInput-root": { borderRadius: 1.5 },
+  };
+
+  /** Same outer height as Bank Name `Select` (outlined) for a balanced row. */
+  const titleBankRowMinHeight = 53;
+  const titleOfAccountFieldSx = {
+    ...textFieldSx,
+    width: "100%",
+    "& .MuiOutlinedInput-root": {
+      ...textFieldSx["& .MuiOutlinedInput-root"],
+      minHeight: titleBankRowMinHeight,
+      alignItems: "center",
+    },
+  };
+  const bankNameRowControlSx = {
+    ...selectFormControlSx,
+    width: "100%",
+    "& .MuiOutlinedInput-root": {
+      minHeight: titleBankRowMinHeight,
+      borderRadius: 1.5,
     },
   };
 
@@ -368,32 +461,25 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   }, [open, isEditMode, recordId, mergedInitialKey, fetchExistingFiles]);
 
   useEffect(() => {
+    if (!open) return;
     let alive = true;
     (async () => {
       setLoadingLists(true);
       try {
-        const [cmdRes, baseRes, banks] = await Promise.all([
-          api.list("command").catch(() => []),
-          api.list("base").catch(() => []),
+        const savedRacId = toAccRacBaseId(initialDataToFormOverrides(initialData).racId);
+        const [racRes, banks, savedRacRes] = await Promise.all([
+          api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }).catch(() => []),
           fetchBankListsForDropdown().catch(() => []),
+          savedRacId ? api.get(ACC_RAC_BASES_ENTITY, savedRacId).catch(() => null) : null,
         ]);
         if (!alive) return;
-        const cmdArr = Array.isArray(cmdRes) ? cmdRes : [];
-        setCommandOptions(
-          cmdArr.map((cmd) => ({
-            id: Number(cmd?.id),
-            name: String(cmd?.name ?? cmd?.value ?? cmd?.label ?? cmd?.Name ?? cmd?.Value ?? ""),
-          }))
-        );
-        const baseArr = Array.isArray(baseRes) ? baseRes : [];
-        setBaseOptions(
-          baseArr.map((b) => ({
-            id: Number(b?.id),
-            name: String(b?.name ?? b?.value ?? b?.label ?? b?.Name ?? b?.Value ?? ""),
-            cmdId: Number(b?.cmdId ?? b?.cmd ?? b?.commandId ?? 0),
-          }))
-        );
-        setBankOptions(banks);
+        let racArr = unwrapAccRacBasesList(racRes)
+          .map(mapAccRacBasesRow)
+          .filter((o) => o.id && o.name);
+        const savedRacOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedRacRes), savedRacId);
+        racArr = mergeAccRacBaseOption(racArr, savedRacOption);
+        setRacOptions(racArr);
+        setBankOptions(Array.isArray(banks) ? banks : []);
       } catch (err) {
         console.error("Bank form dropdowns:", err);
       } finally {
@@ -403,7 +489,102 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     return () => {
       alive = false;
     };
-  }, []);
+  }, [open, mergedInitialKey]);
+
+  useEffect(() => {
+    if (!open) {
+      bankEditSyncRef.current = null;
+      return;
+    }
+    if (!isEditMode || !initialData || loadingLists || !bankOptions.length) return;
+    if (bankEditSyncRef.current === mergedInitialKey) return;
+
+    const rawId =
+      initialData.bankId ??
+      initialData.BankId ??
+      initialData.bankListsId ??
+      initialData.BankListsId;
+    const idStr = rawId != null && rawId !== "" ? String(rawId).trim() : "";
+    const bankName = String(initialData.BankName ?? initialData.bankName ?? "").trim();
+
+    let resolved = "";
+    if (idStr) {
+      const exact = bankOptions.find((o) => String(o.id) === idStr);
+      if (exact) resolved = String(exact.id);
+      else {
+        const n = Number(idStr);
+        if (!Number.isNaN(n)) {
+          const byNum = bankOptions.find((o) => Number(o.id) === n);
+          if (byNum) resolved = String(byNum.id);
+        }
+      }
+    }
+    if (!resolved && bankName) {
+      const lower = bankName.toLowerCase();
+      const byName = bankOptions.find((o) => {
+        const nm = String(o.name ?? "")
+          .trim()
+          .toLowerCase();
+        const lb = String(o.label ?? "")
+          .trim()
+          .toLowerCase();
+        const baseLabel = lb.split(" (")[0] ?? lb;
+        return nm === lower || lb === lower || baseLabel === lower;
+      });
+      if (byName) resolved = String(byName.id);
+    }
+
+    const optionKnown = (opts, id) => opts.some((o) => String(o.id) === String(id));
+    if (idStr && !optionKnown(bankOptions, idStr)) {
+      const label = bankName || idStr;
+      setBankOptions((opts) => [{ id: idStr, label, name: bankName || label }, ...opts]);
+    }
+
+    if (!resolved && idStr) resolved = idStr;
+
+    bankEditSyncRef.current = mergedInitialKey;
+    if (resolved) {
+      setForm((prev) => (String(prev.bankId) === resolved ? prev : { ...prev, bankId: resolved }));
+    }
+  }, [open, isEditMode, loadingLists, bankOptions, mergedInitialKey, initialData]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const rid = form.racId;
+    if (rid === "" || rid == null || rid === 0 || rid === "0") {
+      setBaseOptions([]);
+      setLoadingBases(false);
+      return undefined;
+    }
+    (async () => {
+      setLoadingBases(true);
+      try {
+        const savedBaseId = toAccRacBaseId(form.baseId);
+        const [raw, savedBaseRes] = await Promise.all([
+          api.list(ACC_RAC_BASES_ENTITY, { parentId: String(rid) }),
+          savedBaseId ? api.get(ACC_RAC_BASES_ENTITY, savedBaseId).catch(() => null) : null,
+        ]);
+        if (cancelled) return;
+        let arr = unwrapAccRacBasesList(raw)
+          .map(mapAccRacBasesRow)
+          .filter((o) => o.id && o.name);
+        const savedBaseOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedBaseRes), savedBaseId);
+        arr = mergeAccRacBaseOption(arr, savedBaseOption);
+        setBaseOptions(arr);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Bank form bases:", err);
+          setBaseOptions([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingBases(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.racId, form.baseId]);
 
   const onChange = useCallback(
     (field) => (event) => {
@@ -465,12 +646,71 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     setForm((prev) => ({ ...prev, reference: limited }));
   }, []);
 
-  const filteredBaseOptions = useMemo(() => {
-    if (form.racId === "" || form.racId == null || form.racId === 0 || form.racId === "0")
-      return [];
-    const numRac = Number(form.racId);
-    return baseOptions.filter((b) => Number(b.cmdId) === numRac);
-  }, [baseOptions, form.racId]);
+  const closeQuickAdd = useCallback(() => {
+    setQuickAddType(null);
+    setQuickAddName("");
+    setQuickAddError("");
+    setQuickAddSubmitting(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) closeQuickAdd();
+  }, [open, closeQuickAdd]);
+
+  const refreshRacOptions = useCallback(async () => {
+    const racRes = await api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" });
+    const racArr = unwrapAccRacBasesList(racRes)
+      .map(mapAccRacBasesRow)
+      .filter((o) => o.id && o.name);
+    setRacOptions(racArr);
+    return racArr;
+  }, []);
+
+  const handleQuickAddSubmit = useCallback(async () => {
+    const name = String(quickAddName ?? "").trim();
+    if (!name) {
+      setQuickAddError("Name is required");
+      return;
+    }
+    setQuickAddSubmitting(true);
+    setQuickAddError("");
+    try {
+      if (quickAddType === "rac") {
+        const created = await api.create(ACC_RAC_BASES_ENTITY, { Type: "RAC", Name: name });
+        await refreshRacOptions();
+        const newId = created?.id ?? created?.Id;
+        if (newId != null && newId !== "") {
+          setForm((prev) => ({ ...prev, racId: String(newId), baseId: "" }));
+        }
+      } else if (quickAddType === "base") {
+        const parentId = Number(form.racId);
+        if (!parentId || Number.isNaN(parentId)) {
+          setQuickAddError("Select a RAC first");
+          setQuickAddSubmitting(false);
+          return;
+        }
+        const created = await api.create(ACC_RAC_BASES_ENTITY, {
+          Type: "Base",
+          ParentId: parentId,
+          Name: name,
+        });
+        const raw = await api.list(ACC_RAC_BASES_ENTITY, { parentId: String(parentId) });
+        const arr = unwrapAccRacBasesList(raw)
+          .map(mapAccRacBasesRow)
+          .filter((o) => o.id && o.name);
+        setBaseOptions(arr);
+        const newId = created?.id ?? created?.Id;
+        if (newId != null && newId !== "") {
+          setForm((prev) => ({ ...prev, baseId: String(newId) }));
+        }
+      }
+      closeQuickAdd();
+    } catch (e) {
+      setQuickAddError(e?.message || "Save failed");
+    } finally {
+      setQuickAddSubmitting(false);
+    }
+  }, [quickAddName, quickAddType, form.racId, refreshRacOptions, closeQuickAdd]);
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return "0 Bytes";
@@ -603,18 +843,6 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     }
   };
 
-  const gridItem = (children) => (
-    <Grid item xs={12} md={4}>
-      {children}
-    </Grid>
-  );
-
-  const gridItemFull = (children) => (
-    <Grid item xs={12}>
-      {children}
-    </Grid>
-  );
-
   const setDateField = (field) => (e) => {
     const v = e.target.value;
     setForm((prev) => ({ ...prev, [field]: v }));
@@ -627,672 +855,799 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" scroll="paper">
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
-        {isEditMode ? "Edit Bank Account" : "New Bank Account"}
-      </DialogTitle>
-      <DialogContent>
-        {loadingLists && (
-          <Box display="flex" alignItems="center" gap={1} mb={2}>
-            <CircularProgress size={20} />
-            <Typography variant="body2" color="text.secondary">
-              Loading options…
-            </Typography>
-          </Box>
-        )}
-
-        <Grid container spacing={2} mt={0.5}>
-          {gridItem(
-            <MDBox sx={{ position: "relative" }}>
-              <input
-                type="date"
-                ref={openingDateInputRef}
-                value={form.openingDate || ""}
-                onChange={setDateField("openingDate")}
-                style={{
-                  position: "absolute",
-                  opacity: 0,
-                  width: "100%",
-                  height: "100%",
-                  top: 0,
-                  left: 0,
-                  cursor: "pointer",
-                }}
-                aria-hidden
-              />
-              <MDInput
-                label="Opening Date"
-                type="text"
-                value={toDisplayDate(form.openingDate)}
-                readOnly
-                fullWidth
-                size="small"
-                required
-                error={!!errors.openingDate}
-                helperText={errors.openingDate}
-                onClick={() => openDatePicker(openingDateInputRef)}
-                InputProps={{
-                  readOnly: true,
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
-              />
-            </MDBox>
+    <>
+      <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" scroll="paper">
+        <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
+          {isEditMode ? "Edit Bank Account" : "New Bank Account"}
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            pt: 1,
+          }}
+        >
+          {loadingLists && (
+            <Box display="flex" alignItems="center" gap={1} mb={2}>
+              <CircularProgress size={20} />
+              <Typography variant="body2" color="text.secondary">
+                Loading options…
+              </Typography>
+            </Box>
           )}
 
-          {gridItem(
-            <FormControl fullWidth size="small">
-              <InputLabel id="bank-form-rac">RAC</InputLabel>
-              <Select
-                labelId="bank-form-rac"
-                label="RAC"
-                value={form.racId === null || form.racId === undefined ? "" : String(form.racId)}
-                onChange={onRacChange}
-              >
-                <MenuItem value="">
-                  <em>None</em>
-                </MenuItem>
-                {commandOptions.map((o) => (
-                  <MenuItem key={o.id} value={String(o.id)}>
-                    {o.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItem(
-            <FormControl
-              fullWidth
-              size="small"
-              disabled={
-                form.racId === "" || form.racId == null || form.racId === 0 || form.racId === "0"
-              }
-            >
-              <InputLabel id="bank-form-base">Base</InputLabel>
-              <Select
-                labelId="bank-form-base"
-                label="Base"
-                value={form.baseId === null || form.baseId === undefined ? "" : String(form.baseId)}
-                onChange={onChange("baseId")}
-              >
-                <MenuItem value="">
-                  <em>None</em>
-                </MenuItem>
-                {filteredBaseOptions.map((o) => (
-                  <MenuItem key={o.id} value={String(o.id)}>
-                    {o.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItem(
-            <FormControl fullWidth size="small" required>
-              <InputLabel id="bank-funding">Funding Source</InputLabel>
-              <Select
-                labelId="bank-funding"
-                label="Funding Source"
-                value={form.fundingSource}
-                onChange={onChange("fundingSource")}
-              >
-                {FUNDING_SOURCES.map((f) => (
-                  <MenuItem key={f} value={f}>
-                    {f}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItem(
-            <TextField
-              fullWidth
-              label="Fund Name"
-              value={form.fundName}
-              onChange={onChange("fundName")}
-              size="small"
-            />
-          )}
-
-          {gridItem(
-            <TextField
-              fullWidth
-              label="Title of Account"
-              value={form.titleOfAccount}
-              onChange={onChange("titleOfAccount")}
-              size="small"
-            />
-          )}
-
-          {gridItem(
-            <FormControl fullWidth size="small">
-              <InputLabel id="bank-name">Bank Name</InputLabel>
-              <Select
-                labelId="bank-name"
-                label="Bank Name"
-                value={form.bankId === null || form.bankId === undefined ? "" : String(form.bankId)}
-                onChange={onChange("bankId")}
-              >
-                <MenuItem value="">
-                  <em>None</em>
-                </MenuItem>
-                {bankOptions.map((o) => (
-                  <MenuItem key={o.id} value={String(o.id)}>
-                    {o.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItem(
-            <TextField
-              fullWidth
-              label="Branch Code"
-              value={form.branchCode}
-              onChange={onChange("branchCode")}
-              error={!!errors.branchCode}
-              helperText={errors.branchCode || ""}
-              placeholder="Numeric only"
-              size="small"
-              inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
-            />
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              label="Branch Address"
-              value={form.branchAddress}
-              onChange={onChange("branchAddress")}
-              size="small"
-            />
-          )}
-
-          {gridItem(
-            <TextField
-              fullWidth
-              label="Account No (IBAN)"
-              value={form.accountNoIban}
-              onChange={onChange("accountNoIban")}
-              error={!!errors.accountNoIban}
-              helperText={errors.accountNoIban || ""}
-              placeholder="Min 24 alphanumeric characters"
-              size="small"
-              inputProps={{ maxLength: 64 }}
-            />
-          )}
-
-          {gridItem(
-            form.currency === "Other" ? (
-              <TextField
-                fullWidth
-                required
-                label="Currency"
-                value={form.currencyOther}
-                onChange={(e) => {
-                  const v = String(e.target.value).slice(0, 20);
-                  setForm((prev) => ({ ...prev, currencyOther: v }));
-                  setErrors((prev) => {
-                    if (!prev.currencyOther) return prev;
-                    const next = { ...prev };
-                    delete next.currencyOther;
-                    return next;
-                  });
-                }}
-                error={!!errors.currencyOther}
-                helperText={errors.currencyOther || `${String(form.currencyOther || "").length}/20`}
-                size="small"
-                inputProps={{ maxLength: 20 }}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        title="Choose from list"
-                        onClick={() => {
-                          setForm((prev) => ({ ...prev, currency: "PKR", currencyOther: "" }));
-                          setErrors((prev) => {
-                            const next = { ...prev };
-                            delete next.currencyOther;
-                            return next;
-                          });
-                        }}
-                        edge="end"
-                      >
-                        <Icon fontSize="small">list</Icon>
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            ) : (
-              <FormControl fullWidth size="small" required>
-                <InputLabel id="cur">Currency</InputLabel>
-                <Select
-                  labelId="cur"
-                  label="Currency"
-                  value={form.currency}
-                  onChange={onCurrencyChange}
+          <Grid container spacing={2.25} mt={0.25}>
+            {/* Row 1: RAC, Base */}
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+                <FormControl fullWidth size="small" sx={{ ...selectFormControlSx, flex: 1 }}>
+                  <InputLabel id="bank-form-rac">RAC</InputLabel>
+                  <Select
+                    labelId="bank-form-rac"
+                    label="RAC"
+                    value={
+                      form.racId === null || form.racId === undefined ? "" : String(form.racId)
+                    }
+                    onChange={onRacChange}
+                    disabled={loadingLists}
+                  >
+                    <MenuItem value="">
+                      <em>None</em>
+                    </MenuItem>
+                    {racOptions.map((o) => (
+                      <MenuItem key={o.id} value={String(o.id)}>
+                        {o.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {canQuickAddRacBase && (
+                  <IconButton
+                    size="small"
+                    title="Add RAC"
+                    aria-label="Add RAC"
+                    disabled={loadingLists || quickAddSubmitting}
+                    onClick={() => {
+                      setQuickAddType("rac");
+                      setQuickAddName("");
+                      setQuickAddError("");
+                    }}
+                    sx={{ mt: 0.5 }}
+                  >
+                    <Icon fontSize="small">add</Icon>
+                  </IconButton>
+                )}
+              </Box>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+                <FormControl
+                  fullWidth
+                  size="small"
+                  sx={{ ...selectFormControlSx, flex: 1 }}
+                  disabled={
+                    loadingLists ||
+                    loadingBases ||
+                    form.racId === "" ||
+                    form.racId == null ||
+                    form.racId === 0 ||
+                    form.racId === "0"
+                  }
                 >
-                  {CURRENCIES.map((c) => (
-                    <MenuItem key={c} value={c}>
-                      {c}
+                  <InputLabel id="bank-form-base">Unit</InputLabel>
+                  <Select
+                    labelId="bank-form-base"
+                    label="Base"
+                    value={
+                      form.baseId === null || form.baseId === undefined ? "" : String(form.baseId)
+                    }
+                    onChange={onChange("baseId")}
+                  >
+                    <MenuItem value="">
+                      <em>None</em>
+                    </MenuItem>
+                    {baseOptions.map((o) => (
+                      <MenuItem key={o.id} value={String(o.id)}>
+                        {o.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {canQuickAddRacBase && (
+                  <IconButton
+                    size="small"
+                    title="Add Unit"
+                    aria-label="Add Base"
+                    disabled={
+                      loadingLists ||
+                      loadingBases ||
+                      quickAddSubmitting ||
+                      form.racId === "" ||
+                      form.racId == null ||
+                      form.racId === 0 ||
+                      form.racId === "0"
+                    }
+                    onClick={() => {
+                      setQuickAddType("base");
+                      setQuickAddName("");
+                      setQuickAddError("");
+                    }}
+                    sx={{ mt: 0.5 }}
+                  >
+                    <Icon fontSize="small">add</Icon>
+                  </IconButton>
+                )}
+              </Box>
+            </Grid>
+
+            {/* Row 2: Opening Date, Funding Source, Fund Name */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDBox sx={{ position: "relative" }}>
+                <input
+                  type="date"
+                  ref={openingDateInputRef}
+                  value={form.openingDate || ""}
+                  onChange={setDateField("openingDate")}
+                  style={{
+                    position: "absolute",
+                    opacity: 0,
+                    width: "100%",
+                    height: "100%",
+                    top: 0,
+                    left: 0,
+                    cursor: "pointer",
+                  }}
+                  aria-hidden
+                />
+                <MDInput
+                  label="Opening Date"
+                  type="text"
+                  value={toDisplayDate(form.openingDate)}
+                  readOnly
+                  fullWidth
+                  size="small"
+                  required
+                  error={!!errors.openingDate}
+                  helperText={errors.openingDate}
+                  onClick={() => openDatePicker(openingDateInputRef)}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{ ...textFieldSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+                />
+              </MDBox>
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth size="small" required sx={selectFormControlSx}>
+                <InputLabel id="bank-funding">Funding Source</InputLabel>
+                <Select
+                  labelId="bank-funding"
+                  label="Funding Source"
+                  value={form.fundingSource}
+                  onChange={onChange("fundingSource")}
+                >
+                  {FUNDING_SOURCES.map((f) => (
+                    <MenuItem key={f} value={f}>
+                      {f}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
-            )
-          )}
-
-          {gridItem(
-            form.accountType === "Other" ? (
+            </Grid>
+            <Grid item xs={12} sm={12} md={4}>
               <TextField
                 fullWidth
-                required
-                label="Type"
-                value={form.accountTypeOther}
-                onChange={(e) => {
-                  const v = String(e.target.value).slice(0, 20);
-                  setForm((prev) => ({ ...prev, accountTypeOther: v }));
-                  setErrors((prev) => {
-                    if (!prev.accountTypeOther) return prev;
-                    const next = { ...prev };
-                    delete next.accountTypeOther;
-                    return next;
-                  });
-                }}
-                error={!!errors.accountTypeOther}
-                helperText={
-                  errors.accountTypeOther || `${String(form.accountTypeOther || "").length}/20`
-                }
+                label="Fund Name"
+                value={form.fundName}
+                onChange={onChange("fundName")}
                 size="small"
-                inputProps={{ maxLength: 20 }}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        title="Choose from list"
-                        onClick={() => {
-                          setForm((prev) => ({
-                            ...prev,
-                            accountType: "Current",
-                            accountTypeOther: "",
-                          }));
-                          setErrors((prev) => {
-                            const next = { ...prev };
-                            delete next.accountTypeOther;
-                            return next;
-                          });
-                        }}
-                        edge="end"
-                      >
-                        <Icon fontSize="small">list</Icon>
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
+                sx={textFieldSx}
               />
-            ) : (
-              <FormControl fullWidth size="small" required>
-                <InputLabel id="acc-type">Type</InputLabel>
+            </Grid>
+
+            {/* Row 3: Title of Account, Bank Name */}
+            <Grid item xs={12} sm={6} md={6} sx={{ display: "flex", alignItems: "stretch" }}>
+              <TextField
+                fullWidth
+                label="Title of Account"
+                value={form.titleOfAccount}
+                onChange={onChange("titleOfAccount")}
+                size="small"
+                sx={titleOfAccountFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={6} sx={{ display: "flex", alignItems: "stretch" }}>
+              <FormControl fullWidth size="small" sx={bankNameRowControlSx}>
+                <InputLabel id="bank-name">Bank Name</InputLabel>
                 <Select
-                  labelId="acc-type"
-                  label="Type"
-                  value={form.accountType}
-                  onChange={onAccountTypeChange}
+                  labelId="bank-name"
+                  label="Bank Name"
+                  value={
+                    form.bankId === null || form.bankId === undefined ? "" : String(form.bankId)
+                  }
+                  onChange={onChange("bankId")}
                 >
-                  {ACCOUNT_TYPES.map((c) => (
-                    <MenuItem key={c} value={c}>
-                      {c}
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {bankOptions.map((o) => (
+                    <MenuItem key={o.id} value={String(o.id)}>
+                      {o.label}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
-            )
-          )}
+            </Grid>
 
-          {gridItemFull(
-            <MDBox sx={{ position: "relative" }}>
-              <input
-                type="date"
-                ref={signatoryDateInputRef}
-                value={form.signatoryDate || ""}
-                onChange={setDateField("signatoryDate")}
-                style={{
-                  position: "absolute",
-                  opacity: 0,
-                  width: "100%",
-                  height: "100%",
-                  top: 0,
-                  left: 0,
-                  cursor: "pointer",
-                }}
-                aria-hidden
-              />
-              <MDInput
-                label="Signatory Date"
-                type="text"
-                value={toDisplayDate(form.signatoryDate)}
-                readOnly
-                fullWidth
-                size="small"
-                onClick={() => openDatePicker(signatoryDateInputRef)}
-                InputProps={{
-                  readOnly: true,
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
-              />
-            </MDBox>
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              required
-              label="Signatory-1 (Rank Name Appointment Service#)"
-              value={form.signatory1}
-              onChange={onChange("signatory1")}
-              error={!!errors.signatory1}
-              helperText={errors.signatory1}
-              size="small"
-            />
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              required
-              label="Signatory-2 (Rank Name Appointment Service#)"
-              value={form.signatory2}
-              onChange={onChange("signatory2")}
-              error={!!errors.signatory2}
-              helperText={errors.signatory2}
-              size="small"
-            />
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              label="Signatory-3 (optional)"
-              value={form.signatory3}
-              onChange={onChange("signatory3")}
-              size="small"
-            />
-          )}
-
-          {gridItem(
-            <FormControl fullWidth size="small" required>
-              <InputLabel id="st">Status</InputLabel>
-              <Select labelId="st" label="Status" value={form.status} onChange={onChange("status")}>
-                {STATUS_OPTIONS.map((c) => (
-                  <MenuItem key={c} value={c}>
-                    {c}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItem(
-            <MDBox sx={{ position: "relative" }}>
-              <input
-                type="date"
-                ref={statusDateInputRef}
-                value={form.statusDate || ""}
-                onChange={setDateField("statusDate")}
-                style={{
-                  position: "absolute",
-                  opacity: 0,
-                  width: "100%",
-                  height: "100%",
-                  top: 0,
-                  left: 0,
-                  cursor: "pointer",
-                }}
-                aria-hidden
-              />
-              <MDInput
-                label="Status Date"
-                type="text"
-                value={toDisplayDate(form.statusDate)}
-                readOnly
-                fullWidth
-                size="small"
-                onClick={() => openDatePicker(statusDateInputRef)}
-                InputProps={{
-                  readOnly: true,
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ ...inputSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
-              />
-            </MDBox>
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              multiline
-              minRows={3}
-              label="Remarks"
-              value={form.remarks}
-              onChange={onChange("remarks")}
-              size="small"
-              inputProps={{ maxLength: MAX_REMARKS_CHARS }}
-              helperText={`${String(form.remarks || "").length}/${MAX_REMARKS_CHARS}`}
-            />
-          )}
-
-          {gridItem(
-            <FormControl fullWidth size="small" required>
-              <InputLabel id="auth">Authority</InputLabel>
-              <Select
-                labelId="auth"
-                label="Authority"
-                value={form.authority}
-                onChange={onChange("authority")}
-              >
-                {AUTHORITY_OPTIONS.map((c) => (
-                  <MenuItem key={c} value={c}>
-                    {c}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          {gridItemFull(
-            <TextField
-              fullWidth
-              label="Reference"
-              value={form.reference}
-              onChange={onReferenceChange}
-              size="small"
-              helperText={`${countWords(form.reference)}/${MAX_REFERENCE_WORDS} words`}
-            />
-          )}
-
-          {isEditMode && recordId && (
+            {/* Row 4: Branch Address */}
             <Grid item xs={12}>
-              <MDBox
-                sx={{
-                  border: "1px dashed",
-                  borderColor: "grey.400",
-                  borderRadius: 2,
-                  p: 2,
-                  bgcolor: "background.paper",
-                }}
-              >
-                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-                  Attachments (max {MAX_ATTACHMENT_FILES} files total)
-                </Typography>
+              <TextField
+                fullWidth
+                label="Branch Address"
+                value={form.branchAddress}
+                onChange={onChange("branchAddress")}
+                size="small"
+                sx={textFieldSx}
+              />
+            </Grid>
 
-                {loadingExistingFiles ? (
-                  <Box display="flex" justifyContent="center" py={1}>
-                    <CurrencyLoading size={20} />
-                  </Box>
-                ) : (
-                  existingFiles.length > 0 && (
-                    <Box mb={2}>
-                      <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                        Uploaded files ({existingFiles.length}/{MAX_ATTACHMENT_FILES}):
-                      </Typography>
-                      {existingFiles.map((file, index) => (
-                        <Box
-                          key={file.id || file.fileId || `${file.fileName}-${index}`}
-                          display="flex"
-                          alignItems="center"
-                          flexWrap="wrap"
-                          gap={0.5}
-                          mb={0.5}
+            {/* Row 5: Branch Code, IBAN, Currency, Type */}
+            <Grid item xs={12} sm={4} md={2}>
+              <TextField
+                fullWidth
+                label="Branch Code"
+                value={form.branchCode}
+                onChange={onChange("branchCode")}
+                error={!!errors.branchCode}
+                helperText={errors.branchCode || ""}
+                placeholder="Numeric only"
+                size="small"
+                inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
+                sx={textFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={8} md={4}>
+              <TextField
+                fullWidth
+                label="Account No (IBAN)"
+                value={form.accountNoIban}
+                onChange={onChange("accountNoIban")}
+                error={!!errors.accountNoIban}
+                helperText={errors.accountNoIban || ""}
+                placeholder="Min 24 alphanumeric characters"
+                size="small"
+                inputProps={{ maxLength: 64 }}
+                sx={textFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              {form.currency === "Other" ? (
+                <TextField
+                  fullWidth
+                  required
+                  label="Currency"
+                  value={form.currencyOther}
+                  onChange={(e) => {
+                    const v = String(e.target.value).slice(0, 20);
+                    setForm((prev) => ({ ...prev, currencyOther: v }));
+                    setErrors((prev) => {
+                      if (!prev.currencyOther) return prev;
+                      const next = { ...prev };
+                      delete next.currencyOther;
+                      return next;
+                    });
+                  }}
+                  error={!!errors.currencyOther}
+                  helperText={
+                    errors.currencyOther || `${String(form.currencyOther || "").length}/20`
+                  }
+                  size="small"
+                  inputProps={{ maxLength: 20 }}
+                  sx={textFieldSx}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          size="small"
+                          title="Choose from list"
+                          onClick={() => {
+                            setForm((prev) => ({ ...prev, currency: "PKR", currencyOther: "" }));
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.currencyOther;
+                              return next;
+                            });
+                          }}
+                          edge="end"
                         >
-                          <Chip
-                            label={file.fileName || `File ${index + 1}`}
-                            size="small"
-                            variant="outlined"
-                            sx={{ maxWidth: "100%" }}
-                          />
-                          <IconButton
-                            size="small"
-                            onClick={() => openAttachmentDownload(file)}
-                            title="Open / download"
-                            sx={{ padding: "2px" }}
+                          <Icon fontSize="small">list</Icon>
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              ) : (
+                <FormControl fullWidth size="small" required sx={selectFormControlSx}>
+                  <InputLabel id="cur">Currency</InputLabel>
+                  <Select
+                    labelId="cur"
+                    label="Currency"
+                    value={form.currency}
+                    onChange={onCurrencyChange}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <MenuItem key={c} value={c}>
+                        {c}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              {form.accountType === "Other" ? (
+                <TextField
+                  fullWidth
+                  required
+                  label="Type"
+                  value={form.accountTypeOther}
+                  onChange={(e) => {
+                    const v = String(e.target.value).slice(0, 20);
+                    setForm((prev) => ({ ...prev, accountTypeOther: v }));
+                    setErrors((prev) => {
+                      if (!prev.accountTypeOther) return prev;
+                      const next = { ...prev };
+                      delete next.accountTypeOther;
+                      return next;
+                    });
+                  }}
+                  error={!!errors.accountTypeOther}
+                  helperText={
+                    errors.accountTypeOther || `${String(form.accountTypeOther || "").length}/20`
+                  }
+                  size="small"
+                  inputProps={{ maxLength: 20 }}
+                  sx={textFieldSx}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          size="small"
+                          title="Choose from list"
+                          onClick={() => {
+                            setForm((prev) => ({
+                              ...prev,
+                              accountType: "Current",
+                              accountTypeOther: "",
+                            }));
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.accountTypeOther;
+                              return next;
+                            });
+                          }}
+                          edge="end"
+                        >
+                          <Icon fontSize="small">list</Icon>
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              ) : (
+                <FormControl fullWidth size="small" required sx={selectFormControlSx}>
+                  <InputLabel id="acc-type">Type</InputLabel>
+                  <Select
+                    labelId="acc-type"
+                    label="Type"
+                    value={form.accountType}
+                    onChange={onAccountTypeChange}
+                  >
+                    {ACCOUNT_TYPES.map((c) => (
+                      <MenuItem key={c} value={c}>
+                        {c}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </Grid>
+
+            {/* Signatories: one per row */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                required
+                label="Signatory-1 (Rank Name Appointment Service#)"
+                value={form.signatory1}
+                onChange={onChange("signatory1")}
+                error={!!errors.signatory1}
+                helperText={errors.signatory1}
+                size="small"
+                sx={textFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                required
+                label="Signatory-2 (Rank Name Appointment Service#)"
+                value={form.signatory2}
+                onChange={onChange("signatory2")}
+                error={!!errors.signatory2}
+                helperText={errors.signatory2}
+                size="small"
+                sx={textFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Signatory-3 (optional)"
+                value={form.signatory3}
+                onChange={onChange("signatory3")}
+                size="small"
+                sx={textFieldSx}
+              />
+            </Grid>
+
+            {/* Signatory Date, Status, Status Date */}
+            <Grid item xs={12} sm={6} md={4}>
+              <MDBox sx={{ position: "relative" }}>
+                <input
+                  type="date"
+                  ref={signatoryDateInputRef}
+                  value={form.signatoryDate || ""}
+                  onChange={setDateField("signatoryDate")}
+                  style={{
+                    position: "absolute",
+                    opacity: 0,
+                    width: "100%",
+                    height: "100%",
+                    top: 0,
+                    left: 0,
+                    cursor: "pointer",
+                  }}
+                  aria-hidden
+                />
+                <MDInput
+                  label="Signatory Date"
+                  type="text"
+                  value={toDisplayDate(form.signatoryDate)}
+                  readOnly
+                  fullWidth
+                  size="small"
+                  onClick={() => openDatePicker(signatoryDateInputRef)}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{ ...textFieldSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+                />
+              </MDBox>
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth size="small" required sx={selectFormControlSx}>
+                <InputLabel id="st">Status</InputLabel>
+                <Select
+                  labelId="st"
+                  label="Status"
+                  value={form.status}
+                  onChange={onChange("status")}
+                >
+                  {STATUS_OPTIONS.map((c) => (
+                    <MenuItem key={c} value={c}>
+                      {c}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={12} md={4}>
+              <MDBox sx={{ position: "relative" }}>
+                <input
+                  type="date"
+                  ref={statusDateInputRef}
+                  value={form.statusDate || ""}
+                  onChange={setDateField("statusDate")}
+                  style={{
+                    position: "absolute",
+                    opacity: 0,
+                    width: "100%",
+                    height: "100%",
+                    top: 0,
+                    left: 0,
+                    cursor: "pointer",
+                  }}
+                  aria-hidden
+                />
+                <MDInput
+                  label="Status Date"
+                  type="text"
+                  value={toDisplayDate(form.statusDate)}
+                  readOnly
+                  fullWidth
+                  size="small"
+                  onClick={() => openDatePicker(statusDateInputRef)}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Icon sx={{ cursor: "pointer" }}>calendar_today</Icon>
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{ ...textFieldSx, "& .MuiInputBase-input": { cursor: "pointer" } }}
+                />
+              </MDBox>
+            </Grid>
+
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                minRows={3}
+                label="Remarks"
+                value={form.remarks}
+                onChange={onChange("remarks")}
+                size="small"
+                inputProps={{ maxLength: MAX_REMARKS_CHARS }}
+                helperText={`${String(form.remarks || "").length}/${MAX_REMARKS_CHARS}`}
+                sx={textFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth size="small" required sx={selectFormControlSx}>
+                <InputLabel id="auth">Authority</InputLabel>
+                <Select
+                  labelId="auth"
+                  label="Authority"
+                  value={form.authority}
+                  onChange={onChange("authority")}
+                >
+                  {AUTHORITY_OPTIONS.map((c) => (
+                    <MenuItem key={c} value={c}>
+                      {c}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Reference"
+                value={form.reference}
+                onChange={onReferenceChange}
+                size="small"
+                helperText={`${countWords(form.reference)}/${MAX_REFERENCE_WORDS} words`}
+                sx={textFieldSx}
+              />
+            </Grid>
+
+            {isEditMode && recordId && (
+              <Grid item xs={12}>
+                <MDBox
+                  sx={{
+                    border: "1px dashed",
+                    borderColor: "grey.400",
+                    borderRadius: 2,
+                    p: 2,
+                    bgcolor: "background.paper",
+                  }}
+                >
+                  <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
+                    Attachments (max {MAX_ATTACHMENT_FILES} files total)
+                  </Typography>
+
+                  {loadingExistingFiles ? (
+                    <Box display="flex" justifyContent="center" py={1}>
+                      <CurrencyLoading size={20} />
+                    </Box>
+                  ) : (
+                    existingFiles.length > 0 && (
+                      <Box mb={2}>
+                        <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                          Uploaded files ({existingFiles.length}/{MAX_ATTACHMENT_FILES}):
+                        </Typography>
+                        {existingFiles.map((file, index) => (
+                          <Box
+                            key={file.id || file.fileId || `${file.fileName}-${index}`}
+                            display="flex"
+                            alignItems="center"
+                            flexWrap="wrap"
+                            gap={0.5}
+                            mb={0.5}
                           >
-                            <Icon fontSize="small">download</Icon>
-                          </IconButton>
-                          {canDeleteCurrentMenu() && (
+                            <Chip
+                              label={file.fileName || `File ${index + 1}`}
+                              size="small"
+                              variant="outlined"
+                              sx={{ maxWidth: "100%" }}
+                            />
                             <IconButton
                               size="small"
-                              color="error"
-                              onClick={() => handleDeleteExistingFile(file)}
-                              title="Delete file"
+                              onClick={() => openAttachmentDownload(file)}
+                              title="Open / download"
                               sx={{ padding: "2px" }}
                             >
-                              <Icon fontSize="small">delete</Icon>
+                              <Icon fontSize="small">download</Icon>
                             </IconButton>
-                          )}
-                        </Box>
-                      ))}
-                    </Box>
-                  )
-                )}
+                            {canDeleteCurrentMenu() && (
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDeleteExistingFile(file)}
+                                title="Delete file"
+                                sx={{ padding: "2px" }}
+                              >
+                                <Icon fontSize="small">delete</Icon>
+                              </IconButton>
+                            )}
+                          </Box>
+                        ))}
+                      </Box>
+                    )
+                  )}
 
-                {existingFiles.length >= MAX_ATTACHMENT_FILES ? (
-                  <Box
-                    sx={{
-                      p: 1.5,
-                      bgcolor: "warning.light",
-                      borderRadius: 1,
-                      border: "1px solid",
-                      borderColor: "warning.main",
-                    }}
-                  >
-                    <Typography variant="body2" color="warning.dark">
-                      Maximum {MAX_ATTACHMENT_FILES} files already uploaded. Delete a file to add
-                      new ones.
-                    </Typography>
-                  </Box>
-                ) : (
-                  <>
-                    <input
-                      accept="*/*"
-                      style={{ display: "none" }}
-                      id="bank-acct-attachment-file-input"
-                      type="file"
-                      multiple
-                      onChange={handleFileSelect}
-                      disabled={
-                        existingFiles.length + selectedFiles.length >= MAX_ATTACHMENT_FILES ||
-                        isUploading
-                      }
-                    />
-                    <label htmlFor="bank-acct-attachment-file-input">
-                      <MDButton
-                        variant="gradient"
-                        color="info"
-                        component="span"
-                        size="small"
+                  {existingFiles.length >= MAX_ATTACHMENT_FILES ? (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        bgcolor: "warning.light",
+                        borderRadius: 1,
+                        border: "1px solid",
+                        borderColor: "warning.main",
+                      }}
+                    >
+                      <Typography variant="body2" color="warning.dark">
+                        Maximum {MAX_ATTACHMENT_FILES} files already uploaded. Delete a file to add
+                        new ones.
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <>
+                      <input
+                        accept="*/*"
+                        style={{ display: "none" }}
+                        id="bank-acct-attachment-file-input"
+                        type="file"
+                        multiple
+                        onChange={handleFileSelect}
                         disabled={
                           existingFiles.length + selectedFiles.length >= MAX_ATTACHMENT_FILES ||
                           isUploading
                         }
-                        sx={{ mb: 1 }}
-                      >
-                        <Icon>cloud_upload</Icon>&nbsp; Add files (
-                        {existingFiles.length + selectedFiles.length}/{MAX_ATTACHMENT_FILES})
-                      </MDButton>
-                    </label>
-                    {existingFiles.length + selectedFiles.length < MAX_ATTACHMENT_FILES && (
-                      <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                        You can add{" "}
-                        {MAX_ATTACHMENT_FILES - existingFiles.length - selectedFiles.length} more
-                        file(s). New files upload after you click Save.
-                      </Typography>
-                    )}
-                  </>
-                )}
-
-                {selectedFiles.length > 0 && (
-                  <Box mt={1}>
-                    <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                      New files (uploaded when you save):
-                    </Typography>
-                    {selectedFiles.map((file, index) => (
-                      <Chip
-                        key={`${file.name}-${index}`}
-                        label={`${file.name} (${formatFileSize(file.size)})`}
-                        onDelete={() => handleRemoveNewFile(index)}
-                        deleteIcon={<Icon fontSize="small">cancel</Icon>}
-                        size="small"
-                        sx={{ mr: 0.5, mb: 0.5 }}
-                        color="primary"
-                        variant="outlined"
                       />
-                    ))}
-                  </Box>
-                )}
-              </MDBox>
-            </Grid>
-          )}
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <MDButton
-          variant="outlined"
-          color="secondary"
-          onClick={onClose}
-          disabled={submitting || isUploading}
-        >
-          <Icon>close</Icon>&nbsp;Cancel
-        </MDButton>
-        <MDButton
-          variant="gradient"
-          color="info"
-          onClick={handleSave}
-          disabled={submitting || isUploading || !canSave}
-        >
-          <Icon>save</Icon>&nbsp;
-          {isUploading ? "Uploading…" : submitting ? "Saving…" : "Save"}
-        </MDButton>
-      </DialogActions>
-    </Dialog>
+                      <label htmlFor="bank-acct-attachment-file-input">
+                        <MDButton
+                          variant="gradient"
+                          color="info"
+                          component="span"
+                          size="small"
+                          disabled={
+                            existingFiles.length + selectedFiles.length >= MAX_ATTACHMENT_FILES ||
+                            isUploading
+                          }
+                          sx={{ mb: 1 }}
+                        >
+                          <Icon>cloud_upload</Icon>&nbsp; Add files (
+                          {existingFiles.length + selectedFiles.length}/{MAX_ATTACHMENT_FILES})
+                        </MDButton>
+                      </label>
+                      {existingFiles.length + selectedFiles.length < MAX_ATTACHMENT_FILES && (
+                        <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                          You can add{" "}
+                          {MAX_ATTACHMENT_FILES - existingFiles.length - selectedFiles.length} more
+                          file(s). New files upload after you click Save.
+                        </Typography>
+                      )}
+                    </>
+                  )}
+
+                  {selectedFiles.length > 0 && (
+                    <Box mt={1}>
+                      <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
+                        New files (uploaded when you save):
+                      </Typography>
+                      {selectedFiles.map((file, index) => (
+                        <Chip
+                          key={`${file.name}-${index}`}
+                          label={`${file.name} (${formatFileSize(file.size)})`}
+                          onDelete={() => handleRemoveNewFile(index)}
+                          deleteIcon={<Icon fontSize="small">cancel</Icon>}
+                          size="small"
+                          sx={{ mr: 0.5, mb: 0.5 }}
+                          color="primary"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  )}
+                </MDBox>
+              </Grid>
+            )}
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={onClose}
+            disabled={submitting || isUploading}
+          >
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleSave}
+            disabled={submitting || isUploading || !canSave}
+          >
+            <Icon>save</Icon>&nbsp;
+            {isUploading ? "Uploading…" : submitting ? "Saving…" : "Save"}
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={quickAddType != null}
+        onClose={quickAddSubmitting ? undefined : closeQuickAdd}
+        fullWidth
+        maxWidth="xs"
+        scroll="paper"
+      >
+        <DialogTitle sx={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {quickAddType === "base" ? "New Base" : "New RAC"}
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            autoFocus
+            margin="dense"
+            label="Name"
+            value={quickAddName}
+            onChange={(e) => {
+              setQuickAddName(e.target.value);
+              if (quickAddError) setQuickAddError("");
+            }}
+            disabled={quickAddSubmitting}
+            size="small"
+            sx={{ ...textFieldSx, mt: 0.5 }}
+          />
+          {quickAddError ? (
+            <FormHelperText error sx={{ mx: 0 }}>
+              {quickAddError}
+            </FormHelperText>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={closeQuickAdd}
+            disabled={quickAddSubmitting}
+          >
+            Cancel
+          </MDButton>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleQuickAddSubmit}
+            disabled={quickAddSubmitting}
+          >
+            {quickAddSubmitting ? "Saving…" : "Save"}
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }
 

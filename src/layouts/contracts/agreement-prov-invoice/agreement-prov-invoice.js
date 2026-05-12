@@ -3,8 +3,12 @@ import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
+import Divider from "@mui/material/Divider";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
+import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -20,6 +24,232 @@ import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
+import { format, parseISO, isValid } from "date-fns";
+
+const AGREEMENT_PROV_GRID_DATE_FALLBACK_KEYS = {
+  contractStartDate: ["contractStartDate", "ContractStartDate"],
+  contractEndDate: ["contractEndDate", "ContractEndDate"],
+};
+
+function parseAgreementProvGridDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = AGREEMENT_PROV_GRID_DATE_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function agreementProvGridDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseAgreementProvGridDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+function AgreementProvDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `agreement-prov-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+AgreementProvDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const AGREEMENT_PROV_DATATABLE_DATE_FILTER_TYPES = Object.freeze({
+  agreementProvDateCompare: agreementProvGridDateCompare,
+});
 
 export default function AgreementProvInvoice() {
   const [controller] = useMaterialUIController();
@@ -211,6 +441,16 @@ export default function AgreementProvInvoice() {
           initialRentPA: row.InitialRentPA || row.initialRentPA || "",
           natureOfBusiness: row.NatureOfBusiness || row.natureOfBusiness || "",
           status: row.Status !== undefined ? row.Status : row.status,
+          amountTotal:
+            row.AmountTotal ?? row.amountTotal ?? row.TotalAmount ?? row.totalAmount ?? 0,
+          amountReceived:
+            row.AmountReceived ??
+            row.amountReceived ??
+            row.ReceivedAmount ??
+            row.receivedAmount ??
+            0,
+          amountPending:
+            row.AmountPending ?? row.amountPending ?? row.PendingAmount ?? row.pendingAmount ?? 0,
         };
       });
 
@@ -533,7 +773,44 @@ export default function AgreementProvInvoice() {
     ) {
       return formatDateDDMMMYYYY(value);
     }
+    if (colId === "amounttotal" || colId === "amountreceived" || colId === "amountpending") {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
     return value;
+  };
+
+  const clickableAmountCellSx = {
+    cursor: "pointer",
+    color: "primary.main",
+    textDecoration: "underline",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    lineHeight: "inherit",
+    background: "none",
+    border: "none",
+    padding: 0,
+    "&:hover": { opacity: 0.85 },
+  };
+
+  // eslint-disable-next-line react/prop-types
+  const renderClickableAmountCell = ({ value }) => {
+    const n = Number(value);
+    const safe = Number.isFinite(n) ? n : 0;
+    return (
+      <MDTypography
+        component="button"
+        type="button"
+        variant="caption"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        sx={clickableAmountCellSx}
+      >
+        {safe.toLocaleString()}
+      </MDTypography>
+    );
   };
 
   // Define table columns with Cell functions to handle both PascalCase and camelCase
@@ -550,15 +827,16 @@ export default function AgreementProvInvoice() {
         return (
           <IconButton
             onClick={() => generatePDF(rowData)}
-            size="large"
+            size="medium"
             sx={{
+              padding: "4px",
               color: "#1976d2",
               "&:hover": {
                 backgroundColor: "rgba(25, 118, 210, 0.1)",
               },
             }}
           >
-            <Icon fontSize="large">picture_as_pdf</Icon>
+            <Icon sx={{ fontSize: "1.35rem" }}>picture_as_pdf</Icon>
           </IconButton>
         );
       },
@@ -597,9 +875,12 @@ export default function AgreementProvInvoice() {
       },
     },
     {
+      id: "contractStartDate",
       Header: "Contract Start Date",
       accessor: "contractStartDate",
       align: "left",
+      filter: "agreementProvDateCompare",
+      Filter: AgreementProvDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -609,9 +890,12 @@ export default function AgreementProvInvoice() {
       },
     },
     {
+      id: "contractEndDate",
       Header: "Contract End Date",
       accessor: "contractEndDate",
       align: "left",
+      filter: "agreementProvDateCompare",
+      Filter: AgreementProvDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -654,6 +938,24 @@ export default function AgreementProvInvoice() {
         const rowData = row?.original || {};
         return rowData.NatureOfBusiness || rowData.natureOfBusiness || value || "-";
       },
+    },
+    {
+      Header: "Total Amount",
+      accessor: "amountTotal",
+      align: "right",
+      Cell: renderClickableAmountCell,
+    },
+    {
+      Header: "Received",
+      accessor: "amountReceived",
+      align: "right",
+      Cell: renderClickableAmountCell,
+    },
+    {
+      Header: "Pending",
+      accessor: "amountPending",
+      align: "right",
+      Cell: renderClickableAmountCell,
     },
     {
       Header: "Status",
@@ -1048,8 +1350,8 @@ export default function AgreementProvInvoice() {
                   sx={{
                     display: "flex",
                     flexDirection: "column",
-                    height: "78vh",
-                    minHeight: "560px",
+                    height: "88vh",
+                    minHeight: "680px",
                     overflow: "hidden",
                     "& .MuiTableContainer-root": {
                       flex: "1 1 0",
@@ -1083,6 +1385,7 @@ export default function AgreementProvInvoice() {
                     noEndBorder
                     exportFileName="Agreement-Prov-Invoice"
                     exportCellFormatter={exportCellFormatter}
+                    extraFilterTypes={AGREEMENT_PROV_DATATABLE_DATE_FILTER_TYPES}
                   />
                 </MDBox>
               </MDBox>

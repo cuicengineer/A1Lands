@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -11,6 +11,9 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Divider from "@mui/material/Divider";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
+import Popover from "@mui/material/Popover";
 import Chip from "@mui/material/Chip";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -85,6 +88,87 @@ function stripContractForClone(contract) {
   return c;
 }
 
+function ContractGridLongTextCell({ value, matchGridPlainText = false }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value).trim() : "-";
+  const showMore = text !== "-" && text.length > 25;
+  const displayText = showMore ? text.slice(0, 25) : text;
+
+  const textSx = {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "clip",
+    whiteSpace: "nowrap",
+    ...(matchGridPlainText
+      ? {
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          lineHeight: "inherit",
+          color: "#111111 !important",
+        }
+      : {}),
+  };
+
+  return (
+    <MDBox display="flex" alignItems="center" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      {matchGridPlainText ? (
+        <MDBox component="span" sx={textSx}>
+          {displayText}
+        </MDBox>
+      ) : (
+        <MDTypography component="span" variant="body2" sx={textSx}>
+          {displayText}
+        </MDTypography>
+      )}
+      {showMore && (
+        <>
+          <MDBox
+            component="button"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(e.currentTarget);
+            }}
+            sx={{
+              border: "none",
+              background: "none",
+              padding: "0 1px",
+              cursor: "pointer",
+              color: "info.main",
+              fontSize: "0.8rem",
+              lineHeight: 1.2,
+              flexShrink: 0,
+              textDecoration: "underline",
+            }}
+            aria-label="Show full value"
+          >
+            ...
+          </MDBox>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+ContractGridLongTextCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+  matchGridPlainText: PropTypes.bool,
+};
+
 function ContractsForm({
   open,
   onClose,
@@ -126,6 +210,7 @@ function ContractsForm({
     rentalValue: "",
     govtShare: "",
     pafShare: "",
+    fiscal: "",
     status: true,
     isArchive: false,
     remarks: "",
@@ -134,6 +219,7 @@ function ContractsForm({
     risedate: "",
     vaArea: "",
     profitRate: "",
+    approvalStatus: "0",
   });
   const [errors, setErrors] = useState({});
   const [filteredBases, setFilteredBases] = useState([]);
@@ -299,6 +385,7 @@ function ContractsForm({
           !Number.isNaN(Number(initialData.PAFShare))
             ? String(Math.round(Number(initialData.PAFShare)))
             : initialData.PAFShare || "",
+        fiscal: initialData.Fiscal ?? initialData.fiscal ?? "",
         status: initialData.Status !== undefined ? initialData.Status : true,
         isArchive:
           initialData.IsArchive !== undefined && initialData.IsArchive !== null
@@ -310,6 +397,15 @@ function ContractsForm({
         risedate: normalizedRiseDate,
         vaArea: initialData.VaArea || "",
         profitRate: initialData.ProfitRate ?? initialData.profitRate ?? "",
+        approvalStatus:
+          initialData.ApprovalStatus === true ||
+          initialData.ApprovalStatus === 1 ||
+          initialData.ApprovalStatus === "1" ||
+          initialData.approvalStatus === true ||
+          initialData.approvalStatus === 1 ||
+          initialData.approvalStatus === "1"
+            ? "1"
+            : "0",
       });
 
       // Initialize riseTerms list from existing contract rise terms, if any
@@ -374,6 +470,7 @@ function ContractsForm({
         rentalValue: "",
         govtShare: "",
         pafShare: "",
+        fiscal: "",
         status: true,
         isArchive: false,
         remarks: "",
@@ -382,6 +479,7 @@ function ContractsForm({
         risedate: "",
         vaArea: "",
         profitRate: "",
+        approvalStatus: "0",
       });
       // Reset rise terms when opening new form
       setRiseTerms([]);
@@ -432,6 +530,7 @@ function ContractsForm({
 
   // Auto-calculate initialRentPA when initialRentPM changes (rounded to integer)
   useEffect(() => {
+    if (initialData && !isClone) return;
     const initialRent = Number(form.initialRentPM);
 
     if (initialRent && !isNaN(initialRent)) {
@@ -446,10 +545,11 @@ function ContractsForm({
         initialRentPA: "",
       }));
     }
-  }, [form.initialRentPM]);
+  }, [form.initialRentPM, initialData, isClone]);
 
   // Auto-calculate securityDepositAmount when sdRateMonths or initialRentPM changes (rounded to integer)
   useEffect(() => {
+    if (initialData && !isClone) return;
     const sdRate = Number(form.sdRateMonths);
     const initialRent = Number(form.initialRentPM);
 
@@ -465,7 +565,7 @@ function ContractsForm({
         securityDepositAmount: "",
       }));
     }
-  }, [form.sdRateMonths, form.initialRentPM]);
+  }, [form.sdRateMonths, form.initialRentPM, initialData, isClone]);
 
   // Load Rental Value Rate (%) records when form opens.
   useEffect(() => {
@@ -749,6 +849,26 @@ function ContractsForm({
     const hasRentInTerm = String(form.term || "")
       .toLowerCase()
       .includes("rent");
+    const initialApprovalRaw = initialData?.ApprovalStatus ?? initialData?.approvalStatus;
+    const initialApprovalValue =
+      initialApprovalRaw === true || initialApprovalRaw === 1 || initialApprovalRaw === "1"
+        ? "1"
+        : "0";
+    const approvalStatusChanged = form.approvalStatus !== initialApprovalValue;
+    const storedFeasibleValue = (() => {
+      const raw =
+        initialData?.Viability ??
+        initialData?.viability ??
+        initialData?.Feasible ??
+        initialData?.feasible ??
+        "";
+      const trimmed = String(raw || "").trim();
+      if (!trimmed) return "";
+      const lower = trimmed.toLowerCase();
+      if (lower === "viable") return "Viable";
+      if (lower === "unviable") return "Unviable";
+      return trimmed;
+    })();
 
     const payload = {
       contractNo: form.contractNo.trim(),
@@ -789,10 +909,20 @@ function ContractsForm({
       govtShare: form.govtShare ? Number(form.govtShare) : null,
       pafShare: form.pafShare ? Number(form.pafShare) : null,
       feasible:
-        Number(form.initialRentPA || 0) > Number(form.govtShare || 0) ? "Unviable" : "Viable",
+        initialData && !isClone && storedFeasibleValue
+          ? storedFeasibleValue
+          : Number(form.initialRentPA || 0) > Number(form.govtShare || 0)
+          ? "Unviable"
+          : "Viable",
       status: form.status,
       IsArchive: Boolean(form.isArchive),
       remarks: form.remarks?.trim() || null,
+      ...(canShowAhqApprovalField && {
+        ApprovalStatus: form.approvalStatus === "1",
+        ...(approvalStatusChanged && {
+          ApprovedBy: api.getLoggedInUsername(),
+        }),
+      }),
       riseTermType: form.riseTermType || null,
       riseyear:
         form.riseTermType === "Variable" || form.riseTermType === "Uniform"
@@ -863,9 +993,83 @@ function ContractsForm({
     const selectedTenantNo = String(form.tenantNo).trim();
     return tenants.find((t) => String(t?.tenantNo ?? "").trim() === selectedTenantNo) || null;
   }, [tenants, form.tenantNo, hasTenantSelection]);
+
+  const canShowAhqApprovalField = useMemo(() => {
+    if (!initialData || isClone) return false;
+    if (api.isSuperuserUser()) return true;
+
+    try {
+      const raw = localStorage.getItem("auth");
+      if (!raw) return false;
+      const auth = JSON.parse(raw);
+      const normalize = (value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "");
+
+      /* Match contractsApprovalActionsBypassUser string fields — some sessions only populate IDs when Base is null. */
+      const hasAhqRacStrings = [
+        auth?.cmdName,
+        auth?.CmdName,
+        auth?.commandName,
+        auth?.CommandName,
+        auth?.rac,
+        auth?.Rac,
+        auth?.racName,
+        auth?.RacName,
+        auth?.baseName,
+        auth?.BaseName,
+        auth?.base,
+        auth?.Base,
+      ].some((value) => normalize(value) === "ahq");
+
+      const ahqCommandIds = new Set(
+        (commands || [])
+          .filter((cmd) => {
+            const label = normalize(
+              cmd?.name ?? cmd?.Name ?? cmd?.commandName ?? cmd?.CommandName ?? ""
+            );
+            const shortCode = normalize(cmd?.code ?? cmd?.Code ?? "");
+            return label === "ahq" || shortCode === "ahq";
+          })
+          .map((cmd) => Number(cmd?.id ?? cmd?.Id))
+          .filter((n) => Number.isFinite(n))
+      );
+
+      const sessionCmdIds = [
+        auth?.cmdId,
+        auth?.CmdId,
+        auth?.commandId,
+        auth?.CommandId,
+        auth?.racId,
+        auth?.RacId,
+      ];
+
+      const hasAhqRacIds =
+        ahqCommandIds.size > 0 &&
+        sessionCmdIds.some((v) => v != null && ahqCommandIds.has(Number(v)));
+
+      const hasAhqRac = hasAhqRacStrings || hasAhqRacIds;
+
+      const categoryTokens = String(auth?.category ?? auth?.Category ?? "")
+        .split(",")
+        .map((value) => normalize(value))
+        .filter(Boolean);
+      const hasAllowedCategory = categoryTokens.some(
+        (token) => token.includes("power") || token.includes("supervisor")
+      );
+
+      return hasAhqRac && hasAllowedCategory;
+    } catch (_) {
+      return false;
+    }
+  }, [initialData, isClone, commands]);
+
   // Use only PascalCase (strict API response format)
   const selectedGroupArea = selectedPropertyGroup?.Area ?? "";
   const selectedGroupRate = selectedPropertyGroup?.Rate ?? "";
+  const savedGroupRate = initialData?.GroupRate ?? initialData?.groupRate ?? "";
   const selectedGroupLocation =
     selectedPropertyGroup?.Location ?? selectedPropertyGroup?.location ?? "";
   const selectedGroupUoM = selectedPropertyGroup?.UoM ?? "";
@@ -941,9 +1145,19 @@ function ContractsForm({
     return { percent: Number.isFinite(rate) ? rate : 0, applicationDate: String(appDate || "") };
   }, [rentalValueRates, form.cmdId, form.baseId, form.classId, form.contractStartDate]);
   const selectedRentalValuePercentRate = selectedRentalValueRateMeta.percent;
+  const savedRentalValueRate = initialData?.RentalValueRate ?? initialData?.rentalValueRate ?? "";
+  const displayGroupRate =
+    initialData && !isClone && savedGroupRate !== "" && savedGroupRate != null
+      ? savedGroupRate
+      : selectedGroupRate;
+  const displayRentalValueRate =
+    initialData && !isClone && savedRentalValueRate !== "" && savedRentalValueRate != null
+      ? savedRentalValueRate
+      : selectedRentalValuePercentRate;
 
   // Auto-calculate Rental Value = Area * Rate * (%Rate / 100) (rounded to integer)
   useEffect(() => {
+    if (initialData && !isClone) return;
     const area = Number(selectedGroupArea);
     const rate = Number(selectedGroupRate);
     const percent = Number(selectedRentalValuePercentRate);
@@ -955,9 +1169,10 @@ function ContractsForm({
       if (prevNum === calculated) return prev;
       return { ...prev, rentalValue: calculated };
     });
-  }, [selectedGroupArea, selectedGroupRate, selectedRentalValuePercentRate]);
+  }, [initialData, isClone, selectedGroupArea, selectedGroupRate, selectedRentalValuePercentRate]);
 
   const rentalValueFormulaText = useMemo(() => {
+    if (initialData && !isClone) return "Stored value from this contract.";
     const area = Number(selectedGroupArea) || 0;
     const rate = Number(selectedGroupRate) || 0;
     const percent = Number(selectedRentalValuePercentRate) || 0;
@@ -975,6 +1190,8 @@ function ContractsForm({
     selectedRentalValuePercentRate,
     selectedRentalValueRateMeta.applicationDate,
     form.contractStartDate,
+    initialData,
+    isClone,
   ]);
 
   const selectedGovtShareRateMeta = useMemo(() => {
@@ -1086,6 +1303,7 @@ function ContractsForm({
   ]);
 
   const govtShareFormulaText = useMemo(() => {
+    if (initialData && !isClone) return "Stored value from this contract.";
     const percent = Number(selectedGovtSharePercentRate) || 0;
     const conceptOld =
       "Formula: GovtShare = Rental Value x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
@@ -1114,6 +1332,8 @@ function ContractsForm({
     selectedGovtShareRateMeta.applicationDate,
     form.contractStartDate,
     govtShareUsesInitialRentPAForNewContract,
+    initialData,
+    isClone,
   ]);
 
   // Auto-calculate PAF Share = Initial Rent PA - Govt Share (rounded, min 0)
@@ -1132,17 +1352,31 @@ function ContractsForm({
   }, [form.initialRentPA, form.govtShare]);
 
   const pafShareFormulaText = useMemo(() => {
+    if (initialData && !isClone) return "Stored value from this contract.";
     const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
     const calculated = Math.max(0, Math.round(initialRentPA - govtShare));
     return `Formula: ${initialRentPA} - ${govtShare} = ${calculated}`;
-  }, [form.initialRentPA, form.govtShare]);
+  }, [form.initialRentPA, form.govtShare, initialData, isClone]);
 
   const viabilityLabel = useMemo(() => {
+    if (initialData && !isClone) {
+      const stored =
+        initialData?.Viability ??
+        initialData?.viability ??
+        initialData?.Feasible ??
+        initialData?.feasible ??
+        "";
+      const trimmed = String(stored || "").trim();
+      const lower = trimmed.toLowerCase();
+      if (lower === "viable") return "Viable";
+      if (lower === "unviable") return "Unviable";
+      return trimmed || "-";
+    }
     const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
     return initialRentPA > govtShare ? "Unviable" : "Viable";
-  }, [form.initialRentPA, form.govtShare]);
+  }, [form.initialRentPA, form.govtShare, initialData, isClone]);
 
   // Rise Terms handlers
   const getNextRiseSequenceNo = () => {
@@ -1235,8 +1469,8 @@ function ContractsForm({
     }
   };
 
-  // Fetch ContractRiseTerms by ContractID
-  const fetchContractRiseTerms = async (contractId) => {
+  // Fetch ContractRiseTerms by ContractID (GET contract body often omits nested terms).
+  const fetchContractRiseTerms = useCallback(async (contractId) => {
     if (!contractId) {
       setRiseTerms([]);
       return;
@@ -1277,7 +1511,17 @@ function ContractsForm({
       console.error("Error fetching ContractRiseTerms:", error);
       // If API call fails, keep existing riseTerms from initialData
     }
-  };
+  }, []);
+
+  // Edit + Variable: load rise terms when form opens so the summary shows "n term(s) configured".
+  useEffect(() => {
+    if (!open || isClone || !initialData) return;
+    const contractId = initialData.Id ?? initialData.id;
+    if (!contractId) return;
+    const rawRt = initialData.RiseTermType ?? initialData.riseTermType ?? "";
+    if (normalizeRiseTermType(String(rawRt)) !== "Variable") return;
+    fetchContractRiseTerms(contractId);
+  }, [open, initialData, isClone, fetchContractRiseTerms]);
 
   const handleOpenRiseTermsDialog = () => {
     // Reset form
@@ -1313,6 +1557,9 @@ function ContractsForm({
   const hasRentInTerm = String(form.term || "")
     .toLowerCase()
     .includes("rent");
+  const isEditContract = Boolean(initialData) && !isClone;
+  const lockTermAndRiseTermDropdowns =
+    isEditContract && form.riseTermType === "Variable" && riseTerms.length > 0;
   const activeNatureOptions = useMemo(() => {
     const isActive = (v) =>
       v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
@@ -1420,7 +1667,7 @@ function ContractsForm({
           )}
           <Grid container spacing={2} mt={1}>
             {/* Command, Base, Class - First Row */}
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={6} sm={6} md={2}>
               <Autocomplete
                 size="small"
                 fullWidth
@@ -1944,6 +2191,7 @@ function ContractsForm({
                   value={form.term || ""}
                   label="Term"
                   onChange={(e) => handleChange("term", e.target.value)}
+                  disabled={lockTermAndRiseTermDropdowns}
                   sx={selectSx}
                 >
                   <MenuItem value="Rent" sx={menuItemSx}>
@@ -1959,6 +2207,11 @@ function ContractsForm({
                     Rent or Profit
                   </MenuItem>
                 </Select>
+                {lockTermAndRiseTermDropdowns && (
+                  <FormHelperText sx={{ mx: 0, mt: 0.5, lineHeight: 1.35 }}>
+                    Delete all Variable rise terms first to change Term or Rise Terms.
+                  </FormHelperText>
+                )}
               </FormControl>
             </Grid>
 
@@ -1990,6 +2243,7 @@ function ContractsForm({
                       value={form.riseTermType || ""}
                       label="Rise Terms"
                       onChange={(e) => handleChange("riseTermType", e.target.value)}
+                      disabled={lockTermAndRiseTermDropdowns}
                       sx={selectSx}
                     >
                       <MenuItem value="Uniform" sx={menuItemSx}>
@@ -2253,10 +2507,12 @@ function ContractsForm({
                       Rate
                     </MDTypography>
                     <MDTypography variant="h6" fontWeight="bold">
-                      {selectedGroupRate || 0}
+                      {displayGroupRate || 0}
                     </MDTypography>
                     <MDTypography variant="caption" color="text">
-                      From selected property group
+                      {initialData && !isClone
+                        ? "Stored value from this contract"
+                        : "From selected property group"}
                     </MDTypography>
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
@@ -2269,12 +2525,32 @@ function ContractsForm({
                       % Rate
                     </MDTypography>
                     <MDTypography variant="h6" fontWeight="bold">
-                      {selectedRentalValuePercentRate || 0}
+                      {displayRentalValueRate || 0}
                     </MDTypography>
                     <MDTypography variant="caption" color="text">
-                      From Rental Value Rate
+                      {initialData && !isClone
+                        ? "Stored value from this contract"
+                        : "From Rental Value Rate"}
                     </MDTypography>
                   </Grid>
+                  {initialData && (
+                    <Grid item xs={12} sm={6} md={3}>
+                      <MDTypography
+                        variant="caption"
+                        color="black"
+                        fontWeight="bold"
+                        sx={{ display: "block" }}
+                      >
+                        Fiscal
+                      </MDTypography>
+                      <MDTypography variant="h6" fontWeight="bold">
+                        {form.fiscal || "-"}
+                      </MDTypography>
+                      <MDTypography variant="caption" color="text">
+                        Stored value from this contract
+                      </MDTypography>
+                    </Grid>
+                  )}
                 </Grid>
               </MDBox>
             </Grid>
@@ -2301,6 +2577,30 @@ function ContractsForm({
                 </Select>
               </FormControl>
             </Grid>
+
+            {canShowAhqApprovalField && (
+              <Grid item xs={12} sm={6} md={2}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="approval-status-label" sx={labelSx}>
+                    Apprv By AHQ
+                  </InputLabel>
+                  <Select
+                    labelId="approval-status-label"
+                    value={form.approvalStatus || "0"}
+                    label="Apprv By AHQ"
+                    onChange={(e) => handleChange("approvalStatus", e.target.value)}
+                    sx={selectSx}
+                  >
+                    <MenuItem value="0" sx={menuItemSx}>
+                      Pending
+                    </MenuItem>
+                    <MenuItem value="1" sx={menuItemSx}>
+                      Approved
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
 
             {/* IsArchive */}
             <Grid item xs={12} sm={6} md={2}>
@@ -3195,6 +3495,504 @@ ContractsForm.propTypes = {
   onPropertyGroupsRefresh: PropTypes.func,
 };
 
+/** Default-hidden column ids on the Contracts grid column picker (unchecked until user enables them). */
+const CONTRACTS_GRID_INITIAL_HIDDEN_COLUMNS = Object.freeze([
+  "tenantNo",
+  "natureOfBusiness",
+  "commercialOperationDate",
+  "initialRentPM",
+  "increaseRatePercent",
+  "riseRatePercent",
+  "securityDepositAmount",
+  "percentRate",
+]);
+
+/** Fallback keys per column id for reading normalized row dates when values[] is empty. */
+const CONTRACTS_GRID_DATE_COLUMN_FALLBACK_KEYS = {
+  contractStartDate: ["contractStartDate", "ContractStartDate"],
+  contractEndDate: ["contractEndDate", "ContractEndDate"],
+  commercialOperationDate: ["commercialOperationDate", "CommercialOperationDate"],
+};
+
+/** Normalize grid date columns (CSD / COD / CED) to yyyy-MM-dd. */
+function parseContractsGridRowDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONTRACTS_GRID_DATE_COLUMN_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function contractsGridDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseContractsGridRowDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+/** Header date filter (greater / less / range) for CSD, COD, CED on the Contracts grid. */
+function ContractsDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `contracts-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+ContractsDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONTRACTS_GRID_MONEY_COMPARE_FALLBACK_KEYS = {
+  initialRentPM: ["initialRentPM", "InitialRentPM"],
+  initialRentPA: ["initialRentPA", "InitialRentPA"],
+  currentRentPA: ["CurrRentPA"],
+  groupRate: ["groupRate", "GroupRate", "totalRate", "TotalRate"],
+  rentalValue: ["rentalValue", "RentalValue"],
+  govtShare: ["govtShare", "GovtShare"],
+  pafShare: ["pafShare", "PAFShare"],
+};
+
+function normalizeContractsMoneyRawToNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  const n = Number(s.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseContractsGridRowMoneyNumber(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONTRACTS_GRID_MONEY_COMPARE_FALLBACK_KEYS[columnId] || [];
+  if (
+    (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) &&
+    o &&
+    fallbacks.length
+  ) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && !(typeof v === "string" && v.trim() === "")) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return normalizeContractsMoneyRawToNumber(raw);
+}
+
+function contractsMoneyApproxEqual(a, b) {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= 1e-6 * scale;
+}
+
+function contractsGridMoneyCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowN = parseContractsGridRowMoneyNumber(row, columnId);
+    if (rowN === null) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") {
+      const ref = normalizeContractsMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN > ref;
+    }
+    if (mode === "lte") {
+      const ref = normalizeContractsMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN <= ref;
+    }
+    if (mode === "eq") {
+      const ref = normalizeContractsMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return contractsMoneyApproxEqual(rowN, ref);
+    }
+    if (mode === "between") {
+      const a = normalizeContractsMoneyRawToNumber(filterValue.valueFrom);
+      const b = normalizeContractsMoneyRawToNumber(filterValue.valueTo);
+      if (a === null || b === null) return false;
+      const low = Math.min(a, b);
+      const high = Math.max(a, b);
+      return rowN >= low && rowN <= high;
+    }
+    return true;
+  });
+}
+
+/** Numeric / amount filters for money columns on the Contracts grid (gt / lte / eq / inclusive range). */
+function ContractsMoneyColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Amount";
+  const modeLabelId = `contracts-money-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refAmt, setRefAmt] = useState("");
+  const [endAmt, setEndAmt] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefAmt("");
+      setEndAmt("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefAmt(fv.valueFrom != null ? String(fv.valueFrom) : "");
+      setEndAmt(fv.valueTo != null ? String(fv.valueTo) : "");
+    } else {
+      setMode(["gt", "lte", "eq"].includes(fv.mode) ? fv.mode : "none");
+      setRefAmt(fv.value != null ? String(fv.value) : "");
+      setEndAmt("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lte" || mode === "eq") {
+      if (!String(refAmt).trim()) return;
+      column.setFilter({ mode, value: refAmt.trim() });
+    } else if (mode === "between") {
+      if (!String(refAmt).trim() || !String(endAmt).trim()) return;
+      column.setFilter({
+        mode: "between",
+        valueFrom: refAmt.trim(),
+        valueTo: endAmt.trim(),
+      });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefAmt("");
+    setEndAmt("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel}`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No amount filter</MenuItem>
+              <MenuItem value="gt">Greater than</MenuItem>
+              <MenuItem value="lte">Less than or equal to</MenuItem>
+              <MenuItem value="eq">Equal to</MenuItem>
+              <MenuItem value="between">Price range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lte" || mode === "eq") && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Reference amount
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Lower bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                Upper bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={endAmt}
+                onChange={(e) => setEndAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+ContractsMoneyColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONTRACTS_DATATABLE_EXTRA_FILTER_TYPES = Object.freeze({
+  contractsDateCompare: contractsGridDateCompare,
+  contractsMoneyCompare: contractsGridMoneyCompare,
+});
+
 export default function Contracts() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -3247,9 +4045,12 @@ export default function Contracts() {
   const [baseFilterIds, setBaseFilterIds] = useState([]);
   const [classFilterIds, setClassFilterIds] = useState([]);
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [contractsTableFilter, setContractsTableFilter] = useState("all");
+  const [contractsArchiveFilter, setContractsArchiveFilter] = useState("all");
+  const [contractsApprovalFilter, setContractsApprovalFilter] = useState("all");
   // Increment to refetch as-of values (used on first load, send button, not on date-only change).
   const [asOfRefreshToken, setAsOfRefreshToken] = useState(1);
+  const [asOfRefreshing, setAsOfRefreshing] = useState(false);
+  const asOfFetchGenRef = useRef(0);
   // Holds only the columns that should be overridden "as of" a selected date.
   // Keyed by Contract Id (primary) and ContractNo (fallback).
   const [asOfOverrideMap, setAsOfOverrideMap] = useState(() => ({
@@ -3402,6 +4203,14 @@ export default function Contracts() {
         "RentalValueRate",
         "rentalValueRate",
       ]);
+      const currRentPA = readFirstOwn(o, [
+        "CurrRentPA",
+        "currRentPA",
+        "CurrentRentPA",
+        "currentRentPA",
+      ]);
+      const fy = readFirstOwn(o, ["FY", "Fy", "fy"]);
+      const rrfy = readFirstOwn(o, ["RRFY", "Rrfy", "rrfy"]);
 
       // Bind these calculated columns from as-of payload when key exists (including null).
       if (contractState !== undefined) {
@@ -3420,6 +4229,21 @@ export default function Contracts() {
         next.PAFShare = pafShare;
         next.pafShare = pafShare;
       }
+      const ahqShare = readFirstOwn(o, ["AHQShare", "ahqShare"]);
+      const racShare = readFirstOwn(o, ["RACShare", "racShare"]);
+      const baseShare = readFirstOwn(o, ["BaseShare", "baseShare"]);
+      if (ahqShare !== undefined) {
+        next.AHQShare = ahqShare;
+        next.ahqShare = ahqShare;
+      }
+      if (racShare !== undefined) {
+        next.RACShare = racShare;
+        next.racShare = racShare;
+      }
+      if (baseShare !== undefined) {
+        next.BaseShare = baseShare;
+        next.baseShare = baseShare;
+      }
       if (viability !== undefined) {
         next.Viability = viability;
         next.viability = viability;
@@ -3436,6 +4260,94 @@ export default function Contracts() {
         // Some parts of the grid also read RentalValueRate
         next.RentalValueRate = percentRate;
         next.rentalValueRate = percentRate;
+      }
+      if (currRentPA !== undefined) {
+        next.CurrRentPA = currRentPA;
+        next.currRentPA = currRentPA;
+        next.CurrentRentPA = currRentPA;
+        next.currentRentPA = currRentPA;
+      }
+      if (fy !== undefined) {
+        next.FY = fy;
+        next.Fy = fy;
+        next.fy = fy;
+      }
+      if (rrfy !== undefined) {
+        next.RRFY = rrfy;
+        next.Rrfy = rrfy;
+        next.rrfy = rrfy;
+      }
+
+      const due = readFirstOwn(o, [
+        "Due",
+        "due",
+        "DueAmount",
+        "dueAmount",
+        "InvDue",
+        "invDue",
+        "InvoiceDue",
+        "invoiceDue",
+      ]);
+      const paid = readFirstOwn(o, [
+        "Paid",
+        "paid",
+        "PaidAmount",
+        "paidAmount",
+        "InvPaid",
+        "invPaid",
+        "InvoicePaid",
+        "invoicePaid",
+      ]);
+      const rcvable = readFirstOwn(o, [
+        "Rcvable",
+        "rcvable",
+        "Receivable",
+        "receivable",
+        "ReceivableAmount",
+        "receivableAmount",
+        "InvReceivable",
+        "invReceivable",
+        "InvoiceReceivable",
+        "invoiceReceivable",
+      ]);
+      const invoiceLabel = (() => {
+        const fromStatus = readFirstOwn(o, [
+          "InvoicePaymentStatus",
+          "invoicePaymentStatus",
+          "InvoicePayStatus",
+          "invoicePayStatus",
+          "PaymentStatus",
+          "paymentStatus",
+        ]);
+        if (fromStatus !== undefined) return fromStatus;
+        const inv = readFirstOwn(o, ["Invoices", "invoices"]);
+        if (typeof inv === "string" && String(inv).trim() !== "") return inv;
+        return undefined;
+      })();
+
+      if (due !== undefined) {
+        next.Due = due;
+        next.due = due;
+        next.DueAmount = due;
+        next.dueAmount = due;
+      }
+      if (paid !== undefined) {
+        next.Paid = paid;
+        next.paid = paid;
+        next.PaidAmount = paid;
+        next.paidAmount = paid;
+      }
+      if (rcvable !== undefined) {
+        next.Rcvable = rcvable;
+        next.rcvable = rcvable;
+        next.Receivable = rcvable;
+        next.receivable = rcvable;
+      }
+      if (invoiceLabel !== undefined) {
+        next.InvoicePaymentStatus = invoiceLabel;
+        next.invoicePaymentStatus = invoiceLabel;
+        next.Invoices = invoiceLabel;
+        next.invoices = invoiceLabel;
       }
 
       return next;
@@ -3566,10 +4478,15 @@ export default function Contracts() {
   }, [pageNumber, pageSize]);
 
   // When As of Date changes, fetch "as of" values and merge into existing rows.
-  // Only these columns are overridden:
-  // Rental Value, Govt Share, PAF Share, Rate, % Rate
+  // Overrides: calculated columns plus Inv. Due / Paid / Rcvable and Invoices (payment status label).
   useEffect(() => {
     let isMounted = true;
+    const myGen = ++asOfFetchGenRef.current;
+
+    const finishAsOfRefreshUi = () => {
+      if (myGen !== asOfFetchGenRef.current) return;
+      if (isMounted) setAsOfRefreshing(false);
+    };
 
     const fetchAsOfOverrides = async () => {
       try {
@@ -3613,6 +4530,8 @@ export default function Contracts() {
         const cleared = { byId: new Map(), byContractNo: new Map(), asOfDate: "" };
         asOfOverrideMapRef.current = cleared;
         setAsOfOverrideMap(cleared);
+      } finally {
+        finishAsOfRefreshUi();
       }
     };
 
@@ -4031,15 +4950,67 @@ export default function Contracts() {
     if (
       colId === "contractstartdate" ||
       colId === "contractenddate" ||
-      colId === "commercialoperationdate" ||
-      colId === "risedate"
+      colId === "commercialoperationdate"
     ) {
-      return formatDateDDMMMYYYY(value);
+      return formatContractGridDate(value);
     }
-    return value;
+
+    if (colId === "increaseratepercent" || colId === "riseratepercent" || colId === "profitrate") {
+      return formatContractGridNumber(value, "%");
+    }
+    if (colId === "percentrate") {
+      if (isContractGridBlank(value)) return "";
+      const n = Number(value);
+      return Number.isFinite(n) ? `${n}%` : `${value}%`;
+    }
+
+    if (colId === "status") {
+      return value === 1 || value === "1" || value === true ? "Active" : "Inactive";
+    }
+    if (colId === "approvalstatus") {
+      return value === true || value === 1 || value === "1" ? "Approved" : "Pending";
+    }
+
+    return isContractGridBlank(value) ? "" : String(value);
   };
 
   const CALCULATED_CELL_BG = "#e9ecef";
+  const CONTRACT_GRID_TABLE_WIDTH = "4300px";
+
+  /** Active / Inactive — same light palette as Contract State (Valid / soft yellow). */
+  const renderContractsStatusLightPill = (value) => {
+    const isActive =
+      value === true ||
+      value === 1 ||
+      value === "1" ||
+      (typeof value === "string" && String(value).toLowerCase() === "active");
+    const badgeStyles = isActive
+      ? { backgroundColor: "#d4edda", color: "#155724" }
+      : { backgroundColor: "#fff3cd", color: "#856404" };
+    const label = isActive ? "Active" : "Inactive";
+    return (
+      <MDBox
+        sx={{
+          ...badgeStyles,
+          backgroundColor: `${badgeStyles.backgroundColor} !important`,
+          color: `${badgeStyles.color} !important`,
+          px: 1,
+          py: 0.35,
+          borderRadius: "999px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: "96px",
+          fontWeight: 600,
+          "&, & *": {
+            color: `${badgeStyles.color} !important`,
+          },
+        }}
+      >
+        {label}
+      </MDBox>
+    );
+  };
 
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "72px", showInTable: true },
@@ -4107,21 +5078,31 @@ export default function Contracts() {
           : govt > paf
           ? "Viable"
           : "Unviable";
+        const viableStyles =
+          label === "Viable"
+            ? { backgroundColor: "#d4edda", color: "#155724" }
+            : { backgroundColor: "#f8d7da", color: "#721c24" };
         return (
-          <Chip
-            label={
-              <MDBox component="span" display="inline" sx={{ color: "#ffffff !important" }}>
-                {label}
-              </MDBox>
-            }
-            size="small"
-            color={label === "Viable" ? "success" : "error"}
+          <MDBox
             sx={{
-              // DataTable also forces .MuiChip-label — keep root + label in sync where cascade allows
-              color: "#ffffff !important",
-              "& .MuiChip-label": { color: "#ffffff !important" },
+              ...viableStyles,
+              backgroundColor: `${viableStyles.backgroundColor} !important`,
+              color: `${viableStyles.color} !important`,
+              px: 1,
+              py: 0.35,
+              borderRadius: "999px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: "88px",
+              fontWeight: 600,
+              "&, & *": {
+                color: `${viableStyles.color} !important`,
+              },
             }}
-          />
+          >
+            {label}
+          </MDBox>
         );
       },
     },
@@ -4326,25 +5307,32 @@ export default function Contracts() {
             .trim()
             .toLowerCase();
           const displayState =
-            normalizedState === "upcoming" || normalizedState === "not started"
+            normalizedState === "upcoming" || normalizedState === "pre-mature"
               ? "Pre-Mature"
-              : normalizedState === "active"
+              : normalizedState === "valid" || normalizedState === "active"
               ? "Valid"
-              : normalizedState === "expired"
-              ? "Expired"
+              : normalizedState === "terminated"
+              ? "Terminated"
+              : normalizedState === "expiring"
+              ? "Expiring"
               : state;
           const badgeStyles =
-            normalizedState === "active"
+            normalizedState === "valid" || normalizedState === "active"
               ? {
                   backgroundColor: "#d4edda",
                   color: "#155724",
                 }
-              : normalizedState === "expired"
+              : normalizedState === "terminated"
               ? {
-                  backgroundColor: "#f8d7da",
+                  backgroundColor: "#FF0000",
+                  color: "#ffffff",
+                }
+              : normalizedState === "expiring"
+              ? {
+                  backgroundColor: "#fff3cd",
                   color: "#721c24",
                 }
-              : normalizedState === "upcoming" || normalizedState === "not started"
+              : normalizedState === "upcoming" || normalizedState === "pre-mature"
               ? {
                   backgroundColor: "#dbeafe",
                   color: "#1d4ed8",
@@ -4358,6 +5346,9 @@ export default function Contracts() {
             <MDBox
               sx={{
                 ...badgeStyles,
+                // Table body cells use strong !important colors; keep badges visible in the grid.
+                backgroundColor: `${badgeStyles.backgroundColor} !important`,
+                color: `${badgeStyles.color} !important`,
                 px: 1,
                 py: 0.35,
                 borderRadius: "999px",
@@ -4366,6 +5357,9 @@ export default function Contracts() {
                 justifyContent: "center",
                 minWidth: "96px",
                 fontWeight: 600,
+                "&, & *": {
+                  color: `${badgeStyles.color} !important`,
+                },
               }}
             >
               {displayState}
@@ -4386,45 +5380,12 @@ export default function Contracts() {
           rowData.ContractStatus ??
           rowData.contractStatus ??
           "";
-        const normalized = String(fromPayload || "")
-          .trim()
-          .toLowerCase();
-        if (normalized) {
-          return renderContractStateBadge(normalized);
+        const trimmedBackend = String(fromPayload || "").trim();
+        if (trimmedBackend) {
+          return renderContractStateBadge(trimmedBackend);
         }
 
-        const startRaw = rowData.ContractStartDate ?? rowData.contractStartDate ?? "";
-        const endRaw = rowData.ContractEndDate ?? rowData.contractEndDate ?? "";
-        const start = String(startRaw || "")
-          .split("T")[0]
-          .slice(0, 10);
-        const end = String(endRaw || "")
-          .split("T")[0]
-          .slice(0, 10);
-        const today = new Date().toISOString().split("T")[0];
-        const computed =
-          start && today < start
-            ? "Upcoming"
-            : end && today > end
-            ? "Expired"
-            : start && end && today >= start && today <= end
-            ? "Active"
-            : "-";
-
-        return (
-          <MDBox
-            sx={{
-              backgroundColor: CALCULATED_CELL_BG,
-              px: 0.75,
-              py: 0.25,
-              borderRadius: "6px",
-              display: "inline-block",
-              width: "100%",
-            }}
-          >
-            {computed === "-" ? computed : renderContractStateBadge(computed)}
-          </MDBox>
-        );
+        return renderContractStateBadge("-");
       },
     },
     {
@@ -4657,7 +5618,7 @@ export default function Contracts() {
       accessor: "status",
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <StatusBadge value={value} />,
+      Cell: ({ value }) => renderContractsStatusLightPill(value),
     },
     {
       id: "approvalStatus",
@@ -4753,6 +5714,525 @@ export default function Contracts() {
     },
   ];
 
+  const isContractGridBlank = (value) =>
+    value === null || value === undefined || String(value).trim() === "";
+
+  const getContractGridValue = (row, keys) => {
+    const data = row || {};
+    const sources = [data, data.original].filter(Boolean);
+    for (let i = 0; i < sources.length; i += 1) {
+      for (let j = 0; j < keys.length; j += 1) {
+        const value = sources[i][keys[j]];
+        if (!isContractGridBlank(value)) return value;
+      }
+    }
+    return "";
+  };
+
+  const formatContractGridDate = (value) =>
+    isContractGridBlank(value) ? "" : formatDateDDMMMYYYY(value);
+
+  const formatContractGridNumber = (value, suffix = "") => {
+    if (isContractGridBlank(value)) return "";
+    const numericValue = Number(value);
+    const display = Number.isFinite(numericValue) ? numericValue.toLocaleString() : String(value);
+    return `${display}${suffix}`;
+  };
+
+  const formatContractGridAreaWithUnit = (areaValue, rtRow) => {
+    const data = rtRow?.original ?? rtRow ?? {};
+    const numPart = formatContractGridNumber(areaValue, "");
+    const unit = getContractGridValue(data, ["unitName", "UnitName", "UoM"]);
+    if (!numPart && isContractGridBlank(unit)) return "";
+    if (!numPart) return isContractGridBlank(unit) ? "" : String(unit).trim();
+    if (isContractGridBlank(unit)) return numPart;
+    return `${numPart} (${String(unit).trim()})`;
+  };
+
+  const formatContractGridTenant = (tenantNoValue, rtRow) => {
+    const data = rtRow?.original ?? rtRow ?? {};
+    const tn = !isContractGridBlank(tenantNoValue)
+      ? String(tenantNoValue).trim()
+      : String(getContractGridValue(data, ["tenantNo", "TenantNo"]) || "").trim();
+    if (!tn) return "";
+    const tenant = tenants.find((t) => String(t?.tenantNo ?? t?.TenantNo ?? "").trim() === tn);
+    const owner = String(tenant?.ownerName ?? tenant?.OwnerName ?? "").trim();
+    return owner ? `${tn} - ${owner}` : tn;
+  };
+
+  const makeContractGridColumn = ({
+    id,
+    Header,
+    keys,
+    align = "left",
+    type = "text",
+    moneyCompareFilter = false,
+  }) => ({
+    id,
+    Header,
+    accessor: (row) => getContractGridValue(row, keys),
+    align,
+    ...(moneyCompareFilter
+      ? { filter: "contractsMoneyCompare", Filter: ContractsMoneyColumnFilter }
+      : {}),
+    Cell: ({ value }) => {
+      if (type === "date") return formatContractGridDate(value);
+      if (type === "number") return formatContractGridNumber(value);
+      if (type === "percent") return formatContractGridNumber(value, "%");
+      return isContractGridBlank(value) ? "" : String(value);
+    },
+  });
+
+  const findContractColumn = (key) =>
+    columns.find((col) => col.id === key || col.accessor === key) || {};
+
+  const firstRiseRateAccessor = (row) => {
+    const directValue = getContractGridValue(row, [
+      "RiseRatePercent",
+      "riseRatePercent",
+      "RisePercent",
+    ]);
+    if (!isContractGridBlank(directValue)) return directValue;
+    const terms = row?.ContractRiseTerms || row?.contractRiseTerms || [];
+    if (Array.isArray(terms) && terms.length > 0) {
+      return terms[0]?.RisePercent ?? terms[0]?.risePercent ?? "";
+    }
+    return "";
+  };
+
+  const openPropertyGroupingPopupByGrpId = (grpIdValue) => {
+    const grpId = String(grpIdValue || "").trim();
+    if (!grpId) return;
+    const targetUrl = `/contracts/property-grouping?grpId=${encodeURIComponent(grpId)}`;
+    window.open(targetUrl, "_blank");
+  };
+
+  const normalizeInvoicesPaymentLabelKey = (raw) =>
+    String(raw || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  /** Badge palette: filled pill so status reads clearly over zebra row / td !important text color. */
+  const invoicesPaymentBadgePalette = (raw) => {
+    const key = normalizeInvoicesPaymentLabelKey(raw);
+    if (!key) return null;
+    if (key === "full paid") return { bg: "#d4edda", fg: "#155724", outline: "#c3e6cb" };
+    if (key === "partial" || key === "partial paid")
+      return { bg: "#fff3cd", fg: "#856404", outline: "#ffe69c" };
+    if (key === "unpaid") return { bg: "#ef6c00", fg: "#ffffff", outline: "#e65100" }; // orange
+    if (key === "overpaid") return { bg: "#c62828", fg: "#ffffff", outline: "#b71c1c" }; // red
+    return null;
+  };
+
+  const renderContractGridInvoices = (value) => {
+    if (isContractGridBlank(value)) return "";
+    const label = typeof value === "string" ? value.trim() : String(value);
+    const palette = invoicesPaymentBadgePalette(label);
+    if (!palette) {
+      return (
+        <MDTypography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+          {label}
+        </MDTypography>
+      );
+    }
+    const { bg, fg, outline } = palette;
+    return (
+      <MDBox
+        component="span"
+        data-contract-invoices-badge="1"
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: "88px",
+          maxWidth: "100%",
+          px: 1,
+          py: 0.45,
+          borderRadius: "999px",
+          fontWeight: 700,
+          fontSize: "0.8125rem",
+          lineHeight: 1.25,
+          whiteSpace: "normal",
+          textAlign: "center",
+          backgroundColor: `${bg} !important`,
+          color: `${fg} !important`,
+          boxShadow: `inset 0 0 0 1px ${outline}`,
+          verticalAlign: "middle",
+          "&, & *, & .MuiTypography-root": {
+            color: `${fg} !important`,
+          },
+        }}
+      >
+        {label}
+      </MDBox>
+    );
+  };
+
+  const renderContractGridApproval = (value) => {
+    if (isContractGridBlank(value)) return "";
+    const isApproved = value === true || value === 1 || value === "1";
+    const badgeStyles = isApproved
+      ? { backgroundColor: "#d4edda", color: "#155724" }
+      : { backgroundColor: "#fff3cd", color: "#856404" };
+    return (
+      <MDBox
+        sx={{
+          ...badgeStyles,
+          px: 1,
+          py: 0.35,
+          borderRadius: "999px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: "96px",
+          fontWeight: 600,
+        }}
+      >
+        {isApproved ? "Approved" : "Pending"}
+      </MDBox>
+    );
+  };
+
+  const contractGridColumns = [
+    { ...findContractColumn("actions"), Header: "Action" },
+    makeContractGridColumn({
+      id: "contractNo",
+      Header: "CA No",
+      keys: ["contractNo", "ContractNo"],
+    }),
+    makeContractGridColumn({ id: "cmdName", Header: "RAC", keys: ["cmdName", "CmdName"] }),
+    makeContractGridColumn({ id: "baseName", Header: "Base", keys: ["baseName", "BaseName"] }),
+    makeContractGridColumn({ id: "className", Header: "Class", keys: ["className", "ClassName"] }),
+    makeContractGridColumn({ id: "grpId", Header: "Gp ID", keys: ["grpId", "GId", "GrpId"] }),
+    {
+      id: "location",
+      Header: "Location",
+      accessor: (row) => getContractGridValue(row, ["location", "Location"]),
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <ContractGridLongTextCell value={value} matchGridPlainText />,
+    },
+    {
+      id: "tenantNo",
+      Header: "Tenant",
+      accessor: (row) => getContractGridValue(row, ["tenantNo", "TenantNo"]),
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => formatContractGridTenant(value, row),
+    },
+    makeContractGridColumn({
+      id: "businessName",
+      Header: "Business",
+      keys: ["businessName", "BusinessName"],
+    }),
+    makeContractGridColumn({
+      id: "natureOfBusiness",
+      Header: "Nature",
+      keys: ["natureOfBusiness", "NatureOfBusiness"],
+    }),
+    {
+      id: "booArea",
+      Header: "BoO Area",
+      accessor: (row) => getContractGridValue(row, ["totalArea", "TotalArea", "Area"]),
+      align: "right",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => formatContractGridAreaWithUnit(value, row),
+    },
+    {
+      id: "vaArea",
+      Header: "CA Area",
+      accessor: (row) => getContractGridValue(row, ["vaArea", "VaArea"]),
+      align: "right",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => formatContractGridAreaWithUnit(value, row),
+    },
+    {
+      id: "contractStartDate",
+      Header: "CSD",
+      accessor: (row) => getContractGridValue(row, ["contractStartDate", "ContractStartDate"]),
+      align: "left",
+      filter: "contractsDateCompare",
+      Filter: ContractsDateColumnFilter,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractGridDate(value),
+    },
+    {
+      id: "commercialOperationDate",
+      Header: "COD",
+      accessor: (row) =>
+        getContractGridValue(row, ["commercialOperationDate", "CommercialOperationDate"]),
+      align: "left",
+      filter: "contractsDateCompare",
+      Filter: ContractsDateColumnFilter,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractGridDate(value),
+    },
+    {
+      id: "contractEndDate",
+      Header: "CED",
+      accessor: (row) => getContractGridValue(row, ["contractEndDate", "ContractEndDate"]),
+      align: "left",
+      filter: "contractsDateCompare",
+      Filter: ContractsDateColumnFilter,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractGridDate(value),
+    },
+    makeContractGridColumn({
+      id: "fiscal",
+      Header: "FY",
+      keys: ["FY"],
+    }),
+    { ...findContractColumn("contractState") },
+    makeContractGridColumn({ id: "term", Header: "Term", keys: ["term", "Term"] }),
+    makeContractGridColumn({
+      id: "initialRentPM",
+      Header: "Initial Rent PM",
+      keys: ["initialRentPM", "InitialRentPM"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "initialRentPA",
+      Header: "Initial Rent PA",
+      keys: ["initialRentPA", "InitialRentPA"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "paymentTermMonths",
+      Header: "Pay Term",
+      keys: ["paymentTermMonths", "PaymentTermMonths"],
+      align: "right",
+      type: "number",
+    }),
+    makeContractGridColumn({
+      id: "increaseRatePercent",
+      Header: "Increase Rate (%)",
+      keys: ["increaseRatePercent", "IncreaseRatePercent"],
+      align: "right",
+      type: "percent",
+    }),
+    makeContractGridColumn({
+      id: "riseTermType",
+      Header: "Rise Term",
+      keys: ["riseTermType", "RiseTermType"],
+    }),
+    {
+      id: "riseRatePercent",
+      Header: "Rise Rate (%)",
+      accessor: firstRiseRateAccessor,
+      align: "right",
+      Cell: ({ value }) => formatContractGridNumber(value, "%"),
+    },
+    makeContractGridColumn({
+      id: "profitRate",
+      Header: "Profit Rate (%)",
+      keys: ["profitRate", "ProfitRate"],
+      align: "right",
+      type: "percent",
+    }),
+    makeContractGridColumn({
+      id: "securityDepositAmount",
+      Header: "Security Deposit",
+      keys: ["securityDepositAmount", "SecurityDepositAmount"],
+      align: "right",
+      type: "number",
+    }),
+    { ...findContractColumn("feasible"), Header: "Viability" },
+    makeContractGridColumn({
+      id: "percentRate",
+      Header: "RV Rate",
+      keys: ["RentalValueRate", "rentalValueRate", "RentalValueRatePercent"],
+      align: "right",
+      type: "percent",
+    }),
+    makeContractGridColumn({
+      id: "currentRentPA",
+      Header: "Current Rent PA",
+      keys: ["CurrRentPA"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "rrFy",
+      Header: "RR FY",
+      keys: ["RRFY", "Rrfy", "rrfy"],
+    }),
+    {
+      id: "groupRate",
+      Header: "Revenue Rate (Rs)",
+      accessor: (row) =>
+        getContractGridValue(row, ["groupRate", "GroupRate", "totalRate", "TotalRate"]),
+      align: "center",
+      filter: "contractsMoneyCompare",
+      Filter: ContractsMoneyColumnFilter,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => {
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue) && numericValue === -99) {
+          const grpId = getContractGridValue(row, ["grpId", "GId", "GrpId"]);
+          return (
+            <MDBox display="flex" justifyContent="center" width="100%">
+              <IconButton
+                size="small"
+                color="error"
+                title="Add Rate to Property Grouping for this FY"
+                onClick={() => openPropertyGroupingPopupByGrpId(grpId)}
+                sx={{ p: "2px" }}
+              >
+                <Icon>warning</Icon>
+              </IconButton>
+            </MDBox>
+          );
+        }
+        return formatContractGridNumber(value);
+      },
+    },
+    makeContractGridColumn({
+      id: "rentalValue",
+      Header: "Rental Value",
+      keys: ["rentalValue", "RentalValue"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "govtShare",
+      Header: "Govt Share",
+      keys: ["govtShare", "GovtShare"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "pafShare",
+      Header: "PAF Share",
+      keys: ["pafShare", "PAFShare"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "ahqShare",
+      Header: "AHQShare",
+      keys: ["AHQShare", "ahqShare"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "racShare",
+      Header: "RACShare",
+      keys: ["RACShare", "racShare"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "baseShare",
+      Header: "BaseShare",
+      keys: ["BaseShare", "baseShare"],
+      align: "right",
+      type: "number",
+      moneyCompareFilter: true,
+    }),
+    makeContractGridColumn({
+      id: "due",
+      Header: "Inv. Due",
+      keys: [
+        "due",
+        "Due",
+        "dueAmount",
+        "DueAmount",
+        "InvDue",
+        "invDue",
+        "InvoiceDue",
+        "invoiceDue",
+      ],
+      align: "right",
+      type: "number",
+    }),
+    makeContractGridColumn({
+      id: "paid",
+      Header: "Inv. Paid",
+      keys: [
+        "paid",
+        "Paid",
+        "paidAmount",
+        "PaidAmount",
+        "InvPaid",
+        "invPaid",
+        "InvoicePaid",
+        "invoicePaid",
+      ],
+      align: "right",
+      type: "number",
+    }),
+    makeContractGridColumn({
+      id: "rcvable",
+      Header: "Inv. Rcvable",
+      keys: [
+        "rcvable",
+        "Rcvable",
+        "receivable",
+        "Receivable",
+        "receivableAmount",
+        "ReceivableAmount",
+      ],
+      align: "right",
+      type: "number",
+    }),
+    {
+      id: "invoices",
+      Header: "Invoices",
+      accessor: (row) =>
+        getContractGridValue(row, [
+          "InvoicePaymentStatus",
+          "invoicePaymentStatus",
+          "InvoicePayStatus",
+          "invoicePayStatus",
+          "PaymentStatus",
+          "paymentStatus",
+          "invoices",
+          "Invoices",
+        ]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => renderContractGridInvoices(value),
+    },
+    {
+      id: "status",
+      Header: "Status",
+      accessor: (row) => getContractGridValue(row, ["status", "Status"]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) =>
+        isContractGridBlank(value) ? "" : renderContractsStatusLightPill(value),
+    },
+    {
+      id: "approvalStatus",
+      Header: "AHQ Approval",
+      accessor: (row) =>
+        getContractGridValue(row, ["ApprovalStatus", "approvalStatus", "ApprovedStatus"]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => renderContractGridApproval(value),
+    },
+    {
+      id: "remarks",
+      Header: "Remarks",
+      accessor: (row) => getContractGridValue(row, ["remarks", "Remarks"]),
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => <ContractGridLongTextCell value={value} />,
+    },
+    { ...findContractColumn("contractAttachments"), Header: "Attach" },
+  ];
+
   const groupingColumnOptions = [
     { label: "Group ID", value: "grpId" },
     { label: "Command", value: "cmdName" },
@@ -4838,9 +6318,12 @@ export default function Contracts() {
         natureOfBusiness: row.NatureOfBusiness || "",
         contractStartDate: row.ContractStartDate || "",
         contractEndDate: row.ContractEndDate || "",
+        fiscal: row.Fiscal ?? row.fiscal ?? "",
+        RRFY: row.RRFY ?? row.Rrfy ?? row.rrfy ?? "",
+        rrfy: row.RRFY ?? row.Rrfy ?? row.rrfy ?? "",
         commercialOperationDate: row.CommercialOperationDate || "",
         initialRentPM: row.InitialRentPM || "",
-        currentRentPA: row.CurrentRentPA ?? row.currentRentPA ?? "",
+        currentRentPA: row.CurrRentPA ?? "",
         initialRentPA: row.InitialRentPA || "",
         paymentTermMonths: row.PaymentTermMonths || "",
         term: row.Term || "",
@@ -4859,6 +6342,9 @@ export default function Contracts() {
               Number(row.GovtShare ?? row.govtShare ?? 0)
           )
         ),
+        ahqShare: row.AHQShare ?? row.ahqShare,
+        racShare: row.RACShare ?? row.racShare,
+        baseShare: row.BaseShare ?? row.baseShare,
         isArchive: row.IsArchive ?? row.isArchive ?? false,
         IsArchive: row.IsArchive ?? row.isArchive ?? false,
         status: row.Status,
@@ -4875,7 +6361,8 @@ export default function Contracts() {
             ? row.GroupRate ?? row.groupRate
             : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         // Also set PascalCase versions for direct access
-        CurrentRentPA: row.CurrentRentPA ?? row.currentRentPA ?? "",
+        CurrentRentPA: row.CurrRentPA ?? "",
+        CurrRentPA: row.CurrRentPA ?? "",
         TotalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
         TotalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         GroupRate:
@@ -4938,7 +6425,7 @@ export default function Contracts() {
         .slice(0, 10);
       const today = new Date().toISOString().split("T")[0];
       if (start && today < start) return "upcoming";
-      if (end && today > end) return "expired";
+      if (end && today > end) return "terminated";
       if (start && end && today >= start && today <= end) return "active";
       return "";
     };
@@ -4965,27 +6452,29 @@ export default function Contracts() {
 
       let matchesArchiveComposite = true;
       let matchesApprovalDimension = true;
-      switch (contractsTableFilter) {
+      switch (contractsArchiveFilter) {
         case "all":
           matchesArchiveComposite = true;
-          matchesApprovalDimension = true;
           break;
         case "valid": {
           const st = getRowContractStateNormalized(row);
           matchesArchiveComposite = st === "active" || st === "valid";
-          matchesApprovalDimension = true;
           break;
         }
         case "archive":
           matchesArchiveComposite = isArchived(row.IsArchive ?? row.isArchive);
+          break;
+        default:
+          break;
+      }
+      switch (contractsApprovalFilter) {
+        case "all":
           matchesApprovalDimension = true;
           break;
         case "approved":
-          matchesArchiveComposite = true;
           matchesApprovalDimension = rowApprovalApproved;
           break;
         case "pending":
-          matchesArchiveComposite = true;
           matchesApprovalDimension = !rowApprovalApproved;
           break;
         default:
@@ -5346,7 +6835,8 @@ export default function Contracts() {
     commandFilterIds,
     baseFilterIds,
     classFilterIds,
-    contractsTableFilter,
+    contractsArchiveFilter,
+    contractsApprovalFilter,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
@@ -5957,25 +7447,6 @@ export default function Contracts() {
     }
   };
 
-  // Get column IDs that should be hidden initially (columns with showInTable: false)
-  // React-table uses accessor as id if id is not provided
-  const initialHiddenColumnIds = useMemo(() => {
-    return columns
-      .filter((col) => col.showInTable === false)
-      .map((col) => {
-        // React-table generates id from accessor if id is not provided
-        // For columns with Cell functions, we need to ensure they have an id or accessor
-        if (col.id) return col.id;
-        if (col.accessor) return col.accessor;
-        // Fallback: try to generate from Header (not ideal but works)
-        if (typeof col.Header === "string") {
-          return col.Header.toLowerCase().replace(/\s+/g, "");
-        }
-        return null;
-      })
-      .filter(Boolean);
-  }, [columns]);
-
   return (
     <DashboardLayout>
       <DashboardNavbar />
@@ -6011,45 +7482,35 @@ export default function Contracts() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "600px",
-                  minHeight: "600px",
+                  height: "88vh",
+                  minHeight: "680px",
                   minWidth: 0,
                   maxWidth: "100%",
                   overflow: "hidden",
-                  // Table area: at most 600px tall; shrink to row content when few rows (no large blank band).
-                  "& .MuiTableContainer-root": {
-                    flex: "0 0 auto",
-                    minHeight: "600px",
+                  // Let the DataTable stretch in this flex column so the sticky body fills space (no idle gap below rows).
+                  "& > div:not(.MuiTableContainer-root):not(.contracts-asof-grid-host)": {
+                    flexShrink: 0,
+                  },
+                  "& > .MuiTableContainer-root": {
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    alignSelf: "stretch",
                     minWidth: 0,
                     width: "100%",
                     maxWidth: "100%",
-                    height: "600px",
-                    maxHeight: "600px",
                     overflow: "hidden",
                     display: "flex",
                     flexDirection: "column",
                   },
-                  // Sticky DataTable: scroll wrapper (MuiBox) after toolbar; default in DataTable is minHeight 300px.
-                  // Contracts: use stickyBodyMinHeight on DataTable to set 600px; keep flex minWidth 0 for layout.
-                  // Match DataTable sticky body: keep overflowX scroll so the bottom horizontal bar stays usable.
-                  "& .MuiTableContainer-root > div:last-of-type:not(:first-of-type)": {
-                    flex: "1 1 auto",
-                    minWidth: 0,
-                    maxHeight: "100%",
-                    width: "100%",
-                    maxWidth: "400%",
-                    boxSizing: "border-box",
-                    scrollbarGutter: "auto",
-                    overflowX: "scroll",
-                    overflowY: "auto",
-                  },
-                  // Kill DataTable's max-content sizing (from contentFitTable) — it explodes scrollWidth in Firefox.
+                  // Sticky DataTable: scroll + layout are handled inside DataTable (sticky body is the middle child).
+                  // Contracts: use stickyBodyMinHeight on DataTable; keep flex minWidth 0 for layout.
+                  // The requested Contracts grid has many columns; keep a real horizontal scroll width.
                   "& .MuiTable-root": {
                     display: "table",
                     tableLayout: "fixed !important",
-                    width: "100% !important",
-                    minWidth: "0 !important",
-                    maxWidth: "100% !important",
+                    width: `${CONTRACT_GRID_TABLE_WIDTH} !important`,
+                    minWidth: `${CONTRACT_GRID_TABLE_WIDTH} !important`,
+                    maxWidth: "none !important",
                     whiteSpace: "normal !important",
                     boxSizing: "border-box",
                   },
@@ -6079,63 +7540,54 @@ export default function Contracts() {
                   "& .MuiTable-root th, & .MuiTable-root td": {
                     display: "table-cell !important",
                   },
+                  "& .MuiTable-root": {
+                    tableLayout: "auto !important",
+                  },
                   // DataTable uses custom <td> cells (MDBox), not MUI TableCell.
-                  // Force wrapping + constrain inner "max-content" wrapper so text never overlaps.
+                  // Keep widths content-driven based on visible text.
                   "& table th, & table td": {
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
+                    width: "auto !important",
+                    whiteSpace: "nowrap !important",
+                    wordBreak: "normal !important",
+                    overflowWrap: "normal !important",
                     lineHeight: 1.3,
                     verticalAlign: "top",
                   },
                   // DataTableBodyCell renders: <td><div style="display:inline-block;width:max-content">...</div></td>
                   "& table td > div": {
-                    display: "block !important",
-                    width: "100% !important",
-                    maxWidth: "100% !important",
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
+                    display: "inline-block !important",
+                    width: "max-content !important",
+                    maxWidth: "none !important",
+                    whiteSpace: "inherit !important",
                   },
                   "& table td > div > *": {
-                    maxWidth: "100% !important",
-                    whiteSpace: "normal !important",
-                    wordBreak: "break-word !important",
-                    overflowWrap: "anywhere !important",
+                    maxWidth: "none !important",
+                    whiteSpace: "inherit !important",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "1.0rem !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    padding: "8px 6px !important",
                     borderBottom: "1px solid #d0d0d0",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    padding: "6px 6px !important",
                     borderBottom: "1px solid #e0e0e0",
                   },
-                  // Keep Actions + ID columns compact and stable (avoid wrap/overlap)
+                  // Keep compact padding without forcing fixed column width.
                   "& .MuiTable-root th:nth-of-type(1), & .MuiTable-root td:nth-of-type(1)": {
-                    width: "72px",
-                    minWidth: "72px",
-                    maxWidth: "72px",
-                    whiteSpace: "nowrap !important",
+                    width: "auto !important",
+                    minWidth: "max-content",
+                    maxWidth: "none",
                     paddingLeft: "4px !important",
                     paddingRight: "4px !important",
                   },
                   "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-                    width: "56px",
-                    minWidth: "56px",
-                    maxWidth: "56px",
-                    whiteSpace: "nowrap !important",
+                    width: "auto !important",
+                    minWidth: "max-content",
+                    maxWidth: "none",
                     paddingLeft: "4px !important",
                     paddingRight: "4px !important",
-                  },
-                  // ID is an integer field; keep it tight against the next column (Contract No)
-                  "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-                    paddingRight: "1px !important",
-                  },
-                  "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
-                    paddingLeft: "1px !important",
                   },
                 }}
               >
@@ -6177,7 +7629,7 @@ export default function Contracts() {
                     gap={1}
                     width={{ xs: "100%", md: "auto" }}
                   >
-                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                    <MDBox width={{ xs: "80%", md: "130px" }}>
                       <Autocomplete
                         multiple
                         size="small"
@@ -6224,7 +7676,7 @@ export default function Contracts() {
                         )}
                       />
                     </MDBox>
-                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                    <MDBox width={{ xs: "80%", md: "130px" }}>
                       <Autocomplete
                         multiple
                         size="small"
@@ -6271,7 +7723,7 @@ export default function Contracts() {
                         )}
                       />
                     </MDBox>
-                    <MDBox width={{ xs: "80%", md: "150px" }}>
+                    <MDBox width={{ xs: "80%", md: "130px" }}>
                       <Autocomplete
                         multiple
                         size="small"
@@ -6373,23 +7825,38 @@ export default function Contracts() {
                         size="small"
                         color="info"
                         title="Refresh as-of values"
-                        onClick={() => setAsOfRefreshToken((t) => t + 1)}
+                        onClick={() => {
+                          setAsOfRefreshing(true);
+                          setAsOfRefreshToken((t) => t + 1);
+                        }}
                       >
                         <Icon fontSize="small">send</Icon>
                       </IconButton>
                       <ToggleButtonGroup
                         exclusive
-                        value={contractsTableFilter}
+                        value={contractsArchiveFilter}
                         onChange={(_, v) => {
-                          if (v !== null) setContractsTableFilter(v);
+                          if (v !== null) setContractsArchiveFilter(v);
                         }}
                         size="small"
                         color="info"
-                        aria-label="Filter contracts table"
+                        aria-label="Filter contracts table by archive status"
                       >
                         <ToggleButton value="all">ALL</ToggleButton>
                         <ToggleButton value="valid">VALID</ToggleButton>
                         <ToggleButton value="archive">ARCHIVE</ToggleButton>
+                      </ToggleButtonGroup>
+                      <ToggleButtonGroup
+                        exclusive
+                        value={contractsApprovalFilter}
+                        onChange={(_, v) => {
+                          setContractsApprovalFilter(v ?? "all");
+                        }}
+                        size="small"
+                        color="info"
+                        aria-label="Filter contracts table by approval status"
+                        sx={{ ml: { xs: 0, sm: 1.25 } }}
+                      >
                         <ToggleButton value="approved">APPROVED</ToggleButton>
                         <ToggleButton value="pending">PENDING</ToggleButton>
                       </ToggleButtonGroup>
@@ -6397,59 +7864,108 @@ export default function Contracts() {
                   </MDBox>
                 </MDBox>
 
-                <DataTable
-                  table={{
-                    columns: allColumns,
-                    rows: computedRows,
+                <MDBox
+                  className="contracts-asof-grid-host"
+                  sx={{
+                    position: "relative",
+                    flex: "1 1 0",
+                    minHeight: 0,
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignSelf: "stretch",
+                    width: "100%",
+                    "& > .MuiTableContainer-root": {
+                      flex: "1 1 0",
+                      minHeight: 0,
+                      alignSelf: "stretch",
+                      minWidth: 0,
+                      width: "100%",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column",
+                    },
                   }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  stickyBodyMinHeight="400px"
-                  entriesPerPage={false}
-                  pageSize={pageSize}
-                  page={0}
-                  onPageChange={() => {}}
-                  onEntriesPerPageChange={(n) => {
-                    setPageSize(n);
-                    setPageNumber(1);
-                  }}
-                  showTotalEntries
-                  pagination={{ variant: "gradient", color: "info" }}
-                  noEndBorder
-                  canSearch
-                  toolbarStart={
-                    <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
-                      <Autocomplete
-                        multiple
-                        size="small"
-                        options={groupingColumnOptions}
-                        disableCloseOnSelect
-                        value={groupingColumnOptions.filter((opt) =>
-                          groupByColumns.includes(opt.value)
-                        )}
-                        isOptionEqualToValue={(option, value) => option.value === value.value}
-                        getOptionLabel={(option) => option.label}
-                        onChange={(event, newValue) => {
-                          setGroupByColumns((newValue || []).map((item) => item.value));
-                        }}
-                        renderInput={(params) => (
-                          <MDInput
-                            {...params}
-                            label="Group By Columns"
-                            placeholder="Select columns"
-                            sx={groupByInputSx}
-                          />
-                        )}
-                      />
+                  aria-busy={asOfRefreshing}
+                >
+                  {asOfRefreshing && (
+                    <MDBox
+                      position="absolute"
+                      top={0}
+                      left={0}
+                      right={0}
+                      bottom={0}
+                      display="flex"
+                      justifyContent="center"
+                      alignItems="center"
+                      zIndex={20}
+                      sx={{
+                        backgroundColor: "rgba(255, 255, 255, 0.75)",
+                        backdropFilter: "blur(2px)",
+                        pointerEvents: "auto",
+                      }}
+                    >
+                      <CurrencyLoading size={50} />
                     </MDBox>
-                  }
-                  exportFileName="Contracts"
-                  exportCellFormatter={contractsExportCellFormatter}
-                  exportExcludeGroupParentsWhenExpanded
-                  exportAllColumns
-                  initialHiddenColumns={initialHiddenColumnIds}
-                  onVisibleRowCountChange={setVisibleRowCount}
-                />
+                  )}
+                  <DataTable
+                    table={{
+                      columns: contractGridColumns,
+                      rows: computedRows,
+                    }}
+                    isSorted={false}
+                    stickyToolbarAndHeader
+                    stickyBodyMinHeight="400px"
+                    entriesPerPage={false}
+                    pageSize={pageSize}
+                    page={0}
+                    onPageChange={() => {}}
+                    onEntriesPerPageChange={(n) => {
+                      setPageSize(n);
+                      setPageNumber(1);
+                    }}
+                    showTotalEntries={false}
+                    pagination={{ variant: "gradient", color: "info" }}
+                    noEndBorder
+                    canSearch
+                    toolbarStart={
+                      <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
+                        <Autocomplete
+                          multiple
+                          size="small"
+                          options={groupingColumnOptions}
+                          disableCloseOnSelect
+                          value={groupingColumnOptions.filter((opt) =>
+                            groupByColumns.includes(opt.value)
+                          )}
+                          isOptionEqualToValue={(option, value) => option.value === value.value}
+                          getOptionLabel={(option) => option.label}
+                          onChange={(event, newValue) => {
+                            setGroupByColumns((newValue || []).map((item) => item.value));
+                          }}
+                          renderInput={(params) => (
+                            <MDInput
+                              {...params}
+                              label="Group By Columns"
+                              placeholder="Select columns"
+                              sx={groupByInputSx}
+                            />
+                          )}
+                        />
+                      </MDBox>
+                    }
+                    exportFileName="Contracts"
+                    exportCellFormatter={contractsExportCellFormatter}
+                    exportExcludeGroupParentsWhenExpanded
+                    exportAllColumns
+                    extraFilterTypes={CONTRACTS_DATATABLE_EXTRA_FILTER_TYPES}
+                    initialHiddenColumns={CONTRACTS_GRID_INITIAL_HIDDEN_COLUMNS}
+                    onVisibleRowCountChange={setVisibleRowCount}
+                  />
+                </MDBox>
               </MDBox>
 
               {/* Server-side Pagination Footer (sibling to table area so it is not clipped by the grid host) */}
@@ -6473,7 +7989,13 @@ export default function Contracts() {
                     "& .MuiPaginationItem-icon": { fontSize: "1rem" },
                   }}
                 >
-                  <MDBox mb={{ xs: 0.5, sm: 0 }} display="flex" alignItems="center" gap={0.5}>
+                  <MDBox
+                    mb={{ xs: 0.5, sm: 0 }}
+                    display="flex"
+                    alignItems="center"
+                    gap={0.5}
+                    flexWrap="wrap"
+                  >
                     <FormControl size="small" sx={{ minWidth: 12 }}>
                       <Select
                         value={String(pageSize)}
@@ -6497,12 +8019,12 @@ export default function Contracts() {
                       </Select>
                     </FormControl>
                     <MDTypography
-                      variant="caption"
+                      variant="button"
                       color="secondary"
                       fontWeight="regular"
-                      sx={{ fontSize: "0.7rem", lineHeight: 1.2 }}
+                      sx={{ fontSize: "0.7rem" }}
                     >
-                      {visibleRowCount} of {totalCount} entries
+                      {`${Math.min(pageNumber * pageSize, totalCount)} of ${totalCount} entries`}
                     </MDTypography>
                     {Math.ceil(totalCount / pageSize) > 1 && (
                       <MDPagination

@@ -17,9 +17,13 @@ import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
+import Divider from "@mui/material/Divider";
 import Popover from "@mui/material/Popover";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
+import Checkbox from "@mui/material/Checkbox";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
@@ -36,31 +40,270 @@ import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import { format, parseISO, isValid } from "date-fns";
 
-/** Description column: up to 2 lines; click … for full text in a popover (same pattern as rental-properties Location). */
+const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
+  applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
+  deactiveDate: ["deactiveDate", "DeactiveDate"],
+};
+
+const GOVT_SHARE_RATE_DEFAULT_GROUP_BY_COLUMNS = ["cmdName", "baseName", "className"];
+
+const GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS = [
+  { value: "cmdName", label: "RAC" },
+  { value: "baseName", label: "Base" },
+  { value: "className", label: "Class" },
+  { value: "applicableDate", label: "Application Date" },
+  { value: "deactiveDate", label: "Deactive Date" },
+  { value: "config", label: "Factor" },
+  { value: "rate", label: "Rate(%)" },
+  { value: "description", label: "Description" },
+  { value: "status", label: "Status" },
+];
+
+function parseConfigGridApplicationDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function configGridApplicationDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseConfigGridApplicationDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+function ApplicationDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `config-application-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+ApplicationDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES = Object.freeze({
+  applicationDateCompare: configGridApplicationDateCompare,
+});
+
+/** Description column: first 30 characters; click … for full text in a popover. */
 function DescriptionTableCell({ value }) {
   const [anchor, setAnchor] = useState(null);
   const text = value != null && String(value).trim() !== "" ? String(value) : "-";
   const hasContent = text !== "-";
-  const showMore = hasContent && text.length > 32;
+  const showMore = hasContent && text.length > 30;
+  const displayText = showMore ? text.slice(0, 30) : text;
 
   return (
     <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
-      <MDTypography
-        component="div"
-        variant="body2"
+      <MDBox
+        component="span"
         sx={{
           flex: 1,
           minWidth: 0,
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
-          lineHeight: 1.35,
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          lineHeight: "inherit",
+          color: "#111111 !important",
         }}
       >
-        {hasContent ? text : "-"}
-      </MDTypography>
+        {hasContent ? displayText : "-"}
+      </MDBox>
       {showMore && (
         <>
           <MDBox
@@ -1056,6 +1299,8 @@ export default function GovtShareRate() {
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [expandedRateGroups, setExpandedRateGroups] = useState(new Set());
+  const [groupByColumns, setGroupByColumns] = useState(GOVT_SHARE_RATE_DEFAULT_GROUP_BY_COLUMNS);
   const isSuperUser =
     String(getLoggedInUsername() || "")
       .trim()
@@ -1067,8 +1312,33 @@ export default function GovtShareRate() {
       const next = new Set(prev);
       if (next.has(groupKey)) {
         next.delete(groupKey);
+        const prefix = `${groupKey}|RATE|`;
+        setExpandedRateGroups((er) => {
+          const nextEr = new Set(er);
+          Array.from(er).forEach((k) => {
+            if (k.startsWith(prefix)) nextEr.delete(k);
+          });
+          return nextEr;
+        });
       } else {
         next.add(groupKey);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setExpandedGroups(new Set());
+    setExpandedRateGroups(new Set());
+  }, [groupByColumns]);
+
+  const handleToggleRateGroup = (rateGroupKey) => {
+    setExpandedRateGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(rateGroupKey)) {
+        next.delete(rateGroupKey);
+      } else {
+        next.add(rateGroupKey);
       }
       return next;
     });
@@ -1456,21 +1726,21 @@ export default function GovtShareRate() {
     return value;
   };
 
-  const classAndConfigGridColumnWidth = "140px";
-
   const columns = [
     {
       Header: "Action",
       accessor: "actions",
       align: "center",
-      width: "72px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        if (row.original.isGroupRow) {
-          // eslint-disable-next-line react/prop-types
-          const groupKey = row.original.groupKey;
-          const isExpanded = expandedGroups.has(groupKey);
+        /* eslint-disable-next-line react/prop-types -- react-table row */
+        const rowData = row?.original || {};
+        if (rowData.isGroupRow) {
+          const groupKey = rowData.groupKey;
+          const isRateSub = Boolean(rowData.isRateSubGroupRow);
+          const isExpanded = isRateSub
+            ? expandedRateGroups.has(groupKey)
+            : expandedGroups.has(groupKey);
           return (
             <MDBox
               alignItems="left"
@@ -1485,7 +1755,9 @@ export default function GovtShareRate() {
               <IconButton
                 size="small"
                 color="info"
-                onClick={() => handleToggleGroup(groupKey)}
+                onClick={() =>
+                  isRateSub ? handleToggleRateGroup(groupKey) : handleToggleGroup(groupKey)
+                }
                 title={isExpanded ? "Collapse" : "Expand"}
                 sx={{ padding: "1px" }}
               >
@@ -1495,14 +1767,13 @@ export default function GovtShareRate() {
           );
         }
         // eslint-disable-next-line react/prop-types
-        return row.original.actions;
+        return rowData.actions;
       },
     },
     {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
-      width: "60px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1517,11 +1788,10 @@ export default function GovtShareRate() {
       Header: "S.No",
       accessor: "sno",
       align: "center",
-      width: "60px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
-        if (row.original.isExpandedRow) {
+        if (row.original.isExpandedRow || row.original.isRateSubGroupRow) {
           return "";
         }
         // eslint-disable-next-line react/prop-types
@@ -1529,9 +1799,12 @@ export default function GovtShareRate() {
       },
     },
     {
+      id: "applicableDate",
       Header: "Application Date",
       accessor: "applicableDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // Use PascalCase (strict API response format)
@@ -1545,9 +1818,12 @@ export default function GovtShareRate() {
       },
     },
     {
+      id: "deactiveDate",
       Header: "Deactive Date",
       accessor: "deactiveDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const dateValue = value || row.original?.DeactiveDate || row.original?.deactiveDate;
@@ -1572,7 +1848,14 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
+        const rowOrig = row?.original || {};
+        if (rowOrig.isGroupRow && !rowOrig.isRateSubGroupRow) {
+          return value || "-";
+        }
+        if (rowOrig.isRateSubGroupRow) {
+          return value || "-";
+        }
+        const baseId = rowOrig.baseId ?? rowOrig.BaseId ?? null;
         if (!baseId) return value || "-";
         const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
         return baseItem ? baseItem.name : value || "-";
@@ -1582,11 +1865,10 @@ export default function GovtShareRate() {
       Header: "Class",
       accessor: "className",
       align: "left",
-      width: classAndConfigGridColumnWidth,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
-        if (row?.original?.isGroupRow) {
+        if (row?.original?.isGroupRow && !row?.original?.isRateSubGroupRow) {
           return value || "-";
         }
         const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
@@ -1599,17 +1881,20 @@ export default function GovtShareRate() {
       Header: "Factor",
       accessor: "config",
       align: "left",
-      width: classAndConfigGridColumnWidth,
     },
     {
       Header: "Rate(%)",
       accessor: "rate",
-      align: "left",
+      align: "right",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        // eslint-disable-next-line react/prop-types
-        if (row?.original?.isGroupRow) {
-          return "";
+        // eslint-disable-next-line react/prop-types -- react-table row
+        const rowData = row?.original || {};
+        if (rowData.isGroupRow) {
+          const r = rowData.rate ?? rowData.Rate;
+          if (r === null || r === undefined || r === "") return "";
+          const n = Number(r);
+          return Number.isFinite(n) ? `${n.toLocaleString()}%` : "";
         }
         return value ? `${Number(value).toLocaleString()}%` : "-";
       },
@@ -1620,8 +1905,15 @@ export default function GovtShareRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        /* eslint-disable-next-line react/prop-types -- react-table row.original */
-        if (row?.original?.isGroupRow) {
+        // eslint-disable-next-line react/prop-types -- react-table row
+        const rowData = row?.original || {};
+        if (rowData.isRateSubGroupRow) {
+          return "";
+        }
+        if (rowData.isGroupRow && !rowData.isRateSubGroupRow) {
+          if (groupByColumns.includes("description")) {
+            return <DescriptionTableCell value={value} />;
+          }
           return "";
         }
         return <DescriptionTableCell value={value} />;
@@ -1633,37 +1925,46 @@ export default function GovtShareRate() {
       align: "center",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
-        /* eslint-disable react/prop-types -- react-table row.original */
-        if (row.original.isExpandedRow) {
-          const statusValue = row.original.status;
+        // eslint-disable-next-line react/prop-types -- react-table row
+        const rowData = row?.original || {};
+        if (rowData.isExpandedRow) {
+          const statusValue = rowData.status;
           return <StatusBadge value={statusValue} />;
         }
         if (
-          row.original.isGroupRow &&
-          row.original.statuses &&
-          Array.isArray(row.original.statuses)
+          rowData.isGroupRow &&
+          rowData.isRateSubGroupRow &&
+          rowData.statuses &&
+          Array.isArray(rowData.statuses)
         ) {
-          if (row.original.statuses.length > 1) {
+          if (rowData.statuses.length > 1) {
             return "";
           }
-          if (row.original.statuses.length === 1) {
-            return <StatusBadge value={row.original.statuses[0]} />;
+          if (rowData.statuses.length === 1) {
+            return <StatusBadge value={rowData.statuses[0]} />;
           }
           return "";
         }
-        /* eslint-enable react/prop-types */
+        if (
+          rowData.isGroupRow &&
+          !rowData.isRateSubGroupRow &&
+          rowData.statuses &&
+          Array.isArray(rowData.statuses)
+        ) {
+          if (rowData.statuses.length > 1) {
+            return "";
+          }
+          if (rowData.statuses.length === 1) {
+            return <StatusBadge value={rowData.statuses[0]} />;
+          }
+          return "";
+        }
         return <StatusBadge value={value} />;
       },
     },
   ];
 
   const computedRows = useMemo(() => {
-    const groupKeyOf = (r) => {
-      const cmdId = r.cmdId ?? r.CmdId ?? "";
-      const baseId = r.baseId ?? r.BaseId ?? "";
-      return `${cmdId}|${baseId}`;
-    };
-
     const enrichedRows = tableRows.map((row, index) => {
       // Normalize id and foreign keys (handle both camelCase and PascalCase)
       const normalizedId = row?.id ?? row?.Id;
@@ -1763,18 +2064,50 @@ export default function GovtShareRate() {
       };
     });
 
+    if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
+      return enrichedRows.map((row) => ({
+        ...row,
+        isGroupRow: false,
+        isExpandedRow: false,
+        isRateSubGroupRow: false,
+      }));
+    }
+
+    const getGroupValue = (row, columnKey) => {
+      const raw = row?.[columnKey];
+      if (raw === null || raw === undefined || raw === "") return "-";
+      if (columnKey === "applicableDate" || columnKey === "deactiveDate") {
+        return formatDateDDMMMYYYY(raw) || "-";
+      }
+      if (columnKey === "status") return raw ? "Active" : "Inactive";
+      if (columnKey === "rate") {
+        const n = Number(raw);
+        return Number.isFinite(n) ? `${n.toLocaleString()}%` : String(raw);
+      }
+      return String(raw);
+    };
+
     const byKey = new Map();
     enrichedRows.forEach((r) => {
-      const k = groupKeyOf(r);
+      const groupValues = groupByColumns.map((columnKey) => getGroupValue(r, columnKey));
+      const k = groupValues.join(" || ");
       if (!byKey.has(k)) {
-        byKey.set(k, []);
+        const groupLabel = groupByColumns
+          .map((columnKey, idx) => {
+            const label =
+              GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS.find((opt) => opt.value === columnKey)
+                ?.label || columnKey;
+            return `${label}: ${groupValues[idx]}`;
+          })
+          .join(" | ");
+        byKey.set(k, { label: groupLabel, rows: [] });
       }
-      byKey.get(k).push(r);
+      byKey.get(k).rows.push(r);
     });
 
     const sortedKeys = Array.from(byKey.keys()).sort((ka, kb) => {
-      const a = byKey.get(ka)[0];
-      const b = byKey.get(kb)[0];
+      const a = byKey.get(ka).rows[0];
+      const b = byKey.get(kb).rows[0];
       const d = String(a.applicableDate || "").localeCompare(String(b.applicableDate || ""));
       if (d !== 0) return d;
       return String(a.cmdName || "").localeCompare(String(b.cmdName || ""));
@@ -1783,19 +2116,9 @@ export default function GovtShareRate() {
     const result = [];
     let topSno = 0;
     sortedKeys.forEach((gk) => {
-      const gRows = byKey.get(gk);
+      const group = byKey.get(gk);
+      const gRows = group.rows;
       const snoValue = (pageNumber - 1) * pageSize + ++topSno;
-
-      if (gRows.length === 1) {
-        const r = gRows[0];
-        result.push({
-          ...r,
-          sno: snoValue,
-          isGroupRow: false,
-          isExpandedRow: false,
-        });
-        return;
-      }
 
       const firstRow = gRows[0];
       const isExpanded = expandedGroups.has(gk);
@@ -1816,19 +2139,35 @@ export default function GovtShareRate() {
       });
       const classNamesJoined = Array.from(classNameSet).sort().join(", ");
 
+      const baseNameSet = new Set();
+      gRows.forEach((gr) => {
+        const n = gr.baseName || "";
+        if (n) baseNameSet.add(n);
+      });
+      const baseNamesJoined = Array.from(baseNameSet).sort().join(", ");
+
       const safeId = gk.replace(/[^a-zA-Z0-9_|.-]/g, "_");
       result.push({
         ...firstRow,
         id: `group-${safeId}`,
         sno: snoValue,
-        className: classNamesJoined,
+        cmdName: groupByColumns.includes("cmdName") ? firstRow.cmdName : group.label,
+        baseName: groupByColumns.includes("baseName") ? firstRow.baseName : baseNamesJoined,
+        baseId: null,
+        BaseId: null,
+        className: groupByColumns.includes("className") ? firstRow.className : classNamesJoined,
         classId: null,
         ClassId: null,
-        rate: null,
-        Rate: null,
+        config: groupByColumns.includes("config") ? firstRow.config : "",
+        rate: groupByColumns.includes("rate") ? firstRow.rate : null,
+        Rate: groupByColumns.includes("rate") ? firstRow.rate : null,
+        description: groupByColumns.includes("description") ? firstRow.description : "",
+        applicableDate: groupByColumns.includes("applicableDate") ? firstRow.applicableDate : "",
+        deactiveDate: groupByColumns.includes("deactiveDate") ? firstRow.deactiveDate : "",
         isGroupRow: true,
         isExpandedRow: false,
         groupKey: gk,
+        groupLabel: group.label,
         groupRows: gRows,
         statuses: statusArray,
         status: statusArray.length === 1 ? statusArray[0] : statusArray,
@@ -1841,6 +2180,7 @@ export default function GovtShareRate() {
             sno: "",
             isGroupRow: false,
             isExpandedRow: true,
+            isRateSubGroupRow: false,
             groupKey: gk,
           });
         });
@@ -1848,7 +2188,7 @@ export default function GovtShareRate() {
     });
 
     return result;
-  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups]);
+  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups, groupByColumns]);
 
   return (
     <DashboardLayout>
@@ -1891,21 +2231,28 @@ export default function GovtShareRate() {
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
                     minHeight: 0,
-                    overflow: "hidden",
+                    overflow: "auto",
                   },
                   "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
+                    tableLayout: "auto",
+                    width: "max-content",
+                    borderCollapse: "collapse",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "1.0rem !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
@@ -1940,7 +2287,12 @@ export default function GovtShareRate() {
                     defaultValue: 20,
                     entries: [10, 25, 50, 100, 500, 1000],
                   }}
+                  page={pageNumber - 1}
                   pageSize={pageSize}
+                  onPageChange={(newPage) => {
+                    setPageNumber(newPage + 1);
+                    fetchGovtShareRates(newPage + 1, pageSize);
+                  }}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -1949,8 +2301,42 @@ export default function GovtShareRate() {
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
+                  toolbarStart={
+                    <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS}
+                        disableCloseOnSelect
+                        value={GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS.filter((opt) =>
+                          groupByColumns.includes(opt.value)
+                        )}
+                        isOptionEqualToValue={(option, value) => option.value === value.value}
+                        getOptionLabel={(option) => option.label}
+                        onChange={(event, newValue) => {
+                          setGroupByColumns((newValue || []).map((item) => item.value));
+                        }}
+                        renderOption={(props, option, { selected }) => (
+                          <li {...props}>
+                            <Checkbox size="small" checked={selected} />
+                            {option.label}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="Group By Columns"
+                            placeholder="Select columns"
+                          />
+                        )}
+                      />
+                    </MDBox>
+                  }
+                  autoResetFilters={false}
                   exportFileName="Govt-Share-Rate"
                   exportCellFormatter={exportCellFormatter}
+                  extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
+                  contentFitTable
                 />
 
                 {/* Server-side Pagination Footer */}

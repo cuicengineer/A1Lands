@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import Grid from "@mui/material/Grid";
+import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Dialog from "@mui/material/Dialog";
@@ -26,6 +27,7 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
+import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import { format, parseISO, isValid } from "date-fns";
@@ -38,10 +40,15 @@ function AddressTableCell({ value }) {
   const showMore = hasContent && text.length > 20;
 
   return (
-    <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
-      <MDTypography
+    <MDBox
+      display="flex"
+      alignItems="flex-start"
+      gap={0.25}
+      color="inherit"
+      sx={{ maxWidth: "100%", minWidth: 0 }}
+    >
+      <Box
         component="div"
-        variant="body2"
         sx={{
           flex: 1,
           minWidth: 0,
@@ -51,10 +58,12 @@ function AddressTableCell({ value }) {
           overflow: "hidden",
           wordBreak: "break-word",
           lineHeight: 1.22,
+          fontSize: "0.875rem",
+          color: "inherit",
         }}
       >
         {hasContent ? text : "-"}
-      </MDTypography>
+      </Box>
       {showMore && (
         <>
           <MDBox
@@ -102,6 +111,425 @@ function AddressTableCell({ value }) {
 
 AddressTableCell.propTypes = {
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
+
+const TENANTS_HSCROLL_HIDE_MS = 1800;
+const TENANTS_HSCROLL_THUMB_MIN_PX = 28;
+const TENANTS_HSCROLL_RAIL_H = 6;
+
+function findTenantsMainHorizontalScrollEl(root) {
+  if (!root || typeof root.querySelector !== "function") return null;
+  const table = root.querySelector("table.MuiTable-root") || root.querySelector("table");
+  if (!table) return null;
+  let el = table.parentElement;
+  while (el && root.contains(el)) {
+    const { overflowX } = getComputedStyle(el);
+    if (
+      (overflowX === "auto" || overflowX === "scroll" || overflowX === "overlay") &&
+      el.scrollWidth > el.clientWidth + 1
+    ) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  el = table.parentElement;
+  while (el && root.contains(el)) {
+    const { overflowX } = getComputedStyle(el);
+    if (overflowX === "auto" || overflowX === "scroll" || overflowX === "overlay") {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return table.parentElement;
+}
+
+/**
+ * Custom slim horizontal scroll rail (Notion / Airtable–style) synced with the DataTable body
+ * scroll element; sits in the header strip above the grid. tenants.js only.
+ */
+function TenantsTableTopScrollRail({ gridHostRef, syncKey, darkMode }) {
+  const stripRef = useRef(null);
+  const railRef = useRef(null);
+  const mainElRef = useRef(null);
+  const hideTimerRef = useRef(null);
+  const dragRef = useRef({
+    dragging: false,
+    startClientX: 0,
+    startScrollLeft: 0,
+    railWidth: 0,
+    thumbWidth: 0,
+    maxScroll: 0,
+  });
+
+  const [metrics, setMetrics] = useState({
+    scrollLeft: 0,
+    scrollWidth: 0,
+    clientWidth: 0,
+  });
+  const [railWidth, setRailWidth] = useState(0);
+  const [railHot, setRailHot] = useState(false);
+  const [thumbDragging, setThumbDragging] = useState(false);
+
+  const { scrollLeft, scrollWidth, clientWidth } = metrics;
+  const overflow = scrollWidth > clientWidth + 1;
+  const maxScroll = Math.max(1, scrollWidth - clientWidth);
+
+  const bumpHot = useCallback(() => {
+    setRailHot(true);
+    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = window.setTimeout(() => {
+      setRailHot(false);
+    }, TENANTS_HSCROLL_HIDE_MS);
+  }, []);
+
+  const readMetrics = useCallback(() => {
+    const m = findTenantsMainHorizontalScrollEl(gridHostRef.current) || mainElRef.current;
+    if (!m) return;
+    mainElRef.current = m;
+    setMetrics((prev) => {
+      const next = {
+        scrollLeft: m.scrollLeft,
+        scrollWidth: m.scrollWidth,
+        clientWidth: m.clientWidth,
+      };
+      if (
+        prev.scrollLeft === next.scrollLeft &&
+        prev.scrollWidth === next.scrollWidth &&
+        prev.clientWidth === next.clientWidth
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [gridHostRef]);
+
+  useLayoutEffect(() => {
+    const root = gridHostRef.current;
+    if (!root) return undefined;
+
+    let cancelled = false;
+    let rafId = 0;
+    let detach = () => {};
+
+    const tryAttach = () => {
+      if (cancelled) return;
+      const main = findTenantsMainHorizontalScrollEl(root);
+      if (!main) {
+        rafId = window.requestAnimationFrame(tryAttach);
+        return;
+      }
+      mainElRef.current = main;
+
+      let lastMainLeft = main.scrollLeft;
+      const onScroll = () => {
+        if (main.scrollLeft !== lastMainLeft) {
+          lastMainLeft = main.scrollLeft;
+          bumpHot();
+        }
+        readMetrics();
+      };
+
+      main.addEventListener("scroll", onScroll, { passive: true });
+      const ro =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => {
+              readMetrics();
+            })
+          : null;
+      if (ro) {
+        ro.observe(main);
+        const table = root.querySelector("table.MuiTable-root") || root.querySelector("table");
+        if (table) ro.observe(table);
+      }
+      readMetrics();
+
+      detach = () => {
+        main.removeEventListener("scroll", onScroll);
+        if (ro) ro.disconnect();
+      };
+    };
+
+    tryAttach();
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+      detach();
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+    };
+  }, [gridHostRef, syncKey, bumpHot, readMetrics]);
+
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail || !overflow) return undefined;
+    const ro = new ResizeObserver(() => {
+      setRailWidth(rail.clientWidth);
+    });
+    ro.observe(rail);
+    setRailWidth(rail.clientWidth);
+    return () => ro.disconnect();
+  }, [syncKey, scrollWidth, clientWidth, overflow]);
+
+  const rw = railWidth || railRef.current?.clientWidth || 0;
+  const thumbW =
+    rw > 0
+      ? Math.max(
+          TENANTS_HSCROLL_THUMB_MIN_PX,
+          Math.round((clientWidth / Math.max(scrollWidth, 1)) * rw)
+        )
+      : TENANTS_HSCROLL_THUMB_MIN_PX;
+  const thumbMaxLeft = Math.max(0, rw - thumbW);
+  const thumbLeft = overflow && rw > 0 ? Math.round((scrollLeft / maxScroll) * thumbMaxLeft) : 0;
+
+  const headerBg = darkMode ? "#202940" : "#ffffff";
+  const headerBorder = darkMode ? "rgba(255,255,255,0.08)" : "#e0e0e0";
+  const fadeL = darkMode
+    ? "linear-gradient(90deg, #202940 0%, rgba(32,41,64,0) 100%)"
+    : "linear-gradient(90deg, #ffffff 0%, rgba(255,255,255,0) 100%)";
+  const fadeR = darkMode
+    ? "linear-gradient(270deg, #202940 0%, rgba(32,41,64,0) 100%)"
+    : "linear-gradient(270deg, #ffffff 0%, rgba(255,255,255,0) 100%)";
+  const trackBg = darkMode ? "rgba(255,255,255,0.08)" : "rgba(15, 23, 42, 0.06)";
+  const thumbBg = darkMode ? "rgba(255,255,255,0.38)" : "rgba(15, 23, 42, 0.28)";
+  const thumbBgHover = darkMode ? "rgba(255,255,255,0.52)" : "rgba(15, 23, 42, 0.42)";
+
+  const applyScrollLeft = (nextLeft, smooth) => {
+    const m = mainElRef.current;
+    if (!m) return;
+    const max = Math.max(0, m.scrollWidth - m.clientWidth);
+    const clamped = Math.min(max, Math.max(0, nextLeft));
+    if (smooth) m.scrollTo({ left: clamped, behavior: "smooth" });
+    else m.scrollLeft = clamped;
+    bumpHot();
+  };
+
+  const onRailPointerDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("[data-tenants-hscroll-thumb='1']")) return;
+    e.preventDefault();
+    const rail = railRef.current;
+    const m = mainElRef.current;
+    if (!rail || !m || !overflow) return;
+    const rect = rail.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const railInnerW = rail.clientWidth;
+    const tw = Math.max(
+      TENANTS_HSCROLL_THUMB_MIN_PX,
+      Math.round((m.clientWidth / Math.max(m.scrollWidth, 1)) * railInnerW)
+    );
+    const tMax = Math.max(0, railInnerW - tw);
+    const maxS = Math.max(1, m.scrollWidth - m.clientWidth);
+    const targetLeft = Math.min(tMax, Math.max(0, x - tw / 2));
+    const nextScroll = (targetLeft / Math.max(1, tMax)) * maxS;
+    applyScrollLeft(nextScroll, true);
+  };
+
+  const onThumbPointerDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rail = railRef.current;
+    const m = mainElRef.current;
+    if (!rail || !m || !overflow) return;
+    const rwi = rail.clientWidth;
+    const tw = Math.max(
+      TENANTS_HSCROLL_THUMB_MIN_PX,
+      Math.round((m.clientWidth / Math.max(m.scrollWidth, 1)) * rwi)
+    );
+    const maxS = m.scrollWidth - m.clientWidth;
+    dragRef.current = {
+      dragging: true,
+      startClientX: e.clientX,
+      startScrollLeft: m.scrollLeft,
+      railWidth: rwi,
+      thumbWidth: tw,
+      maxScroll: Math.max(1, maxS),
+    };
+    setThumbDragging(true);
+    bumpHot();
+
+    const onMove = (ev) => {
+      if (!dragRef.current.dragging) return;
+      const d = dragRef.current;
+      const delta = ev.clientX - d.startClientX;
+      const travel = Math.max(1, d.railWidth - d.thumbWidth);
+      const next = d.startScrollLeft + (delta / travel) * d.maxScroll;
+      applyScrollLeft(next, false);
+    };
+    const onUp = () => {
+      dragRef.current.dragging = false;
+      setThumbDragging(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return undefined;
+    const fn = (e) => {
+      const m = mainElRef.current;
+      if (!m || m.scrollWidth <= m.clientWidth + 1) return;
+      const dx = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+      if (!dx) return;
+      e.preventDefault();
+      m.scrollLeft += dx * 0.88;
+      bumpHot();
+      readMetrics();
+    };
+    el.addEventListener("wheel", fn, { passive: false });
+    return () => el.removeEventListener("wheel", fn);
+  }, [syncKey, bumpHot, readMetrics]);
+
+  if (!overflow && scrollWidth > 0) {
+    return (
+      <Box
+        aria-hidden
+        sx={{
+          flexShrink: 0,
+          height: 2,
+          bgcolor: headerBg,
+          borderBottom: `1px solid ${headerBorder}`,
+        }}
+      />
+    );
+  }
+
+  if (scrollWidth === 0) {
+    return (
+      <Box
+        aria-hidden
+        sx={{
+          flexShrink: 0,
+          height: 2,
+          bgcolor: headerBg,
+          borderBottom: `1px solid ${headerBorder}`,
+        }}
+      />
+    );
+  }
+
+  return (
+    <Box
+      ref={stripRef}
+      role="presentation"
+      tabIndex={-1}
+      onMouseEnter={bumpHot}
+      onPointerDownCapture={(e) => {
+        if (e.button === 0) e.preventDefault();
+      }}
+      sx={{
+        position: "sticky",
+        top: 0,
+        zIndex: 6,
+        flexShrink: 0,
+        minHeight: 12,
+        display: "flex",
+        alignItems: "center",
+        px: 0,
+        bgcolor: headerBg,
+        borderBottom: `1px solid ${headerBorder}`,
+        boxSizing: "border-box",
+        transition: "opacity 0.35s ease",
+        opacity: railHot ? 1 : 0,
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        MozUserSelect: "none",
+        msUserSelect: "none",
+        caretColor: "transparent",
+        outline: "none",
+        cursor: "default",
+        "&:hover": {
+          opacity: 1,
+          transition: "opacity 0.2s ease",
+        },
+      }}
+    >
+      <Box
+        aria-hidden
+        sx={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 28,
+          zIndex: 2,
+          pointerEvents: "none",
+          background: fadeL,
+        }}
+      />
+      <Box
+        aria-hidden
+        sx={{
+          position: "absolute",
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 28,
+          zIndex: 2,
+          pointerEvents: "none",
+          background: fadeR,
+        }}
+      />
+      <Box
+        ref={railRef}
+        onPointerDown={onRailPointerDown}
+        sx={{
+          position: "relative",
+          zIndex: 1,
+          flex: 1,
+          mx: 2,
+          height: TENANTS_HSCROLL_RAIL_H,
+          borderRadius: 999,
+          bgcolor: trackBg,
+          cursor: overflow ? "pointer" : "default",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          MozUserSelect: "none",
+          caretColor: "transparent",
+        }}
+      >
+        <Box
+          data-tenants-hscroll-thumb="1"
+          onPointerDown={onThumbPointerDown}
+          sx={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            height: TENANTS_HSCROLL_RAIL_H,
+            width: `${thumbW}px`,
+            transform: `translateX(${thumbLeft}px)`,
+            borderRadius: 999,
+            bgcolor: thumbBg,
+            boxShadow: darkMode ? "0 0 0 1px rgba(255,255,255,0.06)" : "0 0 0 1px rgba(0,0,0,0.04)",
+            cursor: overflow ? "grab" : "default",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            MozUserSelect: "none",
+            caretColor: "transparent",
+            transition: thumbDragging
+              ? "none"
+              : "transform 0.08s ease-out, background-color 0.15s ease, box-shadow 0.15s ease",
+            "&:hover": {
+              bgcolor: thumbBgHover,
+            },
+            "&:active": {
+              cursor: "grabbing",
+            },
+          }}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+TenantsTableTopScrollRail.propTypes = {
+  gridHostRef: PropTypes.shape({ current: PropTypes.any }).isRequired,
+  syncKey: PropTypes.string.isRequired,
+  darkMode: PropTypes.bool.isRequired,
 };
 
 function TenantsForm({ open, onClose, onSubmit, initialData }) {
@@ -596,6 +1024,9 @@ TenantsForm.propTypes = {
 };
 
 export default function Tenants() {
+  const [controller] = useMaterialUIController();
+  const { darkMode } = controller;
+  const tenantsGridHostRef = useRef(null);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -610,6 +1041,8 @@ export default function Tenants() {
   const [contractsDialogLoading, setContractsDialogLoading] = useState(false);
   const [tenantContracts, setTenantContracts] = useState([]);
   const [selectedTenantNo, setSelectedTenantNo] = useState("");
+  const [pageNumber, setPageNumber] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const fetchTenants = async () => {
     try {
@@ -768,8 +1201,8 @@ export default function Tenants() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
-    { Header: "ID", accessor: "id", align: "center", width: "56px" },
+    { Header: "Actions", accessor: "actions", align: "center" },
+    { Header: "ID", accessor: "id", align: "center" },
     { Header: "Tenant No", accessor: "tenantNo", align: "left" },
     { Header: "Prefix", accessor: "prefix", align: "left" },
     { Header: "Particular Name", accessor: "ownerName", align: "left" },
@@ -942,35 +1375,66 @@ export default function Tenants() {
                 )}
               </MDBox>
               <MDBox
+                ref={tenantsGridHostRef}
                 pt={3}
                 position="relative"
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "88vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
                     minHeight: 0,
-                    overflow: "hidden",
+                    overflow: "auto",
+                  },
+                  "& .MuiTableContainer-root > .MuiBox-root:nth-of-type(2)": {
+                    scrollBehavior: "smooth",
+                    scrollbarWidth: "thin",
+                    scrollbarColor: darkMode
+                      ? "rgba(255,255,255,0.24) rgba(255,255,255,0.04)"
+                      : "rgba(15, 23, 42, 0.28) transparent",
+                    "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+                    "&::-webkit-scrollbar-track": { background: "transparent" },
+                    "&::-webkit-scrollbar-thumb": {
+                      backgroundColor: darkMode
+                        ? "rgba(255,255,255,0.26)"
+                        : "rgba(15, 23, 42, 0.3)",
+                      borderRadius: "100px",
+                      border: "2px solid transparent",
+                      backgroundClip: "padding-box",
+                      "&:hover": {
+                        backgroundColor: darkMode
+                          ? "rgba(255,255,255,0.42)"
+                          : "rgba(15, 23, 42, 0.45)",
+                      },
+                    },
+                    "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
                   },
                   "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
+                    tableLayout: "auto",
+                    width: "max-content",
+                    borderCollapse: "collapse",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "12px !important",
                     fontWeight: "700 !important",
-                    padding: "5px 6px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     lineHeight: 1.2,
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td": {
-                    padding: "3px 6px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     lineHeight: 1.22,
-                    fontSize: "0.8125rem !important",
+                    fontSize: "0.875rem !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td .MuiButton-root": {
                     minHeight: "auto !important",
@@ -983,15 +1447,35 @@ export default function Tenants() {
                   },
                 }}
               >
+                <TenantsTableTopScrollRail
+                  gridHostRef={tenantsGridHostRef}
+                  syncKey={`${rows.length}-${pageSize}-${pageNumber}`}
+                  darkMode={Boolean(darkMode)}
+                />
                 <DataTable
                   table={{ columns, rows: computedRows }}
                   isSorted={false}
                   stickyToolbarAndHeader
-                  entriesPerPage={true}
+                  entriesPerPage={{
+                    defaultValue: 20,
+                    entries: [10, 25, 50, 100, 500, 1000],
+                  }}
+                  page={pageNumber - 1}
+                  pageSize={pageSize}
+                  onPageChange={(newPage) => {
+                    setPageNumber(newPage + 1);
+                  }}
+                  onEntriesPerPageChange={(value) => {
+                    setPageSize(value);
+                    setPageNumber(1);
+                    fetchTenants();
+                  }}
                   showTotalEntries={true}
                   noEndBorder
                   canSearch={true}
+                  pagination={{ variant: "gradient", color: "info" }}
                   exportFileName="Tenants"
+                  contentFitTable
                 />
               </MDBox>
             </Card>

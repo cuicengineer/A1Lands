@@ -16,9 +16,13 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
+import Divider from "@mui/material/Divider";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
+import Checkbox from "@mui/material/Checkbox";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
@@ -34,6 +38,492 @@ import api, {
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
 import { format, parseISO, isValid } from "date-fns";
+
+const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
+  applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
+  deactiveDate: ["deactiveDate", "DeactiveDate"],
+};
+
+const RENTAL_VALUE_RATE_DEFAULT_GROUP_BY_COLUMNS = ["cmdName", "baseName", "className"];
+
+const RENTAL_VALUE_RATE_GROUPING_COLUMN_OPTIONS = [
+  { value: "cmdName", label: "RAC" },
+  { value: "baseName", label: "Base" },
+  { value: "className", label: "Class" },
+  { value: "applicableDate", label: "Application Date" },
+  { value: "deactiveDate", label: "Deactive Date" },
+  { value: "rate", label: "Rate(%)" },
+  { value: "description", label: "Description" },
+  { value: "status", label: "Status" },
+];
+
+function parseConfigGridApplicationDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function configGridApplicationDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseConfigGridApplicationDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+function ApplicationDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `config-application-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+ApplicationDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const RENTAL_VALUE_RATE_GRID_MONEY_FALLBACK_KEYS = {
+  rate: ["rate", "Rate"],
+};
+
+function normalizeRentalValueRateMoneyRawToNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  const n = Number(s.replace(/,/g, "").replace(/%/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseRentalValueRateGridRowMoneyNumber(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = RENTAL_VALUE_RATE_GRID_MONEY_FALLBACK_KEYS[columnId] || [];
+  const isMissing = (v) =>
+    v === undefined || v === null || (typeof v === "string" && v.trim() === "") || v === "";
+  if (isMissing(raw) && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (!isMissing(v)) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return normalizeRentalValueRateMoneyRawToNumber(raw);
+}
+
+function rentalValueRateMoneyApproxEqual(a, b) {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= 1e-6 * scale;
+}
+
+function rentalValueRateGridMoneyCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowN = parseRentalValueRateGridRowMoneyNumber(row, columnId);
+    if (rowN === null) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") {
+      const ref = normalizeRentalValueRateMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN > ref;
+    }
+    if (mode === "lte") {
+      const ref = normalizeRentalValueRateMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN <= ref;
+    }
+    if (mode === "eq") {
+      const ref = normalizeRentalValueRateMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rentalValueRateMoneyApproxEqual(rowN, ref);
+    }
+    if (mode === "between") {
+      const a = normalizeRentalValueRateMoneyRawToNumber(filterValue.valueFrom);
+      const b = normalizeRentalValueRateMoneyRawToNumber(filterValue.valueTo);
+      if (a === null || b === null) return false;
+      const low = Math.min(a, b);
+      const high = Math.max(a, b);
+      return rowN >= low && rowN <= high;
+    }
+    return true;
+  });
+}
+
+function RentalValueRateMoneyColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Amount";
+  const modeLabelId = `rental-value-rate-money-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refAmt, setRefAmt] = useState("");
+  const [endAmt, setEndAmt] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefAmt("");
+      setEndAmt("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefAmt(fv.valueFrom != null ? String(fv.valueFrom) : "");
+      setEndAmt(fv.valueTo != null ? String(fv.valueTo) : "");
+    } else {
+      setMode(["gt", "lte", "eq"].includes(fv.mode) ? fv.mode : "none");
+      setRefAmt(fv.value != null ? String(fv.value) : "");
+      setEndAmt("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lte" || mode === "eq") {
+      if (!String(refAmt).trim()) return;
+      column.setFilter({ mode, value: refAmt.trim() });
+    } else if (mode === "between") {
+      if (!String(refAmt).trim() || !String(endAmt).trim()) return;
+      column.setFilter({
+        mode: "between",
+        valueFrom: refAmt.trim(),
+        valueTo: endAmt.trim(),
+      });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefAmt("");
+    setEndAmt("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel}`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No amount filter</MenuItem>
+              <MenuItem value="gt">Greater than</MenuItem>
+              <MenuItem value="lte">Less than or equal to</MenuItem>
+              <MenuItem value="eq">Equal to</MenuItem>
+              <MenuItem value="between">Price range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lte" || mode === "eq") && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Reference amount
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Lower bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                Upper bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={endAmt}
+                onChange={(e) => setEndAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+RentalValueRateMoneyColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES = Object.freeze({
+  applicationDateCompare: configGridApplicationDateCompare,
+  rentalValueRateMoneyCompare: rentalValueRateGridMoneyCompare,
+});
 
 function RentalValueRateForm({
   open,
@@ -924,6 +1414,7 @@ export default function RentalValueRate() {
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [groupByColumns, setGroupByColumns] = useState(RENTAL_VALUE_RATE_DEFAULT_GROUP_BY_COLUMNS);
   const isSuperUser =
     String(getLoggedInUsername() || "")
       .trim()
@@ -941,6 +1432,10 @@ export default function RentalValueRate() {
       return next;
     });
   };
+
+  useEffect(() => {
+    setExpandedGroups(new Set());
+  }, [groupByColumns]);
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -1276,7 +1771,6 @@ export default function RentalValueRate() {
       Header: "Action",
       accessor: "actions",
       align: "center",
-      width: "72px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1315,7 +1809,6 @@ export default function RentalValueRate() {
       Header: "Attach",
       accessor: "attachments",
       align: "center",
-      width: "60px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1344,6 +1837,10 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          return value || "-";
+        }
         const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
         if (!baseId) return value || "-";
         const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
@@ -1351,9 +1848,12 @@ export default function RentalValueRate() {
       },
     },
     {
+      id: "applicableDate",
       Header: "Application Date",
       accessor: "applicableDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // Support both camelCase and PascalCase field names
@@ -1369,9 +1869,12 @@ export default function RentalValueRate() {
       },
     },
     {
+      id: "deactiveDate",
       Header: "Deactive Date",
       accessor: "deactiveDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const rowData = row?.original || {};
@@ -1396,9 +1899,12 @@ export default function RentalValueRate() {
       },
     },
     {
+      id: "rate",
       Header: "Rate(%)",
       accessor: "rate",
       align: "right",
+      filter: "rentalValueRateMoneyCompare",
+      Filter: RentalValueRateMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1443,18 +1949,6 @@ export default function RentalValueRate() {
   ];
 
   const computedRows = useMemo(() => {
-    const groupKeyOf = (r) => {
-      const cmdId = r.cmdId ?? r.CmdId ?? "";
-      const baseId = r.baseId ?? r.BaseId ?? "";
-      const rateVal = r.rate ?? r.Rate;
-      let rateSeg = "";
-      if (rateVal !== null && rateVal !== undefined && rateVal !== "") {
-        const n = Number(rateVal);
-        rateSeg = Number.isFinite(n) ? String(n) : String(rateVal).trim();
-      }
-      return `${cmdId}|${baseId}|${rateSeg}`;
-    };
-
     const enrichedRows = tableRows.map((row, index) => {
       // Normalize id and foreign keys (handle both camelCase and PascalCase)
       const normalizedId = row?.id ?? row?.Id;
@@ -1555,18 +2049,49 @@ export default function RentalValueRate() {
       };
     });
 
+    if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
+      return enrichedRows.map((row) => ({
+        ...row,
+        isGroupRow: false,
+        isExpandedRow: false,
+      }));
+    }
+
+    const getGroupValue = (row, columnKey) => {
+      const raw = row?.[columnKey];
+      if (raw === null || raw === undefined || raw === "") return "-";
+      if (columnKey === "applicableDate" || columnKey === "deactiveDate") {
+        return formatDateDDMMMYYYY(raw) || "-";
+      }
+      if (columnKey === "status") return raw ? "Active" : "Inactive";
+      if (columnKey === "rate") {
+        const n = Number(raw);
+        return Number.isFinite(n) ? `${n.toLocaleString()}%` : String(raw);
+      }
+      return String(raw);
+    };
+
     const byKey = new Map();
     enrichedRows.forEach((r) => {
-      const k = groupKeyOf(r);
+      const groupValues = groupByColumns.map((columnKey) => getGroupValue(r, columnKey));
+      const k = groupValues.join(" || ");
       if (!byKey.has(k)) {
-        byKey.set(k, []);
+        const groupLabel = groupByColumns
+          .map((columnKey, idx) => {
+            const label =
+              RENTAL_VALUE_RATE_GROUPING_COLUMN_OPTIONS.find((opt) => opt.value === columnKey)
+                ?.label || columnKey;
+            return `${label}: ${groupValues[idx]}`;
+          })
+          .join(" | ");
+        byKey.set(k, { label: groupLabel, rows: [] });
       }
-      byKey.get(k).push(r);
+      byKey.get(k).rows.push(r);
     });
 
     const sortedKeys = Array.from(byKey.keys()).sort((ka, kb) => {
-      const a = byKey.get(ka)[0];
-      const b = byKey.get(kb)[0];
+      const a = byKey.get(ka).rows[0];
+      const b = byKey.get(kb).rows[0];
       const d = String(a.applicableDate || "").localeCompare(String(b.applicableDate || ""));
       if (d !== 0) return d;
       return String(a.cmdName || "").localeCompare(String(b.cmdName || ""));
@@ -1575,19 +2100,9 @@ export default function RentalValueRate() {
     const result = [];
     let topSno = 0;
     sortedKeys.forEach((gk) => {
-      const gRows = byKey.get(gk);
+      const group = byKey.get(gk);
+      const gRows = group.rows;
       const snoValue = (pageNumber - 1) * pageSize + ++topSno;
-
-      if (gRows.length === 1) {
-        const r = gRows[0];
-        result.push({
-          ...r,
-          sno: snoValue,
-          isGroupRow: false,
-          isExpandedRow: false,
-        });
-        return;
-      }
 
       const firstRow = gRows[0];
       const isExpanded = expandedGroups.has(gk);
@@ -1608,6 +2123,13 @@ export default function RentalValueRate() {
       });
       const classNamesJoined = Array.from(classNameSet).sort().join(", ");
 
+      const baseNameSet = new Set();
+      gRows.forEach((gr) => {
+        const n = gr.baseName || "";
+        if (n) baseNameSet.add(n);
+      });
+      const baseNamesJoined = Array.from(baseNameSet).sort().join(", ");
+
       let uniformGroupRate = null;
       const rateTokens = gRows.map((gr) => {
         const rv = gr.rate ?? gr.Rate;
@@ -1627,14 +2149,22 @@ export default function RentalValueRate() {
         ...firstRow,
         id: `group-${safeId}`,
         sno: snoValue,
-        className: classNamesJoined,
+        cmdName: groupByColumns.includes("cmdName") ? firstRow.cmdName : group.label,
+        baseName: groupByColumns.includes("baseName") ? firstRow.baseName : baseNamesJoined,
+        baseId: null,
+        BaseId: null,
+        className: groupByColumns.includes("className") ? firstRow.className : classNamesJoined,
         classId: null,
         ClassId: null,
-        rate: uniformGroupRate,
-        Rate: uniformGroupRate,
+        rate: groupByColumns.includes("rate") ? firstRow.rate : uniformGroupRate,
+        Rate: groupByColumns.includes("rate") ? firstRow.rate : uniformGroupRate,
+        description: groupByColumns.includes("description") ? firstRow.description : "",
+        applicableDate: groupByColumns.includes("applicableDate") ? firstRow.applicableDate : "",
+        deactiveDate: groupByColumns.includes("deactiveDate") ? firstRow.deactiveDate : "",
         isGroupRow: true,
         isExpandedRow: false,
         groupKey: gk,
+        groupLabel: group.label,
         groupRows: gRows,
         statuses: statusArray,
         status: statusArray.length === 1 ? statusArray[0] : statusArray,
@@ -1654,7 +2184,7 @@ export default function RentalValueRate() {
     });
 
     return result;
-  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups]);
+  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups, groupByColumns]);
 
   return (
     <DashboardLayout>
@@ -1691,27 +2221,34 @@ export default function RentalValueRate() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "78vh",
-                  minHeight: "560px",
+                  height: "88vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
                     minHeight: 0,
-                    overflow: "hidden",
+                    overflow: "auto",
                   },
                   "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
+                    tableLayout: "auto",
+                    width: "max-content",
+                    borderCollapse: "collapse",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "1.0rem !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "8px 10px !important",
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "8px 10px !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
@@ -1746,7 +2283,12 @@ export default function RentalValueRate() {
                     defaultValue: 20,
                     entries: [10, 25, 50, 100, 500, 1000],
                   }}
+                  page={pageNumber - 1}
                   pageSize={pageSize}
+                  onPageChange={(newPage) => {
+                    setPageNumber(newPage + 1);
+                    fetchRentalValueRates(newPage + 1, pageSize);
+                  }}
                   onEntriesPerPageChange={(value) => {
                     setPageSize(value);
                     setPageNumber(1);
@@ -1755,9 +2297,42 @@ export default function RentalValueRate() {
                   showTotalEntries={false}
                   noEndBorder
                   canSearch
+                  toolbarStart={
+                    <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
+                      <Autocomplete
+                        multiple
+                        size="small"
+                        options={RENTAL_VALUE_RATE_GROUPING_COLUMN_OPTIONS}
+                        disableCloseOnSelect
+                        value={RENTAL_VALUE_RATE_GROUPING_COLUMN_OPTIONS.filter((opt) =>
+                          groupByColumns.includes(opt.value)
+                        )}
+                        isOptionEqualToValue={(option, value) => option.value === value.value}
+                        getOptionLabel={(option) => option.label}
+                        onChange={(event, newValue) => {
+                          setGroupByColumns((newValue || []).map((item) => item.value));
+                        }}
+                        renderOption={(props, option, { selected }) => (
+                          <li {...props}>
+                            <Checkbox size="small" checked={selected} />
+                            {option.label}
+                          </li>
+                        )}
+                        renderInput={(params) => (
+                          <MDInput
+                            {...params}
+                            label="Group By Columns"
+                            placeholder="Select columns"
+                          />
+                        )}
+                      />
+                    </MDBox>
+                  }
                   autoResetFilters={false}
                   exportFileName="Rental-Value-Rate"
                   exportCellFormatter={exportCellFormatter}
+                  extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
+                  contentFitTable
                 />
 
                 {/* Server-side Pagination Footer */}

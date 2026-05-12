@@ -14,6 +14,9 @@ import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Popover from "@mui/material/Popover";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Menu from "@mui/material/Menu";
+import Divider from "@mui/material/Divider";
 import Autocomplete from "@mui/material/Autocomplete";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -34,31 +37,506 @@ import api, {
 import sharingFormulaApi from "services/api.sharingformula.service";
 import { format, parseISO, isValid } from "date-fns";
 
-/** Description column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
+const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
+  applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
+  deactiveDate: ["deactiveDate", "DeactiveDate"],
+};
+
+function parseConfigGridApplicationDateYyyyMmDd(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS[columnId] || [];
+  if ((raw === undefined || raw === null || String(raw).trim() === "") && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (v != null && String(v).trim() !== "") {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const s = String(raw).trim();
+  const isoHead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoHead) return isoHead[1];
+  try {
+    const parsed = parseISO(s);
+    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
+  } catch {
+    // ignore invalid parseISO
+  }
+  const ts = Date.parse(s);
+  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
+  return null;
+}
+
+function configGridApplicationDateCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowD = parseConfigGridApplicationDateYyyyMmDd(row, columnId);
+    if (!rowD) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") return Boolean(filterValue.date) && rowD > filterValue.date;
+    if (mode === "lt") return Boolean(filterValue.date) && rowD < filterValue.date;
+    if (mode === "between") {
+      const { dateFrom, dateTo } = filterValue;
+      if (!dateFrom || !dateTo) return false;
+      const start = dateFrom <= dateTo ? dateFrom : dateTo;
+      const end = dateFrom <= dateTo ? dateTo : dateFrom;
+      return rowD >= start && rowD <= end;
+    }
+    return true;
+  });
+}
+
+function ApplicationDateColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Date";
+  const modeLabelId = `config-application-date-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refDate, setRefDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefDate("");
+      setEndDate("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefDate(fv.dateFrom || "");
+      setEndDate(fv.dateTo || "");
+    } else {
+      setMode(fv.mode === "gt" || fv.mode === "lt" ? fv.mode : "none");
+      setRefDate(fv.date || "");
+      setEndDate("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lt") {
+      if (!refDate.trim()) return;
+      column.setFilter({ mode, date: refDate });
+    } else if (mode === "between") {
+      if (!refDate.trim() || !endDate.trim()) return;
+      const start = refDate <= endDate ? refDate : endDate;
+      const finish = refDate <= endDate ? endDate : refDate;
+      column.setFilter({ mode: "between", dateFrom: start, dateTo: finish });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefDate("");
+    setEndDate("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel} date`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No date filter</MenuItem>
+              <MenuItem value="gt">Greater than (after)</MenuItem>
+              <MenuItem value="lt">Less than (before)</MenuItem>
+              <MenuItem value="between">Date range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lt") && (
+            <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+              Reference date
+            </MDTypography>
+          )}
+          {(mode === "gt" || mode === "lt") && (
+            <input
+              type="date"
+              value={refDate}
+              onChange={(e) => setRefDate(e.target.value)}
+              style={inputSx}
+            />
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                From date
+              </MDTypography>
+              <input
+                type="date"
+                value={refDate}
+                onChange={(e) => setRefDate(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                To date
+              </MDTypography>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+ApplicationDateColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONFIG_GRID_FORMULA_MONEY_FALLBACK_KEYS = {
+  baseShare: ["baseShare", "baseRate", "BaseRate"],
+  commandShare: ["commandShare", "racRate", "RACRate"],
+  ahqShare: ["ahqShare", "ahqRate", "AHQRate"],
+};
+
+function normalizeSharingFormulaMoneyRawToNumber(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (s === "") return null;
+  const n = Number(s.replace(/,/g, "").replace(/%/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseSharingFormulaGridRowMoneyNumber(row, columnId) {
+  let raw = row?.values?.[columnId];
+  const o = row?.original;
+  const fallbacks = CONFIG_GRID_FORMULA_MONEY_FALLBACK_KEYS[columnId] || [];
+  const isMissing = (v) =>
+    v === undefined || v === null || (typeof v === "string" && v.trim() === "") || v === "";
+  if (isMissing(raw) && o && fallbacks.length) {
+    for (let i = 0; i < fallbacks.length; i += 1) {
+      const v = o[fallbacks[i]];
+      if (!isMissing(v)) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  return normalizeSharingFormulaMoneyRawToNumber(raw);
+}
+
+function sharingFormulaMoneyApproxEqual(a, b) {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1);
+  return Math.abs(a - b) <= 1e-6 * scale;
+}
+
+function sharingFormulaGridMoneyCompare(rowsToFilter, id, filterValue) {
+  if (!filterValue || filterValue.mode === "none") return rowsToFilter;
+  const columnId = Array.isArray(id) ? id[0] : id;
+  return rowsToFilter.filter((row) => {
+    const rowN = parseSharingFormulaGridRowMoneyNumber(row, columnId);
+    if (rowN === null) return false;
+    const { mode } = filterValue;
+    if (mode === "gt") {
+      const ref = normalizeSharingFormulaMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN > ref;
+    }
+    if (mode === "lte") {
+      const ref = normalizeSharingFormulaMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return rowN <= ref;
+    }
+    if (mode === "eq") {
+      const ref = normalizeSharingFormulaMoneyRawToNumber(filterValue.value);
+      if (ref === null) return false;
+      return sharingFormulaMoneyApproxEqual(rowN, ref);
+    }
+    if (mode === "between") {
+      const a = normalizeSharingFormulaMoneyRawToNumber(filterValue.valueFrom);
+      const b = normalizeSharingFormulaMoneyRawToNumber(filterValue.valueTo);
+      if (a === null || b === null) return false;
+      const low = Math.min(a, b);
+      const high = Math.max(a, b);
+      return rowN >= low && rowN <= high;
+    }
+    return true;
+  });
+}
+
+function SharingFormulaMoneyColumnFilter({ column }) {
+  const colLabel =
+    typeof column?.Header === "string" && column.Header.trim() ? column.Header.trim() : "Amount";
+  const modeLabelId = `sharing-formula-money-filter-mode-${column.id || "col"}`;
+
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [mode, setMode] = useState("none");
+  const [refAmt, setRefAmt] = useState("");
+  const [endAmt, setEndAmt] = useState("");
+  const open = Boolean(anchorEl);
+
+  useEffect(() => {
+    if (!open) return;
+    const fv = column.filterValue;
+    if (!fv || fv.mode === undefined || fv.mode === "none") {
+      setMode("none");
+      setRefAmt("");
+      setEndAmt("");
+      return;
+    }
+    if (fv.mode === "between") {
+      setMode("between");
+      setRefAmt(fv.valueFrom != null ? String(fv.valueFrom) : "");
+      setEndAmt(fv.valueTo != null ? String(fv.valueTo) : "");
+    } else {
+      setMode(["gt", "lte", "eq"].includes(fv.mode) ? fv.mode : "none");
+      setRefAmt(fv.value != null ? String(fv.value) : "");
+      setEndAmt("");
+    }
+  }, [open, column.filterValue]);
+
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+  };
+
+  const handleClose = (e) => {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    setAnchorEl(null);
+  };
+
+  const hasActiveFilter = Boolean(column.filterValue && column.filterValue.mode !== "none");
+
+  const commit = () => {
+    if (mode === "none") column.setFilter(undefined);
+    else if (mode === "gt" || mode === "lte" || mode === "eq") {
+      if (!String(refAmt).trim()) return;
+      column.setFilter({ mode, value: refAmt.trim() });
+    } else if (mode === "between") {
+      if (!String(refAmt).trim() || !String(endAmt).trim()) return;
+      column.setFilter({
+        mode: "between",
+        valueFrom: refAmt.trim(),
+        valueTo: endAmt.trim(),
+      });
+    }
+    handleClose();
+  };
+
+  const clearFilter = () => {
+    column.setFilter(undefined);
+    setMode("none");
+    setRefAmt("");
+    setEndAmt("");
+    handleClose();
+  };
+
+  const inputSx = { width: "100%", fontSize: "0.8125rem" };
+
+  return (
+    <>
+      <Tooltip title={`Filter by ${colLabel}`}>
+        <IconButton
+          size="small"
+          onClick={handleOpen}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          sx={{
+            fontSize: "10px",
+            padding: "0px",
+            minWidth: "14px",
+            minHeight: "14px",
+            color: hasActiveFilter ? "#1A73E8" : "#111111",
+          }}
+        >
+          <Icon fontSize="inherit">filter_alt</Icon>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        PaperProps={{ sx: { width: 300, px: 0.5 } }}
+        MenuListProps={{ dense: true, onClick: (ev) => ev.stopPropagation(), autoFocus: false }}
+      >
+        <MDBox px={1.5} pt={1.5} pb={1} onClick={(ev) => ev.stopPropagation()}>
+          <MDTypography variant="button" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+            {colLabel} filter
+          </MDTypography>
+          <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
+            <InputLabel id={modeLabelId}>Comparison</InputLabel>
+            <Select
+              labelId={modeLabelId}
+              label="Comparison"
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
+              <MenuItem value="none">No amount filter</MenuItem>
+              <MenuItem value="gt">Greater than</MenuItem>
+              <MenuItem value="lte">Less than or equal to</MenuItem>
+              <MenuItem value="eq">Equal to</MenuItem>
+              <MenuItem value="between">Price range</MenuItem>
+            </Select>
+          </FormControl>
+          {(mode === "gt" || mode === "lte" || mode === "eq") && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Reference amount
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          {mode === "between" && (
+            <>
+              <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                Lower bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={refAmt}
+                onChange={(e) => setRefAmt(e.target.value)}
+                style={inputSx}
+              />
+              <MDTypography variant="caption" color="text" display="block" sx={{ mt: 1, mb: 0.5 }}>
+                Upper bound
+              </MDTypography>
+              <input
+                type="number"
+                step="any"
+                inputMode="decimal"
+                value={endAmt}
+                onChange={(e) => setEndAmt(e.target.value)}
+                style={inputSx}
+              />
+            </>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+          <MDBox display="flex" justifyContent="flex-end" gap={1}>
+            <MDButton variant="outlined" color="secondary" size="small" onClick={clearFilter}>
+              Clear
+            </MDButton>
+            <MDButton variant="gradient" color="info" size="small" onClick={commit}>
+              Apply
+            </MDButton>
+          </MDBox>
+        </MDBox>
+      </Menu>
+    </>
+  );
+}
+
+SharingFormulaMoneyColumnFilter.propTypes = {
+  column: PropTypes.object.isRequired,
+};
+
+const CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES = Object.freeze({
+  applicationDateCompare: configGridApplicationDateCompare,
+  sharingFormulaMoneyCompare: sharingFormulaGridMoneyCompare,
+});
+
+/** Description column: first 30 characters; click … for full text in a popover. */
 function DescriptionTableCell({ value }) {
   const [anchor, setAnchor] = useState(null);
   const text = value != null && String(value).trim() !== "" ? String(value) : "-";
   const hasContent = text !== "-";
-  const showMore = hasContent && text.length > 20;
+  const showMore = hasContent && text.length > 30;
+  const displayText = showMore ? text.slice(0, 30) : text;
 
   return (
     <MDBox display="flex" alignItems="flex-start" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
-      <MDTypography
-        component="div"
-        variant="body2"
+      <MDBox
+        component="span"
         sx={{
           flex: 1,
           minWidth: 0,
-          display: "-webkit-box",
-          WebkitLineClamp: 1,
-          WebkitBoxOrient: "vertical",
           overflow: "hidden",
           wordBreak: "break-word",
-          lineHeight: 1.35,
+          fontSize: "0.875rem",
+          fontWeight: 400,
+          lineHeight: "inherit",
+          color: "#111111 !important",
         }}
       >
-        {hasContent ? text : "-"}
-      </MDTypography>
+        {hasContent ? displayText : "-"}
+      </MDBox>
       {showMore && (
         <>
           <MDBox
@@ -1043,7 +1521,6 @@ export default function SharingFormula() {
       Header: "Actions",
       accessor: "actions",
       align: "center",
-      width: "100px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1091,7 +1568,6 @@ export default function SharingFormula() {
       Header: "",
       accessor: "expand",
       align: "center",
-      width: "40px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1116,7 +1592,6 @@ export default function SharingFormula() {
       Header: "S.No",
       accessor: "sno",
       align: "center",
-      width: "60px",
       // eslint-disable-next-line react/prop-types
       Cell: ({ row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1128,18 +1603,24 @@ export default function SharingFormula() {
       },
     },
     {
+      id: "applicableDate",
       Header: "Application Date",
       accessor: "applicableDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => {
         return formatDateDDMMMYYYY(value);
       },
     },
     {
+      id: "deactiveDate",
       Header: "Deactive Date",
       accessor: "deactiveDate",
       align: "left",
+      filter: "applicationDateCompare",
+      Filter: ApplicationDateColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value }) => {
         return formatDateDDMMMYYYY(value) || "-";
@@ -1180,9 +1661,12 @@ export default function SharingFormula() {
       },
     },
     {
+      id: "baseShare",
       Header: "BaseRate",
       accessor: "baseShare",
       align: "right",
+      filter: "sharingFormulaMoneyCompare",
+      Filter: SharingFormulaMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1208,9 +1692,12 @@ export default function SharingFormula() {
       },
     },
     {
+      id: "commandShare",
       Header: "RACRate",
       accessor: "commandShare",
       align: "right",
+      filter: "sharingFormulaMoneyCompare",
+      Filter: SharingFormulaMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1236,9 +1723,12 @@ export default function SharingFormula() {
       },
     },
     {
+      id: "ahqShare",
       Header: "AHQRate",
       accessor: "ahqShare",
       align: "right",
+      filter: "sharingFormulaMoneyCompare",
+      Filter: SharingFormulaMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         // eslint-disable-next-line react/prop-types
@@ -1516,27 +2006,34 @@ export default function SharingFormula() {
                 sx={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
+                  height: "88vh",
+                  minHeight: "680px",
                   overflow: "hidden",
                   "& .MuiTableContainer-root": {
                     flex: "1 1 0",
                     minHeight: 0,
-                    overflow: "hidden",
+                    overflow: "auto",
                   },
                   "& .MuiTable-root": {
-                    tableLayout: "fixed",
-                    width: "100%",
+                    tableLayout: "auto",
+                    width: "max-content",
+                    borderCollapse: "collapse",
                   },
                   "& .MuiTable-root th": {
                     fontSize: "12px !important",
                     fontWeight: "700 !important",
-                    padding: "8px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #d0d0d0",
+                    whiteSpace: "nowrap",
                   },
                   "& .MuiTable-root td": {
-                    padding: "6px 8px !important",
+                    width: "auto !important",
+                    minWidth: "0 !important",
+                    padding: "1px 4px !important",
                     borderBottom: "1px solid #e0e0e0",
+                    whiteSpace: "nowrap",
                   },
                 }}
               >
@@ -1588,6 +2085,8 @@ export default function SharingFormula() {
                   pagination={{ variant: "gradient", color: "info" }}
                   exportFileName="Sharing-Formula"
                   exportCellFormatter={exportCellFormatter}
+                  extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
+                  contentFitTable
                 />
               </MDBox>
             </Card>
