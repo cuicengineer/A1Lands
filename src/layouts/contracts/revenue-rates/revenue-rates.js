@@ -2157,7 +2157,7 @@ export default function RevenueRates() {
                     autoHeight
                     entriesPerPage={{
                       defaultValue: 50,
-                      entries: [10, 25, 50, 100],
+                      entries: [10, 25, 50, 100, 500, 1000, 2000],
                     }}
                     page={0}
                     onPageChange={() => {}}

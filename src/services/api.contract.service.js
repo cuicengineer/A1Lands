@@ -34,6 +34,49 @@ function getAll(pageNumber = 1, pageSize = 50) {
   return requestWithPagination("GET", `/api/Contracts?${params}`);
 }
 
+/**
+ * GET /api/ContractInvoiceSchedule — optional query: contractNo, fromDate, toDate, cmdId, classId, baseId
+ */
+function getInvoiceSchedule(filters = {}) {
+  const params = new URLSearchParams();
+  const contractNo = filters.contractNo != null ? String(filters.contractNo).trim() : "";
+  if (contractNo) params.set("contractNo", contractNo);
+  if (filters.fromDate) params.set("fromDate", filters.fromDate);
+  if (filters.toDate) params.set("toDate", filters.toDate);
+  if (filters.cmdId != null && filters.cmdId !== "") {
+    params.set("cmdId", String(filters.cmdId));
+  }
+  if (filters.classId != null && filters.classId !== "") {
+    params.set("classId", String(filters.classId));
+  }
+  if (filters.baseId != null && filters.baseId !== "") {
+    params.set("baseId", String(filters.baseId));
+  }
+  const qs = params.toString();
+  return requestWithPagination("GET", `/api/ContractInvoiceSchedule${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * PUT /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}
+ */
+async function updateInvoiceSchedule(contractNo, invoiceNo, data) {
+  const actionBy = await getActionBy();
+  const payload = {
+    ...(data || {}),
+    Action: "Update",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  return requestWithPagination(
+    "PUT",
+    `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}`,
+    payload
+  );
+}
+
 // Get active contracts as of a specific date (yyyy-MM-dd) using the ActiveByAsOfDate endpoint
 function getActiveByAsOfDate(asOfDateYyyyMmDd) {
   const params = new URLSearchParams({
@@ -104,6 +147,8 @@ async function deleteContractRiseTerm(riseTermId) {
 
 const contractApi = {
   getAll,
+  getInvoiceSchedule,
+  updateInvoiceSchedule,
   getActiveByAsOfDate,
   list,
   searchByGrpName,

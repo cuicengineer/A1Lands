@@ -1042,7 +1042,7 @@ export default function Tenants() {
   const [tenantContracts, setTenantContracts] = useState([]);
   const [selectedTenantNo, setSelectedTenantNo] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
 
   const fetchTenants = async () => {
     try {

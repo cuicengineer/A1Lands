@@ -325,6 +325,11 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   const [quickAddError, setQuickAddError] = useState("");
   const [quickAddSubmitting, setQuickAddSubmitting] = useState(false);
   const canQuickAddRacBase = canCreateCurrentMenu();
+  const canEditRacUnitDropdownLabels = canEditCurrentMenu();
+  const [racUnitNameEdit, setRacUnitNameEdit] = useState(null);
+  const [racUnitNameEditDraft, setRacUnitNameEditDraft] = useState("");
+  const [racUnitNameEditError, setRacUnitNameEditError] = useState("");
+  const [racUnitNameEditSaving, setRacUnitNameEditSaving] = useState(false);
 
   const openingDateInputRef = useRef(null);
   const signatoryDateInputRef = useRef(null);
@@ -654,7 +659,13 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   }, []);
 
   useEffect(() => {
-    if (!open) closeQuickAdd();
+    if (!open) {
+      closeQuickAdd();
+      setRacUnitNameEdit(null);
+      setRacUnitNameEditDraft("");
+      setRacUnitNameEditError("");
+      setRacUnitNameEditSaving(false);
+    }
   }, [open, closeQuickAdd]);
 
   const refreshRacOptions = useCallback(async () => {
@@ -665,6 +676,81 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     setRacOptions(racArr);
     return racArr;
   }, []);
+
+  const refreshBaseOptionsAfterRacUnitRename = useCallback(async () => {
+    const rid = form.racId;
+    if (rid === "" || rid == null || rid === 0 || rid === "0") return;
+    const savedBaseId = toAccRacBaseId(form.baseId);
+    try {
+      const [raw, savedBaseRes] = await Promise.all([
+        api.list(ACC_RAC_BASES_ENTITY, { parentId: String(rid) }),
+        savedBaseId ? api.get(ACC_RAC_BASES_ENTITY, savedBaseId).catch(() => null) : null,
+      ]);
+      let arr = unwrapAccRacBasesList(raw)
+        .map(mapAccRacBasesRow)
+        .filter((o) => o.id && o.name);
+      const savedBaseOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedBaseRes), savedBaseId);
+      arr = mergeAccRacBaseOption(arr, savedBaseOption);
+      setBaseOptions(arr);
+    } catch (err) {
+      console.error("Bank form bases refresh:", err);
+    }
+  }, [form.racId, form.baseId]);
+
+  const closeRacUnitNameEdit = useCallback(() => {
+    if (racUnitNameEditSaving) return;
+    setRacUnitNameEdit(null);
+    setRacUnitNameEditDraft("");
+    setRacUnitNameEditError("");
+    setRacUnitNameEditSaving(false);
+  }, [racUnitNameEditSaving]);
+
+  const handleSaveRacUnitName = useCallback(async () => {
+    if (!racUnitNameEdit || !canEditRacUnitDropdownLabels) return;
+    const name = String(racUnitNameEditDraft ?? "").trim();
+    if (!name) {
+      setRacUnitNameEditError("Name is required");
+      return;
+    }
+    setRacUnitNameEditSaving(true);
+    setRacUnitNameEditError("");
+    try {
+      const existingRes = await api.get(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id);
+      const existing = unwrapAccRacBaseRow(existingRes);
+      if (!existing || !(existing.id ?? existing.Id)) {
+        throw new Error("Could not load record to update");
+      }
+      const type =
+        existing.Type ?? existing.type ?? (racUnitNameEdit.list === "rac" ? "RAC" : "Base");
+      const parentRaw = existing.ParentId ?? existing.parentId;
+      const existingTerm = String(existing.Term ?? existing.term ?? "").trim();
+      const term = existingTerm || name;
+      const payload = { Name: name, Term: term, Type: type };
+      if (String(type).toLowerCase() === "base" && parentRaw != null && parentRaw !== "") {
+        const pid = Number(parentRaw);
+        payload.ParentId = Number.isFinite(pid) ? pid : parentRaw;
+      }
+      await api.update(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id, payload);
+      if (racUnitNameEdit.list === "rac") {
+        await refreshRacOptions();
+      } else {
+        await refreshBaseOptionsAfterRacUnitRename();
+      }
+      setRacUnitNameEdit(null);
+      setRacUnitNameEditDraft("");
+      setRacUnitNameEditError("");
+    } catch (e) {
+      setRacUnitNameEditError(e?.message || "Update failed");
+    } finally {
+      setRacUnitNameEditSaving(false);
+    }
+  }, [
+    racUnitNameEdit,
+    racUnitNameEditDraft,
+    canEditRacUnitDropdownLabels,
+    refreshRacOptions,
+    refreshBaseOptionsAfterRacUnitRename,
+  ]);
 
   const handleQuickAddSubmit = useCallback(async () => {
     const name = String(quickAddName ?? "").trim();
@@ -893,8 +979,43 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       <em>None</em>
                     </MenuItem>
                     {racOptions.map((o) => (
-                      <MenuItem key={o.id} value={String(o.id)}>
-                        {o.name}
+                      <MenuItem
+                        key={o.id}
+                        value={String(o.id)}
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 0.5,
+                          pr: canEditRacUnitDropdownLabels ? 0.25 : undefined,
+                        }}
+                      >
+                        <Typography
+                          component="span"
+                          variant="body2"
+                          sx={{ flex: 1, minWidth: 0 }}
+                          noWrap
+                        >
+                          {o.name}
+                        </Typography>
+                        {canEditRacUnitDropdownLabels && (
+                          <IconButton
+                            size="small"
+                            edge="end"
+                            aria-label={`Edit RAC name: ${o.name}`}
+                            title="Edit name"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setRacUnitNameEdit({ list: "rac", id: String(o.id) });
+                              setRacUnitNameEditDraft(o.name);
+                              setRacUnitNameEditError("");
+                            }}
+                          >
+                            <Icon fontSize="small">edit</Icon>
+                          </IconButton>
+                        )}
                       </MenuItem>
                     ))}
                   </Select>
@@ -945,8 +1066,43 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       <em>None</em>
                     </MenuItem>
                     {baseOptions.map((o) => (
-                      <MenuItem key={o.id} value={String(o.id)}>
-                        {o.name}
+                      <MenuItem
+                        key={o.id}
+                        value={String(o.id)}
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 0.5,
+                          pr: canEditRacUnitDropdownLabels ? 0.25 : undefined,
+                        }}
+                      >
+                        <Typography
+                          component="span"
+                          variant="body2"
+                          sx={{ flex: 1, minWidth: 0 }}
+                          noWrap
+                        >
+                          {o.name}
+                        </Typography>
+                        {canEditRacUnitDropdownLabels && (
+                          <IconButton
+                            size="small"
+                            edge="end"
+                            aria-label={`Edit Unit name: ${o.name}`}
+                            title="Edit name"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setRacUnitNameEdit({ list: "base", id: String(o.id) });
+                              setRacUnitNameEditDraft(o.name);
+                              setRacUnitNameEditError("");
+                            }}
+                          >
+                            <Icon fontSize="small">edit</Icon>
+                          </IconButton>
+                        )}
                       </MenuItem>
                     ))}
                   </Select>
@@ -1593,6 +1749,57 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
           >
             <Icon>save</Icon>&nbsp;
             {isUploading ? "Uploading…" : submitting ? "Saving…" : "Save"}
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={racUnitNameEdit != null}
+        onClose={racUnitNameEditSaving ? undefined : closeRacUnitNameEdit}
+        fullWidth
+        maxWidth="xs"
+        scroll="paper"
+      >
+        <DialogTitle sx={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {racUnitNameEdit?.list === "base" ? "Edit Unit name" : "Edit RAC name"}
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            autoFocus
+            margin="dense"
+            label="Name"
+            value={racUnitNameEditDraft}
+            onChange={(e) => {
+              setRacUnitNameEditDraft(e.target.value);
+              if (racUnitNameEditError) setRacUnitNameEditError("");
+            }}
+            disabled={racUnitNameEditSaving}
+            size="small"
+            sx={{ ...textFieldSx, mt: 0.5 }}
+          />
+          {racUnitNameEditError ? (
+            <FormHelperText error sx={{ mx: 0 }}>
+              {racUnitNameEditError}
+            </FormHelperText>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={closeRacUnitNameEdit}
+            disabled={racUnitNameEditSaving}
+          >
+            Cancel
+          </MDButton>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleSaveRacUnitName}
+            disabled={racUnitNameEditSaving}
+          >
+            {racUnitNameEditSaving ? "Saving…" : "Save"}
           </MDButton>
         </DialogActions>
       </Dialog>

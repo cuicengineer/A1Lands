@@ -1303,7 +1303,7 @@ export default function SharingFormula() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
@@ -2066,7 +2066,7 @@ export default function SharingFormula() {
                   stickyToolbarAndHeader
                   entriesPerPage={{
                     defaultValue: 20,
-                    entries: [10, 25, 50, 100],
+                    entries: [10, 25, 50, 100, 200, 500, 1000],
                   }}
                   page={pageNumber - 1}
                   pageSize={pageSize}

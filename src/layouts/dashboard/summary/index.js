@@ -519,7 +519,7 @@ function SummaryOfA1Activities() {
                   {[
                     {
                       key: "total",
-                      label: "Total Lands",
+                      label: "Lands",
                       data: summaryData.total,
                       icon: "dashboard",
                       color: "info",

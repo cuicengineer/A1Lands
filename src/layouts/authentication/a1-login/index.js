@@ -124,17 +124,22 @@ function A1Login() {
               <div className="brand">
                 <img className="logo-symb" src={pafLogo} alt="PAF Logo" />
                 <div className="brand-text">
-                  <h2>A1 LMS</h2>
-                  <small>Land Activities Mgmt System</small>
+                  <h2>A1 LAND&#8217;s</h2>
+                  <small style={{ textAlign: "center", fontSize: "0.87em" }}>
+                    Activities Management System
+                  </small>
                 </div>
               </div>
 
               <div className="brand-text">
                 <h4>
-                  <p>Directorate of Central Non Public Fund</p>
+                  <p style={{ fontSize: "0.90em" }}>Directorate of Central Non Public Fund</p>
                 </h4>
                 <p>
-                  <h5> Audit & Accounts Sub Branch</h5>
+                  <h5 style={{ textAlign: "center", color: "black", fontSize: "0.83em" }}>
+                    {" "}
+                    Audit & Accounts Sub Branch
+                  </h5>
                 </p>{" "}
                 <br></br>
               </div>

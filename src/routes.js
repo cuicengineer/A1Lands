@@ -59,6 +59,7 @@ import DataConfig from "layouts/configuration/data-config";
 import RentalProperties from "layouts/configuration/rental-properties/rental-properties";
 import PropertyType from "layouts/configuration/property-type/property-type";
 import BanksList from "layouts/configuration/banks-list/banks-list";
+import LockDateConfig from "layouts/configuration/lock-date/lock-date";
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
@@ -223,6 +224,14 @@ const routes = [
         icon: <Icon fontSize="small">people</Icon>,
         route: "/configuration/tenants",
         component: <Tenants />,
+      },
+      {
+        type: "collapse",
+        name: "Lock Date",
+        key: "configuration-lock-date",
+        icon: <Icon fontSize="small">event_busy</Icon>,
+        route: "/configuration/lock-date",
+        component: <LockDateConfig />,
       },
       // {
       //   type: "collapse",

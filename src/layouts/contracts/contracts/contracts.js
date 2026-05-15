@@ -819,6 +819,38 @@ function ContractsForm({
           "Commercial Operation Date must be on or before Contract End Date";
       }
     }
+    const isNewContractForm = !initialData || isClone;
+    const hasRentInTermValidate = String(form.term || "")
+      .toLowerCase()
+      .includes("rent");
+    const needsProfitRate = form.term && String(form.term).trim().toLowerCase() !== "rent";
+
+    if (isNewContractForm) {
+      if (!form.term?.trim()) newErrors.term = "Term is required";
+      if (form.dpc == null || String(form.dpc).trim() === "") {
+        newErrors.dpc = "DPC per day is required";
+      }
+      if (needsProfitRate && (form.profitRate == null || String(form.profitRate).trim() === "")) {
+        newErrors.profitRate = "Profit Rate is required";
+      }
+      if (hasRentInTermValidate) {
+        if (!form.riseTermType?.trim()) {
+          newErrors.riseTermType = "Rise Terms is required";
+        } else if (form.riseTermType === "Variable") {
+          if (!riseTerms.length) {
+            newErrors.riseTerms = "At least one variable rise term is required";
+          }
+        } else {
+          if (!form.increaseRatePercent) {
+            newErrors.increaseRatePercent = "Increase Rate Percent is required";
+          }
+          if (form.riseTermType === "Uniform" && !form.increaseIntervalMonths) {
+            newErrors.increaseIntervalMonths = "Increase Interval Months is required";
+          }
+        }
+      }
+    }
+
     if (form.riseTermType === "Fixed Date") {
       if (!form.risedate?.trim()) {
         newErrors.risedate = "Rise Date is required";
@@ -2190,6 +2222,7 @@ function ContractsForm({
                   labelId="term-label"
                   value={form.term || ""}
                   label="Term"
+                  required
                   onChange={(e) => handleChange("term", e.target.value)}
                   disabled={lockTermAndRiseTermDropdowns}
                   sx={selectSx}
@@ -2207,9 +2240,10 @@ function ContractsForm({
                     Rent or Profit
                   </MenuItem>
                 </Select>
-                {lockTermAndRiseTermDropdowns && (
-                  <FormHelperText sx={{ mx: 0, mt: 0.5, lineHeight: 1.35 }}>
-                    Delete all Variable rise terms first to change Term or Rise Terms.
+                {(errors.term || lockTermAndRiseTermDropdowns) && (
+                  <FormHelperText error={!!errors.term} sx={{ mx: 0, mt: 0.5, lineHeight: 1.35 }}>
+                    {errors.term ||
+                      "Delete all Variable rise terms first to change Term or Rise Terms."}
                   </FormHelperText>
                 )}
               </FormControl>
@@ -2225,6 +2259,9 @@ function ContractsForm({
                   onChange={(e) => handleChange("profitRate", e.target.value)}
                   fullWidth
                   size="small"
+                  required
+                  error={!!errors.profitRate}
+                  helperText={errors.profitRate}
                   sx={inputSx}
                 />
               </Grid>
@@ -2256,6 +2293,11 @@ function ContractsForm({
                         Variable
                       </MenuItem>
                     </Select>
+                    {errors.riseTermType && (
+                      <FormHelperText error sx={{ mx: 0 }}>
+                        {errors.riseTermType}
+                      </FormHelperText>
+                    )}
                   </FormControl>
                 </Grid>
                 {form.riseTermType === "Variable" && (
@@ -2277,6 +2319,9 @@ function ContractsForm({
                         }
                         fullWidth
                         size="small"
+                        required
+                        error={!!errors.riseTerms}
+                        helperText={errors.riseTerms}
                         InputProps={{ readOnly: true }}
                         sx={{
                           ...inputSx,
@@ -2298,13 +2343,16 @@ function ContractsForm({
                       onChange={(e) => handleChange("increaseRatePercent", e.target.value)}
                       fullWidth
                       size="small"
+                      required
+                      error={!!errors.increaseRatePercent}
+                      helperText={errors.increaseRatePercent}
                       sx={inputSx}
                     />
                   </Grid>
                 )}
                 {form.riseTermType !== "Variable" && form.riseTermType !== "Fixed Date" && (
                   <Grid item xs={12} sm={6} md={4}>
-                    <FormControl size="small" fullWidth>
+                    <FormControl size="small" fullWidth error={!!errors.increaseIntervalMonths}>
                       <InputLabel id="increase-interval-label" sx={labelSx}>
                         Increase Interval Months
                       </InputLabel>
@@ -2312,6 +2360,7 @@ function ContractsForm({
                         labelId="increase-interval-label"
                         value={form.increaseIntervalMonths || ""}
                         label="Increase Interval Months"
+                        required
                         onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
                         sx={selectSx}
                       >
@@ -2321,6 +2370,11 @@ function ContractsForm({
                           </MenuItem>
                         ))}
                       </Select>
+                      {errors.increaseIntervalMonths && (
+                        <FormHelperText error sx={{ mx: 0 }}>
+                          {errors.increaseIntervalMonths}
+                        </FormHelperText>
+                      )}
                     </FormControl>
                   </Grid>
                 )}
@@ -2387,6 +2441,9 @@ function ContractsForm({
                 onChange={(e) => handleChange("dpc", e.target.value)}
                 fullWidth
                 size="small"
+                required
+                error={!!errors.dpc}
+                helperText={errors.dpc}
                 inputProps={{ step: "0.01", min: 0 }}
                 sx={inputSx}
               />
@@ -5821,7 +5878,7 @@ export default function Contracts() {
     if (key === "partial" || key === "partial paid")
       return { bg: "#fff3cd", fg: "#856404", outline: "#ffe69c" };
     if (key === "unpaid") return { bg: "#ef6c00", fg: "#ffffff", outline: "#e65100" }; // orange
-    if (key === "overpaid") return { bg: "#c62828", fg: "#ffffff", outline: "#b71c1c" }; // red
+    if (key === "overpaid") return { bg: "#f8d7da", fg: "#721c24", outline: "#f5c6cb" }; // light red (Unviable-style)
     return null;
   };
 
@@ -6287,7 +6344,11 @@ export default function Contracts() {
       const hasPayloadValue = fromPayload === "viable" || fromPayload === "unviable";
       const govt = Number(row.GovtShare ?? row.govtShare ?? 0);
       const initialRentPAValue = Number(row.InitialRentPA ?? row.initialRentPA ?? 0);
-      const paf = Math.max(0, Math.round(initialRentPAValue - govt));
+      const mergedPafFromAsOf = row.PAFShare ?? row.pafShare;
+      const pafFromAsOfNum = Number(mergedPafFromAsOf);
+      const paf = Number.isFinite(pafFromAsOfNum)
+        ? pafFromAsOfNum
+        : Math.max(0, Math.round(initialRentPAValue - govt));
       const feasibleValue = hasPayloadValue
         ? fromPayload === "viable"
           ? "Viable"
@@ -6335,13 +6396,7 @@ export default function Contracts() {
           row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? "",
         rentalValue: row.RentalValue ?? row.rentalValue,
         govtShare: row.GovtShare ?? row.govtShare,
-        pafShare: Math.max(
-          0,
-          Math.round(
-            Number(row.InitialRentPA ?? row.initialRentPA ?? 0) -
-              Number(row.GovtShare ?? row.govtShare ?? 0)
-          )
-        ),
+        pafShare: paf,
         ahqShare: row.AHQShare ?? row.ahqShare,
         racShare: row.RACShare ?? row.racShare,
         baseShare: row.BaseShare ?? row.baseShare,

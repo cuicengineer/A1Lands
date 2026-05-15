@@ -25,7 +25,7 @@ function UserRole() {
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
   const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(5);
+  const [pageSize, setPageSize] = useState(15);
   const canMutateRoles = isSuperuserUser();
   const canCreate = canMutateRoles;
   const canEdit = canMutateRoles;

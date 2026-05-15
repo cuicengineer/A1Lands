@@ -154,6 +154,7 @@ const STATUS_ACTIVE_KEY = 1;
 const STATUS_INACTIVE_KEY = 0;
 
 function isStatusColumn(column) {
+  if (column?.skipStatusNormalization) return false;
   const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
   const accessor = typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
   const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";

@@ -66,7 +66,7 @@ function UserMgmt() {
   const [errors, setErrors] = useState({});
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(50);
   const [isRightsModalOpen, setIsRightsModalOpen] = useState(false);
   const [rightsUserId, setRightsUserId] = useState(null);
   const [rightsUserName, setRightsUserName] = useState("");
