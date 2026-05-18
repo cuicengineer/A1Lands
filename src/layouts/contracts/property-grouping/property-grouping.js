@@ -3540,66 +3540,20 @@ export default function PropertyGrouping() {
                   />
                 </MDBox>
 
-                {/* Custom Pagination Footer */}
-                {totalCount > 0 && (
-                  <MDBox
-                    display="flex"
-                    flexDirection={{ xs: "column", sm: "row" }}
-                    justifyContent="flex-start"
-                    alignItems={{ xs: "flex-start", sm: "center" }}
-                    p={3}
-                    gap={2}
-                  >
-                    <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-                      <MDTypography variant="button" color="secondary" fontWeight="regular">
-                        {visibleRowCount} of {totalCount} entries
-                      </MDTypography>
-                      {Math.ceil(totalCount / pageSize) > 1 && (
-                        <MDPagination variant="gradient" color="info">
-                          {pageNumber > 1 && (
-                            <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                              <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                            </MDPagination>
-                          )}
-                          {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                            .filter((page) => {
-                              const totalPages = Math.ceil(totalCount / pageSize);
-                              return (
-                                page === 1 ||
-                                page === totalPages ||
-                                (page >= pageNumber - 2 && page <= pageNumber + 2)
-                              );
-                            })
-                            .map((page, index, array) => {
-                              const prevPage = array[index - 1];
-                              const showEllipsis = prevPage && page - prevPage > 1;
-                              return (
-                                <React.Fragment key={page}>
-                                  {showEllipsis && (
-                                    <MDPagination item disabled>
-                                      <Icon>more_horiz</Icon>
-                                    </MDPagination>
-                                  )}
-                                  <MDPagination
-                                    item
-                                    onClick={() => setPageNumber(page)}
-                                    active={page === pageNumber}
-                                  >
-                                    {page}
-                                  </MDPagination>
-                                </React.Fragment>
-                              );
-                            })}
-                          {pageNumber < Math.ceil(totalCount / pageSize) && (
-                            <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                              <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                            </MDPagination>
-                          )}
-                        </MDPagination>
-                      )}
-                    </MDBox>
-                  </MDBox>
-                )}
+                {/* Entries count footer (server-side total; no page controls) */}
+                <MDBox
+                  display="flex"
+                  alignItems="center"
+                  px={2}
+                  py={1.5}
+                  sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
+                >
+                  <MDTypography variant="button" color="secondary" fontWeight="regular">
+                    {totalCount === 0
+                      ? "0 of 0 entries"
+                      : `${visibleRowCount} of ${totalCount} entries`}
+                  </MDTypography>
+                </MDBox>
               </MDBox>
             </Card>
           </Grid>

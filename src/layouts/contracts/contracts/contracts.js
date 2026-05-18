@@ -5381,8 +5381,8 @@ export default function Contracts() {
                 }
               : normalizedState === "terminated"
               ? {
-                  backgroundColor: "#FF0000",
-                  color: "#ffffff",
+                  backgroundColor: "#f8d7da",
+                  color: "#842029",
                 }
               : normalizedState === "expiring"
               ? {
@@ -6175,7 +6175,7 @@ export default function Contracts() {
     }),
     makeContractGridColumn({
       id: "ahqShare",
-      Header: "AHQShare",
+      Header: "AHQ Share",
       keys: ["AHQShare", "ahqShare"],
       align: "right",
       type: "number",
@@ -6183,7 +6183,7 @@ export default function Contracts() {
     }),
     makeContractGridColumn({
       id: "racShare",
-      Header: "RACShare",
+      Header: "RAC Share",
       keys: ["RACShare", "racShare"],
       align: "right",
       type: "number",
@@ -6191,7 +6191,7 @@ export default function Contracts() {
     }),
     makeContractGridColumn({
       id: "baseShare",
-      Header: "BaseShare",
+      Header: "Base Share",
       keys: ["BaseShare", "baseShare"],
       align: "right",
       type: "number",

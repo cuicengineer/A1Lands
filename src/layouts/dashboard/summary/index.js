@@ -51,6 +51,56 @@ function readTotalProperties(row) {
   return null;
 }
 
+/** Read area from PropertySummary row (PascalCase / camelCase). */
+function readPropertySummaryArea(row) {
+  if (!row || typeof row !== "object") return null;
+  const keys = ["Area", "area", "TotalArea", "totalArea"];
+  for (const k of keys) {
+    if (row[k] === undefined || row[k] === null || row[k] === "") continue;
+    const n = Number(row[k]);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** Read unit of measure from PropertySummary row. */
+function readPropertySummaryUom(row) {
+  if (!row || typeof row !== "object") return "";
+  const keys = [
+    "UoM",
+    "uom",
+    "UOM",
+    "Uom",
+    "UnitName",
+    "unitName",
+    "UnitOfMeasure",
+    "unitOfMeasure",
+  ];
+  for (const k of keys) {
+    const v = row[k];
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function formatPropertySummaryAreaValue(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value ?? "");
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+/** e.g. "123 (Marla), 1,298 (Acre)" */
+function formatAreasByUomLine(areasByUom) {
+  if (!areasByUom || typeof areasByUom !== "object") return "";
+  const parts = Object.entries(areasByUom)
+    .filter(([, area]) => Number.isFinite(area))
+    .sort(([uomA], [uomB]) => uomA.localeCompare(uomB))
+    .map(([uom, area]) => `${formatPropertySummaryAreaValue(area)} (${uom})`);
+  return parts.join(", ");
+}
+
 /** Read revenue-in-millions from varied naming (PascalCase, camelCase, ASP.NET defaults). */
 function readTotalRevenueMillion(row) {
   if (!row || typeof row !== "object") return null;
@@ -365,9 +415,15 @@ function buildSummaryDataFromPropertyRows(rows) {
 
     const cid = Number(r.ClassId ?? r.classId);
     if (!Number.isFinite(cid)) continue;
-    if (!byClassId[cid]) byClassId[cid] = { value: 0, amount: 0 };
+    if (!byClassId[cid]) byClassId[cid] = { value: 0, amount: 0, areasByUom: {} };
     if (Number.isFinite(pc)) byClassId[cid].value += pc;
     if (Number.isFinite(cr)) byClassId[cid].amount += cr;
+
+    const areaVal = readPropertySummaryArea(r);
+    if (Number.isFinite(areaVal)) {
+      const uomLabel = readPropertySummaryUom(r) || "—";
+      byClassId[cid].areasByUom[uomLabel] = (byClassId[cid].areasByUom[uomLabel] || 0) + areaVal;
+    }
   }
 
   const out = {
@@ -390,6 +446,7 @@ function buildSummaryDataFromPropertyRows(rows) {
       out[stickerKey] = {
         value: agg.value,
         amount: agg.amount,
+        areaLine: formatAreasByUomLine(agg.areasByUom),
       };
     }
   }
@@ -553,22 +610,61 @@ function SummaryOfA1Activities() {
                       color: "error",
                     },
                     { key: "hb", label: "HB", data: summaryData.hb, icon: "home", color: "dark" },
-                  ].map((item) => (
-                    <Grid item xs={12} sm={6} md={2} key={item.key}>
-                      <MDBox mb={1.5}>
-                        <ComplexStatisticsCard
-                          color={item.color}
-                          icon={item.icon}
-                          title={item.label}
-                          count={item.data.value}
-                          percentage={{
-                            color: "info",
-                            amount: `Worth: ${item.data.amount.toFixed(2)} Mil`,
-                          }}
-                        />
-                      </MDBox>
-                    </Grid>
-                  ))}
+                  ].map((item) => {
+                    const showAreaLine = item.key !== "total" && Boolean(item.data.areaLine);
+                    return (
+                      <Grid item xs={12} sm={6} md={2} key={item.key}>
+                        <MDBox mb={1.5}>
+                          <ComplexStatisticsCard
+                            color={item.color}
+                            icon={item.icon}
+                            title={item.label}
+                            count={
+                              showAreaLine ? (
+                                <MDBox
+                                  component="span"
+                                  display="flex"
+                                  flexDirection="column"
+                                  alignItems="flex-end"
+                                  lineHeight={1.2}
+                                >
+                                  <MDTypography
+                                    component="span"
+                                    variant="h4"
+                                    sx={{
+                                      color: darkMode ? "#ffffff !important" : "inherit",
+                                    }}
+                                  >
+                                    {item.data.value}
+                                  </MDTypography>
+                                  <MDTypography
+                                    component="span"
+                                    variant="caption"
+                                    sx={{
+                                      color: darkMode ? "#ffffff !important" : "#7b809a",
+                                      fontSize: "0.65rem",
+                                      fontWeight: 500,
+                                      mt: 0.25,
+                                      textAlign: "right",
+                                      lineHeight: 1.25,
+                                    }}
+                                  >
+                                    Area: {item.data.areaLine}
+                                  </MDTypography>
+                                </MDBox>
+                              ) : (
+                                item.data.value
+                              )
+                            }
+                            percentage={{
+                              color: "info",
+                              amount: `Worth: ${item.data.amount.toFixed(2)} Mil`,
+                            }}
+                          />
+                        </MDBox>
+                      </Grid>
+                    );
+                  })}
                 </Grid>
               )}
             </Grid>

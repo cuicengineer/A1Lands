@@ -57,6 +57,82 @@ function getInvoiceSchedule(filters = {}) {
 }
 
 /**
+ * GET /api/ContractInvoiceSchedule/by-invoice/{invoiceNo}
+ */
+function getInvoiceScheduleByInvoiceNo(invoiceNo) {
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  return requestWithPagination(
+    "GET",
+    `/api/ContractInvoiceSchedule/by-invoice/${encodedInvoiceNo}`
+  );
+}
+
+/**
+ * POST /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}/{subInvoiceNo}
+ */
+async function createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, data) {
+  const actionBy = await getActionBy();
+  const payload = {
+    ...(data || {}),
+    Action: "Create",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  const encodedSubInvoiceNo = encodeURIComponent(String(subInvoiceNo ?? "").trim());
+  return requestWithPagination(
+    "POST",
+    `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}/${encodedSubInvoiceNo}`,
+    payload
+  );
+}
+
+/**
+ * PUT /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}/{subInvoiceNo}
+ */
+async function updateInvoiceScheduleSub(contractNo, invoiceNo, subInvoiceNo, data) {
+  const actionBy = await getActionBy();
+  const payload = {
+    ...(data || {}),
+    Action: "Update",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  const encodedSubInvoiceNo = encodeURIComponent(String(subInvoiceNo ?? "").trim());
+  return requestWithPagination(
+    "PUT",
+    `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}/${encodedSubInvoiceNo}`,
+    payload
+  );
+}
+
+/**
+ * DELETE /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}/{subInvoiceNo}
+ */
+async function deleteInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo) {
+  const actionBy = await getActionBy();
+  const payload = {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: true,
+  };
+  const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  const encodedSubInvoiceNo = encodeURIComponent(String(subInvoiceNo ?? "").trim());
+  return requestWithPagination(
+    "DELETE",
+    `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}/${encodedSubInvoiceNo}`,
+    payload
+  );
+}
+
+/**
  * PUT /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}
  */
 async function updateInvoiceSchedule(contractNo, invoiceNo, data) {
@@ -148,6 +224,10 @@ async function deleteContractRiseTerm(riseTermId) {
 const contractApi = {
   getAll,
   getInvoiceSchedule,
+  getInvoiceScheduleByInvoiceNo,
+  createInvoiceSchedule,
+  updateInvoiceScheduleSub,
+  deleteInvoiceSchedule,
   updateInvoiceSchedule,
   getActiveByAsOfDate,
   list,

@@ -5,7 +5,6 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
-import MDPagination from "components/MDPagination";
 import CurrencyLoading from "components/CurrencyLoading";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -941,68 +940,20 @@ function RentalProperties() {
               />
             </MDBox>
 
-            {/* Server-side Pagination Footer */}
-            {totalCount > 0 && (
-              <MDBox
-                display="flex"
-                flexDirection={{ xs: "column", sm: "row" }}
-                justifyContent="flex-start"
-                alignItems={{ xs: "flex-start", sm: "center" }}
-                p={3}
-                gap={2}
-              >
-                <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-                  <MDTypography variant="button" color="secondary" fontWeight="regular">
-                    {visibleRowCount} of {totalCount} entries
-                  </MDTypography>
-                  {Math.ceil(totalCount / pageSize) > 1 && (
-                    <MDPagination variant="gradient" color="info">
-                      {pageNumber > 1 && (
-                        <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                          <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                        </MDPagination>
-                      )}
-
-                      {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                        .filter((p) => {
-                          const totalPages = Math.ceil(totalCount / pageSize);
-                          return (
-                            p === 1 ||
-                            p === totalPages ||
-                            (p >= pageNumber - 2 && p <= pageNumber + 2)
-                          );
-                        })
-                        .map((p, idx, arr) => {
-                          const prev = arr[idx - 1];
-                          const showEllipsis = prev && p - prev > 1;
-                          return (
-                            <>
-                              {showEllipsis && (
-                                <MDPagination item disabled>
-                                  <Icon>more_horiz</Icon>
-                                </MDPagination>
-                              )}
-                              <MDPagination
-                                item
-                                onClick={() => setPageNumber(p)}
-                                active={p === pageNumber}
-                              >
-                                {p}
-                              </MDPagination>
-                            </>
-                          );
-                        })}
-
-                      {pageNumber < Math.ceil(totalCount / pageSize) && (
-                        <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                          <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                        </MDPagination>
-                      )}
-                    </MDPagination>
-                  )}
-                </MDBox>
-              </MDBox>
-            )}
+            {/* Entries count footer (server-side total; no page controls) */}
+            <MDBox
+              display="flex"
+              alignItems="center"
+              px={2}
+              py={1.5}
+              sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
+            >
+              <MDTypography variant="button" color="secondary" fontWeight="regular">
+                {totalCount === 0
+                  ? "0 of 0 entries"
+                  : `${visibleRowCount} of ${totalCount} entries`}
+              </MDTypography>
+            </MDBox>
           </MDBox>
         </Card>
       </MDBox>

@@ -14,7 +14,6 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import MDPagination from "components/MDPagination";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
@@ -2178,74 +2177,23 @@ export default function RevenueRates() {
                   />
                 </MDBox>
 
-                {/* Server-side Pagination Footer */}
+                {/* Entries count footer (server-side total; no page controls) */}
                 <MDBox
                   display="flex"
-                  flexDirection={{ xs: "column", sm: "row" }}
-                  justifyContent="flex-start"
-                  alignItems={{ xs: "flex-start", sm: "center" }}
-                  p={3}
-                  gap={2}
+                  alignItems="center"
+                  px={2}
+                  py={1.5}
+                  sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
                 >
-                  <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-                    <MDTypography variant="button" color="secondary" fontWeight="regular">
-                      {(() => {
-                        const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                        const displayVisible = displayTotal === 0 ? 0 : visibleRowCount;
-                        return displayTotal === 0
-                          ? "0 of 0 entries"
-                          : `${displayVisible} of ${displayTotal} entries`;
-                      })()}
-                    </MDTypography>
+                  <MDTypography variant="button" color="secondary" fontWeight="regular">
                     {(() => {
                       const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                      return displayTotal > 0 && Math.ceil(displayTotal / pageSize) > 1;
-                    })() && (
-                      <MDPagination variant="gradient" color="info">
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                          </MDPagination>
-                        )}
-
-                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                          .filter((page) => {
-                            const totalPages = Math.ceil(totalCount / pageSize);
-                            return (
-                              page === 1 ||
-                              page === totalPages ||
-                              (page >= pageNumber - 2 && page <= pageNumber + 2)
-                            );
-                          })
-                          .map((page, index, array) => {
-                            const prevPage = array[index - 1];
-                            const showEllipsis = prevPage && page - prevPage > 1;
-                            return (
-                              <React.Fragment key={page}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    ...
-                                  </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  active={page === pageNumber}
-                                  onClick={() => setPageNumber(page)}
-                                >
-                                  {page}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
-
-                        {pageNumber < Math.ceil(totalCount / pageSize) && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
-                  </MDBox>
+                      const displayVisible = displayTotal === 0 ? 0 : visibleRowCount;
+                      return displayTotal === 0
+                        ? "0 of 0 entries"
+                        : `${displayVisible} of ${displayTotal} entries`;
+                    })()}
+                  </MDTypography>
                 </MDBox>
               </MDBox>
             </Card>

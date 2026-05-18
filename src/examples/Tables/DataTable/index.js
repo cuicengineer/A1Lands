@@ -427,6 +427,10 @@ function DataTable({
   toolbarStart,
   /** Optional extra react-table filter types merged with defaults (column.filter must reference a key). */
   extraFilterTypes,
+  /** Override entries label (e.g. server-side "12 of 500 entries"). Used when showTotalEntries is true. */
+  totalEntriesText,
+  /** Extra footer content beside entries (e.g. server-side pagination controls). */
+  paginationFooter,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -1563,52 +1567,60 @@ function DataTable({
         </Table>
       )}
 
-      <MDBox
-        display="flex"
-        flexDirection={{ xs: "column", sm: "row" }}
-        justifyContent="flex-start"
-        alignItems={{ xs: "flex-start", sm: "center" }}
-        p={!showTotalEntries && pageOptions.length === 1 ? 0 : 3}
-        gap={2}
-      >
-        {showTotalEntries && (
-          <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-            <MDTypography variant="button" color="secondary" fontWeight="regular">
-              {rows.length === 0
-                ? "0 of 0 entries"
-                : `${Math.min(entriesEnd, rows.length)} of ${rows.length} entries`}
-            </MDTypography>
-            {pageOptions.length > 1 && (
-              <MDPagination
-                variant={pagination.variant ? pagination.variant : "gradient"}
-                color={pagination.color ? pagination.color : "info"}
-              >
-                {canPreviousPage && (
-                  <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
-                    <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                  </MDPagination>
-                )}
-                {renderPagination.length > 6 ? (
-                  <MDBox width="5rem" mx={1}>
-                    <MDInput
-                      inputProps={{ type: "number", min: 1, max: customizedPageOptions.length }}
-                      value={customizedPageOptions[pageIndex]}
-                      onChange={(handleInputPagination, handleInputPaginationValue)}
-                    />
-                  </MDBox>
-                ) : (
-                  renderPagination
-                )}
-                {canNextPage && (
-                  <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
-                    <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                  </MDPagination>
-                )}
-              </MDPagination>
+      {(showTotalEntries || paginationFooter) && (
+        <MDBox
+          display="flex"
+          flexDirection={{ xs: "column", sm: "row" }}
+          justifyContent="flex-start"
+          alignItems={{ xs: "flex-start", sm: "center" }}
+          p={3}
+          gap={2}
+          sx={{ flexShrink: 0 }}
+        >
+          <MDBox display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            {showTotalEntries && (
+              <MDTypography variant="button" color="secondary" fontWeight="regular">
+                {totalEntriesText ??
+                  (rows.length === 0
+                    ? "0 of 0 entries"
+                    : `${Math.min(entriesEnd, rows.length)} of ${rows.length} entries`)}
+              </MDTypography>
             )}
+            {paginationFooter}
+            {showTotalEntries &&
+              !totalEntriesText &&
+              !paginationFooter &&
+              pageOptions.length > 1 && (
+                <MDPagination
+                  variant={pagination.variant ? pagination.variant : "gradient"}
+                  color={pagination.color ? pagination.color : "info"}
+                >
+                  {canPreviousPage && (
+                    <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
+                      <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
+                    </MDPagination>
+                  )}
+                  {renderPagination.length > 6 ? (
+                    <MDBox width="5rem" mx={1}>
+                      <MDInput
+                        inputProps={{ type: "number", min: 1, max: customizedPageOptions.length }}
+                        value={customizedPageOptions[pageIndex]}
+                        onChange={(handleInputPagination, handleInputPaginationValue)}
+                      />
+                    </MDBox>
+                  ) : (
+                    renderPagination
+                  )}
+                  {canNextPage && (
+                    <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
+                      <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
+                    </MDPagination>
+                  )}
+                </MDPagination>
+              )}
           </MDBox>
-        )}
-      </MDBox>
+        </MDBox>
+      )}
     </TableContainer>
   );
 }
@@ -1630,6 +1642,8 @@ DataTable.defaultProps = {
   autoResetFilters: true,
   toolbarStart: null,
   extraFilterTypes: null,
+  totalEntriesText: undefined,
+  paginationFooter: null,
 };
 
 // Typechecking props for the DataTable
@@ -1643,6 +1657,8 @@ DataTable.propTypes = {
   ]),
   canSearch: PropTypes.bool,
   showTotalEntries: PropTypes.bool,
+  totalEntriesText: PropTypes.string,
+  paginationFooter: PropTypes.node,
   table: PropTypes.objectOf(PropTypes.array).isRequired,
   pagination: PropTypes.shape({
     variant: PropTypes.oneOf(["contained", "gradient"]),

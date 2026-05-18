@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Dialog from "@mui/material/Dialog";
@@ -10,6 +10,8 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import Menu from "@mui/material/Menu";
 import Divider from "@mui/material/Divider";
+import TableContainer from "@mui/material/TableContainer";
+import CircularProgress from "@mui/material/CircularProgress";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -22,12 +24,13 @@ import Autocomplete from "@mui/material/Autocomplete";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
+import CurrencyLoading from "components/CurrencyLoading";
 import PropTypes from "prop-types";
 import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
-import { format, parseISO, isValid } from "date-fns";
+import { format, parseISO, isValid, addDays, addMonths } from "date-fns";
 
 const AGREEMENT_PROV_GRID_DATE_FALLBACK_KEYS = {
   contractStartDate: ["contractStartDate", "ContractStartDate"],
@@ -292,6 +295,268 @@ function unwrapContractInvoiceScheduleList(res) {
   return [];
 }
 
+const EDIT_INVOICE_LINES_TABLE_COLUMNS = [
+  { label: "Sub Invoice", pascal: "SubInvoiceNo", camel: "subInvoiceNo", align: "left" },
+  { label: "Invoice Rate", pascal: "TotalRent", camel: "totalRent", numeric: true, align: "right" },
+  { label: "Due Date", pascal: "DueDate", camel: "dueDate", date: true, align: "left" },
+  {
+    label: "Rate PM",
+    pascal: "CalculatedRentPM",
+    camel: "calculatedRentPM",
+    numeric: true,
+    align: "right",
+  },
+];
+
+const INVOICE_LINES_GRID_COLUMNS =
+  "minmax(80px, 0.95fr) minmax(96px, 1.1fr) minmax(104px, 1fr) minmax(80px, 0.9fr) 76px";
+
+const INVOICE_LINES_GRID_COLUMNS_READONLY =
+  "minmax(80px, 0.95fr) minmax(96px, 1.1fr) minmax(104px, 1fr) minmax(80px, 0.9fr)";
+
+function isMainInvoiceScheduleRow(lineRow) {
+  if (!lineRow) return false;
+  const sub = pickScheduleRowField(lineRow, "SubInvoiceNo", "subInvoiceNo");
+  if (sub === null || sub === undefined) return true;
+  return String(sub).trim() === "";
+}
+
+function findMainInvoiceScheduleRow(lines) {
+  if (!Array.isArray(lines)) return null;
+  return lines.find(isMainInvoiceScheduleRow) || null;
+}
+
+function applyInvoiceLinesToForm(parentRow, lines, prevForm = {}) {
+  const mainRow = findMainInvoiceScheduleRow(lines);
+  const sourceRow = mainRow || parentRow || {};
+  const fromSource = buildAgreementProvEditForm(sourceRow);
+
+  return {
+    ...fromSource,
+    ...prevForm,
+    contractNo:
+      prevForm.contractNo ||
+      fromSource.contractNo ||
+      String(pickScheduleRowField(sourceRow, "ContractNo", "contractNo") || ""),
+    invoiceNo:
+      prevForm.invoiceNo ||
+      fromSource.invoiceNo ||
+      String(pickScheduleRowField(sourceRow, "InvoiceNo", "invoiceNo") || ""),
+  };
+}
+
+function AgreementProvInvoiceLinesGrid({
+  rows,
+  loading,
+  error,
+  lineActionSaving,
+  saving,
+  form,
+  rowData,
+  onEditLine,
+  onDeleteLine,
+  readOnly,
+}) {
+  const gridRowSx = {
+    display: "grid",
+    gridTemplateColumns: readOnly
+      ? INVOICE_LINES_GRID_COLUMNS_READONLY
+      : INVOICE_LINES_GRID_COLUMNS,
+    width: "100%",
+    alignItems: "center",
+    columnGap: 0,
+  };
+
+  const cellBaseSx = {
+    fontSize: "0.8125rem",
+    lineHeight: 1.25,
+    py: 0.75,
+    px: 1.25,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    boxSizing: "border-box",
+  };
+
+  const headerCellSx = {
+    ...cellBaseSx,
+    fontWeight: 700,
+    fontSize: "0.75rem",
+    bgcolor: "#f4f6f8",
+    borderBottom: "1px solid rgba(0,0,0,0.12)",
+  };
+
+  const bodyCellSx = {
+    ...cellBaseSx,
+    borderBottom: "1px solid rgba(0,0,0,0.06)",
+  };
+
+  if (loading) {
+    return (
+      <MDBox display="flex" justifyContent="center" py={3}>
+        <CircularProgress color="info" size={28} />
+      </MDBox>
+    );
+  }
+
+  if (error) {
+    return (
+      <MDTypography variant="caption" color="error">
+        {error}
+      </MDTypography>
+    );
+  }
+
+  return (
+    <TableContainer
+      component={MDBox}
+      sx={{
+        border: "1px solid rgba(0,0,0,0.12)",
+        borderRadius: 1,
+        overflow: "hidden",
+        display: "block",
+      }}
+    >
+      <MDBox sx={gridRowSx}>
+        {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
+          <MDBox
+            key={col.camel}
+            sx={{
+              ...headerCellSx,
+              textAlign: col.align === "right" ? "right" : "left",
+            }}
+          >
+            {col.label}
+          </MDBox>
+        ))}
+        {!readOnly && <MDBox sx={{ ...headerCellSx, textAlign: "center" }}>Action</MDBox>}
+      </MDBox>
+
+      <MDBox sx={{ maxHeight: 240, overflow: "auto" }}>
+        {rows.length === 0 ? (
+          <MDTypography variant="caption" color="text" display="block" textAlign="center" py={2}>
+            No records found for this invoice.
+          </MDTypography>
+        ) : (
+          rows.map((lineRow, idx) => (
+            <MDBox
+              key={lineRow.Id ?? lineRow.id ?? `invoice-line-${idx}`}
+              sx={{
+                ...gridRowSx,
+                "&:hover": { bgcolor: "rgba(25, 118, 210, 0.04)" },
+                "&:last-of-type > *": { borderBottom: "none" },
+              }}
+            >
+              {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
+                <MDBox
+                  key={col.camel}
+                  sx={{
+                    ...bodyCellSx,
+                    textAlign: col.align === "right" ? "right" : "left",
+                    fontVariantNumeric: col.numeric ? "tabular-nums" : undefined,
+                  }}
+                >
+                  {col.camel === "subInvoiceNo"
+                    ? getInvoiceLineSubInvoiceNo(lineRow) || formatEditInvoiceLineCell(lineRow, col)
+                    : formatEditInvoiceLineCell(lineRow, col)}
+                </MDBox>
+              ))}
+              {!readOnly && (
+                <MDBox
+                  sx={{
+                    ...bodyCellSx,
+                    textAlign: "center",
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: 0.25,
+                  }}
+                >
+                  <Tooltip title="Edit">
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="info"
+                        disabled={lineActionSaving || saving}
+                        onClick={() => onEditLine?.(lineRow, form, rowData)}
+                        sx={{ padding: "2px" }}
+                      >
+                        <Icon fontSize="small">edit</Icon>
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Delete">
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        disabled={lineActionSaving || saving}
+                        onClick={() => onDeleteLine?.(lineRow, form, rowData)}
+                        sx={{ padding: "2px" }}
+                      >
+                        <Icon fontSize="small">delete</Icon>
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </MDBox>
+              )}
+            </MDBox>
+          ))
+        )}
+      </MDBox>
+    </TableContainer>
+  );
+}
+
+AgreementProvInvoiceLinesGrid.propTypes = {
+  rows: PropTypes.arrayOf(PropTypes.object),
+  loading: PropTypes.bool,
+  error: PropTypes.string,
+  lineActionSaving: PropTypes.bool,
+  saving: PropTypes.bool,
+  form: PropTypes.object,
+  rowData: PropTypes.object,
+  onEditLine: PropTypes.func,
+  onDeleteLine: PropTypes.func,
+  readOnly: PropTypes.bool,
+};
+
+function getInvoiceLineSubInvoiceNo(lineRow) {
+  const sub = String(pickScheduleRowField(lineRow, "SubInvoiceNo", "subInvoiceNo") || "").trim();
+  if (sub) return sub;
+  const id = lineRow?.Id ?? lineRow?.id;
+  if (id != null && String(id).trim() !== "") return String(id).trim();
+  return "";
+}
+
+function getInvoiceLineRouteKeys(lineRow, parentRow, parentForm) {
+  const contractNo = String(
+    parentForm?.contractNo ??
+      pickScheduleRowField(parentRow || {}, "ContractNo", "contractNo") ??
+      pickScheduleRowField(lineRow || {}, "ContractNo", "contractNo") ??
+      ""
+  ).trim();
+  const invoiceNo = String(
+    parentForm?.invoiceNo ??
+      pickScheduleRowField(parentRow || {}, "InvoiceNo", "invoiceNo") ??
+      pickScheduleRowField(lineRow || {}, "InvoiceNo", "invoiceNo") ??
+      ""
+  ).trim();
+  const subInvoiceNo = getInvoiceLineSubInvoiceNo(lineRow);
+  return { contractNo, invoiceNo, subInvoiceNo };
+}
+
+function formatScheduleDisplayDate(value) {
+  const v = toScheduleDateInputValue(value);
+  return v || "—";
+}
+
+function formatEditInvoiceLineCell(row, col) {
+  const raw = pickScheduleRowField(row, col.pascal, col.camel);
+  if (col.date) return formatScheduleDisplayDate(raw);
+  if (col.numeric) return formatScheduleGridNumber(raw);
+  return raw === "" ? "—" : String(raw);
+}
+
 function toScheduleDateInputValue(value) {
   if (value === null || value === undefined || String(value).trim() === "") return "";
   const raw = String(value).trim();
@@ -316,6 +581,122 @@ function getInvoiceScheduleRouteKeys(row, form) {
     form?.invoiceNo ?? pickScheduleRowField(row || {}, "InvoiceNo", "invoiceNo") ?? ""
   ).trim();
   return { contractNo, invoiceNo };
+}
+
+function addDaysToYyyyMmDd(dateStr, days) {
+  if (!dateStr || !String(dateStr).trim()) return "";
+  try {
+    const parsed = parseISO(String(dateStr).trim());
+    if (!isValid(parsed)) return "";
+    return format(addDays(parsed, Number(days) || 0), "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+function periodEndFromStartAndMonths(periodStart, months) {
+  if (!periodStart || months === null || months === undefined || months === "") return "";
+  const n = Number(months);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  try {
+    const parsed = parseISO(String(periodStart).trim());
+    if (!isValid(parsed)) return "";
+    return format(addMonths(parsed, n), "yyyy-MM-dd");
+  } catch {
+    return "";
+  }
+}
+
+function suggestNextSubInvoiceNo(parentRow, parentForm, scheduleRows) {
+  const contractNo = String(
+    parentForm?.contractNo ??
+      pickScheduleRowField(parentRow || {}, "ContractNo", "contractNo") ??
+      ""
+  ).trim();
+  const invoiceNo = String(
+    parentForm?.invoiceNo ?? pickScheduleRowField(parentRow || {}, "InvoiceNo", "invoiceNo") ?? ""
+  ).trim();
+  if (!contractNo || !invoiceNo) return "1";
+
+  let maxSub = 0;
+  (scheduleRows || []).forEach((r) => {
+    const rowContract = String(pickScheduleRowField(r, "ContractNo", "contractNo") || "").trim();
+    const rowInvoice = String(pickScheduleRowField(r, "InvoiceNo", "invoiceNo") || "").trim();
+    if (rowContract !== contractNo || rowInvoice !== invoiceNo) return;
+    const subRaw = pickScheduleRowField(r, "SubInvoiceNo", "subInvoiceNo");
+    if (subRaw !== "") {
+      const subNum = parseInt(String(subRaw).replace(/\D/g, ""), 10);
+      if (Number.isFinite(subNum)) maxSub = Math.max(maxSub, subNum);
+    }
+  });
+
+  if (maxSub > 0) return String(maxSub + 1);
+  const siblingCount = (scheduleRows || []).filter((r) => {
+    const rowContract = String(pickScheduleRowField(r, "ContractNo", "contractNo") || "").trim();
+    const rowInvoice = String(pickScheduleRowField(r, "InvoiceNo", "invoiceNo") || "").trim();
+    return rowContract === contractNo && rowInvoice === invoiceNo;
+  }).length;
+  return String(Math.max(1, siblingCount));
+}
+
+function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
+  const contractNo = String(
+    parentForm?.contractNo ??
+      pickScheduleRowField(parentRow || {}, "ContractNo", "contractNo") ??
+      ""
+  ).trim();
+  const invoiceNo = String(
+    parentForm?.invoiceNo ?? pickScheduleRowField(parentRow || {}, "InvoiceNo", "invoiceNo") ?? ""
+  ).trim();
+  const periodStart = addForm.invoiceDate || null;
+  const months = toScheduleNumberOrNull(addForm.months);
+  const periodEnd = periodEndFromStartAndMonths(periodStart, months) || null;
+  const calculatedRentPM = toScheduleNumberOrNull(addForm.calculatedRentPM);
+  const totalRent = calculatedRentPM != null && months != null ? calculatedRentPM * months : null;
+
+  return {
+    ContractId: pickRowNumberField(parentRow, "ContractId", "contractId"),
+    ClassId: pickRowNumberField(parentRow, "ClassId", "classId"),
+    CmdId: pickRowNumberField(parentRow, "CmdId", "cmdId"),
+    BaseId: pickRowNumberField(parentRow, "BaseId", "baseId"),
+    ContractNo: contractNo,
+    ContractStartDate:
+      parentForm?.contractStartDate ||
+      toScheduleDateInputValue(
+        pickScheduleRowField(parentRow, "ContractStartDate", "contractStartDate")
+      ) ||
+      null,
+    ContractEndDate:
+      parentForm?.contractEndDate ||
+      toScheduleDateInputValue(
+        pickScheduleRowField(parentRow, "ContractEndDate", "contractEndDate")
+      ) ||
+      null,
+    InvoiceNo: invoiceNo,
+    PeriodStart: periodStart,
+    PeriodEnd: periodEnd,
+    DueDate: addForm.dueDate || null,
+    CalculatedRentPM: calculatedRentPM,
+    Months: months,
+    TotalRent: totalRent,
+    Remarks: pickScheduleRowField(parentRow, "Remarks", "remarks") || "",
+    AmountReceived: 0,
+    AmountReceivable: totalRent,
+    AmountPending: totalRent,
+    BusinessName:
+      parentForm?.businessName ??
+      String(pickScheduleRowField(parentRow, "BusinessName", "businessName") || ""),
+    InvoiceDateType:
+      parentForm?.invoiceDateType ??
+      String(pickScheduleRowField(parentRow, "InvoiceDateType", "invoiceDateType") || ""),
+    InvoiceStatus: "Unpaid",
+    InitialRentPM: pickRowNumberField(parentRow, "InitialRentPM", "initialRentPM"),
+    PaymentTermMonths: pickRowNumberField(parentRow, "PaymentTermMonths", "paymentTermMonths"),
+    RiseTermType: pickScheduleRowField(parentRow, "RiseTermType", "riseTermType") || "",
+    RiseTerm: pickScheduleRowField(parentRow, "RiseTerm", "riseTerm") || "",
+    RiseRate: pickRowNumberField(parentRow, "RiseRate", "riseRate"),
+    RiseDate: pickScheduleRowField(parentRow, "RiseDate", "riseDate") || null,
+  };
 }
 
 function toScheduleNumberOrNull(value) {
@@ -370,6 +751,145 @@ function getAgreementProvSaveErrorMessage(error) {
   return rawMessage || "Failed to save invoice schedule. Please try again.";
 }
 
+const EDIT_BASIC_INFO_FIELDS_PER_ROW = 5;
+
+function AgreementProvReadOnlyField({ label, value, compact }) {
+  const display =
+    value === null || value === undefined || String(value).trim() === "" ? "—" : String(value);
+  return (
+    <MDBox sx={{ minHeight: compact ? 34 : 44, pr: 0.5 }}>
+      <MDTypography
+        variant="caption"
+        color="text"
+        fontWeight="medium"
+        display="block"
+        lineHeight={1.15}
+        sx={{
+          textTransform: "uppercase",
+          letterSpacing: "0.03em",
+          fontSize: compact ? "0.625rem" : "0.7rem",
+          opacity: 0.85,
+        }}
+      >
+        {label}
+      </MDTypography>
+      <MDTypography
+        variant="body2"
+        fontWeight="medium"
+        color="dark"
+        sx={{
+          mt: 0.25,
+          fontSize: compact ? "0.8125rem" : "0.875rem",
+          wordBreak: "break-word",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.25,
+        }}
+      >
+        {display}
+      </MDTypography>
+    </MDBox>
+  );
+}
+
+AgreementProvReadOnlyField.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  compact: PropTypes.bool,
+};
+
+const agreementProvPanelFieldLabelSx = {
+  textTransform: "uppercase",
+  letterSpacing: "0.03em",
+  fontSize: "0.625rem",
+  opacity: 0.85,
+  lineHeight: 1.15,
+};
+
+const agreementProvPanelInputSx = {
+  mt: 0.25,
+  "& .MuiInputBase-root": {
+    fontSize: "0.8125rem",
+    minHeight: 32,
+    bgcolor: "#fff",
+  },
+  "& .MuiInputBase-input": {
+    py: 0.75,
+  },
+};
+
+function AgreementProvPanelEditableField({ label, children }) {
+  return (
+    <MDBox sx={{ minWidth: 0 }}>
+      <MDTypography
+        variant="caption"
+        color="text"
+        fontWeight="medium"
+        display="block"
+        sx={agreementProvPanelFieldLabelSx}
+      >
+        {label}
+      </MDTypography>
+      <MDBox sx={{ mt: 0.25 }}>{children}</MDBox>
+    </MDBox>
+  );
+}
+
+AgreementProvPanelEditableField.propTypes = {
+  label: PropTypes.string.isRequired,
+  children: PropTypes.node.isRequired,
+};
+
+function AgreementProvReadOnlyInfoPanel({ children, action }) {
+  return (
+    <MDBox
+      sx={{
+        borderRadius: 1.5,
+        border: "1px solid rgba(0,0,0,0.08)",
+        bgcolor: "rgba(0,0,0,0.02)",
+        overflow: "hidden",
+      }}
+    >
+      <MDBox
+        display="flex"
+        alignItems="center"
+        justifyContent="space-between"
+        px={1.5}
+        py={1}
+        sx={{
+          borderBottom: "1px solid rgba(0,0,0,0.06)",
+          bgcolor: "rgba(0,0,0,0.03)",
+        }}
+      >
+        <MDTypography
+          variant="caption"
+          fontWeight="bold"
+          color="text"
+          sx={{ letterSpacing: "0.04em" }}
+        >
+          BASIC INFORMATION
+        </MDTypography>
+        {action || null}
+      </MDBox>
+      <MDBox
+        sx={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${EDIT_BASIC_INFO_FIELDS_PER_ROW}, minmax(0, 1fr))`,
+          gap: 1.25,
+          p: 1.5,
+          alignItems: "start",
+        }}
+      >
+        {children}
+      </MDBox>
+    </MDBox>
+  );
+}
+
+AgreementProvReadOnlyInfoPanel.propTypes = {
+  children: PropTypes.node,
+  action: PropTypes.node,
+};
+
 function buildAgreementProvEditForm(row) {
   if (!row) return {};
   return {
@@ -398,14 +918,63 @@ function buildAgreementProvEditForm(row) {
   };
 }
 
-function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving }) {
-  const [form, setForm] = useState({});
+function AgreementProvInvoiceAddDialog({
+  open,
+  onClose,
+  parentRow,
+  parentForm,
+  lineToEdit,
+  onSave,
+  saving,
+}) {
+  const [form, setForm] = useState({
+    invoiceDate: "",
+    calculatedRentPM: "",
+    months: "",
+    dueDate: "",
+  });
+  const [dueDateManual, setDueDateManual] = useState(false);
+  const isEditMode = Boolean(lineToEdit);
 
   useEffect(() => {
-    if (open && rowData) {
-      setForm(buildAgreementProvEditForm(rowData));
+    if (!open) return;
+    if (lineToEdit) {
+      const invoiceDate = toScheduleDateInputValue(pickScheduleInvoiceDate(lineToEdit));
+      setForm({
+        invoiceDate,
+        calculatedRentPM: pickScheduleRowField(lineToEdit, "CalculatedRentPM", "calculatedRentPM"),
+        months: pickScheduleRowField(lineToEdit, "Months", "months"),
+        dueDate: toScheduleDateInputValue(pickScheduleRowField(lineToEdit, "DueDate", "dueDate")),
+      });
+      setDueDateManual(true);
+      return;
     }
-  }, [open, rowData]);
+    const invoiceDate =
+      parentForm?.invoiceDate ||
+      toScheduleDateInputValue(pickScheduleInvoiceDate(parentRow || {})) ||
+      "";
+    setForm({
+      invoiceDate,
+      calculatedRentPM: "",
+      months: parentForm?.months ?? pickScheduleRowField(parentRow || {}, "Months", "months") ?? "",
+      dueDate: invoiceDate ? addDaysToYyyyMmDd(invoiceDate, 9) : "",
+    });
+    setDueDateManual(false);
+  }, [open, parentRow, parentForm, lineToEdit]);
+
+  const handleInvoiceDateChange = (e) => {
+    const invoiceDate = e.target.value;
+    setForm((prev) => ({
+      ...prev,
+      invoiceDate,
+      dueDate: dueDateManual ? prev.dueDate : addDaysToYyyyMmDd(invoiceDate, 9),
+    }));
+  };
+
+  const handleDueDateChange = (e) => {
+    setDueDateManual(true);
+    setForm((prev) => ({ ...prev, dueDate: e.target.value }));
+  };
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -413,62 +982,28 @@ function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving
 
   const handleSave = async () => {
     if (!onSave) return;
-    await onSave(form, rowData);
+    await onSave(form, parentRow, parentForm, lineToEdit);
   };
 
+  const invoiceNoLabel =
+    parentForm?.invoiceNo || pickScheduleRowField(parentRow || {}, "InvoiceNo", "invoiceNo") || "—";
+
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
-        Edit Agreement Invoice
+        {isEditMode ? "Edit Invoice Record" : "Add Invoice Record"}
       </DialogTitle>
       <DialogContent>
-        <Grid container spacing={2} mt={0.5}>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Contract No"
-              value={form.contractNo || ""}
-              onChange={handleChange("contractNo")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Invoice ID"
-              value={form.invoiceNo || ""}
-              onChange={handleChange("invoiceNo")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Contract Start Date"
-              type="date"
-              value={form.contractStartDate || ""}
-              onChange={handleChange("contractStartDate")}
-              fullWidth
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Contract End Date"
-              type="date"
-              value={form.contractEndDate || ""}
-              onChange={handleChange("contractEndDate")}
-              fullWidth
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
+        <MDTypography variant="caption" color="text" display="block" mb={1.5}>
+          Invoice ID: <strong>{invoiceNoLabel}</strong>
+        </MDTypography>
+        <Grid container spacing={2} mt={0.25}>
           <Grid item xs={12} sm={6}>
             <MDInput
               label="Invoice Date"
               type="date"
               value={form.invoiceDate || ""}
-              onChange={handleChange("invoiceDate")}
+              onChange={handleInvoiceDateChange}
               fullWidth
               size="small"
               InputLabelProps={{ shrink: true }}
@@ -479,35 +1014,13 @@ function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving
               label="Due Date"
               type="date"
               value={form.dueDate || ""}
-              onChange={handleChange("dueDate")}
+              onChange={handleDueDateChange}
               fullWidth
               size="small"
               InputLabelProps={{ shrink: true }}
             />
           </Grid>
           <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Period Start"
-              type="date"
-              value={form.periodStart || ""}
-              onChange={handleChange("periodStart")}
-              fullWidth
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Period End"
-              type="date"
-              value={form.periodEnd || ""}
-              onChange={handleChange("periodEnd")}
-              fullWidth
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
             <MDInput
               label="Rate PM"
               value={form.calculatedRentPM ?? ""}
@@ -516,7 +1029,7 @@ function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving
               size="small"
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={6}>
             <MDInput
               label="Months"
               value={form.months ?? ""}
@@ -525,78 +1038,277 @@ function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving
               size="small"
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
-            <MDInput
-              label="Net Amount"
-              value={form.totalRent ?? ""}
-              onChange={handleChange("totalRent")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <MDInput
-              label="Amount Received"
-              value={form.amountReceived ?? ""}
-              onChange={handleChange("amountReceived")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <MDInput
-              label="Amount Receivable"
-              value={form.amountReceivable ?? ""}
-              onChange={handleChange("amountReceivable")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <MDInput
-              label="Amount Pending"
-              value={form.amountPending ?? ""}
-              onChange={handleChange("amountPending")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Business Name"
-              value={form.businessName || ""}
-              onChange={handleChange("businessName")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Invoice Date Type"
-              value={form.invoiceDateType || ""}
-              onChange={handleChange("invoiceDateType")}
-              fullWidth
-              size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <MDInput
-              label="Invoice Status"
-              value={form.invoiceStatus || ""}
-              onChange={handleChange("invoiceStatus")}
-              fullWidth
-              size="small"
-            />
+        </Grid>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={saving}>
+          Cancel
+        </MDButton>
+        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : isEditMode ? "Update" : "Add"}
+        </MDButton>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+AgreementProvInvoiceAddDialog.propTypes = {
+  open: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onSave: PropTypes.func,
+  saving: PropTypes.bool,
+  parentRow: PropTypes.object,
+  parentForm: PropTypes.object,
+  lineToEdit: PropTypes.object,
+};
+
+function AgreementProvInvoiceEditDialog({
+  open,
+  onClose,
+  rowData,
+  onSave,
+  saving,
+  onOpenAddRecord,
+  onEditInvoiceLine,
+  onDeleteInvoiceLine,
+  lineActionSaving,
+  registerReloadInvoiceLines,
+  viewMode,
+}) {
+  const [form, setForm] = useState({});
+  const [invoiceLinesRows, setInvoiceLinesRows] = useState([]);
+  const [invoiceLinesLoading, setInvoiceLinesLoading] = useState(false);
+  const [invoiceLinesError, setInvoiceLinesError] = useState("");
+
+  const reloadInvoiceLines = useCallback(async () => {
+    if (!rowData) return;
+    const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
+    if (!invoiceNo) {
+      setInvoiceLinesRows([]);
+      setForm(buildAgreementProvEditForm(rowData));
+      return;
+    }
+    setInvoiceLinesLoading(true);
+    setInvoiceLinesError("");
+    try {
+      const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+      const lines = unwrapContractInvoiceScheduleList(response);
+      setInvoiceLinesRows(lines);
+      setForm((prev) => applyInvoiceLinesToForm(rowData, lines, prev));
+    } catch (error) {
+      console.error("Error loading invoice records by invoice no:", error);
+      setInvoiceLinesRows([]);
+      setInvoiceLinesError(getAgreementProvSaveErrorMessage(error));
+      setForm(buildAgreementProvEditForm(rowData));
+    } finally {
+      setInvoiceLinesLoading(false);
+    }
+  }, [rowData]);
+
+  useEffect(() => {
+    if (!open || !rowData) {
+      setInvoiceLinesRows([]);
+      setInvoiceLinesError("");
+      setInvoiceLinesLoading(false);
+      setForm({});
+      return undefined;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      if (!cancelled) await reloadInvoiceLines();
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, rowData, reloadInvoiceLines]);
+
+  useEffect(() => {
+    if (!registerReloadInvoiceLines) return undefined;
+    if (open) {
+      registerReloadInvoiceLines(reloadInvoiceLines);
+    } else {
+      registerReloadInvoiceLines(null);
+    }
+    return () => registerReloadInvoiceLines(null);
+  }, [open, registerReloadInvoiceLines, reloadInvoiceLines]);
+
+  const handleChange = (field) => (e) => {
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleSave = async () => {
+    if (!onSave) return;
+    await onSave(form, rowData);
+  };
+
+  const canAddRecord = Boolean(
+    String(form.contractNo || "").trim() && String(form.invoiceNo || "").trim()
+  );
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600, pb: 1 }}>
+        Edit Agreement Invoice
+      </DialogTitle>
+      <DialogContent sx={{ pt: 0.5 }}>
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <AgreementProvReadOnlyInfoPanel
+              action={
+                viewMode ? null : (
+                  <Tooltip title="Add invoice record">
+                    <span>
+                      <IconButton
+                        color="info"
+                        size="small"
+                        disabled={saving || !canAddRecord}
+                        onClick={() => onOpenAddRecord?.(form, rowData, reloadInvoiceLines)}
+                        sx={{
+                          p: 0.35,
+                          border: "1px solid",
+                          borderColor: "info.main",
+                          borderRadius: 1,
+                        }}
+                      >
+                        <Icon sx={{ fontSize: "1rem !important" }}>add</Icon>
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )
+              }
+            >
+              <AgreementProvReadOnlyField compact label="Contract No" value={form.contractNo} />
+              <AgreementProvReadOnlyField compact label="Invoice No" value={form.invoiceNo} />
+              <AgreementProvReadOnlyField
+                compact
+                label="CSD"
+                value={formatScheduleDisplayDate(form.contractStartDate)}
+              />
+              <AgreementProvReadOnlyField
+                compact
+                label="CED"
+                value={formatScheduleDisplayDate(form.contractEndDate)}
+              />
+              <AgreementProvReadOnlyField
+                compact
+                label="Period Start"
+                value={formatScheduleDisplayDate(form.periodStart)}
+              />
+              <AgreementProvReadOnlyField
+                compact
+                label="Period End"
+                value={formatScheduleDisplayDate(form.periodEnd)}
+              />
+              <AgreementProvReadOnlyField compact label="Business Name" value={form.businessName} />
+              <AgreementProvReadOnlyField
+                compact
+                label="Net Amount"
+                value={formatScheduleGridNumber(form.totalRent)}
+              />
+              <AgreementProvReadOnlyField
+                compact
+                label="Amt Received"
+                value={formatScheduleGridNumber(form.amountReceived)}
+              />
+              <AgreementProvReadOnlyField
+                compact
+                label="Amt Receivable"
+                value={formatScheduleGridNumber(form.amountReceivable)}
+              />
+              <MDBox
+                sx={{
+                  gridColumn: "1 / -1",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  gap: 1.25,
+                  alignItems: "start",
+                }}
+              >
+                {viewMode ? (
+                  <>
+                    <AgreementProvReadOnlyField
+                      compact
+                      label="Invoice Date"
+                      value={formatScheduleDisplayDate(form.invoiceDate)}
+                    />
+                    <AgreementProvReadOnlyField
+                      compact
+                      label="Due Date"
+                      value={formatScheduleDisplayDate(form.dueDate)}
+                    />
+                    <AgreementProvReadOnlyField compact label="Months" value={form.months} />
+                    <AgreementProvReadOnlyField
+                      compact
+                      label="Rate PM"
+                      value={formatScheduleGridNumber(form.calculatedRentPM)}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <AgreementProvPanelEditableField label="Invoice Date">
+                      <MDInput
+                        type="date"
+                        value={form.invoiceDate || ""}
+                        onChange={handleChange("invoiceDate")}
+                        fullWidth
+                        size="small"
+                        sx={agreementProvPanelInputSx}
+                      />
+                    </AgreementProvPanelEditableField>
+                    <AgreementProvPanelEditableField label="Due Date">
+                      <MDInput
+                        type="date"
+                        value={form.dueDate || ""}
+                        onChange={handleChange("dueDate")}
+                        fullWidth
+                        size="small"
+                        sx={agreementProvPanelInputSx}
+                      />
+                    </AgreementProvPanelEditableField>
+                    <AgreementProvPanelEditableField label="Months">
+                      <MDInput
+                        value={form.months ?? ""}
+                        onChange={handleChange("months")}
+                        fullWidth
+                        size="small"
+                        sx={agreementProvPanelInputSx}
+                      />
+                    </AgreementProvPanelEditableField>
+                    <AgreementProvPanelEditableField label="Rate PM">
+                      <MDInput
+                        value={form.calculatedRentPM ?? ""}
+                        onChange={handleChange("calculatedRentPM")}
+                        fullWidth
+                        size="small"
+                        sx={agreementProvPanelInputSx}
+                      />
+                    </AgreementProvPanelEditableField>
+                  </>
+                )}
+              </MDBox>
+            </AgreementProvReadOnlyInfoPanel>
           </Grid>
           <Grid item xs={12}>
-            <MDInput
-              label="Remarks"
-              value={form.remarks || ""}
-              onChange={handleChange("remarks")}
-              fullWidth
-              size="small"
-              multiline
-              minRows={2}
+            <MDTypography variant="button" fontWeight="bold" mt={1.5} mb={1}>
+              Invoice records
+            </MDTypography>
+            <AgreementProvInvoiceLinesGrid
+              rows={invoiceLinesRows}
+              loading={invoiceLinesLoading}
+              error={invoiceLinesError}
+              lineActionSaving={lineActionSaving}
+              saving={saving}
+              form={form}
+              rowData={rowData}
+              readOnly={viewMode}
+              onEditLine={(lineRow, parentForm, parentRow) =>
+                onEditInvoiceLine?.(lineRow, parentForm, parentRow, reloadInvoiceLines)
+              }
+              onDeleteLine={(lineRow, parentForm, parentRow) =>
+                onDeleteInvoiceLine?.(lineRow, parentForm, parentRow, reloadInvoiceLines)
+              }
             />
           </Grid>
         </Grid>
@@ -605,9 +1317,11 @@ function AgreementProvInvoiceEditDialog({ open, onClose, rowData, onSave, saving
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={saving}>
           Close
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
-        </MDButton>
+        {!viewMode && (
+          <MDButton variant="gradient" color="info" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save"}
+          </MDButton>
+        )}
       </DialogActions>
     </Dialog>
   );
@@ -619,6 +1333,12 @@ AgreementProvInvoiceEditDialog.propTypes = {
   onSave: PropTypes.func,
   saving: PropTypes.bool,
   rowData: PropTypes.object,
+  onOpenAddRecord: PropTypes.func,
+  onEditInvoiceLine: PropTypes.func,
+  onDeleteInvoiceLine: PropTypes.func,
+  lineActionSaving: PropTypes.bool,
+  registerReloadInvoiceLines: PropTypes.func,
+  viewMode: PropTypes.bool,
 };
 
 function normalizeAgreementProvInvoiceRow(row) {
@@ -704,7 +1424,18 @@ export default function AgreementProvInvoice() {
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editRowData, setEditRowData] = useState(null);
+  const [editDialogViewMode, setEditDialogViewMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addParentRow, setAddParentRow] = useState(null);
+  const [addParentForm, setAddParentForm] = useState(null);
+  const [lineToEdit, setLineToEdit] = useState(null);
+  const [savingAdd, setSavingAdd] = useState(false);
+  const [lineActionSaving, setLineActionSaving] = useState(false);
+  const reloadInvoiceLinesRef = useRef(null);
+  const registerReloadInvoiceLines = useCallback((fn) => {
+    reloadInvoiceLinesRef.current = typeof fn === "function" ? fn : null;
+  }, []);
   const AGREEMENT_PROV_GROUP_BY_CACHE_KEY = "agreementProvInvoice_groupByColumns";
   const [groupByColumns, setGroupByColumns] = useState(() => {
     try {
@@ -1021,14 +1752,21 @@ export default function AgreementProvInvoice() {
       yPos = invoiceBlockStartY;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      const invoiceDate = formatDate(commercialOpDate || contractStartDate);
+      const formatPdfScheduleDate = (raw) => {
+        const formatted = formatDateDDMMMYYYY(raw);
+        return formatted === "-" ? "" : formatted;
+      };
+      const invoiceDateDisplay = formatPdfScheduleDate(pickScheduleInvoiceDate(rowData));
+      const dueDateDisplay = formatPdfScheduleDate(
+        pickScheduleRowField(rowData, "DueDate", "dueDate")
+      );
       doc.text("Invoice date:", invoiceInfoX, yPos);
       yPos += 5;
-      doc.text(`${invoiceDate}`, invoiceInfoX, yPos);
+      doc.text(`${invoiceDateDisplay}`, invoiceInfoX, yPos);
       yPos += 7;
       doc.text("Due date:", invoiceInfoX, yPos);
       yPos += 5;
-      doc.text(`${invoiceDate}`, invoiceInfoX, yPos);
+      doc.text(`${dueDateDisplay}`, invoiceInfoX, yPos);
       yPos += 7;
       doc.text("Invoice number:", invoiceInfoX, yPos);
       yPos += 5;
@@ -1251,12 +1989,20 @@ export default function AgreementProvInvoice() {
 
   const handleOpenEditRow = (rowData) => {
     setEditRowData(rowData);
+    setEditDialogViewMode(false);
+    setEditDialogOpen(true);
+  };
+
+  const handleOpenViewRow = (rowData) => {
+    setEditRowData(rowData);
+    setEditDialogViewMode(true);
     setEditDialogOpen(true);
   };
 
   const handleCloseEditRow = () => {
     setEditDialogOpen(false);
     setEditRowData(null);
+    setEditDialogViewMode(false);
   };
 
   const handleSaveEditRow = async (form, rowData) => {
@@ -1277,6 +2023,107 @@ export default function AgreementProvInvoice() {
       alert(getAgreementProvSaveErrorMessage(error));
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleOpenAddRecord = (parentForm, parentRow, reloadInvoiceLines) => {
+    reloadInvoiceLinesRef.current =
+      typeof reloadInvoiceLines === "function" ? reloadInvoiceLines : null;
+    setLineToEdit(null);
+    setAddParentForm(parentForm);
+    setAddParentRow(parentRow);
+    setAddDialogOpen(true);
+  };
+
+  const handleCloseAddRecord = () => {
+    setAddDialogOpen(false);
+    setAddParentForm(null);
+    setAddParentRow(null);
+    setLineToEdit(null);
+  };
+
+  const handleEditInvoiceLine = (lineRow, parentForm, parentRow, reloadInvoiceLines) => {
+    reloadInvoiceLinesRef.current =
+      typeof reloadInvoiceLines === "function" ? reloadInvoiceLines : null;
+    setLineToEdit(lineRow);
+    setAddParentForm(parentForm);
+    setAddParentRow(parentRow);
+    setAddDialogOpen(true);
+  };
+
+  const handleDeleteInvoiceLine = async (lineRow, parentForm, parentRow, reloadInvoiceLines) => {
+    const { contractNo, invoiceNo, subInvoiceNo } = getInvoiceLineRouteKeys(
+      lineRow,
+      parentRow,
+      parentForm
+    );
+    if (!contractNo || !invoiceNo || !subInvoiceNo) {
+      alert("Cannot delete: Contract No, Invoice ID, and Sub Invoice are required.");
+      return;
+    }
+    if (!window.confirm("Delete this invoice record?")) return;
+
+    setLineActionSaving(true);
+    try {
+      await contractApi.deleteInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo);
+      if (typeof reloadInvoiceLines === "function") await reloadInvoiceLines();
+    } catch (error) {
+      console.error("Error deleting invoice record:", error);
+      alert(getAgreementProvSaveErrorMessage(error));
+    } finally {
+      setLineActionSaving(false);
+    }
+  };
+
+  const handleSaveAddRecord = async (addForm, parentRow, parentForm, editLineRow) => {
+    const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(parentRow, parentForm);
+    if (!contractNo || !invoiceNo) {
+      alert("Cannot add: Contract No and Invoice ID are required.");
+      return;
+    }
+    if (!addForm.invoiceDate?.trim()) {
+      alert("Invoice Date is required.");
+      return;
+    }
+    if (addForm.calculatedRentPM === "" || addForm.calculatedRentPM == null) {
+      alert("Rate PM is required.");
+      return;
+    }
+    if (addForm.months === "" || addForm.months == null) {
+      alert("Months is required.");
+      return;
+    }
+    if (!addForm.dueDate?.trim()) {
+      alert("Due Date is required.");
+      return;
+    }
+
+    let subInvoiceNo = "";
+    if (editLineRow) {
+      subInvoiceNo = getInvoiceLineRouteKeys(editLineRow, parentRow, parentForm).subInvoiceNo;
+      if (!subInvoiceNo) {
+        alert("Cannot update: Sub Invoice is required.");
+        return;
+      }
+    }
+
+    setSavingAdd(true);
+    try {
+      const payload = buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm);
+      if (editLineRow) {
+        await contractApi.updateInvoiceScheduleSub(contractNo, invoiceNo, subInvoiceNo, payload);
+      } else {
+        const newSubInvoiceNo = suggestNextSubInvoiceNo(parentRow, parentForm, rows);
+        await contractApi.createInvoiceSchedule(contractNo, invoiceNo, newSubInvoiceNo, payload);
+      }
+      handleCloseAddRecord();
+      const reload = reloadInvoiceLinesRef.current;
+      if (typeof reload === "function") await reload();
+    } catch (error) {
+      console.error("Error saving contract invoice schedule:", error);
+      alert(getAgreementProvSaveErrorMessage(error));
+    } finally {
+      setSavingAdd(false);
     }
   };
 
@@ -1307,7 +2154,7 @@ export default function AgreementProvInvoice() {
   };
 
   const viewPdfColumn = {
-    Header: "View PDF",
+    Header: "View",
     accessor: "generatePdf",
     align: "center",
     width: "100px",
@@ -1339,19 +2186,31 @@ export default function AgreementProvInvoice() {
         );
       }
       return (
-        <IconButton
-          onClick={() => generatePDF(rowData)}
-          size="medium"
-          sx={{
-            padding: "4px",
-            color: "#1976d2",
-            "&:hover": {
-              backgroundColor: "rgba(25, 118, 210, 0.1)",
-            },
-          }}
-        >
-          <Icon sx={{ fontSize: "1.35rem" }}>picture_as_pdf</Icon>
-        </IconButton>
+        <MDBox display="flex" justifyContent="center" alignItems="center" gap={0.25}>
+          <Tooltip title="View invoice">
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleOpenViewRow(rowData)}
+              sx={{ padding: "2px" }}
+            >
+              <Icon sx={{ fontSize: "1.2rem" }}>visibility</Icon>
+            </IconButton>
+          </Tooltip>
+          <IconButton
+            onClick={() => generatePDF(rowData)}
+            size="medium"
+            sx={{
+              padding: "4px",
+              color: "#1976d2",
+              "&:hover": {
+                backgroundColor: "rgba(25, 118, 210, 0.1)",
+              },
+            }}
+          >
+            <Icon sx={{ fontSize: "1.35rem" }}>picture_as_pdf</Icon>
+          </IconButton>
+        </MDBox>
       );
     },
   };
@@ -2089,6 +2948,8 @@ export default function AgreementProvInvoice() {
 
                 {/* Results Table */}
                 <MDBox
+                  position="relative"
+                  aria-busy={loading}
                   sx={{
                     display: "flex",
                     flexDirection: "column",
@@ -2170,6 +3031,28 @@ export default function AgreementProvInvoice() {
                     },
                   }}
                 >
+                  {loading && (
+                    <MDBox
+                      position="absolute"
+                      top={0}
+                      left={0}
+                      right={0}
+                      bottom={0}
+                      display="flex"
+                      justifyContent="center"
+                      alignItems="center"
+                      zIndex={10}
+                      sx={{
+                        backgroundColor: darkMode
+                          ? "rgba(0, 0, 0, 0.65)"
+                          : "rgba(255, 255, 255, 0.8)",
+                        backdropFilter: "blur(2px)",
+                        pointerEvents: "auto",
+                      }}
+                    >
+                      <CurrencyLoading size={50} />
+                    </MDBox>
+                  )}
                   <DataTable
                     table={{ columns, rows: computedRows }}
                     stickyToolbarAndHeader
@@ -2223,6 +3106,22 @@ export default function AgreementProvInvoice() {
         rowData={editRowData}
         onSave={handleSaveEditRow}
         saving={savingEdit}
+        viewMode={editDialogViewMode}
+        onOpenAddRecord={handleOpenAddRecord}
+        onEditInvoiceLine={handleEditInvoiceLine}
+        onDeleteInvoiceLine={handleDeleteInvoiceLine}
+        lineActionSaving={lineActionSaving}
+        registerReloadInvoiceLines={registerReloadInvoiceLines}
+      />
+
+      <AgreementProvInvoiceAddDialog
+        open={addDialogOpen}
+        onClose={handleCloseAddRecord}
+        parentRow={addParentRow}
+        parentForm={addParentForm}
+        lineToEdit={lineToEdit}
+        onSave={handleSaveAddRecord}
+        saving={savingAdd}
       />
     </DashboardLayout>
   );

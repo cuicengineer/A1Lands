@@ -71,6 +71,7 @@ import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-ra
 import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
 import SummaryOfA1Activities from "layouts/dashboard/summary";
+import KpiOverview from "layouts/dashboard/kpi-overview";
 import BankAccounts from "layouts/accounts/bank-account/bank-account";
 // @mui icons
 import Icon from "@mui/material/Icon";
@@ -108,6 +109,14 @@ const routes = [
         icon: <Icon fontSize="small">assessment</Icon>,
         route: "/dashboard/summary",
         component: <SummaryOfA1Activities />,
+      },
+      {
+        type: "collapse",
+        name: "KPI Overview",
+        key: "dashboard-kpi-overview",
+        icon: <Icon fontSize="small">insights</Icon>,
+        route: "/dashboard/kpi-overview",
+        component: <KpiOverview />,
       },
     ],
   },
