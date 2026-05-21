@@ -72,13 +72,18 @@ function getInvoiceScheduleByInvoiceNo(invoiceNo) {
  */
 async function createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, data) {
   const actionBy = await getActionBy();
+  const input = data || {};
   const payload = {
-    ...(data || {}),
+    ...input,
     Action: "Create",
     ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
+  if (input.IsFinalized === true || input.isFinalized === true) {
+    payload.IsFinalized = true;
+    payload.isFinalized = true;
+  }
   const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
   const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
   const encodedSubInvoiceNo = encodeURIComponent(String(subInvoiceNo ?? "").trim());

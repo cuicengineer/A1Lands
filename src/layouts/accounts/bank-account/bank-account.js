@@ -1140,6 +1140,40 @@ export default function BankAccounts() {
 
   const txt = (v) => (v != null && String(v).trim() !== "" ? String(v) : "-");
 
+  const renderStatusLabel = (value) => {
+    const label = value != null && String(value).trim() !== "" ? String(value).trim() : "-";
+    const key = label.toLowerCase();
+    const palette =
+      key === "active"
+        ? { bg: "#d4edda", fg: "#155724" }
+        : key === "dormant" || key === "dormat"
+        ? { bg: "#fff3cd", fg: "#856404" }
+        : key === "closed"
+        ? { bg: "#f8d7da", fg: "#721c24" }
+        : null;
+
+    if (!palette) return label;
+    return (
+      <MDBox
+        component="span"
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          px: 1,
+          py: 0.35,
+          borderRadius: "999px",
+          minWidth: 76,
+          fontWeight: 600,
+          backgroundColor: palette.bg,
+          color: palette.fg,
+        }}
+      >
+        {label}
+      </MDBox>
+    );
+  };
+
   const columns = useMemo(
     () => [
       {
@@ -1298,7 +1332,7 @@ export default function BankAccounts() {
             row?.original?.accStatus ??
             row?.original?.Status ??
             row?.original?.status;
-          return s != null && s !== "" ? String(s) : "-";
+          return renderStatusLabel(s);
         },
       },
       {

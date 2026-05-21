@@ -48,6 +48,7 @@ import api, {
   contractsApprovalActionsBypassUser,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
+import lockDateApi from "services/api.lockdate.service";
 import uploadApi from "services/api.upload.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
@@ -61,7 +62,19 @@ import DataTable from "examples/Tables/DataTable";
 import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 import jsPDF from "jspdf";
-import { format, parseISO, isValid } from "date-fns";
+import { addMonths, format, parseISO, isValid } from "date-fns";
+import {
+  hasContractsKpiGridFilters,
+  readContractsUrlKpiFilters,
+  resolveBaseNameById,
+  resolveClassNameById,
+  resolveCommandNameById,
+} from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import {
+  AgreementProvContractBasicInfoStrip,
+  AgreementProvInvoiceEditDialog,
+  buildAgreementProvContractBasicInfoForm,
+} from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
 
 /** API contract payload without identity — used to open the form as “New Contract” with prefills (clone). */
 function stripContractForClone(contract) {
@@ -169,6 +182,61 @@ ContractGridLongTextCell.propTypes = {
   matchGridPlainText: PropTypes.bool,
 };
 
+const RISE_TERM_MONTHS_INTERVAL_OPTIONS = [
+  6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 120, 126, 132, 138,
+  144, 150, 156, 162, 168, 174, 180, 186, 192, 198, 204, 210, 216, 222, 228, 234, 240, 246, 252,
+  258, 264, 270, 276, 282, 288, 294, 300,
+];
+
+/** Months from CSD to CED (aligned with SQL DATEDIFF(MONTH, CSD, CED)). */
+function getContractMonthsBetweenCsdAndCed(contractStartDate, contractEndDate) {
+  const csd = String(contractStartDate || "").trim();
+  const ced = String(contractEndDate || "").trim();
+  if (!csd || !ced) return null;
+  const start = new Date(`${csd}T00:00:00`);
+  const end = new Date(`${ced}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null;
+  if (end <= start) return 0;
+  return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+}
+
+function isRiseMonthsIntervalWithinContractDuration(
+  monthsInterval,
+  contractStartDate,
+  contractEndDate
+) {
+  const maxMonths = getContractMonthsBetweenCsdAndCed(contractStartDate, contractEndDate);
+  if (maxMonths === null) return false;
+  const mi = Number(monthsInterval);
+  return Number.isFinite(mi) && mi > 0 && mi <= maxMonths;
+}
+
+const CONTRACT_PAYMENT_TERM_OPTIONS = [
+  { value: 1, label: "Monthly" },
+  { value: 3, label: "Quarterly" },
+  { value: 6, label: "BiAnnual" },
+  { value: 12, label: "Annual" },
+];
+
+const CONTRACT_SD_RATE_MONTH_VALUES = [1, 2, 3, 4, 6, 9, 12];
+
+const CONTRACT_PAYMENT_TIMING_OPTIONS = ["Start", "End"];
+
+function formatContractPaymentTermDisplay(months) {
+  if (months === "" || months === null || months === undefined) return "";
+  const n = Number(months);
+  const match = CONTRACT_PAYMENT_TERM_OPTIONS.find((o) => o.value === n);
+  if (match) return match.label;
+  return String(months);
+}
+
+function formatContractSdRateDisplay(months) {
+  if (months === "" || months === null || months === undefined) return "";
+  const n = Number(months);
+  if (!Number.isFinite(n)) return String(months);
+  return `${n} Month${n === 1 ? "" : "s"}`;
+}
+
 function ContractsForm({
   open,
   onClose,
@@ -204,6 +272,7 @@ function ContractsForm({
     increaseRatePercent: "",
     increaseIntervalMonths: "",
     sdRateMonths: "",
+    paymentTiming: "",
     dpc: "",
     signatory: "",
     securityDepositAmount: "",
@@ -352,6 +421,7 @@ function ContractsForm({
         increaseRatePercent: initialData.IncreaseRatePercent || "",
         increaseIntervalMonths: initialData.IncreaseIntervalMonths || "",
         sdRateMonths: initialData.SDRateMonths || "",
+        paymentTiming: initialData.PaymentTiming || initialData.paymentTiming || "",
         dpc:
           initialData.Dpc !== undefined && initialData.Dpc !== null
             ? String(initialData.Dpc)
@@ -464,6 +534,7 @@ function ContractsForm({
         increaseRatePercent: "",
         increaseIntervalMonths: "",
         sdRateMonths: "",
+        paymentTiming: "",
         dpc: "",
         signatory: "",
         securityDepositAmount: "",
@@ -864,7 +935,9 @@ function ContractsForm({
     }
     if (!form.initialRentPM) newErrors.initialRentPM = "Initial Rent PM is required";
     // initialRentPA is auto-calculated, no validation needed
-    if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term Months is required";
+    if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term is required";
+    if (!form.sdRateMonths) newErrors.sdRateMonths = "SD Rate is required";
+    if (!form.paymentTiming) newErrors.paymentTiming = "Payment Timing is required";
     if (form.remarks && form.remarks.length > 500) {
       newErrors.remarks = "Remarks cannot exceed 500 characters";
     }
@@ -934,6 +1007,8 @@ function ContractsForm({
           ? Number(form.increaseIntervalMonths)
           : null,
       sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
+      paymentTiming: form.paymentTiming || null,
+      PaymentTiming: form.paymentTiming || null,
       dpc: form.dpc != null && String(form.dpc).trim() !== "" ? Number(form.dpc) : null,
       signatory: form.signatory?.trim() || null,
       securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
@@ -1428,10 +1503,57 @@ function ContractsForm({
     }
   };
 
+  const { usedRiseMonthsIntervals, maxUsedRiseMonthsInterval } = useMemo(() => {
+    const used = new Set();
+    const numericUsed = [];
+    riseTerms.forEach((t, i) => {
+      if (editingRiseTermIndex !== null && i === editingRiseTermIndex) return;
+      const mi = String(t.monthsInterval || "").trim();
+      if (mi) used.add(mi);
+      const miNum = Number(mi);
+      if (Number.isFinite(miNum) && miNum > 0) numericUsed.push(miNum);
+    });
+    return {
+      usedRiseMonthsIntervals: used,
+      maxUsedRiseMonthsInterval: numericUsed.length ? Math.max(...numericUsed) : 0,
+    };
+  }, [riseTerms, editingRiseTermIndex]);
+
+  const maxRiseMonthsFromCsd = useMemo(
+    () => getContractMonthsBetweenCsdAndCed(form.contractStartDate, form.contractEndDate),
+    [form.contractStartDate, form.contractEndDate]
+  );
+
   const validateRiseTerm = () => {
     const newErrors = {};
     if (!riseTermForm.monthsInterval || Number(riseTermForm.monthsInterval) <= 0) {
       newErrors.monthsInterval = "Months Interval is required and must be greater than 0";
+    } else {
+      const miStr = String(riseTermForm.monthsInterval).trim();
+      const miNum = Number(riseTermForm.monthsInterval);
+      const duplicate = riseTerms.some(
+        (t, i) => editingRiseTermIndex !== i && String(t.monthsInterval || "").trim() === miStr
+      );
+      if (duplicate) {
+        newErrors.monthsInterval = "This Months Interval is already used for another rise term.";
+      } else if (
+        maxUsedRiseMonthsInterval > 0 &&
+        Number.isFinite(miNum) &&
+        miNum < maxUsedRiseMonthsInterval
+      ) {
+        newErrors.monthsInterval = `Months Interval must be greater than ${maxUsedRiseMonthsInterval} months (a higher interval is already used).`;
+      } else if (!form.contractStartDate || !form.contractEndDate) {
+        newErrors.monthsInterval =
+          "Contract Start Date (CSD) and Contract End Date (CED) are required.";
+      } else if (
+        !isRiseMonthsIntervalWithinContractDuration(
+          riseTermForm.monthsInterval,
+          form.contractStartDate,
+          form.contractEndDate
+        )
+      ) {
+        newErrors.monthsInterval = `Months Interval must not exceed contract duration (${maxRiseMonthsFromCsd} months from CSD to CED).`;
+      }
     }
     if (!riseTermForm.risePercent || Number(riseTermForm.risePercent) <= 0) {
       newErrors.risePercent = "Rise Percent is required and must be greater than 0";
@@ -1584,7 +1706,6 @@ function ContractsForm({
     setEditingRiseTermIndex(null);
   };
 
-  const paymentTermOptions = [1, 2, 3, 4, 6, 12];
   const increaseIntervalOptions = [1, 2, 3, 4, 6, 12, 15, 24];
   const hasRentInTerm = String(form.term || "")
     .toLowerCase()
@@ -2131,23 +2252,26 @@ function ContractsForm({
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth error={!!errors.paymentTermMonths}>
+              <FormControl size="small" fullWidth required error={!!errors.paymentTermMonths}>
                 <InputLabel id="payment-term-label" sx={labelSx}>
-                  Payment Term (Months)
+                  Payment Term
                 </InputLabel>
                 <Select
                   labelId="payment-term-label"
                   value={form.paymentTermMonths || ""}
-                  label="Payment Term Months"
+                  label="Payment Term"
                   onChange={(e) => handleChange("paymentTermMonths", e.target.value)}
                   sx={selectSx}
                 >
-                  {paymentTermOptions.map((option) => (
-                    <MenuItem key={option} value={option} sx={menuItemSx}>
-                      {option}
+                  {CONTRACT_PAYMENT_TERM_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value} sx={menuItemSx}>
+                      {option.label}
                     </MenuItem>
                   ))}
                 </Select>
+                {errors.paymentTermMonths && (
+                  <FormHelperText>{errors.paymentTermMonths}</FormHelperText>
+                )}
               </FormControl>
             </Grid>
 
@@ -2169,33 +2293,56 @@ function ContractsForm({
               </MDTypography>
             </Grid>
 
-            {/* SD Rate (Months) and Security Deposit (Rs) - same row */}
+            {/* SD Rate, Payment Timing, Security Deposit (Rs) */}
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="sd-rate-months-label" sx={labelSx}>
-                  SD Rate (Months)
+              <FormControl size="small" fullWidth required error={!!errors.sdRateMonths}>
+                <InputLabel id="sd-rate-label" sx={labelSx}>
+                  SD Rate
                 </InputLabel>
                 <Select
-                  labelId="sd-rate-months-label"
+                  labelId="sd-rate-label"
                   value={
-                    [1, 2, 3, 4, 6, 9, 12].includes(Number(form.sdRateMonths))
+                    CONTRACT_SD_RATE_MONTH_VALUES.includes(Number(form.sdRateMonths))
                       ? Number(form.sdRateMonths)
                       : ""
                   }
-                  label="SD Rate Months"
+                  label="SD Rate"
                   onChange={(e) => handleChange("sdRateMonths", e.target.value)}
                   sx={selectSx}
                 >
-                  {[1, 2, 3, 4, 6, 9, 12].map((n) => (
+                  {CONTRACT_SD_RATE_MONTH_VALUES.map((n) => (
                     <MenuItem key={n} value={n} sx={menuItemSx}>
-                      {n}
+                      {formatContractSdRateDisplay(n)}
                     </MenuItem>
                   ))}
                 </Select>
+                {errors.sdRateMonths && <FormHelperText>{errors.sdRateMonths}</FormHelperText>}
               </FormControl>
             </Grid>
 
-            <Grid item xs={12} sm={6} md={6}>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl size="small" fullWidth required error={!!errors.paymentTiming}>
+                <InputLabel id="payment-timing-label" sx={labelSx}>
+                  Payment Timing
+                </InputLabel>
+                <Select
+                  labelId="payment-timing-label"
+                  value={form.paymentTiming || ""}
+                  label="Payment Timing"
+                  onChange={(e) => handleChange("paymentTiming", e.target.value)}
+                  sx={selectSx}
+                >
+                  {CONTRACT_PAYMENT_TIMING_OPTIONS.map((option) => (
+                    <MenuItem key={option} value={option} sx={menuItemSx}>
+                      {option}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {errors.paymentTiming && <FormHelperText>{errors.paymentTiming}</FormHelperText>}
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={4}>
               <MDTypography
                 variant="caption"
                 color="black"
@@ -2208,7 +2355,7 @@ function ContractsForm({
                 {form.securityDepositAmount || 0}
               </MDTypography>
               <MDTypography variant="caption" color="text">
-                Formula: SD Rate Months x Initial Rent PM
+                Formula: SD Rate x Initial Rent PM
               </MDTypography>
             </Grid>
 
@@ -3292,10 +3439,16 @@ function ContractsForm({
                               ])}
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("termOfPayment", "TermOfPayment", [
-                                "paymentTermMonths",
-                                "PaymentTermMonths",
-                              ])}
+                              {formatContractPaymentTermDisplay(
+                                getField("termOfPayment", "TermOfPayment", [
+                                  "paymentTermMonths",
+                                  "PaymentTermMonths",
+                                ])
+                              ) ||
+                                getField("termOfPayment", "TermOfPayment", [
+                                  "paymentTermMonths",
+                                  "PaymentTermMonths",
+                                ])}
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
                               {getField("profitTerm", "ProfitTerm")}
@@ -3313,10 +3466,16 @@ function ContractsForm({
                               ])}
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
-                              {getField("securityDepositTerm", "SecurityDepositTerm", [
-                                "sdRateMonths",
-                                "SdRateMonths",
-                              ])}
+                              {formatContractSdRateDisplay(
+                                getField("securityDepositTerm", "SecurityDepositTerm", [
+                                  "sdRateMonths",
+                                  "SdRateMonths",
+                                ])
+                              ) ||
+                                getField("securityDepositTerm", "SecurityDepositTerm", [
+                                  "sdRateMonths",
+                                  "SdRateMonths",
+                                ])}
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: "0.875rem" }}>
                               {getField("securityDepositRs", "SecurityDepositRs", [
@@ -3412,15 +3571,28 @@ function ContractsForm({
                   onChange={(e) => handleRiseTermChange("monthsInterval", e.target.value)}
                   sx={selectSx}
                 >
-                  {[
-                    6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114,
-                    120, 126, 132, 138, 144, 150, 156, 162, 168, 174, 180, 186, 192, 198, 204, 210,
-                    216, 222, 228, 234, 240, 246, 252, 258, 264, 270, 276, 282, 288, 294, 300,
-                  ].map((value) => (
-                    <MenuItem key={value} value={value.toString()} sx={menuItemSx}>
-                      {value}
-                    </MenuItem>
-                  ))}
+                  {RISE_TERM_MONTHS_INTERVAL_OPTIONS.map((value) => {
+                    const valueStr = String(value);
+                    const isUsed = usedRiseMonthsIntervals.has(valueStr);
+                    const belowUsedHigherInterval =
+                      maxUsedRiseMonthsInterval > 0 && value < maxUsedRiseMonthsInterval;
+                    const exceedsContract =
+                      maxRiseMonthsFromCsd !== null && value > maxRiseMonthsFromCsd;
+                    const disabled = isUsed || belowUsedHigherInterval || exceedsContract;
+                    return (
+                      <MenuItem
+                        key={value}
+                        value={valueStr}
+                        disabled={disabled}
+                        sx={{
+                          ...menuItemSx,
+                          ...(disabled ? { opacity: 0.45, color: "text.disabled" } : {}),
+                        }}
+                      >
+                        {value}
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
                 {riseTermErrors.monthsInterval && (
                   <FormHelperText>{riseTermErrors.monthsInterval}</FormHelperText>
@@ -4050,6 +4222,1193 @@ const CONTRACTS_DATATABLE_EXTRA_FILTER_TYPES = Object.freeze({
   contractsMoneyCompare: contractsGridMoneyCompare,
 });
 
+function unwrapContractInvoiceScheduleList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.Data)) return res.Data;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.Items)) return res.Items;
+  return [];
+}
+
+/** Leading numeric segment of InvoiceNo, e.g. 003-A001-BMSR-P1 → "3", 014-A001-BMSR-P1 → "14". */
+function parseInvoiceNoLeadingSno(invoiceNo) {
+  const raw = String(invoiceNo ?? "").trim();
+  if (!raw) return "";
+  const head = raw.split("-")[0];
+  const n = parseInt(head, 10);
+  return Number.isFinite(n) ? String(n) : head;
+}
+
+function toContractInvoiceDateInputValue(raw) {
+  if (!raw) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  return s.includes("T") ? s.split("T")[0].slice(0, 10) : s.slice(0, 10);
+}
+
+function parsePositiveInteger(value) {
+  const n = parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function computeAgreementInvoicePeriodEnd(periodStartYyyyMmDd, paymentTermMonths) {
+  const start = toContractInvoiceDateInputValue(periodStartYyyyMmDd);
+  if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return "";
+  const months = parsePositiveInteger(paymentTermMonths);
+  if (!months) return "";
+  const parsedStart = parseISO(start);
+  if (!isValid(parsedStart)) return "";
+  return format(addMonths(parsedStart, months), "yyyy-MM-dd");
+}
+
+const CONTRACT_SCH_MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function formatContractSchDateDisplay(raw) {
+  const datePart = toContractInvoiceDateInputValue(raw);
+  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return "";
+  const [y, m, d] = datePart.split("-").map(Number);
+  const month = CONTRACT_SCH_MONTH_SHORT[m - 1];
+  if (!month) return "";
+  return `${String(d).padStart(2, "0")}-${month}-${y}`;
+}
+
+/** Default Period text for invoice schedule grid / Description column. */
+function formatContractSchPeriodDisplay(periodStart, periodEnd) {
+  const start = formatContractSchDateDisplay(periodStart);
+  const end = formatContractSchDateDisplay(periodEnd);
+  if (!start && !end) return "";
+  if (start && end) return `${start} To ${end}`;
+  return start || end || "";
+}
+
+/** Create Agreement Invoice — Description from Period Start/End (e.g. Jan-2025 to Dec-2025). */
+function formatContractSchMonthYearDisplay(raw) {
+  const datePart = toContractInvoiceDateInputValue(raw);
+  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return "";
+  const [y, m] = datePart.split("-").map(Number);
+  const month = CONTRACT_SCH_MONTH_SHORT[m - 1];
+  if (!month) return "";
+  return `${month}-${y}`;
+}
+
+function formatContractSchPeriodMonthYearDisplay(periodStart, periodEnd) {
+  const start = formatContractSchMonthYearDisplay(periodStart);
+  const end = formatContractSchMonthYearDisplay(periodEnd);
+  if (!start && !end) return "";
+  if (start && end) return `${start} to ${end}`;
+  return start || end || "";
+}
+
+function pickContractSchPeriodDescription(row) {
+  const stored = String(
+    pickSchField(row, "Description", "description") || pickSchField(row, "Desc", "desc") || ""
+  ).trim();
+  if (stored) return stored;
+  return formatContractSchPeriodDisplay(
+    pickSchField(row, "PeriodStart", "periodStart"),
+    pickSchField(row, "PeriodEnd", "periodEnd")
+  );
+}
+
+/** e.g. 005-A1-ww → { num: 5, width: 3, restSuffix: "A1-ww" } */
+function parseInvoiceNoLeadingSegment(invoiceNo) {
+  const raw = String(invoiceNo ?? "").trim();
+  if (!raw) return null;
+  const dashIdx = raw.indexOf("-");
+  const head = dashIdx >= 0 ? raw.slice(0, dashIdx) : raw;
+  const restSuffix = dashIdx >= 0 ? raw.slice(dashIdx + 1) : "";
+  const num = parseInt(head, 10);
+  if (!Number.isFinite(num)) return null;
+  return { num, width: head.length, restSuffix };
+}
+
+function generateNextContractInvoiceNo(rows) {
+  let maxNum = 0;
+  let width = 3;
+  let restSuffix = "";
+  (rows || []).forEach((r) => {
+    if (r?.__isDraftNewInvoice) return;
+    const inv = String(r?.InvoiceNo ?? r?.invoiceNo ?? "").trim();
+    const parts = parseInvoiceNoLeadingSegment(inv);
+    if (!parts) return;
+    if (parts.num >= maxNum) {
+      maxNum = parts.num;
+      width = Math.max(width, parts.width);
+      restSuffix = parts.restSuffix;
+    }
+  });
+  const head = String(maxNum + 1).padStart(width, "0");
+  return restSuffix ? `${head}-${restSuffix}` : head;
+}
+
+function generateNextFinalizedContractInvoiceNo(rows) {
+  const finalizedRows = (rows || []).filter(
+    (r) => pickScheduleRowIsFinalize(r) && !r?.__isDraftNewInvoice
+  );
+  return generateNextContractInvoiceNo(finalizedRows.length > 0 ? finalizedRows : rows);
+}
+
+function pickContractInvoiceTemplateRow(rows) {
+  let best = null;
+  let maxNum = -1;
+  (rows || []).forEach((r) => {
+    if (r?.__isDraftNewInvoice) return;
+    const inv = String(r?.InvoiceNo ?? r?.invoiceNo ?? "").trim();
+    const parts = parseInvoiceNoLeadingSegment(inv);
+    if (parts && parts.num > maxNum) {
+      maxNum = parts.num;
+      best = r;
+    }
+  });
+  if (best) return best;
+  const list = (rows || []).filter((r) => !r?.__isDraftNewInvoice);
+  return list.length ? list[list.length - 1] : null;
+}
+
+function unwrapLockDateConfigList(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (response && typeof response === "object") return [response];
+  return [];
+}
+
+function pickActiveLockDateYyyyMmDd(lockDateRows) {
+  const rows = lockDateRows || [];
+  const active =
+    rows.find((r) => r?.IsActive === true || r?.IsActive === 1 || r?.isActive === true) || rows[0];
+  if (!active) return "";
+  const raw =
+    active?.LockingDate ?? active?.lockingDate ?? active?.LockDate ?? active?.lockDate ?? "";
+  return toContractInvoiceDateInputValue(raw);
+}
+
+/** Undo finalize allowed when invoice date is after the configured lock date. */
+function isInvoiceRowAllowedByLockDateConstraint(invoiceRow, lockDateYyyyMmDd) {
+  const lockStr = String(lockDateYyyyMmDd || "").trim();
+  if (!lockStr) return true;
+  const lockTs = Date.parse(lockStr);
+  if (!Number.isFinite(lockTs)) return true;
+  const invoiceDateRaw =
+    pickScheduleInvoiceDateSch(invoiceRow) ||
+    pickSchField(invoiceRow, "PeriodStart", "periodStart") ||
+    pickSchField(invoiceRow, "DueDate", "dueDate");
+  const invStr = toContractInvoiceDateInputValue(invoiceDateRaw);
+  if (!invStr) return false;
+  const invTs = Date.parse(invStr);
+  if (!Number.isFinite(invTs)) return false;
+  return invTs > lockTs;
+}
+
+function buildContractInvoiceDraftRow(templateRow, contractRow, allRows) {
+  const template = templateRow || contractRow || {};
+  const invoiceNo = generateNextContractInvoiceNo(allRows);
+  const invoiceDateRaw =
+    pickScheduleInvoiceDateSch(template) || pickSchField(template, "PeriodStart", "periodStart");
+  const dueDateRaw = pickSchField(template, "DueDate", "dueDate");
+  const contractNo = pickSchField(contractRow || template, "ContractNo", "contractNo");
+  const periodStart = pickSchField(template, "PeriodStart", "periodStart");
+  const periodEnd = pickSchField(template, "PeriodEnd", "periodEnd");
+  const defaultPeriodDescription = formatContractSchPeriodDisplay(periodStart, periodEnd);
+  return {
+    ...template,
+    ContractNo: contractNo || template.ContractNo,
+    contractNo: contractNo || template.contractNo,
+    PaymentTermMonths:
+      template.PaymentTermMonths ??
+      template.paymentTermMonths ??
+      contractRow?.PaymentTermMonths ??
+      contractRow?.paymentTermMonths,
+    paymentTermMonths:
+      template.paymentTermMonths ??
+      template.PaymentTermMonths ??
+      contractRow?.paymentTermMonths ??
+      contractRow?.PaymentTermMonths,
+    InvoiceNo: invoiceNo,
+    invoiceNo,
+    Description: defaultPeriodDescription,
+    description: defaultPeriodDescription,
+    Desc: defaultPeriodDescription,
+    __isDraftNewInvoice: true,
+    __finalizeKey: "__draft_new_invoice__",
+    IsFinalized: false,
+    isFinalized: false,
+    __draftInvoiceDate: toContractInvoiceDateInputValue(invoiceDateRaw),
+    __draftDueDate: toContractInvoiceDateInputValue(dueDateRaw),
+  };
+}
+
+/** Selection key from InvoiceNo (Sno); API calls still use full InvoiceNo on the row. */
+function buildContractInvoiceFinalizeRowKey(row, rowIndex) {
+  const invoiceNo = String(row?.InvoiceNo ?? row?.invoiceNo ?? "").trim();
+  const sno = parseInvoiceNoLeadingSno(invoiceNo);
+  const sub = row?.SubInvoiceNo ?? row?.subInvoiceNo;
+  const subStr = sub === null || sub === undefined ? "" : String(sub).trim();
+  if (sno && subStr) return `${sno}|${subStr}`;
+  if (sno) return sno;
+  if (invoiceNo) return invoiceNo;
+  return `row-${rowIndex ?? 0}`;
+}
+
+function getContractInvoiceFinalizeRowKey(r) {
+  return String(r?.__finalizeKey ?? "").trim();
+}
+
+function getContractInvoiceFinalizeInvoiceNo(r) {
+  return String(r?.InvoiceNo ?? r?.invoiceNo ?? "").trim();
+}
+
+function parseContractInvoiceLeadingSnoNumber(invoiceNo) {
+  const sno = parseInvoiceNoLeadingSno(invoiceNo);
+  const n = parseInt(String(sno || "").trim(), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getAllowedPendingFinalizeKeySet(rows) {
+  const finalizedRows = (rows || []).filter(
+    (r) => pickScheduleRowIsFinalize(r) && !r?.__isDraftNewInvoice
+  );
+  const pendingRows = (rows || []).filter(
+    (r) => !pickScheduleRowIsFinalize(r) && !r?.__isDraftNewInvoice
+  );
+  if (pendingRows.length === 0) return new Set();
+
+  let maxFinalizedSno = null;
+  finalizedRows.forEach((r) => {
+    const sno = parseContractInvoiceLeadingSnoNumber(getContractInvoiceFinalizeInvoiceNo(r));
+    if (sno === null) return;
+    maxFinalizedSno = maxFinalizedSno === null ? sno : Math.max(maxFinalizedSno, sno);
+  });
+
+  let nextAllowedSno = maxFinalizedSno !== null ? maxFinalizedSno + 1 : null;
+  if (nextAllowedSno === null) {
+    pendingRows.forEach((r) => {
+      const sno = parseContractInvoiceLeadingSnoNumber(getContractInvoiceFinalizeInvoiceNo(r));
+      if (sno === null) return;
+      nextAllowedSno = nextAllowedSno === null ? sno : Math.min(nextAllowedSno, sno);
+    });
+  }
+
+  if (nextAllowedSno === null) return new Set();
+
+  const allowed = new Set();
+  pendingRows.forEach((r) => {
+    if (pickScheduleRowIsExplicitlyUnfinalized(r)) {
+      const key = getContractInvoiceFinalizeRowKey(r);
+      if (key) allowed.add(key);
+      return;
+    }
+    const sno = parseContractInvoiceLeadingSnoNumber(getContractInvoiceFinalizeInvoiceNo(r));
+    const isPreviouslyUnfinalizedSequence =
+      maxFinalizedSno !== null && sno !== null && sno < maxFinalizedSno;
+    if (sno !== nextAllowedSno && !isPreviouslyUnfinalizedSequence) return;
+    const key = getContractInvoiceFinalizeRowKey(r);
+    if (key) allowed.add(key);
+  });
+  return allowed;
+}
+
+function hasDuplicateInvoicePeriod(rows, periodStart, periodEnd, currentInvoiceNo = "") {
+  const start = toContractInvoiceDateInputValue(periodStart);
+  const end = toContractInvoiceDateInputValue(periodEnd);
+  if (!start || !end) return false;
+  const currentInvoice = String(currentInvoiceNo || "").trim();
+  return (rows || []).some((r) => {
+    if (r?.__isDraftNewInvoice) return false;
+    const rowStart = toContractInvoiceDateInputValue(pickSchField(r, "PeriodStart", "periodStart"));
+    const rowEnd = toContractInvoiceDateInputValue(pickSchField(r, "PeriodEnd", "periodEnd"));
+    if (!rowStart || !rowEnd) return false;
+    if (rowStart !== start || rowEnd !== end) return false;
+    const rowInvoiceNo = getContractInvoiceFinalizeInvoiceNo(r);
+    return !currentInvoice || rowInvoiceNo !== currentInvoice;
+  });
+}
+
+function assignContractInvoiceFinalizeKeys(rows) {
+  const seen = new Map();
+  return (rows || []).map((row, index) => {
+    let key = buildContractInvoiceFinalizeRowKey(row, index);
+    const count = seen.get(key) ?? 0;
+    if (count > 0) key = `${key}#${count}`;
+    seen.set(buildContractInvoiceFinalizeRowKey(row, index), count + 1);
+    return { ...row, __finalizeKey: key };
+  });
+}
+
+function pickSchField(sch, pascal, camel) {
+  const v = sch?.[pascal] ?? sch?.[camel];
+  if (v === null || v === undefined) return "";
+  return v;
+}
+
+function pickScheduleInvoiceDateSch(sch) {
+  const dateType = String(pickSchField(sch, "InvoiceDateType", "invoiceDateType"))
+    .trim()
+    .toLowerCase();
+  if (dateType.includes("end")) return pickSchField(sch, "PeriodEnd", "periodEnd");
+  return pickSchField(sch, "PeriodStart", "periodStart");
+}
+
+function pickScheduleRowIsFinalize(rowData) {
+  if (!rowData) return false;
+  const v =
+    rowData?.IsFinalized ?? rowData?.isFinalized ?? rowData?.IsFinalize ?? rowData?.isFinalize;
+  if (v === true || v === 1 || v === "1") return true;
+  if (typeof v === "string" && v.trim().toLowerCase() === "true") return true;
+  return false;
+}
+
+function pickScheduleRowIsExplicitlyUnfinalized(rowData) {
+  if (!rowData) return false;
+  const v =
+    rowData?.IsFinalized ?? rowData?.isFinalized ?? rowData?.IsFinalize ?? rowData?.isFinalize;
+  return v === 0 || v === "0";
+}
+
+function pickNum(obj, pascal, camel, fallback) {
+  if (!obj) {
+    if (fallback === null || fallback === undefined || fallback === "") return null;
+    const fn = Number(fallback);
+    return Number.isFinite(fn) ? fn : null;
+  }
+  const v = obj[pascal] ?? obj[camel] ?? fallback;
+  if (v === null || v === undefined || v === "") {
+    if (fallback === null || fallback === undefined || fallback === "") return null;
+    const fn = Number(fallback);
+    return Number.isFinite(fn) ? fn : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildFinalizeInvoiceSchedulePayload(contractRow, sch) {
+  const cr = contractRow || {};
+  const str = (pascal, camel, fb = "") =>
+    String(sch?.[pascal] ?? sch?.[camel] ?? cr?.[pascal] ?? cr?.[camel] ?? fb ?? "").trim();
+  const contractNo = str("ContractNo", "contractNo");
+  const invoiceNo = str("InvoiceNo", "invoiceNo");
+  const contractId = pickNum(sch, "ContractId", "contractId", pickNum(cr, "Id", "id", null));
+  const periodStart = pickSchField(sch, "PeriodStart", "periodStart") || null;
+  const periodEnd = pickSchField(sch, "PeriodEnd", "periodEnd") || null;
+  const totalRent = pickNum(sch, "TotalRent", "totalRent", pickNum(sch, "Total", "total", null));
+  const amountReceivable = pickNum(sch, "AmountReceivable", "amountReceivable", totalRent);
+  const amountPending = pickNum(sch, "AmountPending", "amountPending", amountReceivable);
+  const amountReceived = pickNum(sch, "AmountReceived", "amountReceived", 0) ?? 0;
+
+  return {
+    ContractId: contractId,
+    ClassId: pickNum(sch, "ClassId", "classId", pickNum(cr, "ClassId", "classId", null)),
+    CmdId: pickNum(sch, "CmdId", "cmdId", pickNum(cr, "CmdId", "cmdId", null)),
+    BaseId: pickNum(sch, "BaseId", "baseId", pickNum(cr, "BaseId", "baseId", null)),
+    ContractNo: contractNo,
+    ContractStartDate:
+      pickSchField(sch, "ContractStartDate", "contractStartDate") ||
+      cr?.ContractStartDate ||
+      cr?.contractStartDate ||
+      null,
+    ContractEndDate:
+      pickSchField(sch, "ContractEndDate", "contractEndDate") ||
+      cr?.ContractEndDate ||
+      cr?.contractEndDate ||
+      null,
+    InvoiceNo: invoiceNo,
+    PeriodStart: periodStart || null,
+    PeriodEnd: periodEnd || null,
+    DueDate: pickSchField(sch, "DueDate", "dueDate") || null,
+    CalculatedRentPM: pickNum(sch, "CalculatedRentPM", "calculatedRentPM", null),
+    Months: pickNum(sch, "Months", "months", null),
+    TotalRent: totalRent,
+    ItemwithCode: str("ItemwithCode", "itemwithCode", str("ItemCode", "itemCode")),
+    Description: str("Description", "description", str("Desc", "desc")),
+    AccHead: str("AccHead", "accHead"),
+    Discount: pickNum(sch, "Discount", "discount", sch?.DiscountPercent ?? sch?.discountPercent),
+    Total: pickNum(sch, "Total", "total", totalRent),
+    Remarks: str("Remarks", "remarks"),
+    AmountReceived: amountReceived,
+    AmountReceivable: amountReceivable,
+    AmountPending: amountPending,
+    BusinessName: str("BusinessName", "businessName"),
+    InvoiceDateType: str("InvoiceDateType", "invoiceDateType"),
+    InvoiceStatus: str("InvoiceStatus", "invoiceStatus", "Unpaid"),
+    InitialRentPM: pickNum(
+      sch,
+      "InitialRentPM",
+      "initialRentPM",
+      cr?.InitialRentPM ?? cr?.initialRentPM
+    ),
+    PaymentTermMonths: pickNum(
+      sch,
+      "PaymentTermMonths",
+      "paymentTermMonths",
+      cr?.PaymentTermMonths ?? cr?.paymentTermMonths
+    ),
+    RiseTermType: str("RiseTermType", "riseTermType"),
+    RiseTerm: str("RiseTerm", "riseTerm"),
+    RiseRate: pickNum(sch, "RiseRate", "riseRate", cr?.RiseRate ?? cr?.riseRate),
+    RiseDate: pickSchField(sch, "RiseDate", "riseDate") || cr?.RiseDate || cr?.riseDate || null,
+    IsFinalized: true,
+    isFinalized: true,
+  };
+}
+
+function formatSchGridNumber(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString() : String(value);
+}
+
+/** Same columns as agreement-prov-invoice grid (excluding View / Action). */
+const CONTRACT_INVOICE_FINALIZE_COLS = [
+  {
+    key: "contractNo",
+    label: "Contract No",
+    align: "right",
+    get: (r) => pickSchField(r, "ContractNo", "contractNo") || "—",
+  },
+  {
+    key: "contractPeriod",
+    label: "Contract Period",
+    align: "left",
+    get: (r, formatDate) => {
+      const start = pickSchField(r, "ContractStartDate", "contractStartDate");
+      const end = pickSchField(r, "ContractEndDate", "contractEndDate");
+      if (!start && !end) return "—";
+      if (start && end) return `${formatDate(start)} To ${formatDate(end)}`;
+      return formatDate(start || end) || "—";
+    },
+  },
+  {
+    key: "invoiceNo",
+    label: "Invoice ID",
+    align: "left",
+    get: (r) => pickSchField(r, "InvoiceNo", "invoiceNo") || "—",
+  },
+  {
+    key: "invoiceDate",
+    label: "Invoice Date",
+    align: "left",
+    get: (r, formatDate) => formatDate(pickScheduleInvoiceDateSch(r)) || "—",
+  },
+  {
+    key: "dueDate",
+    label: "Due Date",
+    align: "left",
+    get: (r, formatDate) => formatDate(pickSchField(r, "DueDate", "dueDate")) || "—",
+  },
+  {
+    key: "period",
+    label: "Period",
+    align: "left",
+    get: (r) => pickContractSchPeriodDescription(r) || "—",
+  },
+  {
+    key: "calculatedRentPM",
+    label: "Rate PM",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "CalculatedRentPM", "calculatedRentPM")),
+  },
+  {
+    key: "months",
+    label: "Months",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "Months", "months")),
+  },
+  {
+    key: "totalRent",
+    label: "Net Amount",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "TotalRent", "totalRent")),
+  },
+  {
+    key: "remarks",
+    label: "Remarks",
+    align: "left",
+    get: (r) => pickSchField(r, "Remarks", "remarks") || "—",
+  },
+  {
+    key: "amountReceived",
+    label: "Amount Received",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "AmountReceived", "amountReceived")),
+  },
+  {
+    key: "amountReceivable",
+    label: "Amount Receivable",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "AmountReceivable", "amountReceivable")),
+  },
+  {
+    key: "amountPending",
+    label: "Amount Pending",
+    align: "right",
+    get: (r) => formatSchGridNumber(pickSchField(r, "AmountPending", "amountPending")),
+  },
+  {
+    key: "businessName",
+    label: "Business Name",
+    align: "left",
+    get: (r) => pickSchField(r, "BusinessName", "businessName") || "—",
+  },
+  {
+    key: "invoiceStatus",
+    label: "Invoice Status",
+    align: "center",
+    get: (r) => pickSchField(r, "InvoiceStatus", "invoiceStatus") || "—",
+  },
+];
+
+const CONTRACT_INVOICE_FINALIZE_GRID_COLUMNS_DATA = [
+  "minmax(96px, max-content)",
+  "minmax(168px, max-content)",
+  "minmax(120px, max-content)",
+  "minmax(96px, max-content)",
+  "minmax(96px, max-content)",
+  "minmax(168px, max-content)",
+  "minmax(80px, max-content)",
+  "minmax(64px, max-content)",
+  "minmax(88px, max-content)",
+  "minmax(100px, max-content)",
+  "minmax(96px, max-content)",
+  "minmax(96px, max-content)",
+  "minmax(96px, max-content)",
+  "minmax(120px, max-content)",
+  "minmax(96px, max-content)",
+].join(" ");
+
+const CONTRACT_INVOICE_FINALIZE_GRID_COLUMNS = [
+  "44px",
+  CONTRACT_INVOICE_FINALIZE_GRID_COLUMNS_DATA,
+].join(" ");
+
+function contractInvoiceFinalizeCellAlignSx(align) {
+  const a = align === "right" ? "right" : align === "center" ? "center" : "left";
+  return {
+    textAlign: a,
+    justifyContent: a === "right" ? "flex-end" : a === "center" ? "center" : "flex-start",
+  };
+}
+
+function getContractInvoiceFinalizeRowDisplay(r, formatDate) {
+  const cells = {};
+  CONTRACT_INVOICE_FINALIZE_COLS.forEach((col) => {
+    cells[col.key] = col.get(r, formatDate);
+  });
+  const searchText = Object.values(cells).join(" ").toLowerCase();
+  return { cells, searchText };
+}
+
+function openAgreementProvInvoiceInNewTab(contractNo, invoiceNo) {
+  const c = String(contractNo || "").trim();
+  const inv = String(invoiceNo || "").trim();
+  if (!c || !inv || inv === "—") return;
+  const targetUrl = `/contracts/agreement-prov-invoice?contractNo=${encodeURIComponent(
+    c
+  )}&invoiceNo=${encodeURIComponent(inv)}`;
+  window.open(targetUrl, "_blank");
+}
+
+function readContractsUrlContractNo() {
+  return readContractsUrlKpiFilters().contractNo;
+}
+
+function rowMatchesKpiContractHealthFilter(row, filterKey, getRowContractStateNormalized) {
+  if (!filterKey) return true;
+  const st = getRowContractStateNormalized(row);
+  const payload = String(
+    row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? ""
+  )
+    .trim()
+    .toLowerCase();
+  switch (filterKey) {
+    case "active":
+      return (
+        st === "active" || st === "valid" || payload.includes("active") || payload.includes("valid")
+      );
+    case "expiring":
+      return st === "expiring" || payload.includes("expir") || payload.includes("border");
+    case "terminated":
+      return st === "terminated" || payload.includes("terminat") || payload.includes("closed");
+    case "vacant":
+      return st === "vacant" || payload.includes("vacant");
+    default:
+      return true;
+  }
+}
+
+function rowMatchesKpiContractStatusFilter(row, filterKey) {
+  if (!filterKey) return true;
+  if (filterKey === "viable" || filterKey === "unviable") {
+    const v = String(
+      row.feasible ?? row.Viability ?? row.viability ?? row.Feasible ?? row.feasible ?? ""
+    )
+      .trim()
+      .toLowerCase();
+    if (filterKey === "viable") return v === "viable";
+    return v === "unviable";
+  }
+  const isActive =
+    row.Status === true ||
+    row.Status === 1 ||
+    row.Status === "1" ||
+    (typeof row.Status === "string" && String(row.Status).toLowerCase() === "active");
+  if (filterKey === "active") return isActive;
+  if (filterKey === "inactive") return !isActive;
+  return true;
+}
+
+function ContractInvoiceFinalizeGrid({
+  rows,
+  selectedKeys,
+  onSelectedKeysChange,
+  busy,
+  formatDate,
+  readOnly,
+  undoSelectable,
+  searchValue,
+  onSearchChange,
+  hideSearchInput,
+  draftNewRow,
+  onDraftInvoiceDateChange,
+  onDraftDueDateChange,
+  onDraftSave,
+  onDraftCancel,
+  showDuplicateAction,
+  onDuplicateRow,
+  allowedSelectionKeys,
+  blurNonSelectableRows,
+}) {
+  const [internalSearch, setInternalSearch] = useState("");
+  const search =
+    searchValue !== undefined && searchValue !== null ? String(searchValue) : internalSearch;
+  const setSearch = onSearchChange || setInternalSearch;
+  const selectable = !readOnly || undoSelectable;
+  const hasDraft = Boolean(draftNewRow?.__isDraftNewInvoice);
+  const gridTemplateColumns = [
+    ...(selectable ? ["44px"] : []),
+    CONTRACT_INVOICE_FINALIZE_GRID_COLUMNS_DATA,
+    ...(showDuplicateAction ? ["minmax(72px, max-content)"] : []),
+  ].join(" ");
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      getContractInvoiceFinalizeRowDisplay(r, formatDate).searchText.includes(q)
+    );
+  }, [rows, search, formatDate]);
+
+  const allowedSelectionKeySet = useMemo(() => {
+    if (undoSelectable || !allowedSelectionKeys) return null;
+    const list =
+      allowedSelectionKeys instanceof Set
+        ? Array.from(allowedSelectionKeys)
+        : Array.isArray(allowedSelectionKeys)
+        ? allowedSelectionKeys
+        : [];
+    const normalized = list.map((k) => String(k || "").trim()).filter(Boolean);
+    return normalized.length > 0 ? new Set(normalized) : null;
+  }, [allowedSelectionKeys, undoSelectable]);
+
+  const filteredKeys = useMemo(() => {
+    if (!selectable) return [];
+    if (undoSelectable) {
+      return filteredRows
+        .filter((r) => pickScheduleRowIsFinalize(r) && !r?.__isDraftNewInvoice)
+        .map(getContractInvoiceFinalizeRowKey)
+        .filter(Boolean);
+    }
+    return filteredRows
+      .filter((r) => {
+        if (pickScheduleRowIsFinalize(r)) return false;
+        if (!allowedSelectionKeySet) return true;
+        const rowKey = getContractInvoiceFinalizeRowKey(r);
+        return Boolean(rowKey) && allowedSelectionKeySet.has(rowKey);
+      })
+      .map(getContractInvoiceFinalizeRowKey)
+      .filter(Boolean);
+  }, [filteredRows, selectable, undoSelectable, allowedSelectionKeySet]);
+
+  const selectedInViewCount = filteredKeys.filter((k) => selectedKeys.has(k)).length;
+  const allInViewSelected = filteredKeys.length > 0 && selectedInViewCount === filteredKeys.length;
+  const someInViewSelected = selectedInViewCount > 0 && !allInViewSelected;
+
+  const cellBaseSx = {
+    display: "flex",
+    alignItems: "center",
+    minHeight: 36,
+    fontSize: "0.8125rem",
+    lineHeight: 1.3,
+    py: 0.5,
+    px: 1.25,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    boxSizing: "border-box",
+  };
+
+  const headerCellSx = {
+    ...cellBaseSx,
+    fontWeight: 700,
+    fontSize: "0.7rem",
+    letterSpacing: "0.02em",
+    textTransform: "uppercase",
+    bgcolor: "#f4f6f8",
+    borderBottom: "1px solid rgba(0,0,0,0.12)",
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+  };
+
+  const bodyCellSx = {
+    ...cellBaseSx,
+    borderBottom: "1px solid rgba(0,0,0,0.06)",
+  };
+
+  const gridTableSx = {
+    display: "grid",
+    gridTemplateColumns,
+    width: "max-content",
+    minWidth: "100%",
+    columnGap: 0,
+    alignItems: "stretch",
+  };
+
+  const toggleSelectAllInView = () => {
+    onSelectedKeysChange((prev) => {
+      const next = new Set(prev);
+      if (allInViewSelected) {
+        filteredKeys.forEach((k) => next.delete(k));
+      } else {
+        filteredKeys.forEach((k) => next.add(k));
+      }
+      return next;
+    });
+  };
+
+  return (
+    <MDBox>
+      {!hideSearchInput && (
+        <MDBox mb={1.5}>
+          <MDInput
+            placeholder="Search invoices..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            fullWidth
+            size="small"
+            disabled={busy}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Icon sx={{ fontSize: "1.1rem", opacity: 0.6 }}>search</Icon>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </MDBox>
+      )}
+      <MDBox
+        sx={{
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 1,
+          overflow: "hidden",
+        }}
+      >
+        <MDBox sx={{ overflow: "auto", maxHeight: "52vh" }}>
+          {filteredRows.length === 0 && !hasDraft ? (
+            <MDTypography variant="caption" color="text" display="block" textAlign="center" py={2}>
+              {search.trim() ? "No rows match your search." : "No invoice schedule rows found."}
+            </MDTypography>
+          ) : (
+            <MDBox sx={gridTableSx}>
+              <MDBox sx={{ display: "contents" }}>
+                {selectable && (
+                  <MDBox
+                    sx={{
+                      ...headerCellSx,
+                      justifyContent: "center",
+                      px: 0.5,
+                    }}
+                  >
+                    <Checkbox
+                      size="small"
+                      indeterminate={someInViewSelected}
+                      checked={allInViewSelected}
+                      onChange={toggleSelectAllInView}
+                      disabled={busy || filteredKeys.length === 0}
+                    />
+                  </MDBox>
+                )}
+                {CONTRACT_INVOICE_FINALIZE_COLS.map((col) => (
+                  <MDBox
+                    key={col.key}
+                    sx={{
+                      ...headerCellSx,
+                      ...contractInvoiceFinalizeCellAlignSx(col.align),
+                    }}
+                  >
+                    {col.label}
+                  </MDBox>
+                ))}
+                {showDuplicateAction && (
+                  <MDBox
+                    sx={{
+                      ...headerCellSx,
+                      ...contractInvoiceFinalizeCellAlignSx("center"),
+                    }}
+                  >
+                    Action
+                  </MDBox>
+                )}
+              </MDBox>
+              {hasDraft &&
+                (() => {
+                  const r = draftNewRow;
+                  const d = getContractInvoiceFinalizeRowDisplay(
+                    {
+                      ...r,
+                      PeriodStart: r.__draftInvoiceDate || r.PeriodStart,
+                      periodStart: r.__draftInvoiceDate || r.periodStart,
+                      DueDate: r.__draftDueDate || r.DueDate,
+                      dueDate: r.__draftDueDate || r.dueDate,
+                    },
+                    formatDate
+                  );
+                  return (
+                    <MDBox
+                      key="__draft_new_invoice__"
+                      sx={{
+                        display: "contents",
+                        "& > *": {
+                          bgcolor: "#e3f2fd !important",
+                        },
+                      }}
+                    >
+                      {selectable && (
+                        <MDBox
+                          sx={{
+                            ...bodyCellSx,
+                            justifyContent: "center",
+                            gap: 0.25,
+                            px: 0.25,
+                          }}
+                        >
+                          <Tooltip title="Save invoice">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="success"
+                                disabled={busy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDraftSave();
+                                }}
+                              >
+                                <Icon fontSize="small">check</Icon>
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Cancel">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                disabled={busy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDraftCancel();
+                                }}
+                              >
+                                <Icon fontSize="small">close</Icon>
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </MDBox>
+                      )}
+                      {CONTRACT_INVOICE_FINALIZE_COLS.map((col) => {
+                        const cellText = d.cells[col.key];
+                        if (col.key === "invoiceDate") {
+                          return (
+                            <MDBox
+                              key={col.key}
+                              sx={{
+                                ...bodyCellSx,
+                                ...contractInvoiceFinalizeCellAlignSx(col.align),
+                                overflow: "visible",
+                              }}
+                            >
+                              <MDInput
+                                type="date"
+                                size="small"
+                                value={r.__draftInvoiceDate || ""}
+                                onChange={(e) => onDraftInvoiceDateChange(e.target.value)}
+                                disabled={busy}
+                                sx={{ width: "100%", minWidth: 130 }}
+                              />
+                            </MDBox>
+                          );
+                        }
+                        if (col.key === "dueDate") {
+                          return (
+                            <MDBox
+                              key={col.key}
+                              sx={{
+                                ...bodyCellSx,
+                                ...contractInvoiceFinalizeCellAlignSx(col.align),
+                                overflow: "visible",
+                              }}
+                            >
+                              <MDInput
+                                type="date"
+                                size="small"
+                                value={r.__draftDueDate || ""}
+                                onChange={(e) => onDraftDueDateChange(e.target.value)}
+                                disabled={busy}
+                                sx={{ width: "100%", minWidth: 130 }}
+                              />
+                            </MDBox>
+                          );
+                        }
+                        if (col.key === "invoiceNo") {
+                          return (
+                            <MDBox
+                              key={col.key}
+                              sx={{
+                                ...bodyCellSx,
+                                ...contractInvoiceFinalizeCellAlignSx(col.align),
+                                fontWeight: 600,
+                              }}
+                              title={pickSchField(r, "InvoiceNo", "invoiceNo")}
+                            >
+                              {pickSchField(r, "InvoiceNo", "invoiceNo") || "—"}
+                            </MDBox>
+                          );
+                        }
+                        return (
+                          <MDBox
+                            key={col.key}
+                            sx={{
+                              ...bodyCellSx,
+                              ...contractInvoiceFinalizeCellAlignSx(col.align),
+                              fontVariantNumeric:
+                                col.align === "right" ? "tabular-nums" : undefined,
+                            }}
+                            title={String(cellText ?? "")}
+                          >
+                            {cellText}
+                          </MDBox>
+                        );
+                      })}
+                    </MDBox>
+                  );
+                })()}
+              {filteredRows.map((r, rowIdx) => {
+                if (r?.__isDraftNewInvoice) return null;
+                const rowKey = getContractInvoiceFinalizeRowKey(r);
+                const d = getContractInvoiceFinalizeRowDisplay(r, formatDate);
+                const isLast = rowIdx === filteredRows.length - 1;
+                const isFinalized = pickScheduleRowIsFinalize(r);
+                const sequenceBlocked =
+                  !undoSelectable &&
+                  !isFinalized &&
+                  Boolean(allowedSelectionKeySet) &&
+                  (!rowKey || !allowedSelectionKeySet.has(rowKey));
+                const canSelectRow = undoSelectable
+                  ? isFinalized && !r?.__isDraftNewInvoice
+                  : !isFinalized && !sequenceBlocked;
+                const rowDisabled =
+                  selectable && !undoSelectable && (isFinalized || sequenceBlocked);
+                const rowBlurred = blurNonSelectableRows && !undoSelectable && sequenceBlocked;
+                return (
+                  <MDBox
+                    key={rowKey || `row-${r.InvoiceNo}-${r.SubInvoiceNo}`}
+                    sx={{
+                      display: "contents",
+                      "& > *": {
+                        bgcolor: rowDisabled ? "#ececec" : rowIdx % 2 === 0 ? "#fff" : "#fafbfc",
+                        color: rowDisabled ? "text.disabled" : "inherit",
+                        opacity: rowDisabled ? 0.72 : 1,
+                        filter: rowBlurred ? "blur(1px)" : "none",
+                        ...(isLast ? { borderBottom: "none" } : {}),
+                      },
+                      ...(!rowDisabled
+                        ? {
+                            "&:hover > *": {
+                              bgcolor: "rgba(25, 118, 210, 0.06) !important",
+                            },
+                          }
+                        : {}),
+                    }}
+                  >
+                    {selectable && (
+                      <MDBox
+                        sx={{
+                          ...bodyCellSx,
+                          justifyContent: "center",
+                          px: 0.5,
+                        }}
+                      >
+                        <Checkbox
+                          size="small"
+                          checked={Boolean(rowKey) && canSelectRow && selectedKeys.has(rowKey)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            if (!rowKey || !canSelectRow) return;
+                            const checked = e.target.checked;
+                            onSelectedKeysChange((prev) => {
+                              const next = new Set(prev);
+                              if (checked) next.add(rowKey);
+                              else next.delete(rowKey);
+                              return next;
+                            });
+                          }}
+                          disabled={busy || !rowKey || !canSelectRow}
+                        />
+                      </MDBox>
+                    )}
+                    {CONTRACT_INVOICE_FINALIZE_COLS.map((col) => {
+                      const cellText = d.cells[col.key];
+                      const isInvoiceLink = col.key === "invoiceNo" && cellText && cellText !== "—";
+                      const rowContractNo = pickSchField(r, "ContractNo", "contractNo");
+                      const rowInvoiceNo = pickSchField(r, "InvoiceNo", "invoiceNo");
+                      return (
+                        <MDBox
+                          key={col.key}
+                          sx={{
+                            ...bodyCellSx,
+                            ...contractInvoiceFinalizeCellAlignSx(col.align),
+                            fontVariantNumeric: col.align === "right" ? "tabular-nums" : undefined,
+                          }}
+                          title={String(cellText ?? "")}
+                        >
+                          {isInvoiceLink ? (
+                            <MDTypography
+                              component="span"
+                              variant="caption"
+                              sx={{
+                                cursor: "pointer",
+                                color: "info.main",
+                                textDecoration: "underline",
+                                fontSize: "inherit",
+                                lineHeight: "inherit",
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAgreementProvInvoiceInNewTab(rowContractNo, rowInvoiceNo);
+                              }}
+                            >
+                              {cellText}
+                            </MDTypography>
+                          ) : (
+                            cellText
+                          )}
+                        </MDBox>
+                      );
+                    })}
+                    {showDuplicateAction && (
+                      <MDBox
+                        sx={{
+                          ...bodyCellSx,
+                          ...contractInvoiceFinalizeCellAlignSx("center"),
+                          gap: 0.25,
+                        }}
+                      >
+                        {isFinalized && (
+                          <Tooltip title="Duplicate">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="secondary"
+                                disabled={busy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDuplicateRow?.(r);
+                                }}
+                                sx={{ padding: "2px" }}
+                              >
+                                <Icon fontSize="small">content_copy</Icon>
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        )}
+                      </MDBox>
+                    )}
+                  </MDBox>
+                );
+              })}
+            </MDBox>
+          )}
+        </MDBox>
+      </MDBox>
+      {search.trim() && filteredRows.length > 0 && (
+        <MDTypography variant="caption" color="text" sx={{ mt: 0.75, display: "block" }}>
+          Showing {filteredRows.length} of {rows.length} row(s)
+        </MDTypography>
+      )}
+    </MDBox>
+  );
+}
+
+ContractInvoiceFinalizeGrid.propTypes = {
+  rows: PropTypes.arrayOf(PropTypes.object).isRequired,
+  selectedKeys: PropTypes.instanceOf(Set),
+  onSelectedKeysChange: PropTypes.func,
+  busy: PropTypes.bool,
+  formatDate: PropTypes.func.isRequired,
+  readOnly: PropTypes.bool,
+  undoSelectable: PropTypes.bool,
+  searchValue: PropTypes.string,
+  onSearchChange: PropTypes.func,
+  hideSearchInput: PropTypes.bool,
+  draftNewRow: PropTypes.object,
+  onDraftInvoiceDateChange: PropTypes.func,
+  onDraftDueDateChange: PropTypes.func,
+  onDraftSave: PropTypes.func,
+  onDraftCancel: PropTypes.func,
+  showDuplicateAction: PropTypes.bool,
+  onDuplicateRow: PropTypes.func,
+  allowedSelectionKeys: PropTypes.oneOfType([
+    PropTypes.instanceOf(Set),
+    PropTypes.arrayOf(PropTypes.string),
+  ]),
+  blurNonSelectableRows: PropTypes.bool,
+};
+
+ContractInvoiceFinalizeGrid.defaultProps = {
+  busy: false,
+  selectedKeys: new Set(),
+  onSelectedKeysChange: () => {},
+  readOnly: false,
+  undoSelectable: false,
+  searchValue: undefined,
+  onSearchChange: undefined,
+  hideSearchInput: false,
+  draftNewRow: null,
+  onDraftInvoiceDateChange: () => {},
+  onDraftDueDateChange: () => {},
+  onDraftSave: () => {},
+  onDraftCancel: () => {},
+  showDuplicateAction: false,
+  onDuplicateRow: undefined,
+  allowedSelectionKeys: undefined,
+  blurNonSelectableRows: false,
+};
+
 export default function Contracts() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -4104,6 +5463,12 @@ export default function Contracts() {
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [contractsArchiveFilter, setContractsArchiveFilter] = useState("all");
   const [contractsApprovalFilter, setContractsApprovalFilter] = useState("all");
+  const [kpiContractHealthFilter, setKpiContractHealthFilter] = useState("");
+  const [kpiContractStatusFilter, setKpiContractStatusFilter] = useState("");
+  const urlKpiFilters = useMemo(() => readContractsUrlKpiFilters(), []);
+  const urlContractNo = urlKpiFilters.contractNo;
+  const urlContractNoAppliedRef = useRef(false);
+  const urlKpiGridFiltersAppliedRef = useRef(false);
   // Increment to refetch as-of values (used on first load, send button, not on date-only change).
   const [asOfRefreshToken, setAsOfRefreshToken] = useState(1);
   const [asOfRefreshing, setAsOfRefreshing] = useState(false);
@@ -4124,6 +5489,17 @@ export default function Contracts() {
   const [selectedContractDetails, setSelectedContractDetails] = useState(null);
   const [contractDetailsRiseTerms, setContractDetailsRiseTerms] = useState([]);
   const [loadingContractDetailsRiseTerms, setLoadingContractDetailsRiseTerms] = useState(false);
+  const [invoiceFinalizeOpen, setInvoiceFinalizeOpen] = useState(false);
+  const [invoiceFinalizeContractRow, setInvoiceFinalizeContractRow] = useState(null);
+  const [invoiceScheduleRows, setInvoiceScheduleRows] = useState([]);
+  const [invoiceScheduleLoading, setInvoiceScheduleLoading] = useState(false);
+  const [invoiceFinalizeSelectedKeys, setInvoiceFinalizeSelectedKeys] = useState(() => new Set());
+  const [invoiceFinalizeTab, setInvoiceFinalizeTab] = useState("pending");
+  const [invoiceFinalizeBusy, setInvoiceFinalizeBusy] = useState(false);
+  const [agreementProvCreateDialogOpen, setAgreementProvCreateDialogOpen] = useState(false);
+  const [agreementProvCreateRowData, setAgreementProvCreateRowData] = useState(null);
+  const [invoiceFinalizeSearch, setInvoiceFinalizeSearch] = useState("");
+  const [invoiceFinalizeLockDate, setInvoiceFinalizeLockDate] = useState("");
   const asOfDateInputRef = useRef(null);
 
   const openDatePicker = (ref) => {
@@ -4509,6 +5885,57 @@ export default function Contracts() {
     fetchAllPropertyGroupings();
   }, []);
 
+  useEffect(() => {
+    if (!hasContractsKpiGridFilters(urlKpiFilters)) return;
+    if (commands.length === 0) fetchCommands();
+    if (bases.length === 0) fetchBases();
+    if (classes.length === 0) fetchClasses();
+  }, [urlKpiFilters]);
+
+  useEffect(() => {
+    if (urlKpiGridFiltersAppliedRef.current || !hasContractsKpiGridFilters(urlKpiFilters)) return;
+
+    let cmdName = resolveCommandNameById(commands, urlKpiFilters.cmdId);
+    let baseName = resolveBaseNameById(bases, urlKpiFilters.baseId);
+    let className = resolveClassNameById(classes, urlKpiFilters.classId);
+
+    if (!cmdName && urlKpiFilters.cmdId && rows.length > 0) {
+      const row = rows.find((r) => Number(r.CmdId ?? r.cmdId) === Number(urlKpiFilters.cmdId));
+      cmdName = String(row?.CmdName ?? row?.cmdName ?? "").trim();
+    }
+    if (!baseName && urlKpiFilters.baseId && rows.length > 0) {
+      const row = rows.find((r) => Number(r.BaseId ?? r.baseId) === Number(urlKpiFilters.baseId));
+      baseName = String(row?.BaseName ?? row?.baseName ?? "").trim();
+    }
+    if (!className && urlKpiFilters.classId && rows.length > 0) {
+      const row = rows.find(
+        (r) => Number(r.ClassId ?? r.classId) === Number(urlKpiFilters.classId)
+      );
+      className = String(row?.ClassName ?? row?.className ?? "").trim();
+    }
+
+    const waitingForLists =
+      (urlKpiFilters.cmdId && !cmdName) ||
+      (urlKpiFilters.baseId && !baseName) ||
+      (urlKpiFilters.classId && !className);
+    if (waitingForLists) return;
+
+    if (cmdName) setCommandFilterIds([cmdName]);
+    if (baseName) setBaseFilterIds([baseName]);
+    if (className) setClassFilterIds([className]);
+    if (urlKpiFilters.kpiContractHealth) {
+      setKpiContractHealthFilter(urlKpiFilters.kpiContractHealth);
+    }
+    if (urlKpiFilters.kpiContractStatus) {
+      setKpiContractStatusFilter(urlKpiFilters.kpiContractStatus);
+    }
+    if (urlKpiFilters.kpiApproval === "approved" || urlKpiFilters.kpiApproval === "pending") {
+      setContractsApprovalFilter(urlKpiFilters.kpiApproval);
+    }
+
+    urlKpiGridFiltersAppliedRef.current = true;
+  }, [urlKpiFilters, commands, bases, classes, rows]);
+
   // Lazy-load dropdown lists only when form opens (Add New / Edit)
   useEffect(() => {
     if (!openForm) return;
@@ -4658,8 +6085,22 @@ export default function Contracts() {
     }
   };
 
-  const handleDeleteContract = (id) => {
+  const handleDeleteContract = async (id) => {
     if (!canDeleteCurrentMenu()) return;
+    const row = (rows || []).find((r) => Number(r?.id ?? r?.Id) === Number(id));
+    const contractNo = String(row?.contractNo ?? row?.ContractNo ?? "").trim();
+    if (contractNo) {
+      try {
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        const invoices = unwrapContractInvoiceScheduleList(res);
+        if (invoices.length > 0) {
+          alert("Cannot delete this contract: there are linked invoices.");
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking linked invoices:", error);
+      }
+    }
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
   };
@@ -4711,6 +6152,403 @@ export default function Contracts() {
       setLoadingContractDetailsRiseTerms(false);
     }
   };
+
+  useEffect(() => {
+    if (urlContractNoAppliedRef.current || !urlContractNo) return;
+    urlContractNoAppliedRef.current = true;
+
+    const openContractFromUrl = async () => {
+      try {
+        setLoading(true);
+        const response = await contractApi.getAll(1, 10000);
+        const list = response?.data ?? (Array.isArray(response) ? response : []);
+        const contractKey = urlContractNo.toLowerCase();
+        const match = list.find(
+          (c) =>
+            String(c.ContractNo ?? c.contractNo ?? "")
+              .trim()
+              .toLowerCase() === contractKey
+        );
+        if (!match) {
+          alert(`Contract not found: ${urlContractNo}`);
+          return;
+        }
+
+        let openViewDetails = false;
+        try {
+          const v = String(
+            new URLSearchParams(window.location.search).get("viewDetails") || ""
+          ).toLowerCase();
+          openViewDetails = v === "1" || v === "true" || v === "yes";
+        } catch (_) {
+          openViewDetails = false;
+        }
+
+        if (openViewDetails) {
+          await handleViewDetails(match);
+          return;
+        }
+
+        if (!canEditCurrentMenu()) return;
+        const id = match.Id ?? match.id;
+        if (!id) {
+          alert(`Contract not found: ${urlContractNo}`);
+          return;
+        }
+        const contract = await api.get("Contracts", id);
+        setIsCloneMode(false);
+        setCurrentContract(contract);
+        setOpenForm(true);
+      } catch (error) {
+        console.error("Error opening contract from URL:", error);
+        alert("Failed to load contract. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void openContractFromUrl();
+  }, [urlContractNo]);
+
+  const handleOpenContractInvoices = useCallback(async (row) => {
+    const contractNo = String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+    if (!contractNo) {
+      alert("Contract number is missing.");
+      return;
+    }
+    setInvoiceFinalizeContractRow(row);
+    setInvoiceFinalizeOpen(true);
+    setInvoiceScheduleLoading(true);
+    setInvoiceScheduleRows([]);
+    setInvoiceFinalizeSelectedKeys(new Set());
+    setInvoiceFinalizeTab("pending");
+    setAgreementProvCreateDialogOpen(false);
+    setAgreementProvCreateRowData(null);
+    setInvoiceFinalizeSearch("");
+    try {
+      const [scheduleRes, lockDateRes] = await Promise.all([
+        contractApi.getInvoiceSchedule({ contractNo }),
+        lockDateApi.getAll().catch(() => null),
+      ]);
+      setInvoiceScheduleRows(
+        assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(scheduleRes))
+      );
+      setInvoiceFinalizeLockDate(pickActiveLockDateYyyyMmDd(unwrapLockDateConfigList(lockDateRes)));
+    } catch (error) {
+      console.error("Error loading invoice schedule:", error);
+      alert("Failed to load invoice schedule for this contract.");
+      setInvoiceFinalizeOpen(false);
+      setInvoiceFinalizeContractRow(null);
+    } finally {
+      setInvoiceScheduleLoading(false);
+    }
+  }, []);
+
+  const handleCloseInvoiceFinalizeDialog = useCallback(() => {
+    if (invoiceFinalizeBusy) return;
+    setInvoiceFinalizeOpen(false);
+    setInvoiceFinalizeContractRow(null);
+    setInvoiceScheduleRows([]);
+    setInvoiceFinalizeSelectedKeys(new Set());
+    setInvoiceFinalizeTab("pending");
+    setAgreementProvCreateDialogOpen(false);
+    setAgreementProvCreateRowData(null);
+    setInvoiceFinalizeSearch("");
+  }, [invoiceFinalizeBusy]);
+
+  const invoiceFinalizePendingRows = useMemo(
+    () =>
+      invoiceScheduleRows
+        .filter((r) => !pickScheduleRowIsFinalize(r))
+        .sort((a, b) =>
+          getContractInvoiceFinalizeInvoiceNo(a).localeCompare(
+            getContractInvoiceFinalizeInvoiceNo(b),
+            undefined,
+            { numeric: true }
+          )
+        ),
+    [invoiceScheduleRows]
+  );
+
+  const invoiceFinalizeFinalizedRows = useMemo(
+    () => invoiceScheduleRows.filter((r) => pickScheduleRowIsFinalize(r)),
+    [invoiceScheduleRows]
+  );
+
+  const invoiceFinalizeAllowedPendingKeys = useMemo(
+    () => getAllowedPendingFinalizeKeySet(invoiceScheduleRows),
+    [invoiceScheduleRows]
+  );
+
+  const handleFinalizeSelectedInvoices = useCallback(async () => {
+    if (!invoiceFinalizeContractRow) return;
+    if (invoiceFinalizeSelectedKeys.size === 0) {
+      alert("Select at least one invoice row.");
+      return;
+    }
+    if (invoiceFinalizeAllowedPendingKeys.size > 0) {
+      const hasOutOfSequenceSelection = Array.from(invoiceFinalizeSelectedKeys).some(
+        (k) => !invoiceFinalizeAllowedPendingKeys.has(k)
+      );
+      if (hasOutOfSequenceSelection) {
+        alert("Only the next immediate pending invoice can be finalized.");
+        return;
+      }
+    }
+    const selected = invoiceScheduleRows.filter(
+      (r) =>
+        invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
+        !pickScheduleRowIsFinalize(r) &&
+        (invoiceFinalizeAllowedPendingKeys.size === 0 ||
+          invoiceFinalizeAllowedPendingKeys.has(getContractInvoiceFinalizeRowKey(r)))
+    );
+    if (selected.length === 0) {
+      alert("Selected rows are already finalized, invalid, or out of sequence.");
+      return;
+    }
+    const contractNo = String(
+      invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
+    ).trim();
+    setInvoiceFinalizeBusy(true);
+    try {
+      for (let i = 0; i < selected.length; i += 1) {
+        const schRow = selected[i];
+        const rowContractNo = String(
+          schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
+        ).trim();
+        const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
+        const subRaw = schRow?.SubInvoiceNo ?? schRow?.subInvoiceNo;
+        const subInvoiceNo = subRaw === null || subRaw === undefined ? "" : String(subRaw).trim();
+        if (rowContractNo && invoiceNo) {
+          const payload = {
+            ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
+            IsFinalized: true,
+            isFinalized: true,
+          };
+          await contractApi.createInvoiceSchedule(rowContractNo, invoiceNo, subInvoiceNo, payload);
+        }
+      }
+      if (contractNo) {
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+        );
+      }
+      setInvoiceFinalizeSelectedKeys(new Set());
+      setInvoiceFinalizeTab("finalized");
+    } catch (error) {
+      console.error("Error finalizing invoice rows:", error);
+      alert(String(error?.message || "Finalize failed. Please try again."));
+    } finally {
+      setInvoiceFinalizeBusy(false);
+    }
+  }, [
+    invoiceFinalizeContractRow,
+    invoiceFinalizeSelectedKeys,
+    invoiceScheduleRows,
+    invoiceFinalizeAllowedPendingKeys,
+  ]);
+
+  const handleCloseAgreementProvCreateDialog = useCallback(() => {
+    if (invoiceFinalizeBusy) return;
+    setAgreementProvCreateDialogOpen(false);
+    setAgreementProvCreateRowData(null);
+  }, [invoiceFinalizeBusy]);
+
+  const handleAddNewInvoiceDraft = useCallback(() => {
+    if (!invoiceFinalizeContractRow) return;
+    if (!(invoiceScheduleRows || []).some((r) => pickScheduleRowIsFinalize(r))) {
+      alert("Please finalize at least 1 invoice before adding a new invoice.");
+      return;
+    }
+    const template = pickContractInvoiceTemplateRow(invoiceScheduleRows);
+    const draft = buildContractInvoiceDraftRow(
+      template,
+      invoiceFinalizeContractRow,
+      invoiceScheduleRows
+    );
+    const nextInvoiceNo = generateNextFinalizedContractInvoiceNo(invoiceScheduleRows);
+    setAgreementProvCreateRowData({
+      ...draft,
+      InvoiceNo: nextInvoiceNo,
+      invoiceNo: nextInvoiceNo,
+    });
+    setAgreementProvCreateDialogOpen(true);
+    setInvoiceFinalizeSelectedKeys(new Set());
+  }, [invoiceFinalizeContractRow, invoiceScheduleRows]);
+
+  const handleDuplicateFinalizedInvoice = useCallback(
+    (parentRow) => {
+      if (!invoiceFinalizeContractRow || !parentRow || agreementProvCreateDialogOpen) return;
+      const draft = buildContractInvoiceDraftRow(
+        parentRow,
+        invoiceFinalizeContractRow,
+        invoiceScheduleRows
+      );
+      const periodDescription = pickContractSchPeriodDescription(parentRow);
+      const invoiceDateRaw =
+        pickScheduleInvoiceDateSch(parentRow) ||
+        pickSchField(parentRow, "PeriodStart", "periodStart");
+      const dueDateRaw = pickSchField(parentRow, "DueDate", "dueDate");
+      setAgreementProvCreateRowData({
+        ...draft,
+        Description: periodDescription,
+        description: periodDescription,
+        Desc: periodDescription,
+        __draftInvoiceDate: toContractInvoiceDateInputValue(invoiceDateRaw),
+        __draftDueDate: toContractInvoiceDateInputValue(dueDateRaw),
+      });
+      setAgreementProvCreateDialogOpen(true);
+      setInvoiceFinalizeSelectedKeys(new Set());
+    },
+    [invoiceFinalizeContractRow, invoiceScheduleRows, agreementProvCreateDialogOpen]
+  );
+
+  const handleSaveAgreementProvCreateInvoice = useCallback(
+    async (form, rowData) => {
+      if (!invoiceFinalizeContractRow || !rowData) return;
+      const draftInvoiceDate = String(form?.invoiceDate || "").trim();
+      const draftDueDate = String(form?.dueDate || "").trim();
+      if (!draftInvoiceDate || !draftDueDate) {
+        alert("Invoice Date and Due Date are required.");
+        return;
+      }
+      const contractNo = String(
+        invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
+      ).trim();
+      const invoiceNo = String(
+        form?.invoiceNo ?? rowData?.InvoiceNo ?? rowData?.invoiceNo ?? ""
+      ).trim();
+      if (!contractNo || !invoiceNo) {
+        alert("Contract No and Invoice No are required.");
+        return;
+      }
+      const subRaw = rowData?.SubInvoiceNo ?? rowData?.subInvoiceNo;
+      const subInvoiceNo = subRaw === null || subRaw === undefined ? "" : String(subRaw).trim();
+      const paymentTermMonths =
+        invoiceFinalizeContractRow?.PaymentTermMonths ??
+        invoiceFinalizeContractRow?.paymentTermMonths;
+      const periodEndDate = computeAgreementInvoicePeriodEnd(draftInvoiceDate, paymentTermMonths);
+      if (!periodEndDate) {
+        alert("Unable to derive Period End from Period Start and Payment Term.");
+        return;
+      }
+      if (
+        hasDuplicateInvoicePeriod(invoiceScheduleRows, draftInvoiceDate, periodEndDate, invoiceNo)
+      ) {
+        alert("An invoice for the same period already exists.");
+        return;
+      }
+      const periodDescription = String(form?.description ?? "").trim();
+      const schRow = {
+        ...rowData,
+        InvoiceNo: invoiceNo,
+        invoiceNo,
+        PeriodStart: draftInvoiceDate,
+        periodStart: draftInvoiceDate,
+        PeriodEnd: periodEndDate || null,
+        periodEnd: periodEndDate || null,
+        DueDate: draftDueDate,
+        dueDate: draftDueDate,
+        Description: periodDescription,
+        description: periodDescription,
+        Desc: periodDescription,
+      };
+      setInvoiceFinalizeBusy(true);
+      try {
+        const payload = {
+          ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
+          Description: periodDescription,
+          IsFinalized: true,
+          isFinalized: true,
+          IsFinalize: true,
+          isFinalize: true,
+        };
+        await contractApi.createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, payload);
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+        );
+        setAgreementProvCreateDialogOpen(false);
+        setAgreementProvCreateRowData(null);
+        setInvoiceFinalizeSelectedKeys(new Set());
+        setInvoiceFinalizeTab("finalized");
+      } catch (error) {
+        console.error("Error saving new invoice:", error);
+        alert(String(error?.message || "Failed to save invoice. Please try again."));
+      } finally {
+        setInvoiceFinalizeBusy(false);
+      }
+    },
+    [invoiceFinalizeContractRow, invoiceScheduleRows]
+  );
+
+  const handleUndoFinalizedInvoices = useCallback(async () => {
+    if (!invoiceFinalizeContractRow) return;
+    if (invoiceFinalizeSelectedKeys.size === 0) {
+      alert("Select at least one finalized invoice to undo.");
+      return;
+    }
+    const selected = invoiceScheduleRows.filter(
+      (r) =>
+        invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
+        pickScheduleRowIsFinalize(r)
+    );
+    if (selected.length === 0) {
+      alert("Selected rows are not finalized or invalid.");
+      return;
+    }
+    const blocked = selected.filter(
+      (r) => !isInvoiceRowAllowedByLockDateConstraint(r, invoiceFinalizeLockDate)
+    );
+    if (blocked.length > 0) {
+      const lockLabel = invoiceFinalizeLockDate
+        ? formatDateDDMMMYYYY(invoiceFinalizeLockDate)
+        : "lock date";
+      alert(
+        `Cannot undo finalize: invoice date must be after the lock date (${lockLabel}) for all selected rows.`
+      );
+      return;
+    }
+    const contractNo = String(
+      invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
+    ).trim();
+    setInvoiceFinalizeBusy(true);
+    try {
+      for (let i = 0; i < selected.length; i += 1) {
+        const schRow = selected[i];
+        const rowContractNo = String(
+          schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
+        ).trim();
+        const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
+        if (!rowContractNo || !invoiceNo) continue;
+        const payload = {
+          ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
+          IsFinalized: false,
+          isFinalized: false,
+        };
+        await contractApi.updateInvoiceSchedule(rowContractNo, invoiceNo, payload);
+      }
+      if (contractNo) {
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+        );
+      }
+      setInvoiceFinalizeSelectedKeys(new Set());
+      setInvoiceFinalizeTab("pending");
+    } catch (error) {
+      console.error("Error undoing finalized invoices:", error);
+      alert(String(error?.message || "Undo failed. Please try again."));
+    } finally {
+      setInvoiceFinalizeBusy(false);
+    }
+  }, [
+    invoiceFinalizeContractRow,
+    invoiceFinalizeSelectedKeys,
+    invoiceScheduleRows,
+    invoiceFinalizeLockDate,
+  ]);
 
   const handleConfirmDelete = async () => {
     if (!canDeleteCurrentMenu()) return;
@@ -5003,7 +6841,7 @@ export default function Contracts() {
   };
 
   const contractsExportCellFormatter = ({ value, column }) => {
-    const colId = String(column?.id || "").toLowerCase();
+    const colId = String(column?.id || column?.accessor || "").toLowerCase();
     if (
       colId === "contractstartdate" ||
       colId === "contractenddate" ||
@@ -5026,6 +6864,12 @@ export default function Contracts() {
     }
     if (colId === "approvalstatus") {
       return value === true || value === 1 || value === "1" ? "Approved" : "Pending";
+    }
+    if (colId === "paymenttermmonths") {
+      return formatContractPaymentTermDisplay(value);
+    }
+    if (colId === "sdratemonths") {
+      return formatContractSdRateDisplay(value);
     }
 
     return isContractGridBlank(value) ? "" : String(value);
@@ -5308,10 +7152,12 @@ export default function Contracts() {
       Cell: ({ value }) => (value ? Number(value).toLocaleString() : "-"),
     },
     {
-      Header: "Payment Term Months",
+      Header: "Payment Term",
       accessor: "paymentTermMonths",
-      align: "right",
+      align: "left",
       showInTable: false,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractPaymentTermDisplay(value) || "-",
     },
     { Header: "Term", accessor: "term", align: "left", showInTable: false },
     {
@@ -5328,7 +7174,14 @@ export default function Contracts() {
       align: "right",
       showInTable: false,
     },
-    { Header: "SD Rate Months", accessor: "sdRateMonths", align: "right", showInTable: false },
+    {
+      Header: "SD Rate",
+      accessor: "sdRateMonths",
+      align: "left",
+      showInTable: false,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractSdRateDisplay(value) || "-",
+    },
     {
       Header: "Security Deposit (Rs)",
       accessor: "securityDepositAmount",
@@ -6058,13 +7911,23 @@ export default function Contracts() {
       type: "number",
       moneyCompareFilter: true,
     }),
-    makeContractGridColumn({
+    {
       id: "paymentTermMonths",
-      Header: "Pay Term",
-      keys: ["paymentTermMonths", "PaymentTermMonths"],
-      align: "right",
-      type: "number",
-    }),
+      Header: "Payment Term",
+      accessor: (row) => getContractGridValue(row, ["paymentTermMonths", "PaymentTermMonths"]),
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractPaymentTermDisplay(value) || "-",
+    },
+    {
+      id: "sdRateMonths",
+      Header: "SD Rate",
+      accessor: (row) =>
+        getContractGridValue(row, ["sdRateMonths", "SdRateMonths", "SDRateMonths"]),
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => formatContractSdRateDisplay(value) || "-",
+    },
     makeContractGridColumn({
       id: "increaseRatePercent",
       Header: "Increase Rate (%)",
@@ -6536,13 +8399,22 @@ export default function Contracts() {
           break;
       }
 
+      const matchesKpiHealth = rowMatchesKpiContractHealthFilter(
+        row,
+        kpiContractHealthFilter,
+        getRowContractStateNormalized
+      );
+      const matchesKpiStatus = rowMatchesKpiContractStatusFilter(row, kpiContractStatusFilter);
+
       return (
         matchesCommand &&
         matchesBase &&
         matchesClass &&
         matchesAsOfDate &&
         matchesArchiveComposite &&
-        matchesApprovalDimension
+        matchesApprovalDimension &&
+        matchesKpiHealth &&
+        matchesKpiStatus
       );
     });
 
@@ -6596,6 +8468,15 @@ export default function Contracts() {
                 sx={{ padding: "1px" }}
               >
                 <Icon>visibility</Icon>
+              </IconButton>
+              <IconButton
+                size="small"
+                color="secondary"
+                onClick={() => handleOpenContractInvoices(row)}
+                title="Invoices"
+                sx={{ padding: "1px" }}
+              >
+                <Icon>receipt_long</Icon>
               </IconButton>
             </MDBox>
           ),
@@ -6877,6 +8758,15 @@ export default function Contracts() {
                 >
                   <Icon>visibility</Icon>
                 </IconButton>
+                <IconButton
+                  size="small"
+                  color="secondary"
+                  onClick={() => handleOpenContractInvoices(row)}
+                  title="Invoices"
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>receipt_long</Icon>
+                </IconButton>
               </MDBox>
             ),
           });
@@ -6892,9 +8782,12 @@ export default function Contracts() {
     classFilterIds,
     contractsArchiveFilter,
     contractsApprovalFilter,
+    kpiContractHealthFilter,
+    kpiContractStatusFilter,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
+    handleOpenContractInvoices,
   ]);
 
   const computedRows = groupedData;
@@ -7038,6 +8931,14 @@ export default function Contracts() {
       if (accessor === "totalArea") {
         const v = rowData?.TotalArea ?? value ?? 0;
         return v ? Number(v).toLocaleString() : "-";
+      }
+      if (accessor === "paymentTermMonths") {
+        const v = value ?? rowData?.PaymentTermMonths ?? rowData?.paymentTermMonths;
+        return formatContractPaymentTermDisplay(v) || "-";
+      }
+      if (accessor === "sdRateMonths") {
+        const v = value ?? rowData?.SDRateMonths ?? rowData?.SdRateMonths ?? rowData?.sdRateMonths;
+        return formatContractSdRateDisplay(v) || "-";
       }
       if (accessor === "location") return rowData?.Location || value || "-";
       if (accessor === "uoM") return value || rowData?.UoM || rowData?.unitName || "-";
@@ -8332,6 +10233,197 @@ export default function Contracts() {
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={invoiceFinalizeOpen}
+        onClose={handleCloseInvoiceFinalizeDialog}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="bold">
+            Agreement provisional invoices
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent dividers sx={{ position: "relative", minHeight: 280 }}>
+          {invoiceFinalizeContractRow && (
+            <MDBox mb={1.5}>
+              <AgreementProvContractBasicInfoStrip
+                form={buildAgreementProvContractBasicInfoForm(invoiceFinalizeContractRow)}
+              />
+            </MDBox>
+          )}
+          {invoiceFinalizeBusy && (
+            <MDBox
+              sx={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: "rgba(255,255,255,0.75)",
+              }}
+            >
+              <CurrencyLoading size={56} />
+            </MDBox>
+          )}
+          {invoiceScheduleLoading ? (
+            <MDBox display="flex" justifyContent="center" py={6}>
+              <CurrencyLoading size={48} />
+            </MDBox>
+          ) : (
+            <MDBox>
+              <MDBox
+                mb={1.5}
+                display="flex"
+                alignItems="center"
+                flexWrap="wrap"
+                gap={1}
+                sx={{ width: "100%" }}
+              >
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={invoiceFinalizeTab}
+                  onChange={(_, value) => {
+                    if (value) {
+                      setInvoiceFinalizeTab(value);
+                      setInvoiceFinalizeSelectedKeys(new Set());
+                      if (value === "finalized") {
+                        setAgreementProvCreateDialogOpen(false);
+                        setAgreementProvCreateRowData(null);
+                      }
+                    }
+                  }}
+                  disabled={invoiceFinalizeBusy}
+                >
+                  <ToggleButton value="pending">
+                    Pending ({invoiceFinalizePendingRows.length})
+                  </ToggleButton>
+                  <ToggleButton value="finalized">
+                    Finalized ({invoiceFinalizeFinalizedRows.length})
+                  </ToggleButton>
+                </ToggleButtonGroup>
+                {invoiceFinalizeTab === "pending" && (
+                  <MDButton
+                    variant="outlined"
+                    color="info"
+                    size="small"
+                    onClick={handleAddNewInvoiceDraft}
+                    disabled={
+                      invoiceFinalizeBusy || invoiceScheduleLoading || agreementProvCreateDialogOpen
+                    }
+                    sx={{ flexShrink: 0 }}
+                  >
+                    <Icon sx={{ mr: 0.5 }}>add</Icon>
+                    Add new invoice
+                  </MDButton>
+                )}
+                <MDBox sx={{ flex: "1 1 200px", minWidth: 180 }}>
+                  <MDInput
+                    placeholder="Search invoices..."
+                    value={invoiceFinalizeSearch}
+                    onChange={(e) => setInvoiceFinalizeSearch(e.target.value)}
+                    fullWidth
+                    size="small"
+                    disabled={invoiceFinalizeBusy}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Icon sx={{ fontSize: "1.1rem", opacity: 0.6 }}>search</Icon>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </MDBox>
+              </MDBox>
+              {invoiceFinalizeTab === "pending" ? (
+                <>
+                  {invoiceFinalizePendingRows.length === 0 ? (
+                    <MDTypography variant="body2" color="text">
+                      No pending invoice rows. Add a new invoice or view the Finalized tab.
+                    </MDTypography>
+                  ) : (
+                    <ContractInvoiceFinalizeGrid
+                      rows={invoiceFinalizePendingRows}
+                      selectedKeys={invoiceFinalizeSelectedKeys}
+                      onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
+                      busy={invoiceFinalizeBusy}
+                      formatDate={formatDateDDMMMYYYY}
+                      allowedSelectionKeys={invoiceFinalizeAllowedPendingKeys}
+                      blurNonSelectableRows
+                      hideSearchInput
+                      searchValue={invoiceFinalizeSearch}
+                      onSearchChange={setInvoiceFinalizeSearch}
+                    />
+                  )}
+                </>
+              ) : invoiceFinalizeFinalizedRows.length === 0 ? (
+                <MDTypography variant="body2" color="text">
+                  No finalized invoice rows yet.
+                </MDTypography>
+              ) : (
+                <ContractInvoiceFinalizeGrid
+                  rows={invoiceFinalizeFinalizedRows}
+                  selectedKeys={invoiceFinalizeSelectedKeys}
+                  onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
+                  busy={invoiceFinalizeBusy || agreementProvCreateDialogOpen}
+                  formatDate={formatDateDDMMMYYYY}
+                  undoSelectable
+                  showDuplicateAction
+                  onDuplicateRow={handleDuplicateFinalizedInvoice}
+                  hideSearchInput
+                  searchValue={invoiceFinalizeSearch}
+                  onSearchChange={setInvoiceFinalizeSearch}
+                />
+              )}
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseInvoiceFinalizeDialog}>
+            Close
+          </MDButton>
+          {invoiceFinalizeTab === "pending" && (
+            <MDButton
+              variant="gradient"
+              color="info"
+              onClick={handleFinalizeSelectedInvoices}
+              disabled={
+                invoiceFinalizeBusy ||
+                invoiceScheduleLoading ||
+                invoiceFinalizeSelectedKeys.size === 0
+              }
+            >
+              Finalize
+            </MDButton>
+          )}
+          {invoiceFinalizeTab === "finalized" && (
+            <MDButton
+              variant="gradient"
+              color="warning"
+              onClick={handleUndoFinalizedInvoices}
+              disabled={
+                invoiceFinalizeBusy ||
+                invoiceScheduleLoading ||
+                invoiceFinalizeSelectedKeys.size === 0
+              }
+            >
+              Undo
+            </MDButton>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      <AgreementProvInvoiceEditDialog
+        open={agreementProvCreateDialogOpen}
+        onClose={handleCloseAgreementProvCreateDialog}
+        rowData={agreementProvCreateRowData}
+        onSave={handleSaveAgreementProvCreateInvoice}
+        saving={invoiceFinalizeBusy}
+        createMode
+      />
+
       {/* Contract Details Dialog */}
       <Dialog
         open={detailsDialogOpen}
@@ -8405,6 +10497,16 @@ export default function Contracts() {
                         rowData.TotalRate ||
                         rowData.totalRate ||
                         value;
+                    }
+                    if (accessor === "paymentTermMonths") {
+                      value = value ?? rowData.PaymentTermMonths ?? rowData.paymentTermMonths;
+                    }
+                    if (accessor === "sdRateMonths") {
+                      value =
+                        value ??
+                        rowData.SDRateMonths ??
+                        rowData.SdRateMonths ??
+                        rowData.sdRateMonths;
                     }
 
                     // Get the cell value using the column's Cell function if available

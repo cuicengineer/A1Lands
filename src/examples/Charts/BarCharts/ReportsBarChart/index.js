@@ -47,7 +47,7 @@ import configs from "examples/Charts/BarCharts/ReportsBarChart/configs";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-function ReportsBarChart({ color, title, description, date, chart }) {
+function ReportsBarChart({ color, title, description, date, chart, chartHeight }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const { data, options } = configs(chart.labels || [], chart.datasets || {});
@@ -65,12 +65,12 @@ function ReportsBarChart({ color, title, description, date, chart }) {
               py={2}
               pr={0.5}
               mt={-5}
-              height="12.5rem"
+              height={chartHeight}
             >
               <Bar data={data} options={options} />
             </MDBox>
           ),
-          [color, chart]
+          [color, chart, chartHeight]
         )}
         <MDBox>
           <MDTypography
@@ -107,6 +107,7 @@ function ReportsBarChart({ color, title, description, date, chart }) {
 ReportsBarChart.defaultProps = {
   color: "info",
   description: "",
+  chartHeight: "12.5rem",
 };
 
 // Typechecking props for the ReportsBarChart
@@ -116,6 +117,7 @@ ReportsBarChart.propTypes = {
   description: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   date: PropTypes.string.isRequired,
   chart: PropTypes.objectOf(PropTypes.oneOfType([PropTypes.array, PropTypes.object])).isRequired,
+  chartHeight: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
 
 export default ReportsBarChart;

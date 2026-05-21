@@ -14,6 +14,7 @@ Coded by www.creative-tim.com
 */
 
 import { useState, useEffect, useMemo } from "react";
+import PropTypes from "prop-types";
 
 // react-router components
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
@@ -25,6 +26,7 @@ import Icon from "@mui/material/Icon";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
+import MDSnackbar from "components/MDSnackbar";
 
 // Material Dashboard 2 React example components
 import Sidenav from "examples/Sidenav";
@@ -48,20 +50,90 @@ import routes from "routes";
 import api, {
   canViewCurrentMenu,
   handleAuthStorageEvent,
+  hasStoredAccessToken,
   logoutEverywhere,
 } from "services/api.service";
 
 // Material Dashboard 2 React contexts
-import { useMaterialUIController, setMiniSidenav, setOpenConfigurator } from "context";
+import { useMaterialUIController, setMiniSidenav, setLayout, setOpenConfigurator } from "context";
 
 // Images
 import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
 
 const LAST_ACTIVITY_KEY = "lastActivityAt";
+const AUTH_SESSION_CHANGED_EVENT = "auth:session-changed";
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 const SLIDING_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const TOKEN_REFRESH_BEFORE_EXPIRY_MS = 60 * 1000;
 const MIN_TOKEN_REFRESH_DELAY_MS = 30 * 1000;
+
+const isPublicAuthRoute = (path) =>
+  path === "/" ||
+  path === "/login" ||
+  path.startsWith("/authentication/") ||
+  path.startsWith("/sign-in");
+
+function getContractsAlertTone(message) {
+  const text = String(message || "").toLowerCase();
+  if (
+    /\b(success|saved|created|updated|deleted|uploaded|finalized|approved|complete)\b/.test(text)
+  ) {
+    return { color: "success", icon: "check_circle", title: "Success" };
+  }
+  if (/\b(error|failed|failure|exception)\b/.test(text)) {
+    return { color: "error", icon: "error", title: "Error" };
+  }
+  return { color: "info", icon: "info", title: "Notice" };
+}
+
+function ContractsAlertSkin({ enabled }) {
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const nativeAlert = window.alert;
+    window.alert = (message) => {
+      const content = String(message ?? "");
+      const tone = getContractsAlertTone(content);
+      setToast({
+        id: Date.now(),
+        content,
+        ...tone,
+      });
+    };
+
+    return () => {
+      window.alert = nativeAlert;
+    };
+  }, [enabled]);
+
+  if (!enabled || !toast) return null;
+
+  return (
+    <MDSnackbar
+      key={toast.id}
+      color={toast.color}
+      icon={toast.icon}
+      title={toast.title}
+      content={toast.content}
+      dateTime="now"
+      open={Boolean(toast)}
+      close={() => setToast(null)}
+      onClose={() => setToast(null)}
+      anchorOrigin={{ vertical: "top", horizontal: "right" }}
+      sx={{ mt: 6 }}
+    />
+  );
+}
+
+ContractsAlertSkin.defaultProps = {
+  enabled: false,
+};
+
+ContractsAlertSkin.propTypes = {
+  enabled: PropTypes.bool,
+};
 
 export default function App() {
   const [controller, dispatch] = useMaterialUIController();
@@ -79,20 +151,31 @@ export default function App() {
 
   const [rtlCache, setRtlCache] = useState(null);
   const { pathname } = useLocation();
+  const [isAuthenticated, setIsAuthenticated] = useState(() => hasStoredAccessToken());
 
-  const hasAccessToken = () => {
-    try {
-      return Boolean(
-        localStorage.getItem("token") ||
-          localStorage.getItem("authToken") ||
-          localStorage.getItem("accessToken")
-      );
-    } catch (e) {
-      return false;
+  useEffect(() => {
+    const syncAuth = () => setIsAuthenticated(hasStoredAccessToken());
+    window.addEventListener("storage", syncAuth);
+    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, syncAuth);
+    return () => {
+      window.removeEventListener("storage", syncAuth);
+      window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, syncAuth);
+    };
+  }, []);
+
+  useEffect(() => {
+    setIsAuthenticated(hasStoredAccessToken());
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!isAuthenticated && isPublicAuthRoute(pathname)) {
+      setLayout(dispatch, "page");
     }
-  };
+  }, [pathname, isAuthenticated, dispatch]);
 
-  // Note: route-level guard is applied in getRoutes(). Keeping this file-level helper removed to avoid unused vars.
+  const showDashboardChrome =
+    hasStoredAccessToken() && layout === "dashboard" && !isPublicAuthRoute(pathname);
+  const useContractsAlertSkin = pathname === "/contracts" || pathname.startsWith("/contracts/");
 
   // Cache for the rtl
   useMemo(() => {
@@ -120,17 +203,10 @@ export default function App() {
 
   // Fetch user context (including IP) from backend when authenticated - no external IP APIs
   useEffect(() => {
-    if (
-      hasAccessToken() &&
-      pathname &&
-      !pathname.startsWith("/") &&
-      !pathname.startsWith("/authentication") &&
-      !pathname.startsWith("/login") &&
-      !pathname.startsWith("/sign-in")
-    ) {
+    if (isAuthenticated && pathname && !isPublicAuthRoute(pathname)) {
       api.fetchAndUpdateUserContext().catch(() => {});
     }
-  }, [pathname]);
+  }, [pathname, isAuthenticated]);
 
   // Logout only on inactivity of 5 minutes.
   useEffect(() => {
@@ -151,7 +227,7 @@ export default function App() {
     };
 
     const resetInactivityTimer = () => {
-      if (!hasAccessToken()) return;
+      if (!hasStoredAccessToken()) return;
       clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
         const lastTs = getLastActivityTs();
@@ -166,7 +242,7 @@ export default function App() {
     };
 
     const markActivity = () => {
-      if (!hasAccessToken()) return;
+      if (!hasStoredAccessToken()) return;
       try {
         localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
       } catch (e) {
@@ -176,12 +252,12 @@ export default function App() {
     };
     const handleStorage = (event) => {
       handleAuthStorageEvent(event);
-      if (event.key === LAST_ACTIVITY_KEY && hasAccessToken()) {
+      if (event.key === LAST_ACTIVITY_KEY && hasStoredAccessToken()) {
         resetInactivityTimer();
       }
     };
 
-    if (hasAccessToken()) {
+    if (isAuthenticated) {
       markActivity();
       activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity));
       window.addEventListener("storage", handleStorage);
@@ -192,11 +268,11 @@ export default function App() {
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
       window.removeEventListener("storage", handleStorage);
     };
-  }, [pathname]);
+  }, [pathname, isAuthenticated]);
 
   // While the user is active, silently refresh just before the access token expires.
   useEffect(() => {
-    if (!hasAccessToken()) return undefined;
+    if (!isAuthenticated) return undefined;
     let refreshTimer;
     const isWorkingSession = () => {
       try {
@@ -211,7 +287,7 @@ export default function App() {
 
     const scheduleRefresh = () => {
       clearTimeout(refreshTimer);
-      if (!hasAccessToken() || !isWorkingSession()) return;
+      if (!hasStoredAccessToken() || !isWorkingSession()) return;
       const expiresAt = api.getAccessTokenExpiryMs();
       const delay = expiresAt
         ? Math.max(
@@ -220,7 +296,7 @@ export default function App() {
           )
         : SLIDING_TOKEN_REFRESH_MS;
       refreshTimer = setTimeout(() => {
-        if (!hasAccessToken() || !isWorkingSession()) return;
+        if (!hasStoredAccessToken() || !isWorkingSession()) return;
         api
           .refreshAccessToken()
           .catch(() => {})
@@ -246,7 +322,7 @@ export default function App() {
       clearTimeout(refreshTimer);
       window.removeEventListener("storage", handleStorage);
     };
-  }, [pathname]);
+  }, [pathname, isAuthenticated]);
 
   const getRoutes = (allRoutes) =>
     allRoutes.map((route) => {
@@ -263,7 +339,7 @@ export default function App() {
 
         const element = isPublicRoute ? (
           route.component
-        ) : hasAccessToken() ? (
+        ) : hasStoredAccessToken() ? (
           canViewCurrentMenu(route.route) ? (
             route.component
           ) : (
@@ -307,34 +383,40 @@ export default function App() {
     <CacheProvider value={rtlCache}>
       <ThemeProvider theme={darkMode ? themeDarkRTL : themeRTL}>
         <CssBaseline />
-        {layout === "dashboard" && hasAccessToken() && (
+        {showDashboardChrome && (
           <>
             <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
             <Configurator />
             {configsButton}
           </>
         )}
-        {layout === "vr" && hasAccessToken() && <Configurator />}
+        {layout === "vr" && hasStoredAccessToken() && !isPublicAuthRoute(pathname) && (
+          <Configurator />
+        )}
         <Routes>
           {getRoutes(routes)}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        <ContractsAlertSkin enabled={useContractsAlertSkin} />
       </ThemeProvider>
     </CacheProvider>
   ) : (
     <ThemeProvider theme={darkMode ? themeDark : theme}>
       <CssBaseline />
-      {layout === "dashboard" && hasAccessToken() && (
+      {showDashboardChrome && (
         <>
           <Sidenav color={sidenavColor} brand={pafLogo} brandName="A1 LMS" routes={routes} />
           <Configurator />
         </>
       )}
-      {layout === "vr" && hasAccessToken() && <Configurator />}
+      {layout === "vr" && hasStoredAccessToken() && !isPublicAuthRoute(pathname) && (
+        <Configurator />
+      )}
       <Routes>
         {getRoutes(routes)}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
+      <ContractsAlertSkin enabled={useContractsAlertSkin} />
     </ThemeProvider>
   );
 }

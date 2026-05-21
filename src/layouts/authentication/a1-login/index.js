@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import MDBox from "components/MDBox";
 import PageLayout from "examples/LayoutContainers/PageLayout";
-import api from "services/api.service";
+import api, { notifyAuthSessionChanged } from "services/api.service";
 
 const pafLogo = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
 
@@ -62,15 +62,11 @@ function A1Login() {
         return;
       }
 
-      // Store token if backend returns it
+      // Store token via api so `auth:session-changed` runs (App must see session before navigate)
       const token =
         res?.token || res?.Token || res?.accessToken || res?.AccessToken || res?.jwt || res?.Jwt;
       if (token) {
-        try {
-          localStorage.setItem("token", token);
-        } catch (storageErr) {
-          // ignore
-        }
+        api.storeAccessToken(token);
       }
 
       // Optional: store full auth response for later use
@@ -79,6 +75,7 @@ function A1Login() {
       } catch (storageErr) {
         // ignore
       }
+      notifyAuthSessionChanged();
 
       const canView = (p) =>
         p?.canView === true ||

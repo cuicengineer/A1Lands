@@ -15,6 +15,116 @@ export const PROPERTY_CLASS_STICKERS = {
   hb: { classIds: [6], label: "HB" },
 };
 
+const ASSET_CARD_FIXED_ORDER = ["categoryA", "categoryB", "categoryC", "bts", "hb", "total"];
+
+/** Values from API are in millions; display with M. or B. suffix. */
+export function formatKpiMoneyAmount(valueInMillions) {
+  const n = Number(valueInMillions);
+  if (!Number.isFinite(n)) {
+    return { text: "0.00", suffix: "M." };
+  }
+  const abs = Math.abs(n);
+  if (abs >= 1000) {
+    return {
+      text: (n / 1000).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+      suffix: "B.",
+    };
+  }
+  return {
+    text: n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    suffix: "M.",
+  };
+}
+
+export function formatKpiMoneyLabel(valueInMillions) {
+  const { text, suffix } = formatKpiMoneyAmount(valueInMillions);
+  return `${text} ${suffix}`;
+}
+
+function getKnownPropertyClassIds() {
+  const ids = new Set();
+  Object.values(PROPERTY_CLASS_STICKERS).forEach((meta) => {
+    meta.classIds.forEach((id) => ids.add(Number(id)));
+  });
+  return ids;
+}
+
+function collectPropertySummaryClassIds(propertyRows) {
+  const ids = new Set();
+  for (const r of propertyRows) {
+    if (!isDataSetRow(r, DATA_SET_PROPERTY_SUMMARY)) continue;
+    const cid = Number(r.ClassId ?? r.classId);
+    if (Number.isFinite(cid)) ids.add(cid);
+  }
+  return [...ids];
+}
+
+function aggregateAllPropertySummary(propertyRows) {
+  let count = 0;
+  let worth = 0;
+  const areasByUom = {};
+
+  for (const r of propertyRows) {
+    if (!isDataSetRow(r, DATA_SET_PROPERTY_SUMMARY)) continue;
+    const pc = readNumber(r, ["PropertyCount", "propertyCount"]);
+    const rev = readNumber(r, ["ClassRevenue_Million", "classRevenue_Million"]);
+    if (Number.isFinite(pc)) count += pc;
+    if (Number.isFinite(rev)) worth += rev;
+    const area = readPropertySummaryArea(r);
+    if (Number.isFinite(area)) {
+      const uom = readPropertySummaryUom(r) || "—";
+      areasByUom[uom] = (areasByUom[uom] || 0) + area;
+    }
+  }
+
+  return { count, worth, areaLine: formatAreasByUomLine(areasByUom), areasByUom };
+}
+
+function buildExtraPropertyClassCards(propertyRows, shareRows, knownClassIds) {
+  const labelByClassId = new Map();
+
+  for (const r of propertyRows) {
+    if (!isDataSetRow(r, DATA_SET_PROPERTY_SUMMARY)) continue;
+    const cid = Number(r.ClassId ?? r.classId);
+    if (!Number.isFinite(cid) || knownClassIds.has(cid)) continue;
+    if (!labelByClassId.has(cid)) {
+      const name = readString(r, [
+        "ClassName",
+        "className",
+        "PropertyClassName",
+        "propertyClassName",
+        "Class",
+        "class",
+      ]);
+      labelByClassId.set(cid, name || `Class ${cid}`);
+    }
+  }
+
+  return [...labelByClassId.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([classId, label]) => {
+      const agg = aggregateByClassIds(propertyRows, [classId]);
+      const hasArea = agg.areasByUom && Object.keys(agg.areasByUom).length > 0;
+      const isActive = agg.count > 0 || agg.worth > 0 || hasArea;
+      if (!isActive) return null;
+
+      return {
+        key: `class-${classId}`,
+        label,
+        classId,
+        count: agg.count,
+        worth: agg.worth,
+        areaLine: agg.areaLine,
+        mil: buildMilForCategory(shareRows, propertyRows, [classId]),
+        isExtraClass: true,
+      };
+    })
+    .filter(Boolean);
+}
+
 function readNumber(row, keys) {
   if (!row || typeof row !== "object") return null;
   for (const k of keys) {
@@ -244,43 +354,42 @@ function buildLandsAggregate(propertyRows, categorizedSum) {
 }
 
 export function buildAssetCards(propertyRows, shareRows = []) {
-  const cards = [];
-  let catCount = 0;
-  let catWorth = 0;
+  const cardsByKey = {};
 
   for (const [key, meta] of Object.entries(PROPERTY_CLASS_STICKERS)) {
     if (key === "lands") continue;
     const agg = aggregateByClassIds(propertyRows, meta.classIds);
-    catCount += agg.count;
-    catWorth += agg.worth;
     const mil = buildMilForCategory(shareRows, propertyRows, meta.classIds);
-    cards.push({
+    cardsByKey[key] = {
       key,
       label: meta.label,
       count: agg.count,
       worth: agg.worth,
       areaLine: agg.areaLine,
       mil,
-    });
+    };
   }
 
-  const lands = buildLandsAggregate(propertyRows, { count: catCount, worth: catWorth });
-  const landsMil = buildMilForCategory(
-    shareRows,
+  const totalAgg = aggregateAllPropertySummary(propertyRows);
+  const allClassIds = collectPropertySummaryClassIds(propertyRows);
+  cardsByKey.total = {
+    key: "total",
+    label: "Total",
+    count: totalAgg.count,
+    worth: totalAgg.worth,
+    areaLine: totalAgg.areaLine,
+    mil: buildMilForCategory(shareRows, propertyRows, allClassIds),
+    chartInclude: false,
+  };
+
+  const fixedCards = ASSET_CARD_FIXED_ORDER.map((key) => cardsByKey[key]).filter(Boolean);
+  const extraCards = buildExtraPropertyClassCards(
     propertyRows,
-    PROPERTY_CLASS_STICKERS.lands.classIds
+    shareRows,
+    getKnownPropertyClassIds()
   );
-  return [
-    {
-      key: "lands",
-      label: "Lands",
-      count: lands.count,
-      worth: lands.worth,
-      areaLine: lands.areaLine,
-      mil: landsMil,
-    },
-    ...cards,
-  ];
+
+  return [...fixedCards, ...extraCards];
 }
 
 export function buildExecutiveKpis(propertyRows, contractRows, shareRows) {
@@ -321,8 +430,10 @@ export function buildExecutiveKpis(propertyRows, contractRows, shareRows) {
   }
 
   const health = buildContractHealth(contractRows);
-  const totalHealth = health.active + health.expiring + health.terminated + health.vacant || 1;
-  const contractHealthPct = Math.round((health.active / totalHealth) * 100);
+  const totalHealth =
+    health.active.count + health.expiring.count + health.terminated.count + health.vacant.count ||
+    1;
+  const contractHealthPct = Math.round((health.active.count / totalHealth) * 100);
 
   return {
     totalProperties,
@@ -334,56 +445,175 @@ export function buildExecutiveKpis(propertyRows, contractRows, shareRows) {
   };
 }
 
+function emptyContractStickerMetrics() {
+  return { count: 0, worth: 0, amount: 0 };
+}
+
+function addContractStickerMetrics(target, row, countKeys, worthKeys, amountKeys) {
+  const count = readNumber(row, countKeys);
+  const worth = readNumber(row, worthKeys);
+  const amount = readNumber(row, amountKeys);
+  if (Number.isFinite(count)) target.count += count;
+  if (Number.isFinite(worth)) target.worth += worth;
+  if (Number.isFinite(amount)) target.amount += amount;
+}
+
 export function buildContractHealth(contractRows) {
-  let active = 0;
-  let expiring = 0;
-  let terminated = 0;
-  let vacant = 0;
+  const active = emptyContractStickerMetrics();
+  const premature = emptyContractStickerMetrics();
+  const expiring = emptyContractStickerMetrics();
+  const terminated = emptyContractStickerMetrics();
+  const vacant = emptyContractStickerMetrics();
 
   for (const r of contractRows) {
     if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
-    active += readNumber(r, ["ActiveContracts", "activeContracts"]) || 0;
+
+    addContractStickerMetrics(
+      active,
+      r,
+      ["ActiveContracts", "activeContracts"],
+      [
+        "ActiveContracts_Million",
+        "activeContracts_Million",
+        "ActiveContractsWorth",
+        "activeContractsWorth",
+        "ActiveContractWorth",
+        "activeContractWorth",
+        "ActiveWorth",
+        "activeWorth",
+      ],
+      [
+        "ActiveAmount",
+        "activeAmount",
+        "ActiveContractsAmount",
+        "activeContractsAmount",
+        "ActiveContractAmount",
+        "activeContractAmount",
+      ]
+    );
+
+    addContractStickerMetrics(
+      premature,
+      r,
+      ["PrematureContracts", "prematureContracts", "Premature", "premature"],
+      [
+        "PrematureContracts_Million",
+        "prematureContracts_Million",
+        "PrematureWorth",
+        "prematureWorth",
+        "PrematureContractWorth",
+        "prematureContractWorth",
+      ],
+      ["PrematureAmount", "prematureAmount", "PrematureContractsAmount", "prematureContractsAmount"]
+    );
+
     const expDirect = readNumber(r, ["ExpiringContracts", "expiringContracts"]);
     if (Number.isFinite(expDirect)) {
-      expiring += expDirect;
+      expiring.count += expDirect;
     } else {
-      expiring +=
+      expiring.count +=
         (readNumber(r, ["ExpiredContracts", "expiredContracts"]) || 0) +
         (readNumber(r, ["BorderLineContracts", "borderLineContracts"]) || 0);
     }
-    terminated +=
-      readNumber(r, [
-        "TerminatedContracts",
-        "terminatedContracts",
-        "ClosedContracts",
-        "closedContracts",
-      ]) || 0;
-    vacant += readNumber(r, ["VacantContracts", "vacantContracts"]) || 0;
+    addContractStickerMetrics(
+      expiring,
+      r,
+      [],
+      [
+        "ExpiringContracts_Million",
+        "expiringContracts_Million",
+        "ExpiringWorth",
+        "expiringWorth",
+        "ExpiredContracts_Million",
+        "expiredContracts_Million",
+        "BorderLineContracts_Million",
+        "borderLineContracts_Million",
+      ],
+      [
+        "ExpiringAmount",
+        "expiringAmount",
+        "ExpiredAmount",
+        "expiredAmount",
+        "BorderLineAmount",
+        "borderLineAmount",
+      ]
+    );
+
+    terminated.count +=
+      (readNumber(r, ["TerminatedContracts", "terminatedContracts"]) || 0) +
+      (readNumber(r, ["ClosedContracts", "closedContracts"]) || 0);
+    addContractStickerMetrics(
+      terminated,
+      r,
+      [],
+      [
+        "TerminatedContracts_Million",
+        "terminatedContracts_Million",
+        "ClosedContracts_Million",
+        "closedContracts_Million",
+        "TerminatedWorth",
+        "terminatedWorth",
+        "ClosedWorth",
+        "closedWorth",
+      ],
+      [
+        "TerminatedAmount",
+        "terminatedAmount",
+        "ClosedAmount",
+        "closedAmount",
+        "TerminatedContractsAmount",
+        "terminatedContractsAmount",
+      ]
+    );
+
+    addContractStickerMetrics(
+      vacant,
+      r,
+      ["VacantContracts", "vacantContracts"],
+      [
+        "VacantContracts_Million",
+        "vacantContracts_Million",
+        "VacantWorth",
+        "vacantWorth",
+        "VacantContractWorth",
+        "vacantContractWorth",
+      ],
+      ["VacantAmount", "vacantAmount", "VacantContractsAmount", "vacantContractsAmount"]
+    );
   }
 
-  return { active, expiring, terminated, vacant };
+  return { active, premature, expiring, terminated, vacant };
 }
 
 /** Contract Status aggregates from ContractsSummary rows (API: Viable, UnViable, Active, Inactive). */
 export function buildContractStatus(contractRows) {
-  let viable = 0;
-  let unviable = 0;
-  let active = 0;
-  let inactive = 0;
+  const viable = emptyContractStickerMetrics();
+  const unviable = emptyContractStickerMetrics();
+  const active = emptyContractStickerMetrics();
+  const inactive = emptyContractStickerMetrics();
 
   for (const r of contractRows) {
     if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
-    viable +=
-      readNumber(r, [
-        "Viable",
-        "viable",
-        "ViableContracts",
-        "viableContracts",
-        "ViableCount",
-        "viableCount",
-      ]) || 0;
-    unviable +=
-      readNumber(r, [
+
+    addContractStickerMetrics(
+      viable,
+      r,
+      ["Viable", "viable", "ViableContracts", "viableContracts", "ViableCount", "viableCount"],
+      [
+        "Viable_Million",
+        "viable_Million",
+        "ViableWorth",
+        "viableWorth",
+        "ViableRevenue_Million",
+        "viableRevenue_Million",
+      ],
+      ["ViableAmount", "viableAmount", "ViableContractsAmount", "viableContractsAmount"]
+    );
+
+    addContractStickerMetrics(
+      unviable,
+      r,
+      [
         "UnViable",
         "unViable",
         "Unviable",
@@ -392,9 +622,31 @@ export function buildContractStatus(contractRows) {
         "unviableContracts",
         "UnviableCount",
         "unviableCount",
-      ]) || 0;
-    active +=
-      readNumber(r, [
+      ],
+      [
+        "UnViable_Million",
+        "unViable_Million",
+        "UnViableWorth",
+        "unViableWorth",
+        "UnviableWorth",
+        "unviableWorth",
+        "UnViableRevenue_Million",
+        "unViableRevenue_Million",
+      ],
+      [
+        "UnViableAmount",
+        "unViableAmount",
+        "UnviableAmount",
+        "unviableAmount",
+        "UnviableContractsAmount",
+        "unviableContractsAmount",
+      ]
+    );
+
+    addContractStickerMetrics(
+      active,
+      r,
+      [
         "Active",
         "active",
         "StatusActiveContracts",
@@ -403,11 +655,31 @@ export function buildContractStatus(contractRows) {
         "activeStatusCount",
         "ContractStatusActive",
         "contractStatusActive",
-        "ActiveContracts",
-        "activeContracts",
-      ]) || 0;
-    inactive +=
-      readNumber(r, [
+      ],
+      [
+        "Active_Million",
+        "active_Million",
+        "ActiveWorth",
+        "activeWorth",
+        "StatusActiveWorth",
+        "statusActiveWorth",
+        "ActiveRevenue_Million",
+        "activeRevenue_Million",
+      ],
+      [
+        "ActiveAmount",
+        "activeAmount",
+        "StatusActiveAmount",
+        "statusActiveAmount",
+        "ActiveStatusAmount",
+        "activeStatusAmount",
+      ]
+    );
+
+    addContractStickerMetrics(
+      inactive,
+      r,
+      [
         "Inactive",
         "inactive",
         "InactiveContracts",
@@ -416,7 +688,24 @@ export function buildContractStatus(contractRows) {
         "inactiveCount",
         "StatusInactiveContracts",
         "statusInactiveContracts",
-      ]) || 0;
+      ],
+      [
+        "Inactive_Million",
+        "inactive_Million",
+        "InactiveWorth",
+        "inactiveWorth",
+        "InactiveRevenue_Million",
+        "inactiveRevenue_Million",
+      ],
+      [
+        "InactiveAmount",
+        "inactiveAmount",
+        "InactiveContractsAmount",
+        "inactiveContractsAmount",
+        "StatusInactiveAmount",
+        "statusInactiveAmount",
+      ]
+    );
   }
 
   return { viable, unviable, active, inactive };
@@ -424,13 +713,16 @@ export function buildContractStatus(contractRows) {
 
 /** AHQ Approval aggregates from ContractsSummary rows (API: AHQPending, AHQApprvd). */
 export function buildAhqApproval(contractRows) {
-  let approved = 0;
-  let pending = 0;
+  const approved = emptyContractStickerMetrics();
+  const pending = emptyContractStickerMetrics();
 
   for (const r of contractRows) {
     if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
-    approved +=
-      readNumber(r, [
+
+    addContractStickerMetrics(
+      approved,
+      r,
+      [
         "AHQApprvd",
         "ahqApprvd",
         "AHQApproved",
@@ -439,9 +731,31 @@ export function buildAhqApproval(contractRows) {
         "approvedContracts",
         "ApprovedCount",
         "approvedCount",
-      ]) || 0;
-    pending +=
-      readNumber(r, [
+      ],
+      [
+        "AHQApprvd_Million",
+        "ahqApprvd_Million",
+        "AHQApprvdWorth",
+        "ahqApprvdWorth",
+        "AHQApproved_Million",
+        "ahqApproved_Million",
+        "ApprovedWorth",
+        "approvedWorth",
+      ],
+      [
+        "AHQApprvdAmount",
+        "ahqApprvdAmount",
+        "AHQApprovedAmount",
+        "ahqApprovedAmount",
+        "ApprovedAmount",
+        "approvedAmount",
+      ]
+    );
+
+    addContractStickerMetrics(
+      pending,
+      r,
+      [
         "AHQPending",
         "ahqPending",
         "PendingContracts",
@@ -450,7 +764,26 @@ export function buildAhqApproval(contractRows) {
         "pendingApproval",
         "PendingCount",
         "pendingCount",
-      ]) || 0;
+      ],
+      [
+        "AHQPending_Million",
+        "ahqPending_Million",
+        "AHQPendingWorth",
+        "ahqPendingWorth",
+        "PendingWorth",
+        "pendingWorth",
+        "PendingApproval_Million",
+        "pendingApproval_Million",
+      ],
+      [
+        "AHQPendingAmount",
+        "ahqPendingAmount",
+        "PendingAmount",
+        "pendingAmount",
+        "PendingApprovalAmount",
+        "pendingApprovalAmount",
+      ]
+    );
   }
 
   return { approved, pending };

@@ -26,6 +26,7 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import { useMaterialUIController } from "context";
 import { getEnterpriseCardSx } from "./KpiCharts";
+import { formatKpiMoneyLabel } from "../kpiDataUtils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -111,13 +112,22 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
   const rowBorder = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const tableShellBorder = darkMode ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
 
-  /** Fixed width so `table-layout: fixed` keeps FY columns aligned (no min/max range on col 1). */
+  /** Fixed widths so `table-layout: fixed` keeps header and body cells aligned. */
   const kpiColWidthPx = 212;
+  const fiscalPeriodColWidthPx = 96;
+  const tableWidthPx = kpiColWidthPx + periods.length * fiscalPeriodColWidthPx;
 
   const kpiColWidthSx = {
     width: kpiColWidthPx,
     minWidth: kpiColWidthPx,
     maxWidth: kpiColWidthPx,
+    overflow: "hidden",
+  };
+
+  const fiscalPeriodColSx = {
+    width: fiscalPeriodColWidthPx,
+    minWidth: fiscalPeriodColWidthPx,
+    maxWidth: fiscalPeriodColWidthPx,
     overflow: "hidden",
   };
 
@@ -161,7 +171,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
     overflow: "hidden",
     borderBottom: `1px solid ${rowBorder}`,
   };
-  const kpiColPad = { py: 0.5, pl: 1.25, pr: 1 };
+  const kpiColPad = { py: 0.5, px: 1 };
 
   const textColor = darkMode ? "#e8e8e8" : "#344767";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
@@ -210,13 +220,10 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           mode: "index",
           intersect: false,
           callbacks: {
-            label: (ctx) =>
-              `${ctx.dataset.label}: ${Number(ctx.raw).toLocaleString(undefined, {
-                maximumFractionDigits: 2,
-              })} Mil`,
+            label: (ctx) => `${ctx.dataset.label}: ${formatKpiMoneyLabel(Number(ctx.raw) || 0)}`,
             footer: (items) => {
               const sum = items.reduce((a, it) => a + (Number(it.raw) || 0), 0);
-              return `Total: ${sum.toLocaleString(undefined, { maximumFractionDigits: 2 })} Mil`;
+              return `Total: ${formatKpiMoneyLabel(sum)}`;
             },
           },
         },
@@ -246,7 +253,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           ticks: { color: textColor },
           title: {
             display: true,
-            text: "Millions (Mil)",
+            text: "Amount (M. / B.)",
             color: textColor,
             font: { size: 12, weight: "600" },
           },
@@ -284,9 +291,9 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
         <TableContainer
           sx={{
             mx: 2,
+            mb: 2,
             maxHeight: 400,
             overflow: "auto",
-            scrollbarGutter: "stable",
             borderRadius: 1.5,
             border: `1px solid ${tableShellBorder}`,
             bgcolor: darkMode ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.015)",
@@ -301,9 +308,9 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
               stickyHeader
               size="small"
               sx={{
-                minWidth: kpiColWidthPx + Math.max(periods.length, 1) * 76,
                 tableLayout: "fixed",
-                width: "100%",
+                width: tableWidthPx,
+                minWidth: tableWidthPx,
                 "& .MuiTableCell-root": {
                   boxSizing: "border-box",
                   borderBottom: "none",
@@ -316,7 +323,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
               <colgroup>
                 <col style={{ width: kpiColWidthPx }} />
                 {periods.map((p) => (
-                  <col key={p.fieldKey} />
+                  <col key={p.fieldKey} style={{ width: fiscalPeriodColWidthPx }} />
                 ))}
               </colgroup>
               <TableHead>
@@ -350,21 +357,26 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
                     </MDTypography>
                   </TableCell>
                   {periods.map((p) => (
-                    <TableCell key={p.fieldKey} sx={fiscalNumericHeaderSx}>
+                    <TableCell
+                      key={p.fieldKey}
+                      sx={{ ...fiscalNumericHeaderSx, ...fiscalPeriodColSx }}
+                    >
                       <MDTypography
                         component="span"
-                        variant="button"
+                        variant="caption"
                         fontWeight="bold"
                         color={darkMode ? "white" : "dark"}
                         sx={{
                           display: "block",
                           width: "100%",
+                          m: 0,
                           textAlign: "right",
                           fontSize: "0.75rem",
                           lineHeight: 1.2,
                           fontVariantNumeric: "tabular-nums",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {p.headerLabel}
@@ -407,11 +419,13 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
                       }}
                     >
                       <MDTypography
-                        variant="body2"
+                        component="span"
+                        variant="caption"
                         fontWeight="medium"
                         color={darkMode ? "white" : "dark"}
                         sx={{
                           display: "block",
+                          m: 0,
                           fontSize: "0.8125rem",
                           lineHeight: 1.2,
                           overflow: "hidden",
@@ -427,36 +441,30 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
                       const numeric = isNumericFiscalValue(raw);
                       const display = formatFiscalCell(raw);
                       return (
-                        <TableCell key={p.fieldKey} sx={fiscalNumericBodySx}>
-                          {numeric ? (
-                            <MDTypography
-                              component="span"
-                              variant="caption"
-                              fontWeight="bold"
-                              sx={{
-                                fontSize: "0.8125rem",
-                                lineHeight: 1.15,
-                                display: "block",
-                                textAlign: "right",
-                              }}
-                            >
-                              {display}
-                            </MDTypography>
-                          ) : (
-                            <MDTypography
-                              component="span"
-                              variant="caption"
-                              color="text"
-                              sx={{
-                                display: "block",
-                                textAlign: "right",
-                                fontSize: "0.8125rem",
-                                lineHeight: 1.15,
-                              }}
-                            >
-                              {display}
-                            </MDTypography>
-                          )}
+                        <TableCell
+                          key={p.fieldKey}
+                          sx={{ ...fiscalNumericBodySx, ...fiscalPeriodColSx }}
+                        >
+                          <MDTypography
+                            component="span"
+                            variant="caption"
+                            fontWeight={numeric ? "bold" : "regular"}
+                            color={numeric ? (darkMode ? "white" : "dark") : "text"}
+                            sx={{
+                              display: "block",
+                              width: "100%",
+                              m: 0,
+                              textAlign: "right",
+                              fontSize: "0.8125rem",
+                              lineHeight: 1.2,
+                              fontVariantNumeric: "tabular-nums",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {display}
+                          </MDTypography>
                         </TableCell>
                       );
                     })}
@@ -483,7 +491,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
               mb={1}
               display="block"
             >
-              AHQ / RAC / Base share by fiscal year (Mil)
+              AHQ / RAC / Base share by fiscal year (M.)
             </MDTypography>
             <MDBox height={280} sx={{ position: "relative" }}>
               <Bar

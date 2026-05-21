@@ -7,6 +7,9 @@ if (!RAW_API_BASE) {
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const LAST_ACTIVITY_KEY = "lastActivityAt";
 const LOGOUT_EVENT_KEY = "auth:logout";
+const REFRESH_LOCK_KEY = "auth:refreshLock";
+const REFRESH_LOCK_TTL_MS = 20000;
+const AUTH_SESSION_CHANGED_EVENT = "auth:session-changed";
 const TOKEN_REFRESH_SKEW_SECONDS = 60;
 
 function tryParseJwtPayload(token) {
@@ -58,10 +61,114 @@ function getStoredAccessToken() {
   }
 }
 
+function notifyAuthSessionChanged() {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
+  } catch (e) {
+    // ignore
+  }
+}
+
+function isRefreshLockHeld() {
+  try {
+    const lockTs = Number(localStorage.getItem(REFRESH_LOCK_KEY) || 0);
+    return Number.isFinite(lockTs) && lockTs > 0 && Date.now() - lockTs < REFRESH_LOCK_TTL_MS;
+  } catch (e) {
+    return false;
+  }
+}
+
+function acquireRefreshLock() {
+  try {
+    if (isRefreshLockHeld()) return false;
+    localStorage.setItem(REFRESH_LOCK_KEY, String(Date.now()));
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
+
+function releaseRefreshLock() {
+  try {
+    localStorage.removeItem(REFRESH_LOCK_KEY);
+  } catch (e) {
+    // ignore
+  }
+}
+
+function waitForTokenFromAnotherTab(timeoutMs = REFRESH_LOCK_TTL_MS) {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined") {
+      reject(new Error("no window"));
+      return;
+    }
+    const initialToken = getStoredAccessToken();
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+
+    const tryResolve = () => {
+      if (getStoredAccessToken() && getStoredAccessToken() !== initialToken) {
+        finish(resolve, getStoredAccessToken());
+        return true;
+      }
+      const token = getStoredAccessToken();
+      if (token && !isJwtExpiredOrNearExpiry(token, TOKEN_REFRESH_SKEW_SECONDS)) {
+        finish(resolve, token);
+        return true;
+      }
+      return false;
+    };
+
+    const onStorage = (event) => {
+      if (!event) return;
+      if (event.key === LOGOUT_EVENT_KEY) {
+        finish(reject, new Error("logged out"));
+        return;
+      }
+      if (
+        event.key === "token" ||
+        event.key === "authToken" ||
+        event.key === "accessToken" ||
+        event.key === REFRESH_LOCK_KEY
+      ) {
+        tryResolve();
+      }
+    };
+
+    const poll = setInterval(() => {
+      if (tryResolve()) return;
+      if (!isRefreshLockHeld()) {
+        finish(reject, new Error("refresh wait timeout"));
+      }
+    }, 200);
+
+    const timeout = setTimeout(() => {
+      if (tryResolve()) return;
+      finish(reject, new Error("refresh wait timeout"));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearInterval(poll);
+      clearTimeout(timeout);
+      window.removeEventListener("storage", onStorage);
+    };
+
+    window.addEventListener("storage", onStorage);
+    tryResolve();
+  });
+}
+
 function storeAccessToken(token) {
   if (!token) return;
   try {
     localStorage.setItem("token", token);
+    notifyAuthSessionChanged();
   } catch (e) {
     // ignore
   }
@@ -74,16 +181,27 @@ function clearStoredAuth() {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("auth");
     localStorage.removeItem(LAST_ACTIVITY_KEY);
+    localStorage.removeItem(REFRESH_LOCK_KEY);
+    notifyAuthSessionChanged();
   } catch (e) {
     // ignore
   }
 }
 
+function hasStoredAccessToken() {
+  return Boolean(getStoredAccessToken());
+}
+
 function redirectToLogin() {
   try {
-    if (typeof window !== "undefined" && window.location?.pathname !== "/login") {
-      window.location.assign("/login");
+    if (typeof window === "undefined") return;
+    const path = window.location?.pathname || "";
+    const onLoginScreen = path === "/login" || path === "/";
+    if (onLoginScreen) {
+      window.location.reload();
+      return;
     }
+    window.location.assign("/login");
   } catch (e) {
     // ignore
   }
@@ -105,11 +223,33 @@ function logoutEverywhere(reason = "logout", options = {}) {
 function handleAuthStorageEvent(event) {
   if (!event) return;
   if (event.key === LOGOUT_EVENT_KEY || (event.key === "auth" && event.newValue === null)) {
+    if (!hasStoredAccessToken()) {
+      notifyAuthSessionChanged();
+      redirectToLogin();
+      return;
+    }
     logoutEverywhere("cross-tab", { broadcast: false });
+    return;
+  }
+  if (
+    event.key === "token" ||
+    event.key === "authToken" ||
+    event.key === "accessToken" ||
+    event.key === REFRESH_LOCK_KEY
+  ) {
+    notifyAuthSessionChanged();
   }
 }
 
 function handleUnauthorized(reason = "unauthorized") {
+  if (isRefreshLockHeld()) {
+    return;
+  }
+  const token = getStoredAccessToken();
+  if (token && !isJwtExpiredOrNearExpiry(token, TOKEN_REFRESH_SKEW_SECONDS + 30)) {
+    notifyAuthSessionChanged();
+    return;
+  }
   logoutEverywhere(reason, { broadcast: true });
 }
 
@@ -536,58 +676,93 @@ let refreshPromise = null;
 
 async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
-    // Refresh token is HttpOnly cookie; frontend just calls refresh endpoint with credentials.
-    const res = await fetch(`${API_BASE}/api/Login/refresh`, {
-      method: "POST",
-      headers: { ...JSON_HEADERS },
-      credentials: "include",
-    });
-    if (res.status === 401 || res.status === 403) {
-      handleUnauthorized(`refresh failed (${res.status})`);
-      throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    }
-    if (!res.ok) {
-      let errText = "";
-      try {
-        errText = await res.text();
-      } catch (e) {
-        errText = res.statusText;
-      }
-      throw new Error(`HTTP ${res.status} ${res.statusText}: ${errText}`);
-    }
-    const contentType = res.headers.get("content-type");
-    const data =
-      contentType && contentType.includes("application/json") ? await res.json() : await res.text();
 
-    const nextToken =
-      data?.accessToken ||
-      data?.AccessToken ||
-      data?.access_token ||
-      data?.token ||
-      data?.Token ||
-      data?.jwt ||
-      data?.Jwt ||
-      data?.data?.accessToken ||
-      data?.data?.AccessToken ||
-      data?.data?.token ||
-      data?.data?.Token;
-    if (!nextToken) {
-      handleUnauthorized("refresh succeeded but no access token returned");
-      throw new Error("Refresh response did not include access token");
-    }
-    storeAccessToken(nextToken);
-    // Merge user context (including IP) from refresh response into auth - no external API calls
-    if (data && typeof data === "object") {
-      try {
-        const existing = JSON.parse(localStorage.getItem("auth") || "{}");
-        const merged = { ...existing, ...data };
-        localStorage.setItem("auth", JSON.stringify(merged));
-      } catch (e) {
-        // ignore
+  if (isRefreshLockHeld()) {
+    try {
+      return await waitForTokenFromAnotherTab();
+    } catch (waitErr) {
+      const existing = getStoredAccessToken();
+      if (existing && !isJwtExpiredOrNearExpiry(existing, TOKEN_REFRESH_SKEW_SECONDS)) {
+        return existing;
       }
     }
-    return nextToken;
+  }
+
+  refreshPromise = (async () => {
+    if (!acquireRefreshLock()) {
+      try {
+        return await waitForTokenFromAnotherTab();
+      } catch (waitErr) {
+        const existing = getStoredAccessToken();
+        if (existing && !isJwtExpiredOrNearExpiry(existing, TOKEN_REFRESH_SKEW_SECONDS)) {
+          return existing;
+        }
+        throw waitErr;
+      }
+    }
+
+    try {
+      // Refresh token is HttpOnly cookie; frontend just calls refresh endpoint with credentials.
+      const res = await fetch(`${API_BASE}/api/Login/refresh`, {
+        method: "POST",
+        headers: { ...JSON_HEADERS },
+        credentials: "include",
+      });
+      if (res.status === 401 || res.status === 403) {
+        try {
+          return await waitForTokenFromAnotherTab(3000);
+        } catch (waitErr) {
+          handleUnauthorized(`refresh failed (${res.status})`);
+          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        }
+      }
+      if (!res.ok) {
+        let errText = "";
+        try {
+          errText = await res.text();
+        } catch (e) {
+          errText = res.statusText;
+        }
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${errText}`);
+      }
+      const contentType = res.headers.get("content-type");
+      const data =
+        contentType && contentType.includes("application/json")
+          ? await res.json()
+          : await res.text();
+
+      const nextToken =
+        data?.accessToken ||
+        data?.AccessToken ||
+        data?.access_token ||
+        data?.token ||
+        data?.Token ||
+        data?.jwt ||
+        data?.Jwt ||
+        data?.data?.accessToken ||
+        data?.data?.AccessToken ||
+        data?.data?.token ||
+        data?.data?.Token;
+      if (!nextToken) {
+        handleUnauthorized("refresh succeeded but no access token returned");
+        throw new Error("Refresh response did not include access token");
+      }
+      storeAccessToken(nextToken);
+      // Merge user context (including IP) from refresh response into auth - no external API calls
+      if (data && typeof data === "object") {
+        try {
+          const existing = JSON.parse(localStorage.getItem("auth") || "{}");
+          const merged = { ...existing, ...data };
+          localStorage.setItem("auth", JSON.stringify(merged));
+          notifyAuthSessionChanged();
+        } catch (e) {
+          // ignore
+        }
+      }
+      return nextToken;
+    } finally {
+      releaseRefreshLock();
+    }
   })();
 
   try {
@@ -819,6 +994,8 @@ const api = {
   fetchAndUpdateUserContext,
   logoutEverywhere,
   handleAuthStorageEvent,
+  hasStoredAccessToken,
+  storeAccessToken,
   setupAxiosInterceptors,
   isOperatorUser,
   getStoredPermissions,
@@ -866,6 +1043,9 @@ export {
   fetchAndUpdateUserContext,
   logoutEverywhere,
   handleAuthStorageEvent,
+  hasStoredAccessToken,
+  storeAccessToken,
+  notifyAuthSessionChanged,
   setupAxiosInterceptors,
   getAccessTokenExpiryMs,
 };

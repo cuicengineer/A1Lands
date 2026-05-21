@@ -45,6 +45,7 @@ import api, {
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
 import revenueRatesApi from "services/api.revenuerates.service";
+import govtShareRateApi from "services/api.govtsharerate.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
@@ -472,6 +473,7 @@ function PropertyGroupingForm({
   const [linkedPropertyNameById, setLinkedPropertyNameById] = useState({});
   const [notGroupedProperties, setNotGroupedProperties] = useState([]);
   const [propertyRevenueRates, setPropertyRevenueRates] = useState(new Map()); // Cache revenue rates by property ID
+  const [govtShareAnnualRentScopes, setGovtShareAnnualRentScopes] = useState(new Map());
   const [linkedPropertiesForEdit, setLinkedPropertiesForEdit] = useState([]); // Linked properties for edit mode
   /** Add mode: full async group average; shown beside "Current Revenue Rate" and drives Rate when ready */
   const [revenueGroupAverage, setRevenueGroupAverage] = useState(null);
@@ -538,6 +540,91 @@ function PropertyGroupingForm({
     const id = property.Id || property.PropertyId || property.PropId;
     return id ? Number(id) : null;
   };
+
+  const getPropertyScopeValue = (property, keys) => {
+    for (let i = 0; i < keys.length; i += 1) {
+      const v = property?.[keys[i]];
+      if (v !== undefined && v !== null && v !== "") return v;
+    }
+    return "";
+  };
+
+  const isPropertyInSelectedScope = (property) => {
+    if (!property) return false;
+    const cmdId = getPropertyScopeValue(property, ["CmdId", "cmdId", "CommandId", "commandId"]);
+    const baseId = getPropertyScopeValue(property, ["BaseId", "baseId"]);
+    const classId = getPropertyScopeValue(property, ["ClassId", "classId"]);
+    if (cmdId !== "" && Number(cmdId) !== Number(form.cmdid)) return false;
+    if (baseId !== "" && Number(baseId) !== Number(form.baseid)) return false;
+    if (classId !== "" && Number(classId) !== Number(form.classid)) return false;
+    return true;
+  };
+
+  const isActiveNotDeletedGrouping = (pg) => {
+    const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+    const isActiveRecord = toBool(pg?.status ?? pg?.Status);
+    const isNotDeletedRecord = !toBool(pg?.isDeleted ?? pg?.IsDeleted);
+    return isActiveRecord && isNotDeletedRecord;
+  };
+
+  const isPropertyAlreadyInActiveGroup = (propertyId) =>
+    (allPropertyGroupings || []).some((pg) => {
+      if (!isActiveNotDeletedGrouping(pg)) return false;
+      return normalizePropertyIds(pg).some((id) => Number(id) === Number(propertyId));
+    });
+
+  const getGovtShareScopeKey = (cmdId, baseId, classId) =>
+    `${cmdId || ""}|${baseId || ""}|${classId || ""}`;
+
+  const canDefaultMissingRevenueRateToZero = async () => {
+    const scopeKey = getGovtShareScopeKey(form.cmdid, form.baseid, form.classid);
+    if (govtShareAnnualRentScopes.has(scopeKey)) {
+      return govtShareAnnualRentScopes.get(scopeKey);
+    }
+
+    try {
+      const response = await govtShareRateApi.getAll(1, 10000);
+      const rows = response?.pagination
+        ? response.data || []
+        : Array.isArray(response)
+        ? response
+        : [];
+      const hasAnnualRent = rows.some((row) => {
+        const rowCmdId = row.CmdId ?? row.cmdId;
+        const rowBaseId = row.BaseId ?? row.baseId;
+        const rowClassId = row.ClassId ?? row.classId;
+        const isActive =
+          row.Status === undefined ||
+          row.Status === null ||
+          row.Status === true ||
+          row.Status === 1 ||
+          row.Status === "1";
+        const isNotDeleted = !(
+          row.IsDeleted === true ||
+          row.IsDeleted === 1 ||
+          row.IsDeleted === "1"
+        );
+        const factor = String(row.Config ?? row.config ?? "")
+          .trim()
+          .toLowerCase();
+        return (
+          isActive &&
+          isNotDeleted &&
+          Number(rowCmdId) === Number(form.cmdid) &&
+          Number(rowBaseId) === Number(form.baseid) &&
+          Number(rowClassId) === Number(form.classid) &&
+          factor === "annual rent"
+        );
+      });
+      setGovtShareAnnualRentScopes((prev) => new Map(prev).set(scopeKey, hasAnnualRent));
+      return hasAnnualRent;
+    } catch (error) {
+      console.error("Error checking Govt Share factor:", error);
+      setGovtShareAnnualRentScopes((prev) => new Map(prev).set(scopeKey, false));
+      return false;
+    }
+  };
+
   const getPropertyById = (propertyId) => {
     const targetId = Number(propertyId);
     if (!Number.isFinite(targetId)) return null;
@@ -804,9 +891,42 @@ function PropertyGroupingForm({
 
       return allProperties;
     }
-    // In create mode, use notGroupedProperties (already normalized)
-    return notGroupedProperties || [];
-  }, [isEditMode, rentalProperties, notGroupedProperties, linkedPropertiesForEdit]);
+    // In create mode, include all matching ungrouped rental properties, even when no revenue rate exists yet.
+    const optionById = new Map();
+    (notGroupedProperties || []).forEach((p) => {
+      const id = getPropertyId(p);
+      if (id !== null) optionById.set(Number(id), p);
+    });
+
+    (rentalProperties || [])
+      .map((p) => ({
+        ...p,
+        Id: p.Id || p.PropertyId || null,
+        PId: p.PId || p.PropertyName || "",
+        PropertyName: p.PropertyName || p.PId || "",
+      }))
+      .filter((p) => {
+        const id = getPropertyId(p);
+        if (id === null) return false;
+        if (!isPropertyInSelectedScope(p)) return false;
+        return !isPropertyAlreadyInActiveGroup(id);
+      })
+      .forEach((p) => {
+        const id = getPropertyId(p);
+        if (id !== null && !optionById.has(Number(id))) optionById.set(Number(id), p);
+      });
+
+    return Array.from(optionById.values());
+  }, [
+    isEditMode,
+    rentalProperties,
+    notGroupedProperties,
+    linkedPropertiesForEdit,
+    allPropertyGroupings,
+    form.cmdid,
+    form.baseid,
+    form.classid,
+  ]);
 
   useEffect(() => {
     const fetchAllBases = async () => {
@@ -1308,7 +1428,10 @@ function PropertyGroupingForm({
           // Property rate is 0, fetch from revenue rates
           const rateInfo = await getPropertyRateWithRevenueRate(property, id);
 
-          if (rateInfo.rate === 0 && !isHBClassSelected) {
+          const allowZeroRateFromAnnualRentFactor =
+            rateInfo.rate === 0 ? await canDefaultMissingRevenueRateToZero() : false;
+
+          if (rateInfo.rate === 0 && !isHBClassSelected && !allowZeroRateFromAnnualRentFactor) {
             // No rate found in property or revenue rates
             const propertyLabel = getPropertyLabel(id);
             alert(
@@ -2183,6 +2306,7 @@ export default function PropertyGrouping() {
   const [currentGroupId, setCurrentGroupId] = useState("");
   const [currentGroupRecordId, setCurrentGroupRecordId] = useState(null);
   const [removingPropertyId, setRemovingPropertyId] = useState(null);
+  const [propertyRemoveConfirmId, setPropertyRemoveConfirmId] = useState(null);
   const [linkingSelection, setLinkingSelection] = useState([]);
   const [savingLinkings, setSavingLinkings] = useState(false);
   const [availablePropertiesForLinking, setAvailablePropertiesForLinking] = useState([]);
@@ -2333,8 +2457,8 @@ export default function PropertyGrouping() {
     if (commands.length === 0) fetchCommands();
     // Note: bases list for the form is fetched inside PropertyGroupingForm (allBases)
     if (classes.length === 0) fetchClasses();
-    // Only fetch rentalProperties for Edit mode; Add New uses notGroupedProperties (fetched when RAC/Base/Class are selected)
-    if (currentPropertyGrouping && rentalProperties.length === 0) fetchRentalProperties();
+    // Add New also uses rentalProperties to include matching properties without revenue rates.
+    if (rentalProperties.length === 0) fetchRentalProperties();
   }, [openForm, currentPropertyGrouping, commands.length, classes.length, rentalProperties.length]);
 
   // Fetch all property groupings for duplicate validation - separate effect, run only once per form open (guards against Strict Mode double-invoke)
@@ -2583,11 +2707,18 @@ export default function PropertyGrouping() {
     }
   };
 
-  const handleRemoveProperty = async (linkingId) => {
-    if (!window.confirm("Are you sure you want to remove this property from the group?")) {
-      return;
-    }
+  const handleRemoveProperty = (linkingId) => {
+    setPropertyRemoveConfirmId(linkingId);
+  };
 
+  const handleCancelRemoveProperty = () => {
+    setPropertyRemoveConfirmId(null);
+  };
+
+  const handleConfirmRemoveProperty = async () => {
+    const linkingId = propertyRemoveConfirmId;
+    setPropertyRemoveConfirmId(null);
+    if (!linkingId) return;
     // Check for active contracts before allowing removal
     if (currentGroupId) {
       try {
@@ -2784,7 +2915,7 @@ export default function PropertyGrouping() {
       alert("Property removed successfully and grouping updated!");
     } catch (error) {
       console.error("Error removing property:", error);
-      alert("Failed to remove property. Please try again.");
+      alert("Failed to remove property. Please try again and check if any contract binded.");
     } finally {
       setRemovingPropertyId(null);
     }
@@ -3578,6 +3709,27 @@ export default function PropertyGrouping() {
             disabled={!canDeleteCurrentMenu()}
           >
             <Icon>delete</Icon>&nbsp;Delete
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={Boolean(propertyRemoveConfirmId)} onClose={handleCancelRemoveProperty}>
+        <DialogTitle>Remove Property</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="body1" sx={{ fontSize: "1.1rem" }}>
+            Are you sure you want to remove this property from the group?
+          </MDTypography>
+        </DialogContent>
+        <DialogActions>
+          <MDButton onClick={handleCancelRemoveProperty} color="secondary" variant="outlined">
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton
+            onClick={handleConfirmRemoveProperty}
+            color="error"
+            variant="gradient"
+            disabled={Boolean(removingPropertyId)}
+          >
+            <Icon>delete</Icon>&nbsp;Remove
           </MDButton>
         </DialogActions>
       </Dialog>

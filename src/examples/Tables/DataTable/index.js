@@ -59,6 +59,204 @@ import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
 import { canDeleteCurrentMenu, canEditCurrentMenu } from "services/api.service";
 
+/** Resolve primitive field value from react-table row for Excel export. */
+function getExportRawRowValue(tableRow, column) {
+  const orig = tableRow?.original ?? tableRow;
+  if (!orig || !column) return undefined;
+  if (typeof column.accessor === "function") {
+    try {
+      return column.accessor(orig, 0, { original: orig });
+    } catch {
+      return undefined;
+    }
+  }
+  const keys = [];
+  if (column.accessor && typeof column.accessor === "string") keys.push(column.accessor);
+  if (column.id && typeof column.id === "string") keys.push(column.id);
+  for (const key of keys) {
+    if (
+      Object.prototype.hasOwnProperty.call(orig, key) &&
+      orig[key] !== undefined &&
+      orig[key] !== null
+    ) {
+      return orig[key];
+    }
+    const pascal = key.length ? `${key.charAt(0).toUpperCase()}${key.slice(1)}` : "";
+    if (
+      pascal &&
+      Object.prototype.hasOwnProperty.call(orig, pascal) &&
+      orig[pascal] !== undefined &&
+      orig[pascal] !== null
+    ) {
+      return orig[pascal];
+    }
+  }
+  return undefined;
+}
+
+function isExportActionColumn(column) {
+  const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
+  const accessor = typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
+  const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";
+  return (
+    header === "actions" ||
+    header === "action" ||
+    accessor === "actions" ||
+    accessor === "action" ||
+    id === "actions"
+  );
+}
+
+const EXPORT_DATE_COLUMN_TOKENS = new Set([
+  "periodstart",
+  "periodend",
+  "risedate",
+  "applicabledate",
+  "applicationdate",
+  "deactivedate",
+  "commercialoperationdate",
+  "contractstartdate",
+  "contractenddate",
+  "invoicedate",
+  "duedate",
+  "lockdate",
+  "cod",
+  "csd",
+  "ced",
+]);
+
+function looksLikeExportDateDisplay(value) {
+  const s = String(value ?? "").trim();
+  return /^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(s) || /^\d{4}-\d{2}-\d{2}/.test(s);
+}
+
+function isLikelyDateExportColumn(column) {
+  const parts = [
+    column?.id,
+    column?.accessor,
+    typeof column?.Header === "string" ? column.Header : "",
+  ]
+    .filter(Boolean)
+    .map((p) => String(p).toLowerCase());
+  return parts.some((p) => p.includes("date") || EXPORT_DATE_COLUMN_TOKENS.has(p));
+}
+
+const EXPORT_MONTH_ABBR = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+function excelDateSerialFromLocalDate(d) {
+  const utcMidnight = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const epoch = Date.UTC(1899, 11, 30);
+  return (utcMidnight - epoch) / 86400000;
+}
+
+function parseExportDateValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return excelDateSerialFromLocalDate(value);
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 20000 && value < 120000) {
+    return value;
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const datePart = s.split("T")[0];
+    const [y, m, d] = datePart.split("-").map(Number);
+    if (y && m && d) return excelDateSerialFromLocalDate(new Date(y, m - 1, d));
+  }
+  const dmMatch = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (dmMatch) {
+    const day = Number(dmMatch[1]);
+    const mon = EXPORT_MONTH_ABBR[dmMatch[2].toLowerCase().slice(0, 3)];
+    const year = Number(dmMatch[3]);
+    if (mon !== undefined && day && year) {
+      return excelDateSerialFromLocalDate(new Date(year, mon, day));
+    }
+  }
+  const parsed = Date.parse(s);
+  if (Number.isFinite(parsed)) {
+    return excelDateSerialFromLocalDate(new Date(parsed));
+  }
+  return null;
+}
+
+function parseExportNumericValue(raw, formatted) {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof formatted === "number" && Number.isFinite(formatted)) return formatted;
+  if (typeof raw === "boolean") return raw ? 1 : 0;
+
+  const tryParse = (val) => {
+    if (val === null || val === undefined || val === "") return null;
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+    const s = String(val).trim();
+    if (!s) return null;
+    const withoutPct = s.replace(/%$/, "").replace(/,/g, "").trim();
+    if (/[a-zA-Z]/.test(withoutPct)) return null;
+    const n = Number(withoutPct);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  return tryParse(raw) ?? tryParse(formatted);
+}
+
+function coerceExportSheetCell(formatted, raw, column) {
+  if (
+    formatted &&
+    typeof formatted === "object" &&
+    formatted !== null &&
+    Object.prototype.hasOwnProperty.call(formatted, "v")
+  ) {
+    return formatted;
+  }
+
+  const display =
+    formatted !== undefined && formatted !== null
+      ? formatted
+      : raw !== undefined && raw !== null
+      ? raw
+      : "";
+
+  if (display === "") return "";
+
+  const dateSerial = parseExportDateValue(raw) ?? parseExportDateValue(display);
+  if (
+    dateSerial !== null &&
+    (isLikelyDateExportColumn(column) ||
+      looksLikeExportDateDisplay(display) ||
+      looksLikeExportDateDisplay(raw))
+  ) {
+    return { v: dateSerial, t: "n", z: "dd-mmm-yyyy" };
+  }
+
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return { v: raw, t: "n" };
+  }
+  if (typeof formatted === "number" && Number.isFinite(formatted)) {
+    return { v: formatted, t: "n" };
+  }
+  if (typeof raw === "boolean") {
+    return { v: raw ? 1 : 0, t: "n" };
+  }
+
+  const num = parseExportNumericValue(raw, formatted);
+  if (num !== null) return { v: num, t: "n" };
+
+  return String(display);
+}
+
 function extractText(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
@@ -786,25 +984,24 @@ function DataTable({
         }
       }
 
-      const dataForSheet = exportRows.map((r, index) => {
-        // Ensure row values are computed
+      const headerRow = finalColsToExport.map((c) =>
+        typeof c.Header === "string"
+          ? c.Header === "Actions"
+            ? "Action"
+            : c.Header
+          : String(c.id || "")
+      );
+
+      const bodyRows = exportRows.map((r, index) => {
         try {
           prepareRow(r);
         } catch (e) {
           // ignore
         }
 
-        const obj = {};
-        finalColsToExport.forEach((c) => {
-          const headerLabel =
-            typeof c.Header === "string"
-              ? c.Header === "Actions"
-                ? "Action"
-                : c.Header
-              : String(c.id || "");
+        return finalColsToExport.map((c) => {
+          if (isExportActionColumn(c)) return "";
 
-          // Calculate S.No value for export
-          let rawValue;
           const cHeader = typeof c?.Header === "string" ? c.Header.trim().toLowerCase() : "";
           const cAccessor = typeof c?.accessor === "string" ? c.accessor.trim().toLowerCase() : "";
           const cId = typeof c?.id === "string" ? c.id.trim().toLowerCase() : "";
@@ -812,27 +1009,33 @@ function DataTable({
             snoColumn &&
             (cHeader === "s.no" || cAccessor === "sno" || cId === "sno" || c.id === snoColumn.id);
 
-          if (isSNoColumn) {
-            // Calculate serial number: index + 1 (since we're exporting all rows, not paginated)
-            rawValue = index + 1;
-          } else {
-            rawValue = extractText(r.values?.[c.id]);
-          }
+          const rawFromRow = isSNoColumn ? index + 1 : getExportRawRowValue(r, c);
+          const tableText = isSNoColumn ? rawFromRow : extractText(r.values?.[c.id]);
+          const valueForFormatter =
+            rawFromRow !== undefined && rawFromRow !== null && rawFromRow !== ""
+              ? rawFromRow
+              : tableText;
 
-          obj[headerLabel] =
+          const formatted =
             typeof exportCellFormatter === "function"
               ? exportCellFormatter({
-                  value: rawValue,
+                  value: valueForFormatter,
                   column: c,
-                  headerLabel,
+                  headerLabel:
+                    typeof c.Header === "string"
+                      ? c.Header === "Actions"
+                        ? "Action"
+                        : c.Header
+                      : String(c.id || ""),
                   row: r?.original || null,
                 })
-              : rawValue;
+              : valueForFormatter;
+
+          return coerceExportSheetCell(formatted, rawFromRow, c);
         });
-        return obj;
       });
 
-      const ws = XLSX.utils.json_to_sheet(dataForSheet);
+      const ws = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Export");
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -35,6 +35,12 @@ import {
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import propertyGroupingApi from "services/api.propertygrouping.service";
+import {
+  hasRentalPropertiesUrlFilters,
+  readRentalPropertiesUrlFilters,
+  resolveClassNameById,
+} from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import api from "services/api.service";
 
 const StatusBadge = ({ value }) => (
   <MDBadge
@@ -158,6 +164,10 @@ function RentalProperties() {
   const [loading, setLoading] = useState(false);
   // Search is handled by shared DataTable (canSearch)
 
+  const urlFilters = useMemo(() => readRentalPropertiesUrlFilters(), []);
+  const urlFilterActive = hasRentalPropertiesUrlFilters(urlFilters);
+  const urlFilterFetchRef = useRef(false);
+
   const fetchRentalProperties = async (page = pageNumber, size = pageSize) => {
     setLoading(true);
     try {
@@ -185,6 +195,12 @@ function RentalProperties() {
     fetchRentalProperties(pageNumber, pageSize);
   }, [pageNumber, pageSize]);
 
+  useEffect(() => {
+    if (!urlFilterActive || urlFilterFetchRef.current) return;
+    urlFilterFetchRef.current = true;
+    fetchRentalProperties(1, 10000);
+  }, [urlFilterActive]);
+
   const [formOpen, setFormOpen] = useState(false);
   const [currentProperty, setCurrentProperty] = useState(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -202,6 +218,24 @@ function RentalProperties() {
   const [activeGroups, setActiveGroups] = useState([]);
   const [loadingActiveData, setLoadingActiveData] = useState(false);
   const [currentPropertyId, setCurrentPropertyId] = useState(null);
+
+  /** Master class list — row payloads sometimes send wrong ClassName; Class column uses classId + this list. */
+  const [classesList, setClassesList] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.list("class");
+        if (!cancelled && Array.isArray(res)) setClassesList(res);
+      } catch (e) {
+        if (!cancelled) setClassesList([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleAddProperty = () => {
     if (!canCreate) return;
@@ -728,6 +762,8 @@ function RentalProperties() {
         // Normalize id (handle both camelCase and PascalCase)
         const normalizedId = row?.id ?? row?.Id;
         const baseReadAllowsActions = rowIsEditableOrDeletableByBase(row);
+        const rowClassId = row.classId ?? row.ClassId;
+        const classNameFromId = resolveClassNameById(classesList, rowClassId);
 
         return {
           ...row,
@@ -749,7 +785,13 @@ function RentalProperties() {
             "",
           baseName: row.baseName ?? row.BaseName ?? row.basename ?? row.baseId ?? row.BaseId ?? "",
           className:
-            row.className ?? row.ClassName ?? row.classname ?? row.classId ?? row.ClassId ?? "",
+            classNameFromId ||
+            row.className ||
+            row.ClassName ||
+            row.classname ||
+            (rowClassId !== undefined && rowClassId !== null && rowClassId !== ""
+              ? String(rowClassId)
+              : ""),
           // Location string (clamped to 3 lines + popover in column Cell) — both camelCase and PascalCase
           location: row.location ?? row.Location ?? "",
           actions: (
@@ -789,8 +831,21 @@ function RentalProperties() {
           ),
         };
       }),
-    [tableRows, isBaseReadUser, userBaseId]
+    [tableRows, isBaseReadUser, userBaseId, classesList]
   );
+
+  const displayRows = useMemo(() => {
+    if (!urlFilterActive) return computedRows;
+    return computedRows.filter((row) => {
+      const rowCmd = Number(row.cmdId ?? row.CmdId);
+      const rowBase = Number(row.baseId ?? row.BaseId);
+      const rowClass = Number(row.classId ?? row.ClassId);
+      if (urlFilters.cmdId && rowCmd !== Number(urlFilters.cmdId)) return false;
+      if (urlFilters.baseId && rowBase !== Number(urlFilters.baseId)) return false;
+      if (urlFilters.classId && rowClass !== Number(urlFilters.classId)) return false;
+      return true;
+    });
+  }, [computedRows, urlFilterActive, urlFilters]);
 
   return (
     <DashboardLayout>
@@ -916,7 +971,7 @@ function RentalProperties() {
               <DataTable
                 table={{
                   columns,
-                  rows: computedRows,
+                  rows: displayRows,
                 }}
                 isSorted={false}
                 stickyToolbarAndHeader
