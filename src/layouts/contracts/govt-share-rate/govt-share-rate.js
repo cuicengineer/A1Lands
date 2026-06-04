@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -10,7 +9,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import MDPagination from "components/MDPagination";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
@@ -25,10 +24,16 @@ import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
 import Checkbox from "@mui/material/Checkbox";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
+import CompactGroupBySelect from "components/CompactGroupBySelect";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import { withGridValueChip } from "utils/gridValueChipCell";
 import StatusBadge from "components/StatusBadge";
 import CurrencyLoading from "components/CurrencyLoading";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import PropTypes from "prop-types";
 import api, {
   canCreateCurrentMenu,
@@ -189,7 +194,6 @@ function ApplicationDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -783,7 +787,6 @@ function GovtShareRateForm({
     "& .MuiInputBase-input": {
       fontSize: "1rem",
       padding: "10px 12px",
-      minHeight: "45px",
     },
     "& .MuiInputLabel-root": {
       fontSize: "1rem",
@@ -795,12 +798,11 @@ function GovtShareRateForm({
     "& .MuiSelect-select": {
       fontSize: "1rem",
       padding: "10px 12px",
-      minHeight: "45px",
     },
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
         {initialData ? "Edit Govt Share Rate" : "New Govt Share Rate"}
       </DialogTitle>
@@ -916,7 +918,6 @@ function GovtShareRateForm({
                 "& .MuiInputBase-root": { minHeight: "45px" },
                 "& .MuiOutlinedInput-root": { minHeight: "45px" },
                 "& .MuiAutocomplete-inputRoot": {
-                  minHeight: "45px",
                   paddingTop: 0,
                   paddingBottom: 0,
                 },
@@ -962,7 +963,6 @@ function GovtShareRateForm({
                 "& .MuiInputBase-root": { minHeight: "45px" },
                 "& .MuiOutlinedInput-root": { minHeight: "45px" },
                 "& .MuiAutocomplete-inputRoot": {
-                  minHeight: "45px",
                   paddingTop: 0,
                   paddingBottom: 0,
                 },
@@ -1201,7 +1201,6 @@ function GovtShareRateForm({
                       disabled={existingFiles.length + selectedFiles.length >= 2 || isUploading}
                       sx={{
                         mb: 2,
-                        minHeight: "56px",
                         fontSize: "1.1rem",
                         fontWeight: 600,
                         px: 4,
@@ -1288,10 +1287,9 @@ export default function GovtShareRate() {
   const [classes, setClasses] = useState([]);
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = useState(false);
@@ -1375,39 +1373,25 @@ export default function GovtShareRate() {
     setAttachmentsFiles(normalized);
   };
 
-  const fetchGovtShareRates = async (page = pageNumber, size = pageSize) => {
+  const fetchGovtShareRates = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await govtShareRateApi.getAll(page, size);
+      const response = await govtShareRateApi.getAllRecords();
       const data = response?.data ?? (Array.isArray(response) ? response : []);
-      const pagination = response?.pagination;
-      const total = Number(pagination?.totalCount || 0);
+      const arr = Array.isArray(data) ? data : [];
 
-      setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(total);
-
-      // Use current page data for duplicate check when we have all records in one page; otherwise allRecords is filled when form opens
-      if (total > 0 && total <= size) {
-        setAllRecords(Array.isArray(data) ? data : []);
-      } else {
-        setAllRecords([]);
-      }
+      setTableRows(arr);
+      setAllRecords(arr);
+      setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
     } catch (error) {
       console.error("Error fetching govt share rates:", error);
+      setTableRows([]);
+      setAllRecords([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  };
-
-  const fetchAllRecordsForForm = async () => {
-    try {
-      const allResponse = await govtShareRateApi.getAll(1, 10000);
-      const allData = allResponse?.data ?? (Array.isArray(allResponse) ? allResponse : []);
-      setAllRecords(Array.isArray(allData) ? allData : []);
-    } catch (error) {
-      console.error("Error fetching all govt share rates for duplicate check:", error);
-    }
-  };
+  }, []);
 
   const fetchClasses = async () => {
     try {
@@ -1443,20 +1427,17 @@ export default function GovtShareRate() {
   }, []);
 
   useEffect(() => {
-    fetchGovtShareRates(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
+    fetchGovtShareRates();
+  }, [fetchGovtShareRates]);
 
-  const handleOpenForm = async () => {
+  const handleOpenForm = () => {
     setCurrentRecord(null);
-    if (totalCount > allRecords.length) {
-      await fetchAllRecordsForForm();
-    }
     setOpenForm(true);
   };
 
   const handleCloseForm = () => setOpenForm(false);
 
-  const handleEditRecord = async (id) => {
+  const handleEditRecord = (id) => {
     // Handle both camelCase and PascalCase for id lookup
     const record = tableRows.find(
       (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
@@ -1521,9 +1502,6 @@ export default function GovtShareRate() {
       Status: status !== undefined ? Boolean(status) : true,
       status: status !== undefined ? Boolean(status) : true,
     });
-    if (totalCount > allRecords.length) {
-      await fetchAllRecordsForForm();
-    }
     setOpenForm(true);
   };
 
@@ -1537,7 +1515,7 @@ export default function GovtShareRate() {
 
     try {
       await govtShareRateApi.remove(recordToDelete);
-      fetchGovtShareRates(pageNumber, pageSize);
+      fetchGovtShareRates();
       setDeleteDialogOpen(false);
       setRecordToDelete(null);
     } catch (error) {
@@ -1621,7 +1599,7 @@ export default function GovtShareRate() {
               (Array.isArray(r?.data) ? r.data[0]?.Id || r.data[0]?.id : null);
             if (nid) createdIds.push(nid);
           }
-          await fetchGovtShareRates(pageNumber, pageSize);
+          await fetchGovtShareRates();
           return { ids: [recordId, ...createdIds], id: recordId };
         }
         savedRecord = await govtShareRateApi.update(recordId, data);
@@ -1652,13 +1630,13 @@ export default function GovtShareRate() {
       // If new record was created and has files, upload them
       if (!isEdit) {
         if (Array.isArray(savedRecord?.ids) && savedRecord.ids.length > 0) {
-          await fetchGovtShareRates(pageNumber, pageSize);
+          await fetchGovtShareRates();
           return { ids: savedRecord.ids, id: savedRecord.ids[0] };
         }
       }
 
       // Refresh the table and close form (success message shown in handleSave)
-      await fetchGovtShareRates(pageNumber, pageSize);
+      await fetchGovtShareRates();
       // Note: Form will close itself after showing success message in handleSave
       return savedRecord;
     } catch (error) {
@@ -1837,9 +1815,9 @@ export default function GovtShareRate() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
-        if (!cmdId) return value || "-";
+        if (!cmdId) return withGridValueChip(value || "-", "rac", { row });
         const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
-        return cmdItem ? cmdItem.name : value || "-";
+        return withGridValueChip(cmdItem ? cmdItem.name : value || "-", "rac", { row });
       },
     },
     {
@@ -1853,12 +1831,12 @@ export default function GovtShareRate() {
           return value || "-";
         }
         if (rowOrig.isRateSubGroupRow) {
-          return value || "-";
+          return withGridValueChip(value || "-", "base", { row });
         }
         const baseId = rowOrig.baseId ?? rowOrig.BaseId ?? null;
-        if (!baseId) return value || "-";
+        if (!baseId) return withGridValueChip(value || "-", "base", { row });
         const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
-        return baseItem ? baseItem.name : value || "-";
+        return withGridValueChip(baseItem ? baseItem.name : value || "-", "base", { row });
       },
     },
     {
@@ -1872,9 +1850,9 @@ export default function GovtShareRate() {
           return value || "-";
         }
         const classId = row?.original?.classId ?? row?.original?.ClassId ?? null;
-        if (!classId) return value || "-";
+        if (!classId) return withGridValueChip(value || "-", "class", { row });
         const classItem = classes.find((c) => Number(c.id) === Number(classId));
-        return classItem ? classItem.name : value || "-";
+        return withGridValueChip(classItem ? classItem.name : value || "-", "class", { row });
       },
     },
     {
@@ -1968,7 +1946,7 @@ export default function GovtShareRate() {
     const enrichedRows = tableRows.map((row, index) => {
       // Normalize id and foreign keys (handle both camelCase and PascalCase)
       const normalizedId = row?.id ?? row?.Id;
-      const sno = (pageNumber - 1) * pageSize + index + 1;
+      const sno = index + 1;
       const classId = row.classId ?? row.ClassId;
       const cmdId = row.cmdId ?? row.CmdId;
       const baseId = row.baseId ?? row.BaseId;
@@ -2040,23 +2018,21 @@ export default function GovtShareRate() {
             {canEditCurrentMenu() && (
               <IconButton
                 size="small"
-                color="info"
                 onClick={() => handleEditRecord(normalizedId)}
                 title="Edit"
-                sx={{ padding: "1px" }}
+                sx={{ padding: "1px", color: "#2563eb !important", opacity: "1 !important" }}
               >
-                <Icon>edit</Icon>
+                <Icon sx={{ color: "#2563eb" }}>edit</Icon>
               </IconButton>
             )}
             {canDeleteCurrentMenu() && (
               <IconButton
                 size="small"
-                color="error"
                 onClick={() => handleDeleteRecord(normalizedId)}
                 title="Delete"
-                sx={{ padding: "1px" }}
+                sx={{ padding: "1px", color: "#dc2626 !important", opacity: "1 !important" }}
               >
-                <Icon>delete</Icon>
+                <Icon sx={{ color: "#dc2626" }}>delete</Icon>
               </IconButton>
             )}
           </MDBox>
@@ -2118,7 +2094,7 @@ export default function GovtShareRate() {
     sortedKeys.forEach((gk) => {
       const group = byKey.get(gk);
       const gRows = group.rows;
-      const snoValue = (pageNumber - 1) * pageSize + ++topSno;
+      const snoValue = ++topSno;
 
       const firstRow = gRows[0];
       const isExpanded = expandedGroups.has(gk);
@@ -2188,233 +2164,102 @@ export default function GovtShareRate() {
     });
 
     return result;
-  }, [tableRows, pageNumber, pageSize, classes, commands, bases, expandedGroups, groupByColumns]);
+  }, [tableRows, classes, commands, bases, expandedGroups, groupByColumns]);
+
+  const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: displayTotal,
+      }),
+    [displayTotal]
+  );
+
+  const handleGridPageSizeChange = useCallback((value) => {
+    setGridPageSize(Number(value));
+  }, []);
 
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Govt Share Rate
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                position="relative"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "78vh",
-                  minHeight: "560px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "auto",
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "auto",
-                    width: "max-content",
-                    borderCollapse: "collapse",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "1.0rem !important",
-                    fontWeight: "700 !important",
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td": {
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                }}
-              >
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
-                    }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
-
-                <DataTable
-                  table={{
-                    columns,
-                    rows: computedRows,
-                  }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100, 500, 1000],
-                  }}
-                  page={pageNumber - 1}
-                  pageSize={pageSize}
-                  onPageChange={(newPage) => {
-                    setPageNumber(newPage + 1);
-                    fetchGovtShareRates(newPage + 1, pageSize);
-                  }}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchGovtShareRates(1, value);
-                  }}
-                  showTotalEntries={false}
-                  noEndBorder
-                  canSearch
-                  toolbarStart={
-                    <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
-                      <Autocomplete
-                        multiple
-                        size="small"
-                        options={GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS}
-                        disableCloseOnSelect
-                        value={GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS.filter((opt) =>
-                          groupByColumns.includes(opt.value)
-                        )}
-                        isOptionEqualToValue={(option, value) => option.value === value.value}
-                        getOptionLabel={(option) => option.label}
-                        onChange={(event, newValue) => {
-                          setGroupByColumns((newValue || []).map((item) => item.value));
-                        }}
-                        renderOption={(props, option, { selected }) => (
-                          <li {...props}>
-                            <Checkbox size="small" checked={selected} />
-                            {option.label}
-                          </li>
-                        )}
-                        renderInput={(params) => (
-                          <MDInput
-                            {...params}
-                            label="Group By Columns"
-                            placeholder="Select columns"
-                          />
-                        )}
-                      />
-                    </MDBox>
-                  }
-                  autoResetFilters={false}
-                  exportFileName="Govt-Share-Rate"
-                  exportCellFormatter={exportCellFormatter}
-                  extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
-                  contentFitTable
-                />
-
-                {/* Server-side Pagination Footer */}
-                <MDBox
-                  display="flex"
-                  flexDirection={{ xs: "column", sm: "row" }}
-                  justifyContent="flex-start"
-                  alignItems={{ xs: "flex-start", sm: "center" }}
-                  p={3}
-                  gap={2}
-                >
-                  <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-                    <MDTypography variant="button" color="secondary" fontWeight="regular">
-                      {(() => {
-                        const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                        return displayTotal === 0
-                          ? "0 of 0 entries"
-                          : `${Math.min(
-                              pageNumber * pageSize,
-                              displayTotal
-                            )} of ${displayTotal} entries`;
-                      })()}
-                    </MDTypography>
-                    {(() => {
-                      const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                      return displayTotal > 0 && Math.ceil(displayTotal / pageSize) > 1;
-                    })() && (
-                      <MDPagination variant="gradient" color="info">
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                          </MDPagination>
-                        )}
-
-                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                          .filter((page) => {
-                            const totalPages = Math.ceil(totalCount / pageSize);
-                            return (
-                              page === 1 ||
-                              page === totalPages ||
-                              (page >= pageNumber - 2 && page <= pageNumber + 2)
-                            );
-                          })
-                          .map((page, index, array) => {
-                            const prevPage = array[index - 1];
-                            const showEllipsis = prevPage && page - prevPage > 1;
-                            return (
-                              <React.Fragment key={page}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    ...
-                                  </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  active={page === pageNumber}
-                                  onClick={() => setPageNumber(page)}
-                                >
-                                  {page}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
-
-                        {pageNumber < Math.ceil(totalCount / pageSize) && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
-                  </MDBox>
-                </MDBox>
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
+      <EnterpriseWorkspace
+        title="Govt Share Rate"
+        subtitle="Manage government share rate configuration"
+        tabs={<ConfigurationModuleTabs />}
+        metadata={workspaceMetadata}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "auto",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.875rem !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+        }}
+      >
+        <DataTable
+          table={{
+            columns,
+            rows: computedRows,
+          }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={{
+            defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+            entries: [10, 25, 50, 100],
+          }}
+          pageSize={gridPageSize}
+          onEntriesPerPageChange={handleGridPageSizeChange}
+          showTotalEntries={false}
+          noEndBorder
+          canSearch
+          autoResetFilters={false}
+          exportFileName="Govt-Share-Rate"
+          exportCellFormatter={exportCellFormatter}
+          extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
+          contentFitTable
+          disableHeaderMetrics
+          toolbarStartInHeader
+          toolbarStart={
+            <CompactGroupBySelect
+              options={GOVT_SHARE_RATE_GROUPING_COLUMN_OPTIONS}
+              value={groupByColumns}
+              onChange={setGroupByColumns}
+            />
+          }
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
 
       <GovtShareRateForm
         open={openForm}
@@ -2425,9 +2270,7 @@ export default function GovtShareRate() {
         commands={commands}
         bases={bases}
         existingRecords={allRecords}
-        onUploadSuccess={() => {
-          fetchGovtShareRates(pageNumber, pageSize);
-        }}
+        onUploadSuccess={fetchGovtShareRates}
       />
 
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>

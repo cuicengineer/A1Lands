@@ -1,4 +1,5 @@
 import api, { getActionBy } from "services/api.service";
+import { fetchAllPaginatedRecords } from "utils/fetchAllPaginatedRecords";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -26,13 +27,18 @@ async function requestWithPagination(method, path, body) {
   return data;
 }
 
-function list(pageNumber = 1, pageSize = 50) {
+function list(pageNumber = 1, pageSize = 1000) {
   const params = {
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
   };
   const qs = new URLSearchParams(params).toString();
   return requestWithPagination("GET", `/api/PropertyGroup?${qs}`);
+}
+
+/** Load the full property-group catalog in one round trip when possible. */
+async function getAllRecords() {
+  return fetchAllPaginatedRecords(list, { listEntities: ["propertygroup", "PropertyGroup"] });
 }
 
 function get(id) {
@@ -69,7 +75,7 @@ async function remove(id) {
   return requestWithPagination("DELETE", `/api/PropertyGroup/${id}`, payload);
 }
 
-function getByGroup(id, pageNumber = 1, pageSize = 100) {
+function getByGroup(id, pageNumber = 1, pageSize = 1000) {
   const params = {
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
@@ -113,6 +119,7 @@ async function createPropertyGroupLinking(data) {
 
 const propertyGroupingApi = {
   list,
+  getAllRecords,
   get,
   create,
   update,

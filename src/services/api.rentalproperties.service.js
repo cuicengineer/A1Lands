@@ -1,4 +1,5 @@
 import api, { getActionBy } from "services/api.service";
+import { fetchAllPaginatedRecords } from "utils/fetchAllPaginatedRecords";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -26,12 +27,17 @@ async function requestWithPagination(method, path, body) {
   return data;
 }
 
-function getAll(pageNumber = 1, pageSize = 50) {
+function getAll(pageNumber = 1, pageSize = 1000) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
   }).toString();
   return requestWithPagination("GET", `/api/RentalProperties?${params}`);
+}
+
+/** Load the full catalog in one round trip when possible (not a fixed 1000-row page). */
+async function getAllRecords() {
+  return fetchAllPaginatedRecords(getAll, { listEntities: ["rentalproperty", "RentalProperties"] });
 }
 
 async function create(data) {
@@ -80,5 +86,5 @@ async function remove(id) {
   return requestWithPagination("DELETE", `/api/RentalProperties/${id}`, payload);
 }
 
-const rentalPropertiesApi = { getAll, create, update, remove };
+const rentalPropertiesApi = { getAll, getAllRecords, create, update, remove };
 export default rentalPropertiesApi;

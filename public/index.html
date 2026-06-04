@@ -19,12 +19,63 @@ Software.
     <meta charset="utf-8" />
     <link rel="shortcut icon" href="%PUBLIC_URL%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#1A73E8" />
+    <meta name="theme-color" content="#025B64" />
+    <!-- Fonts/icons are bundled in src/index.js (@fontsource + material-icons) for offline use -->
     <link rel="apple-touch-icon" sizes="76x76" href="%PUBLIC_URL%/apple-icon.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!-- Font Awesome for Login Page -->
-    <link href="%PUBLIC_URL%/login_page/assets/css/all.min.css" rel="stylesheet" />
-    <title>A1 Land Management System</title>
+    <title>A1 Land Activities Management System</title>
+    <!-- Login route: load styles before React to prevent layout shift on logout -->
+    <style id="a1-login-anti-fouc">
+      html.a1-login-pending #app {
+        visibility: hidden;
+      }
+    </style>
+    <script>
+      (function () {
+        var path = window.location.pathname || "/";
+        var normalized = path.replace(/\/+$/, "") || "/";
+        var isLogin = normalized === "/" || normalized === "/login";
+        if (!isLogin) return;
+
+        var root = document.documentElement;
+        root.classList.add("a1-login-active", "a1-login-pending");
+
+        var base = "%PUBLIC_URL%/login_page/assets/";
+        var sheets = [
+          "css/bootstrap.min.css",
+          "fonts/custom-fonts.css",
+          "css/bootstrap-icons.css",
+          "css/style.css",
+        ];
+
+        var pending = sheets.length;
+        var markReady = function () {
+          pending -= 1;
+          if (pending <= 0) {
+            root.classList.remove("a1-login-pending");
+          }
+        };
+
+        sheets.forEach(function (file) {
+          var href = base + file;
+          var link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = href;
+          link.setAttribute("data-a1-login-stylesheet", "true");
+          link.addEventListener("load", markReady);
+          link.addEventListener("error", markReady);
+          document.head.appendChild(link);
+        });
+
+        var fontPreload = document.createElement("link");
+        fontPreload.rel = "preload";
+        fontPreload.as = "font";
+        fontPreload.type = "font/woff";
+        fontPreload.crossOrigin = "anonymous";
+        fontPreload.href = base + "fonts/Poppins-Regular.woff";
+        document.head.appendChild(fontPreload);
+      })();
+    </script>
   </head>
 
   <body>

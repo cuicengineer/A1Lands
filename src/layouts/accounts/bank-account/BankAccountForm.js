@@ -13,12 +13,11 @@ import MenuItem from "@mui/material/MenuItem";
 import FormHelperText from "@mui/material/FormHelperText";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import CircularProgress from "@mui/material/CircularProgress";
+import CurrencyLoading from "components/CurrencyLoading";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import Chip from "@mui/material/Chip";
 import InputAdornment from "@mui/material/InputAdornment";
-import CurrencyLoading from "components/CurrencyLoading";
 import { format, parseISO, isValid } from "date-fns";
 import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
@@ -953,7 +952,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
         >
           {loadingLists && (
             <Box display="flex" alignItems="center" gap={1} mb={2}>
-              <CircularProgress size={20} />
+              <CurrencyLoading size={24} />
               <Typography variant="body2" color="text.secondary">
                 Loading options…
               </Typography>

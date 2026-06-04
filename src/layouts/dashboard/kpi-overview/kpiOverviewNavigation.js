@@ -122,23 +122,68 @@ export function hasContractsKpiGridFilters(filters) {
   );
 }
 
+function catalogEntityId(entity) {
+  return Number(
+    entity?.id ??
+      entity?.Id ??
+      entity?.cmdId ??
+      entity?.CmdId ??
+      entity?.baseId ??
+      entity?.BaseId ??
+      entity?.classId ??
+      entity?.ClassId ??
+      entity?.commandId ??
+      entity?.CommandId
+  );
+}
+
 export function resolveCommandNameById(commands, cmdId) {
   const id = Number(cmdId);
-  if (!Number.isFinite(id)) return "";
-  const match = (commands || []).find((c) => Number(c.id ?? c.Id) === id);
-  return String(match?.name ?? match?.Name ?? match?.cmdName ?? match?.CmdName ?? "").trim();
+  if (!Number.isFinite(id) || id === 0) return "";
+  const match = (commands || []).find((c) => catalogEntityId(c) === id);
+  return String(
+    match?.name ??
+      match?.Name ??
+      match?.value ??
+      match?.Value ??
+      match?.label ??
+      match?.Label ??
+      match?.cmdName ??
+      match?.CmdName ??
+      ""
+  ).trim();
 }
 
 export function resolveBaseNameById(bases, baseId) {
   const id = Number(baseId);
-  if (!Number.isFinite(id)) return "";
-  const match = (bases || []).find((b) => Number(b.id ?? b.Id) === id);
-  return String(match?.name ?? match?.Name ?? match?.baseName ?? match?.BaseName ?? "").trim();
+  if (!Number.isFinite(id) || id === 0) return "";
+  const match = (bases || []).find((b) => catalogEntityId(b) === id);
+  return String(
+    match?.name ??
+      match?.Name ??
+      match?.value ??
+      match?.Value ??
+      match?.label ??
+      match?.Label ??
+      match?.baseName ??
+      match?.BaseName ??
+      ""
+  ).trim();
 }
 
 export function resolveClassNameById(classes, classId) {
   const id = Number(classId);
-  if (!Number.isFinite(id)) return "";
-  const match = (classes || []).find((c) => Number(c.id ?? c.Id) === id);
-  return String(match?.name ?? match?.Name ?? match?.className ?? match?.ClassName ?? "").trim();
+  if (!Number.isFinite(id) || id === 0) return "";
+  const match = (classes || []).find((c) => catalogEntityId(c) === id);
+  return String(
+    match?.name ??
+      match?.Name ??
+      match?.value ??
+      match?.Value ??
+      match?.label ??
+      match?.Label ??
+      match?.className ??
+      match?.ClassName ??
+      ""
+  ).trim();
 }

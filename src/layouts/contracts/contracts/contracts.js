@@ -25,7 +25,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import MDPagination from "components/MDPagination";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import CurrencyLoading from "components/CurrencyLoading";
 import Autocomplete from "@mui/material/Autocomplete";
 import Select from "@mui/material/Select";
@@ -54,11 +54,17 @@ import propertyGroupingApi from "services/api.propertygrouping.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import StatusBadge from "components/StatusBadge";
+import GridValueChip from "components/GridValueChip";
+import GridStatusChip from "components/GridStatusChip";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
 import { PropertyGroupingForm } from "layouts/contracts/property-grouping/property-grouping";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
+import CompactGroupBySelect from "components/CompactGroupBySelect";
+import CompactMultiSelectFilter from "components/CompactMultiSelectFilter";
 import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 import jsPDF from "jspdf";
@@ -74,6 +80,8 @@ import {
   AgreementProvContractBasicInfoStrip,
   AgreementProvInvoiceEditDialog,
   buildAgreementProvContractBasicInfoForm,
+  getAgreementProvSaveErrorMessage,
+  persistAllInvoiceScheduleLines,
 } from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
 
 /** API contract payload without identity — used to open the form as “New Contract” with prefills (clone). */
@@ -813,12 +821,9 @@ function ContractsForm({
       const fetchAllPropertyGroupings = async () => {
         try {
           // Fetch a large number to get all records for validation
-          const response = await propertyGroupingApi.list(1, 10000);
-          if (response && response.pagination) {
-            setAllPropertyGroupings(response.data || []);
-          } else {
-            setAllPropertyGroupings(Array.isArray(response) ? response : []);
-          }
+          const response = await propertyGroupingApi.getAllRecords();
+          const data = response?.data ?? (Array.isArray(response) ? response : []);
+          setAllPropertyGroupings(Array.isArray(data) ? data : []);
         } catch (error) {
           console.error("Error fetching all property groupings:", error);
           setAllPropertyGroupings([]);
@@ -1733,17 +1738,9 @@ function ContractsForm({
   };
   const selectSx = {
     fontSize: "1rem",
-    minHeight: "45px",
     display: "flex",
     alignItems: "center",
     boxSizing: "border-box",
-    // Keep a fixed control height whether empty or filled
-    "&.MuiInputBase-root": {
-      minHeight: "45px",
-    },
-    "&.MuiOutlinedInput-root": {
-      minHeight: "45px",
-    },
     "& .MuiSelect-select": {
       fontSize: "1rem",
       padding: "12px 32px 12px 12px",
@@ -1839,7 +1836,6 @@ function ContractsForm({
                   "& .MuiInputBase-root": { minHeight: "45px" },
                   "& .MuiOutlinedInput-root": { minHeight: "45px" },
                   "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
                     paddingTop: 0,
                     paddingBottom: 0,
                   },
@@ -1874,7 +1870,6 @@ function ContractsForm({
                   "& .MuiInputBase-root": { minHeight: "45px" },
                   "& .MuiOutlinedInput-root": { minHeight: "45px" },
                   "& .MuiAutocomplete-inputRoot": {
-                    minHeight: "45px",
                     paddingTop: 0,
                     paddingBottom: 0,
                   },
@@ -3549,7 +3544,7 @@ function ContractsForm({
       <Dialog
         open={riseTermsDialogOpen}
         onClose={handleCloseRiseTermsDialog}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
       >
         <DialogTitle>
@@ -3875,7 +3870,6 @@ function ContractsDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -4124,7 +4118,6 @@ function ContractsMoneyColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -4812,14 +4805,47 @@ function getContractInvoiceFinalizeRowDisplay(r, formatDate) {
   return { cells, searchText };
 }
 
-function openAgreementProvInvoiceInNewTab(contractNo, invoiceNo) {
-  const c = String(contractNo || "").trim();
-  const inv = String(invoiceNo || "").trim();
-  if (!c || !inv || inv === "—") return;
-  const targetUrl = `/contracts/agreement-prov-invoice?contractNo=${encodeURIComponent(
-    c
-  )}&invoiceNo=${encodeURIComponent(inv)}`;
-  window.open(targetUrl, "_blank");
+/** Row payload for Edit Agreement Invoice dialog from Contracts finalize grid. */
+function buildAgreementProvEditRowFromContractAndSchedule(contractRow, scheduleRow) {
+  const contract = contractRow || {};
+  const sch = scheduleRow || {};
+  const contractNo =
+    pickSchField(contract, "ContractNo", "contractNo") ||
+    pickSchField(sch, "ContractNo", "contractNo");
+  const invoiceNo =
+    pickSchField(sch, "InvoiceNo", "invoiceNo") || pickSchField(contract, "InvoiceNo", "invoiceNo");
+  return {
+    ...contract,
+    ...sch,
+    ContractNo: contractNo || sch.ContractNo || contract.ContractNo,
+    contractNo: contractNo || sch.contractNo || contract.contractNo,
+    InvoiceNo: invoiceNo || sch.InvoiceNo,
+    invoiceNo: invoiceNo || sch.invoiceNo,
+    PaymentTermMonths:
+      sch.PaymentTermMonths ??
+      sch.paymentTermMonths ??
+      contract.PaymentTermMonths ??
+      contract.paymentTermMonths,
+    paymentTermMonths:
+      sch.paymentTermMonths ??
+      sch.PaymentTermMonths ??
+      contract.paymentTermMonths ??
+      contract.PaymentTermMonths,
+    RentalValueRate:
+      contract.RentalValueRate ??
+      contract.rentalValueRate ??
+      contract.RentalValue ??
+      contract.rentalValue ??
+      sch.RentalValueRate ??
+      sch.rentalValueRate,
+    rentalValueRate:
+      contract.rentalValueRate ??
+      contract.RentalValueRate ??
+      contract.rentalValue ??
+      contract.rentalValue ??
+      sch.rentalValueRate ??
+      sch.RentalValueRate,
+  };
 }
 
 function readContractsUrlContractNo() {
@@ -4891,6 +4917,8 @@ function ContractInvoiceFinalizeGrid({
   onDuplicateRow,
   allowedSelectionKeys,
   blurNonSelectableRows,
+  clickableInvoiceNo,
+  onInvoiceNoClick,
 }) {
   const [internalSearch, setInternalSearch] = useState("");
   const search =
@@ -5283,9 +5311,12 @@ function ContractInvoiceFinalizeGrid({
                     )}
                     {CONTRACT_INVOICE_FINALIZE_COLS.map((col) => {
                       const cellText = d.cells[col.key];
-                      const isInvoiceLink = col.key === "invoiceNo" && cellText && cellText !== "—";
-                      const rowContractNo = pickSchField(r, "ContractNo", "contractNo");
-                      const rowInvoiceNo = pickSchField(r, "InvoiceNo", "invoiceNo");
+                      const isInvoiceLink =
+                        col.key === "invoiceNo" &&
+                        cellText &&
+                        cellText !== "—" &&
+                        clickableInvoiceNo &&
+                        typeof onInvoiceNoClick === "function";
                       return (
                         <MDBox
                           key={col.key}
@@ -5309,7 +5340,7 @@ function ContractInvoiceFinalizeGrid({
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openAgreementProvInvoiceInNewTab(rowContractNo, rowInvoiceNo);
+                                onInvoiceNoClick(r);
                               }}
                             >
                               {cellText}
@@ -5387,6 +5418,8 @@ ContractInvoiceFinalizeGrid.propTypes = {
     PropTypes.arrayOf(PropTypes.string),
   ]),
   blurNonSelectableRows: PropTypes.bool,
+  clickableInvoiceNo: PropTypes.bool,
+  onInvoiceNoClick: PropTypes.func,
 };
 
 ContractInvoiceFinalizeGrid.defaultProps = {
@@ -5407,6 +5440,8 @@ ContractInvoiceFinalizeGrid.defaultProps = {
   onDuplicateRow: undefined,
   allowedSelectionKeys: undefined,
   blurNonSelectableRows: false,
+  clickableInvoiceNo: false,
+  onInvoiceNoClick: undefined,
 };
 
 export default function Contracts() {
@@ -5417,9 +5452,7 @@ export default function Contracts() {
   const [isCloneMode, setIsCloneMode] = useState(false);
   const [rows, setRows] = useState([]);
 
-  // Server-side pagination state (backend now paginates)
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
   const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -5498,6 +5531,9 @@ export default function Contracts() {
   const [invoiceFinalizeBusy, setInvoiceFinalizeBusy] = useState(false);
   const [agreementProvCreateDialogOpen, setAgreementProvCreateDialogOpen] = useState(false);
   const [agreementProvCreateRowData, setAgreementProvCreateRowData] = useState(null);
+  const [agreementProvEditDialogOpen, setAgreementProvEditDialogOpen] = useState(false);
+  const [agreementProvEditRowData, setAgreementProvEditRowData] = useState(null);
+  const [agreementProvEditSaving, setAgreementProvEditSaving] = useState(false);
   const [invoiceFinalizeSearch, setInvoiceFinalizeSearch] = useState("");
   const [invoiceFinalizeLockDate, setInvoiceFinalizeLockDate] = useState("");
   const asOfDateInputRef = useRef(null);
@@ -5533,13 +5569,10 @@ export default function Contracts() {
 
   const selectSx = {
     fontSize: "1rem",
-    "& .MuiOutlinedInput-root": {
-      minHeight: "45px",
-    },
+    "& .MuiOutlinedInput-root": {},
     "& .MuiSelect-select": {
       fontSize: "1rem",
       padding: "12px 32px 12px 12px",
-      minHeight: "45px",
       display: "flex",
       alignItems: "center",
       boxSizing: "border-box",
@@ -5787,22 +5820,14 @@ export default function Contracts() {
     });
   };
 
-  const fetchContracts = async (page = pageNumber, size = pageSize) => {
+  const fetchContracts = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await contractApi.getAll(page, size);
-      if (response && response.pagination) {
-        const base = response.data || [];
-        setRows(mergeAsOfOverrides(base, asOfOverrideMapRef.current));
-        setTotalCount(response.pagination.totalCount || 0);
-        setPageNumber(response.pagination.pageNumber || page);
-        setPageSize(response.pagination.pageSize || size);
-      } else {
-        // Fallback (non-paginated)
-        const arr = Array.isArray(response) ? response : [];
-        setRows(mergeAsOfOverrides(arr, asOfOverrideMapRef.current));
-        setTotalCount(arr.length);
-      }
+      const response = await contractApi.getAllRecords();
+      const base = response?.data ?? (Array.isArray(response) ? response : []);
+      const arr = Array.isArray(base) ? base : [];
+      setRows(mergeAsOfOverrides(arr, asOfOverrideMapRef.current));
+      setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
     } catch (error) {
       console.error("Error fetching contracts:", error);
       setRows([]);
@@ -5810,32 +5835,42 @@ export default function Contracts() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const normalizeCatalogList = (response) => {
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.items)) return response.items;
+    return [];
   };
 
   const fetchCommands = async () => {
     try {
       const response = await api.list("command");
-      setCommands(response);
+      setCommands(normalizeCatalogList(response));
     } catch (error) {
       console.error("Error fetching commands:", error);
+      setCommands([]);
     }
   };
 
   const fetchBases = async () => {
     try {
       const response = await api.list("base");
-      setBases(response);
+      setBases(normalizeCatalogList(response));
     } catch (error) {
       console.error("Error fetching bases:", error);
+      setBases([]);
     }
   };
 
   const fetchClasses = async () => {
     try {
       const response = await api.list("class");
-      setClasses(response);
+      setClasses(normalizeCatalogList(response));
     } catch (error) {
       console.error("Error fetching classes:", error);
+      setClasses([]);
     }
   };
 
@@ -5871,18 +5906,22 @@ export default function Contracts() {
   useEffect(() => {
     const fetchAllPropertyGroupings = async () => {
       try {
-        const response = await propertyGroupingApi.list(1, 10000);
-        if (response && response.pagination) {
-          setAllPropertyGroupings(response.data || []);
-        } else {
-          setAllPropertyGroupings(Array.isArray(response) ? response : []);
-        }
+        const response = await propertyGroupingApi.getAllRecords();
+        const data = response?.data ?? (Array.isArray(response) ? response : []);
+        setAllPropertyGroupings(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error fetching all property groupings:", error);
         setAllPropertyGroupings([]);
       }
     };
     fetchAllPropertyGroupings();
+  }, []);
+
+  // RAC/Base/Class grid labels resolve from these catalogs (not only when the form opens).
+  useEffect(() => {
+    fetchCommands();
+    fetchBases();
+    fetchClasses();
   }, []);
 
   useEffect(() => {
@@ -5956,10 +5995,9 @@ export default function Contracts() {
     natures.length,
   ]);
 
-  // Load current page from backend (also when As of Date changes)
   useEffect(() => {
-    fetchContracts(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
+    fetchContracts();
+  }, [fetchContracts]);
 
   // When As of Date changes, fetch "as of" values and merge into existing rows.
   // Overrides: calculated columns plus Inv. Due / Paid / Rcvable and Invoices (payment status label).
@@ -6160,7 +6198,7 @@ export default function Contracts() {
     const openContractFromUrl = async () => {
       try {
         setLoading(true);
-        const response = await contractApi.getAll(1, 10000);
+        const response = await contractApi.getAllRecords();
         const list = response?.data ?? (Array.isArray(response) ? response : []);
         const contractKey = urlContractNo.toLowerCase();
         const match = list.find(
@@ -6224,6 +6262,8 @@ export default function Contracts() {
     setInvoiceFinalizeTab("pending");
     setAgreementProvCreateDialogOpen(false);
     setAgreementProvCreateRowData(null);
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
     setInvoiceFinalizeSearch("");
     try {
       const [scheduleRes, lockDateRes] = await Promise.all([
@@ -6245,7 +6285,7 @@ export default function Contracts() {
   }, []);
 
   const handleCloseInvoiceFinalizeDialog = useCallback(() => {
-    if (invoiceFinalizeBusy) return;
+    if (invoiceFinalizeBusy || agreementProvEditSaving) return;
     setInvoiceFinalizeOpen(false);
     setInvoiceFinalizeContractRow(null);
     setInvoiceScheduleRows([]);
@@ -6253,8 +6293,10 @@ export default function Contracts() {
     setInvoiceFinalizeTab("pending");
     setAgreementProvCreateDialogOpen(false);
     setAgreementProvCreateRowData(null);
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
     setInvoiceFinalizeSearch("");
-  }, [invoiceFinalizeBusy]);
+  }, [invoiceFinalizeBusy, agreementProvEditSaving]);
 
   const invoiceFinalizePendingRows = useMemo(
     () =>
@@ -6325,7 +6367,7 @@ export default function Contracts() {
             IsFinalized: true,
             isFinalized: true,
           };
-          await contractApi.createInvoiceSchedule(rowContractNo, invoiceNo, subInvoiceNo, payload);
+          await contractApi.updateInvoiceSchedule(rowContractNo, invoiceNo, payload);
         }
       }
       if (contractNo) {
@@ -6355,6 +6397,70 @@ export default function Contracts() {
     setAgreementProvCreateRowData(null);
   }, [invoiceFinalizeBusy]);
 
+  const handleCloseAgreementProvEditDialog = useCallback(() => {
+    if (agreementProvEditSaving) return;
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
+  }, [agreementProvEditSaving]);
+
+  const handleOpenAgreementProvEditFromFinalizeRow = useCallback(
+    (scheduleRow) => {
+      if (!invoiceFinalizeContractRow || !scheduleRow) return;
+      const invoiceNo = getContractInvoiceFinalizeInvoiceNo(scheduleRow);
+      if (!invoiceNo || invoiceNo === "—") return;
+      if (!pickScheduleRowIsFinalize(scheduleRow)) return;
+      setAgreementProvEditRowData(
+        buildAgreementProvEditRowFromContractAndSchedule(invoiceFinalizeContractRow, scheduleRow)
+      );
+      setAgreementProvEditDialogOpen(true);
+      setAgreementProvCreateDialogOpen(false);
+      setAgreementProvCreateRowData(null);
+      setInvoiceFinalizeSelectedKeys(new Set());
+    },
+    [invoiceFinalizeContractRow]
+  );
+
+  const handleSaveAgreementProvEditInvoice = useCallback(
+    async (form, rowData, lineSaveContext = {}) => {
+      if (!rowData) return;
+      setAgreementProvEditSaving(true);
+      try {
+        await persistAllInvoiceScheduleLines({
+          rowData,
+          form,
+          invoiceLines: lineSaveContext.invoiceLines ?? [],
+          pendingDeleteSubs: lineSaveContext.pendingDeleteSubs ?? [],
+          newLineDrafts: lineSaveContext.newLineDrafts ?? [],
+          editingLineDraft: lineSaveContext.editingLineDraft ?? null,
+          originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
+          originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
+        });
+        const contractNo = String(
+          invoiceFinalizeContractRow?.ContractNo ??
+            invoiceFinalizeContractRow?.contractNo ??
+            form?.contractNo ??
+            rowData?.ContractNo ??
+            rowData?.contractNo ??
+            ""
+        ).trim();
+        if (contractNo) {
+          const res = await contractApi.getInvoiceSchedule({ contractNo });
+          setInvoiceScheduleRows(
+            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+          );
+        }
+        setAgreementProvEditDialogOpen(false);
+        setAgreementProvEditRowData(null);
+      } catch (error) {
+        console.error("Error saving agreement prov invoice:", error);
+        alert(getAgreementProvSaveErrorMessage(error));
+      } finally {
+        setAgreementProvEditSaving(false);
+      }
+    },
+    [invoiceFinalizeContractRow]
+  );
+
   const handleAddNewInvoiceDraft = useCallback(() => {
     if (!invoiceFinalizeContractRow) return;
     if (!(invoiceScheduleRows || []).some((r) => pickScheduleRowIsFinalize(r))) {
@@ -6374,6 +6480,8 @@ export default function Contracts() {
       invoiceNo: nextInvoiceNo,
     });
     setAgreementProvCreateDialogOpen(true);
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
     setInvoiceFinalizeSelectedKeys(new Set());
   }, [invoiceFinalizeContractRow, invoiceScheduleRows]);
 
@@ -6561,7 +6669,7 @@ export default function Contracts() {
           userIPAddress: getUserIPAddress() || "session",
         };
         await contractApi.remove(recordToDelete, deleteData);
-        await fetchContracts(pageNumber, pageSize);
+        await fetchContracts();
         setDeleteDialogOpen(false);
         setRecordToDelete(null);
       } catch (error) {
@@ -6591,7 +6699,7 @@ export default function Contracts() {
       } else {
         await contractApi.create(dataWithIP);
       }
-      await fetchContracts(pageNumber, pageSize);
+      await fetchContracts();
       setCurrentContract(null);
       handleCloseForm();
     } catch (error) {
@@ -6878,39 +6986,10 @@ export default function Contracts() {
   const CALCULATED_CELL_BG = "#e9ecef";
   const CONTRACT_GRID_TABLE_WIDTH = "4300px";
 
-  /** Active / Inactive — same light palette as Contract State (Valid / soft yellow). */
+  /** Active / Inactive status pill for contract grid. */
   const renderContractsStatusLightPill = (value) => {
-    const isActive =
-      value === true ||
-      value === 1 ||
-      value === "1" ||
-      (typeof value === "string" && String(value).toLowerCase() === "active");
-    const badgeStyles = isActive
-      ? { backgroundColor: "#d4edda", color: "#155724" }
-      : { backgroundColor: "#fff3cd", color: "#856404" };
-    const label = isActive ? "Active" : "Inactive";
-    return (
-      <MDBox
-        sx={{
-          ...badgeStyles,
-          backgroundColor: `${badgeStyles.backgroundColor} !important`,
-          color: `${badgeStyles.color} !important`,
-          px: 1,
-          py: 0.35,
-          borderRadius: "999px",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minWidth: "96px",
-          fontWeight: 600,
-          "&, & *": {
-            color: `${badgeStyles.color} !important`,
-          },
-        }}
-      >
-        {label}
-      </MDBox>
-    );
+    if (isContractGridBlank(value)) return "";
+    return <GridStatusChip value={value} />;
   };
 
   const columns = [
@@ -7677,6 +7756,7 @@ export default function Contracts() {
     align = "left",
     type = "text",
     moneyCompareFilter = false,
+    chipVariant = null,
   }) => ({
     id,
     Header,
@@ -7685,10 +7765,14 @@ export default function Contracts() {
     ...(moneyCompareFilter
       ? { filter: "contractsMoneyCompare", Filter: ContractsMoneyColumnFilter }
       : {}),
+    // eslint-disable-next-line react/prop-types
     Cell: ({ value }) => {
       if (type === "date") return formatContractGridDate(value);
       if (type === "number") return formatContractGridNumber(value);
       if (type === "percent") return formatContractGridNumber(value, "%");
+      if (chipVariant && !isContractGridBlank(value)) {
+        return <GridValueChip value={value} variant={chipVariant} />;
+      }
       return isContractGridBlank(value) ? "" : String(value);
     },
   });
@@ -7782,26 +7866,7 @@ export default function Contracts() {
   const renderContractGridApproval = (value) => {
     if (isContractGridBlank(value)) return "";
     const isApproved = value === true || value === 1 || value === "1";
-    const badgeStyles = isApproved
-      ? { backgroundColor: "#d4edda", color: "#155724" }
-      : { backgroundColor: "#fff3cd", color: "#856404" };
-    return (
-      <MDBox
-        sx={{
-          ...badgeStyles,
-          px: 1,
-          py: 0.35,
-          borderRadius: "999px",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minWidth: "96px",
-          fontWeight: 600,
-        }}
-      >
-        {isApproved ? "Approved" : "Pending"}
-      </MDBox>
-    );
+    return <GridStatusChip value={isApproved ? "approved" : "pending"} />;
   };
 
   const contractGridColumns = [
@@ -7811,9 +7876,24 @@ export default function Contracts() {
       Header: "CA No",
       keys: ["contractNo", "ContractNo"],
     }),
-    makeContractGridColumn({ id: "cmdName", Header: "RAC", keys: ["cmdName", "CmdName"] }),
-    makeContractGridColumn({ id: "baseName", Header: "Base", keys: ["baseName", "BaseName"] }),
-    makeContractGridColumn({ id: "className", Header: "Class", keys: ["className", "ClassName"] }),
+    makeContractGridColumn({
+      id: "cmdName",
+      Header: "RAC",
+      keys: ["cmdName", "CmdName", "Cmd", "cmd", "Rac", "rac"],
+      chipVariant: "rac",
+    }),
+    makeContractGridColumn({
+      id: "baseName",
+      Header: "Base",
+      keys: ["baseName", "BaseName", "Base", "base"],
+      chipVariant: "base",
+    }),
+    makeContractGridColumn({
+      id: "className",
+      Header: "Class",
+      keys: ["className", "ClassName", "Class", "class"],
+      chipVariant: "class",
+    }),
     makeContractGridColumn({ id: "grpId", Header: "Gp ID", keys: ["grpId", "GId", "GrpId"] }),
     {
       id: "location",
@@ -8002,9 +8082,9 @@ export default function Contracts() {
                 color="error"
                 title="Add Rate to Property Grouping for this FY"
                 onClick={() => openPropertyGroupingPopupByGrpId(grpId)}
-                sx={{ p: "2px" }}
+                sx={{ p: "2px", color: "#dc2626 !important", opacity: "1 !important" }}
               >
-                <Icon>warning</Icon>
+                <Icon sx={{ color: "#dc2626" }}>warning</Icon>
               </IconButton>
             </MDBox>
           );
@@ -8187,16 +8267,98 @@ export default function Contracts() {
     };
   }, [rows]);
 
+  const pickContractRowVal = (row, ...keys) => {
+    for (let i = 0; i < keys.length; i += 1) {
+      const v = row?.[keys[i]];
+      if (v !== undefined && v !== null) return v;
+    }
+    return undefined;
+  };
+
+  const resolveContractCmdLabel = (row, commandList) => {
+    const fromCatalog = resolveCommandNameById(
+      commandList,
+      pickContractRowVal(row, "CmdId", "cmdId", "CommandId", "commandId")
+    );
+    if (fromCatalog) return fromCatalog;
+    const text = String(
+      pickContractRowVal(
+        row,
+        "CmdName",
+        "cmdName",
+        "CommandName",
+        "commandName",
+        "Cmd",
+        "cmd",
+        "Rac",
+        "rac"
+      ) ?? ""
+    ).trim();
+    if (!text) return "";
+    const asNum = Number(text);
+    if (Number.isFinite(asNum) && String(asNum) === text) {
+      return resolveCommandNameById(commandList, asNum) || text;
+    }
+    return text;
+  };
+
+  const resolveContractBaseLabel = (row, baseList) => {
+    const fromCatalog = resolveBaseNameById(
+      baseList,
+      pickContractRowVal(row, "BaseId", "baseId", "BaseID", "baseID")
+    );
+    if (fromCatalog) return fromCatalog;
+    const text = String(
+      pickContractRowVal(row, "BaseName", "baseName", "BaseLabel", "baseLabel", "Base", "base") ??
+        ""
+    ).trim();
+    if (!text) return "";
+    const asNum = Number(text);
+    if (Number.isFinite(asNum) && String(asNum) === text) {
+      return resolveBaseNameById(baseList, asNum) || text;
+    }
+    return text;
+  };
+
+  const resolveContractClassLabel = (row, classList) => {
+    const fromCatalog = resolveClassNameById(
+      classList,
+      pickContractRowVal(row, "ClassId", "classId", "ClassID", "classID")
+    );
+    if (fromCatalog) return fromCatalog;
+    const text = String(
+      pickContractRowVal(
+        row,
+        "ClassName",
+        "className",
+        "ClassLabel",
+        "classLabel",
+        "Class",
+        "class"
+      ) ?? ""
+    ).trim();
+    if (!text) return "";
+    const asNum = Number(text);
+    if (Number.isFinite(asNum) && String(asNum) === text) {
+      return resolveClassNameById(classList, asNum) || text;
+    }
+    return text;
+  };
+
   // Group contracts by selected grouping columns.
   const groupedData = useMemo(() => {
     const approvalActionsBypass = contractsApprovalActionsBypassUser();
-    // Use only PascalCase (strict API response format) - create camelCase aliases for accessors
     const normalizedRows = rows.map((row) => {
-      // Look up property grouping to get Area, Rate, Location, and UoM
-      const grpId = row.GrpId || row.GId || "";
-      const propertyGrouping = allPropertyGroupings.find(
-        (pg) => String(pg.GId || "") === String(grpId) || Number(pg.Id) === Number(grpId)
-      );
+      const grpId =
+        pickContractRowVal(row, "GrpId", "grpId", "GId", "gId", "GrpName", "grpName") ?? "";
+      const propertyGrouping = allPropertyGroupings.find((pg) => {
+        const pgGid = String(pickContractRowVal(pg, "GId", "gId") ?? "").trim();
+        const pgId = Number(pickContractRowVal(pg, "Id", "id"));
+        const grpKey = String(grpId).trim();
+        if (grpKey && pgGid && pgGid === grpKey) return true;
+        const grpNum = Number(grpId);
+        return Number.isFinite(grpNum) && Number.isFinite(pgId) && pgId === grpNum;
+      });
 
       // Calculate Viability (same logic as Cell function)
       const fromPayload = String(
@@ -8222,39 +8384,76 @@ export default function Contracts() {
 
       return {
         ...row,
-        id: row.Id,
-        contractNo: row.ContractNo || "",
+        id: pickContractRowVal(row, "Id", "id"),
+        contractNo: pickContractRowVal(row, "ContractNo", "contractNo") ?? "",
         feasible: feasibleValue,
         asOfToday: "Active", // Text value for Excel export
-        cmdName: row.CmdName || "",
-        baseName: row.BaseName || "",
-        className: row.ClassName || "",
-        grpName: row.GrpName || row.GId || "",
-        grpId: propertyGrouping?.GId ?? row.GId ?? row.GrpName ?? String(row.GrpId || ""),
-        // Get from property grouping if available, otherwise from row
-        totalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
-        totalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
-        location: propertyGrouping?.Location ?? row.Location ?? "",
-        unitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
-        uoM: propertyGrouping?.UoM ?? row.UoM ?? row.UnitName ?? "",
-        tenantNo: row.TenantNo || "",
-        businessName: row.BusinessName || "",
-        natureOfBusiness: row.NatureOfBusiness || "",
-        contractStartDate: row.ContractStartDate || "",
-        contractEndDate: row.ContractEndDate || "",
+        cmdName: resolveContractCmdLabel(row, commands),
+        baseName: resolveContractBaseLabel(row, bases),
+        className: resolveContractClassLabel(row, classes),
+        CmdName: resolveContractCmdLabel(row, commands),
+        BaseName: resolveContractBaseLabel(row, bases),
+        ClassName: resolveContractClassLabel(row, classes),
+        grpName:
+          pickContractRowVal(row, "GrpName", "grpName", "GId", "gId") ??
+          propertyGrouping?.GId ??
+          propertyGrouping?.gId ??
+          "",
+        grpId:
+          propertyGrouping?.GId ??
+          propertyGrouping?.gId ??
+          pickContractRowVal(row, "GId", "gId", "GrpId", "grpId") ??
+          "",
+        totalArea:
+          propertyGrouping?.Area ??
+          propertyGrouping?.area ??
+          pickContractRowVal(row, "TotalArea", "totalArea", "Area", "area") ??
+          0,
+        totalRate:
+          propertyGrouping?.Rate ??
+          propertyGrouping?.rate ??
+          pickContractRowVal(row, "TotalRate", "totalRate", "Rate", "rate") ??
+          0,
+        location:
+          propertyGrouping?.Location ??
+          propertyGrouping?.location ??
+          pickContractRowVal(row, "Location", "location") ??
+          "",
+        unitName:
+          propertyGrouping?.UoM ??
+          propertyGrouping?.uoM ??
+          propertyGrouping?.uom ??
+          pickContractRowVal(row, "UnitName", "unitName", "UoM", "uoM", "uom") ??
+          "",
+        uoM:
+          propertyGrouping?.UoM ??
+          propertyGrouping?.uoM ??
+          pickContractRowVal(row, "UoM", "uoM", "uom", "UnitName", "unitName") ??
+          "",
+        tenantNo: pickContractRowVal(row, "TenantNo", "tenantNo") ?? "",
+        businessName: pickContractRowVal(row, "BusinessName", "businessName") ?? "",
+        natureOfBusiness: pickContractRowVal(row, "NatureOfBusiness", "natureOfBusiness") ?? "",
+        contractStartDate: pickContractRowVal(row, "ContractStartDate", "contractStartDate") ?? "",
+        contractEndDate: pickContractRowVal(row, "ContractEndDate", "contractEndDate") ?? "",
         fiscal: row.Fiscal ?? row.fiscal ?? "",
         RRFY: row.RRFY ?? row.Rrfy ?? row.rrfy ?? "",
         rrfy: row.RRFY ?? row.Rrfy ?? row.rrfy ?? "",
-        commercialOperationDate: row.CommercialOperationDate || "",
-        initialRentPM: row.InitialRentPM || "",
-        currentRentPA: row.CurrRentPA ?? "",
-        initialRentPA: row.InitialRentPA || "",
-        paymentTermMonths: row.PaymentTermMonths || "",
-        term: row.Term || "",
-        increaseRatePercent: row.IncreaseRatePercent || "",
-        increaseIntervalMonths: row.IncreaseIntervalMonths || "",
-        sdRateMonths: row.SDRateMonths || "",
-        securityDepositAmount: row.SecurityDepositAmount || "",
+        commercialOperationDate:
+          pickContractRowVal(row, "CommercialOperationDate", "commercialOperationDate") ?? "",
+        initialRentPM: pickContractRowVal(row, "InitialRentPM", "initialRentPM") ?? "",
+        currentRentPA:
+          pickContractRowVal(row, "CurrRentPA", "currRentPA", "CurrentRentPA", "currentRentPA") ??
+          "",
+        initialRentPA: pickContractRowVal(row, "InitialRentPA", "initialRentPA") ?? "",
+        paymentTermMonths: pickContractRowVal(row, "PaymentTermMonths", "paymentTermMonths") ?? "",
+        term: pickContractRowVal(row, "Term", "term") ?? "",
+        increaseRatePercent:
+          pickContractRowVal(row, "IncreaseRatePercent", "increaseRatePercent") ?? "",
+        increaseIntervalMonths:
+          pickContractRowVal(row, "IncreaseIntervalMonths", "increaseIntervalMonths") ?? "",
+        sdRateMonths: pickContractRowVal(row, "SDRateMonths", "sdRateMonths") ?? "",
+        securityDepositAmount:
+          pickContractRowVal(row, "SecurityDepositAmount", "securityDepositAmount") ?? "",
         contractState:
           row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? "",
         rentalValue: row.RentalValue ?? row.rentalValue,
@@ -8272,25 +8471,49 @@ export default function Contracts() {
           row.Status === "1" ||
           (typeof row.Status === "string" && String(row.Status).toLowerCase() === "active")
         ),
-        remarks: row.Remarks || "",
-        vaArea: row.VaArea || 0,
+        remarks: pickContractRowVal(row, "Remarks", "remarks") ?? "",
+        vaArea: pickContractRowVal(row, "VaArea", "vaArea") ?? 0,
         groupRate:
           row.GroupRate !== undefined || row.groupRate !== undefined
             ? row.GroupRate ?? row.groupRate
             : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
         // Also set PascalCase versions for direct access
-        CurrentRentPA: row.CurrRentPA ?? "",
-        CurrRentPA: row.CurrRentPA ?? "",
-        TotalArea: propertyGrouping?.Area ?? row.TotalArea ?? row.Area ?? 0,
-        TotalRate: propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        CurrentRentPA:
+          pickContractRowVal(row, "CurrRentPA", "currRentPA", "CurrentRentPA", "currentRentPA") ??
+          "",
+        CurrRentPA:
+          pickContractRowVal(row, "CurrRentPA", "currRentPA", "CurrentRentPA", "currentRentPA") ??
+          "",
+        TotalArea:
+          propertyGrouping?.Area ??
+          propertyGrouping?.area ??
+          pickContractRowVal(row, "TotalArea", "totalArea", "Area", "area") ??
+          0,
+        TotalRate:
+          propertyGrouping?.Rate ??
+          propertyGrouping?.rate ??
+          pickContractRowVal(row, "TotalRate", "totalRate", "Rate", "rate") ??
+          0,
         GroupRate:
           row.GroupRate !== undefined || row.groupRate !== undefined
             ? row.GroupRate ?? row.groupRate
             : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
-        Location: propertyGrouping?.Location ?? row.Location ?? "",
-        UnitName: propertyGrouping?.UoM ?? row.UnitName ?? row.UoM ?? "",
-        UoM: propertyGrouping?.UoM ?? row.UoM ?? "",
-        VaArea: row.VaArea || 0,
+        Location:
+          propertyGrouping?.Location ??
+          propertyGrouping?.location ??
+          pickContractRowVal(row, "Location", "location") ??
+          "",
+        UnitName:
+          propertyGrouping?.UoM ??
+          propertyGrouping?.uoM ??
+          pickContractRowVal(row, "UnitName", "unitName", "UoM", "uoM") ??
+          "",
+        UoM:
+          propertyGrouping?.UoM ??
+          propertyGrouping?.uoM ??
+          pickContractRowVal(row, "UoM", "uoM", "uom") ??
+          "",
+        VaArea: pickContractRowVal(row, "VaArea", "vaArea") ?? 0,
       };
     });
 
@@ -8462,7 +8685,7 @@ export default function Contracts() {
               )}
               <IconButton
                 size="small"
-                color="primary"
+                color="success"
                 onClick={() => handleViewDetails(row)}
                 title="View Details"
                 sx={{ padding: "1px" }}
@@ -8471,7 +8694,7 @@ export default function Contracts() {
               </IconButton>
               <IconButton
                 size="small"
-                color="secondary"
+                color="warning"
                 onClick={() => handleOpenContractInvoices(row)}
                 title="Invoices"
                 sx={{ padding: "1px" }}
@@ -8751,7 +8974,7 @@ export default function Contracts() {
                 )}
                 <IconButton
                   size="small"
-                  color="primary"
+                  color="success"
                   onClick={() => handleViewDetails(row)}
                   title="View Details"
                   sx={{ padding: "1px" }}
@@ -8760,7 +8983,7 @@ export default function Contracts() {
                 </IconButton>
                 <IconButton
                   size="small"
-                  color="secondary"
+                  color="warning"
                   onClick={() => handleOpenContractInvoices(row)}
                   title="Invoices"
                   sx={{ padding: "1px" }}
@@ -8777,6 +9000,9 @@ export default function Contracts() {
     return result;
   }, [
     rows,
+    commands,
+    bases,
+    classes,
     commandFilterIds,
     baseFilterIds,
     classFilterIds,
@@ -9403,648 +9629,269 @@ export default function Contracts() {
     }
   };
 
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: totalCount,
+        visible: visibleRowCount > 0 && visibleRowCount !== totalCount ? visibleRowCount : null,
+      }),
+    [totalCount, visibleRowCount]
+  );
+
+  const contractsContextFilters = (
+    <MDBox className="contracts-workspace-context-bar">
+      <MDBox width="9.5rem" sx={{ position: "relative", flexShrink: 0 }}>
+        <input
+          type="date"
+          ref={asOfDateInputRef}
+          value={asOfDate || ""}
+          onChange={(e) => setAsOfDate(e.target.value)}
+          tabIndex={-1}
+          style={{
+            position: "absolute",
+            opacity: 0,
+            width: 0,
+            height: 0,
+            top: 0,
+            left: 0,
+            pointerEvents: "none",
+          }}
+          aria-hidden="true"
+        />
+        <MDInput
+          placeholder="As of Date"
+          value={toDisplayDate(asOfDate)}
+          onClick={() => openDatePicker(asOfDateInputRef)}
+          size="small"
+          InputProps={{
+            readOnly: true,
+            endAdornment: (
+              <InputAdornment position="end">
+                <Icon
+                  sx={{ cursor: "pointer", fontSize: "1rem" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openDatePicker(asOfDateInputRef);
+                  }}
+                >
+                  calendar_today
+                </Icon>
+              </InputAdornment>
+            ),
+          }}
+          fullWidth
+          sx={{
+            "& .MuiInputBase-root": { minHeight: 32, maxHeight: 32, fontSize: "0.8125rem" },
+          }}
+        />
+      </MDBox>
+      <IconButton
+        size="small"
+        color="info"
+        title="Refresh as-of values"
+        onClick={() => {
+          setAsOfRefreshing(true);
+          setAsOfRefreshToken((t) => t + 1);
+        }}
+        sx={{ flexShrink: 0 }}
+      >
+        <Icon fontSize="small">send</Icon>
+      </IconButton>
+      <ToggleButtonGroup
+        exclusive
+        value={contractsArchiveFilter}
+        onChange={(_, v) => {
+          if (v !== null) setContractsArchiveFilter(v);
+        }}
+        size="small"
+        color="info"
+        aria-label="Filter contracts table by archive status"
+        className="contracts-context-segmented contracts-context-toggle"
+      >
+        <ToggleButton value="all">ALL</ToggleButton>
+        <ToggleButton value="valid">VALID</ToggleButton>
+        <ToggleButton value="archive">ARCHIVE</ToggleButton>
+      </ToggleButtonGroup>
+      <ToggleButtonGroup
+        exclusive
+        value={contractsApprovalFilter}
+        onChange={(_, v) => {
+          setContractsApprovalFilter(v ?? "all");
+        }}
+        size="small"
+        color="info"
+        aria-label="Filter contracts table by approval status"
+        className="contracts-context-segmented contracts-context-toggle"
+      >
+        <ToggleButton value="approved">APPROVED</ToggleButton>
+        <ToggleButton value="pending">PENDING</ToggleButton>
+      </ToggleButtonGroup>
+    </MDBox>
+  );
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12} sx={{ minWidth: 0, maxWidth: "100%" }}>
-            <Card sx={{ minWidth: 0, maxWidth: "100%", overflow: "visible" }}>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Contracts
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                position="relative"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  minWidth: 0,
-                  maxWidth: "100%",
-                  overflow: "hidden",
-                  // Let the DataTable stretch in this flex column so the sticky body fills space (no idle gap below rows).
-                  "& > div:not(.MuiTableContainer-root):not(.contracts-asof-grid-host)": {
-                    flexShrink: 0,
-                  },
-                  "& > .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    alignSelf: "stretch",
-                    minWidth: 0,
-                    width: "100%",
-                    maxWidth: "100%",
-                    overflow: "hidden",
-                    display: "flex",
-                    flexDirection: "column",
-                  },
-                  // Sticky DataTable: scroll + layout are handled inside DataTable (sticky body is the middle child).
-                  // Contracts: use stickyBodyMinHeight on DataTable; keep flex minWidth 0 for layout.
-                  // The requested Contracts grid has many columns; keep a real horizontal scroll width.
-                  "& .MuiTable-root": {
-                    display: "table",
-                    tableLayout: "fixed !important",
-                    width: `${CONTRACT_GRID_TABLE_WIDTH} !important`,
-                    minWidth: `${CONTRACT_GRID_TABLE_WIDTH} !important`,
-                    maxWidth: "none !important",
-                    whiteSpace: "normal !important",
-                    boxSizing: "border-box",
-                  },
-                  "& .MuiTable-root thead": {
-                    display: "table-header-group !important",
-                    // DataTable sets sticky on thead; override so each th sticks (works reliably in scrollport).
-                    position: "static !important",
-                  },
-                  // Lock column header cells to the DataTable body scroll area (vertical scroll).
-                  "& .MuiTable-root thead th": {
-                    position: "sticky !important",
-                    top: "0 !important",
-                    zIndex: 50,
-                    backgroundColor: "#fff !important",
-                    backgroundClip: "padding-box",
-                    boxShadow: "0 1px 0 0 #d0d0d0",
-                  },
-                  "& .MuiTable-root tbody td, & .MuiTable-root tbody td *": {
-                    zIndex: "auto !important",
-                  },
-                  "& .MuiTable-root tbody": {
-                    display: "table-row-group !important",
-                  },
-                  "& .MuiTable-root thead tr, & .MuiTable-root tbody tr": {
-                    display: "table-row !important",
-                  },
-                  "& .MuiTable-root th, & .MuiTable-root td": {
-                    display: "table-cell !important",
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "auto !important",
-                  },
-                  // DataTable uses custom <td> cells (MDBox), not MUI TableCell.
-                  // Keep widths content-driven based on visible text.
-                  "& table th, & table td": {
-                    width: "auto !important",
-                    whiteSpace: "nowrap !important",
-                    wordBreak: "normal !important",
-                    overflowWrap: "normal !important",
-                    lineHeight: 1.3,
-                    verticalAlign: "top",
-                  },
-                  // DataTableBodyCell renders: <td><div style="display:inline-block;width:max-content">...</div></td>
-                  "& table td > div": {
-                    display: "inline-block !important",
-                    width: "max-content !important",
-                    maxWidth: "none !important",
-                    whiteSpace: "inherit !important",
-                  },
-                  "& table td > div > *": {
-                    maxWidth: "none !important",
-                    whiteSpace: "inherit !important",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "1.0rem !important",
-                    fontWeight: "700 !important",
-                    padding: "8px 6px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                  },
-                  "& .MuiTable-root td": {
-                    padding: "6px 6px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                  },
-                  // Keep compact padding without forcing fixed column width.
-                  "& .MuiTable-root th:nth-of-type(1), & .MuiTable-root td:nth-of-type(1)": {
-                    width: "auto !important",
-                    minWidth: "max-content",
-                    maxWidth: "none",
-                    paddingLeft: "4px !important",
-                    paddingRight: "4px !important",
-                  },
-                  "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-                    width: "auto !important",
-                    minWidth: "max-content",
-                    maxWidth: "none",
-                    paddingLeft: "4px !important",
-                    paddingRight: "4px !important",
-                  },
-                }}
-              >
-                {/* Loading Overlay */}
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
-                    }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
+      <EnterpriseWorkspace
+        title="Contracts"
+        subtitle="Manage contract records and agreements"
+        tabs={<ContractsModuleTabs />}
+        metadata={workspaceMetadata}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& > .contracts-workspace-context-bar": {
+            flexShrink: 0,
+          },
+          "& > .saas-settings-table": {
+            flex: "1 1 0",
+            minHeight: 0,
+            height: "100%",
+            alignSelf: "stretch",
+          },
+          "& .saas-settings-table-scroll": {
+            flex: "1 1 0",
+            minHeight: 0,
+          },
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            minWidth: CONTRACT_GRID_TABLE_WIDTH,
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.875rem !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "8px 6px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "6px 6px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+            lineHeight: 1.3,
+            verticalAlign: "top",
+          },
+          "& table td > div": {
+            maxWidth: "none !important",
+          },
+          "& .MuiTable-root th:nth-of-type(1), & .MuiTable-root td:nth-of-type(1)": {
+            minWidth: "max-content",
+            paddingLeft: "4px !important",
+            paddingRight: "4px !important",
+          },
+          "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
+            minWidth: "max-content",
+            paddingLeft: "4px !important",
+            paddingRight: "4px !important",
+          },
+        }}
+      >
+        {contractsContextFilters}
 
-                {/* Grouping + Command/Base/Class filter widgets */}
-                <MDBox
-                  px={2}
-                  pb={2}
-                  display="flex"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  flexWrap="wrap"
-                  gap={1.5}
-                >
-                  <MDBox
-                    display="flex"
-                    alignItems="center"
-                    flexWrap="wrap"
-                    gap={1}
-                    width={{ xs: "100%", md: "auto" }}
-                  >
-                    <MDBox width={{ xs: "80%", md: "130px" }}>
-                      <Autocomplete
-                        multiple
-                        size="small"
-                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.commands]}
-                        disableCloseOnSelect
-                        value={commandFilterIds}
-                        isOptionEqualToValue={(option, value) => option === value}
-                        getOptionLabel={(option) =>
-                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
-                        }
-                        onChange={(event, newValue, reason, details) => {
-                          if (details?.option === ALL_FILTER_VALUE) {
-                            const allSelected =
-                              gridFilterOptions.commands.length > 0 &&
-                              commandFilterIds.length === gridFilterOptions.commands.length;
-                            setCommandFilterIds(allSelected ? [] : [...gridFilterOptions.commands]);
-                            return;
-                          }
-                          setCommandFilterIds(
-                            (Array.isArray(newValue) ? newValue : []).filter(
-                              (value) => value !== ALL_FILTER_VALUE
-                            )
-                          );
-                        }}
-                        renderOption={(props, option, { selected }) => {
-                          const allSelected =
-                            gridFilterOptions.commands.length > 0 &&
-                            commandFilterIds.length === gridFilterOptions.commands.length;
-                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
-                          return (
-                            <li {...props}>
-                              <Checkbox size="small" checked={checked} />
-                              {option === ALL_FILTER_VALUE ? "All" : option}
-                            </li>
-                          );
-                        }}
-                        renderInput={(params) => (
-                          <MDInput
-                            {...params}
-                            label="RAC"
-                            placeholder="Select RAC"
-                            sx={groupByInputSx}
-                          />
-                        )}
-                      />
-                    </MDBox>
-                    <MDBox width={{ xs: "80%", md: "130px" }}>
-                      <Autocomplete
-                        multiple
-                        size="small"
-                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.bases]}
-                        disableCloseOnSelect
-                        value={baseFilterIds}
-                        isOptionEqualToValue={(option, value) => option === value}
-                        getOptionLabel={(option) =>
-                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
-                        }
-                        onChange={(event, newValue, reason, details) => {
-                          if (details?.option === ALL_FILTER_VALUE) {
-                            const allSelected =
-                              gridFilterOptions.bases.length > 0 &&
-                              baseFilterIds.length === gridFilterOptions.bases.length;
-                            setBaseFilterIds(allSelected ? [] : [...gridFilterOptions.bases]);
-                            return;
-                          }
-                          setBaseFilterIds(
-                            (Array.isArray(newValue) ? newValue : []).filter(
-                              (value) => value !== ALL_FILTER_VALUE
-                            )
-                          );
-                        }}
-                        renderOption={(props, option, { selected }) => {
-                          const allSelected =
-                            gridFilterOptions.bases.length > 0 &&
-                            baseFilterIds.length === gridFilterOptions.bases.length;
-                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
-                          return (
-                            <li {...props}>
-                              <Checkbox size="small" checked={checked} />
-                              {option === ALL_FILTER_VALUE ? "All" : option}
-                            </li>
-                          );
-                        }}
-                        renderInput={(params) => (
-                          <MDInput
-                            {...params}
-                            label="Base"
-                            placeholder="Select Base"
-                            sx={groupByInputSx}
-                          />
-                        )}
-                      />
-                    </MDBox>
-                    <MDBox width={{ xs: "80%", md: "130px" }}>
-                      <Autocomplete
-                        multiple
-                        size="small"
-                        options={[ALL_FILTER_VALUE, ...gridFilterOptions.classes]}
-                        disableCloseOnSelect
-                        value={classFilterIds}
-                        isOptionEqualToValue={(option, value) => option === value}
-                        getOptionLabel={(option) =>
-                          option === ALL_FILTER_VALUE ? "All" : String(option || "")
-                        }
-                        onChange={(event, newValue, reason, details) => {
-                          if (details?.option === ALL_FILTER_VALUE) {
-                            const allSelected =
-                              gridFilterOptions.classes.length > 0 &&
-                              classFilterIds.length === gridFilterOptions.classes.length;
-                            setClassFilterIds(allSelected ? [] : [...gridFilterOptions.classes]);
-                            return;
-                          }
-                          setClassFilterIds(
-                            (Array.isArray(newValue) ? newValue : []).filter(
-                              (value) => value !== ALL_FILTER_VALUE
-                            )
-                          );
-                        }}
-                        renderOption={(props, option, { selected }) => {
-                          const allSelected =
-                            gridFilterOptions.classes.length > 0 &&
-                            classFilterIds.length === gridFilterOptions.classes.length;
-                          const checked = option === ALL_FILTER_VALUE ? allSelected : selected;
-                          return (
-                            <li {...props}>
-                              <Checkbox size="small" checked={checked} />
-                              {option === ALL_FILTER_VALUE ? "All" : option}
-                            </li>
-                          );
-                        }}
-                        renderInput={(params) => (
-                          <MDInput
-                            {...params}
-                            label="Class"
-                            placeholder="Select Class"
-                            sx={groupByInputSx}
-                          />
-                        )}
-                      />
-                    </MDBox>
-                    <MDBox width={{ xs: "80%", sm: "160px" }} sx={{ position: "relative" }}>
-                      <input
-                        type="date"
-                        ref={asOfDateInputRef}
-                        value={asOfDate || ""}
-                        onChange={(e) => setAsOfDate(e.target.value)}
-                        style={{
-                          position: "absolute",
-                          opacity: 0.01,
-                          width: "100%",
-                          height: "100%",
-                          top: 0,
-                          left: 0,
-                          cursor: "pointer",
-                        }}
-                        aria-hidden
-                      />
-                      <MDInput
-                        label="As of Date"
-                        value={toDisplayDate(asOfDate)}
-                        onClick={() => openDatePicker(asOfDateInputRef)}
-                        InputProps={{
-                          readOnly: true,
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <Icon
-                                sx={{ cursor: "pointer" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openDatePicker(asOfDateInputRef);
-                                }}
-                              >
-                                calendar_today
-                              </Icon>
-                            </InputAdornment>
-                          ),
-                        }}
-                        fullWidth
-                        sx={groupByInputSx}
-                      />
-                    </MDBox>
-                    <MDBox
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 1,
-                        flexWrap: "wrap",
-                        mt: { xs: 1, sm: 0 },
-                      }}
-                    >
-                      <IconButton
-                        size="small"
-                        color="info"
-                        title="Refresh as-of values"
-                        onClick={() => {
-                          setAsOfRefreshing(true);
-                          setAsOfRefreshToken((t) => t + 1);
-                        }}
-                      >
-                        <Icon fontSize="small">send</Icon>
-                      </IconButton>
-                      <ToggleButtonGroup
-                        exclusive
-                        value={contractsArchiveFilter}
-                        onChange={(_, v) => {
-                          if (v !== null) setContractsArchiveFilter(v);
-                        }}
-                        size="small"
-                        color="info"
-                        aria-label="Filter contracts table by archive status"
-                      >
-                        <ToggleButton value="all">ALL</ToggleButton>
-                        <ToggleButton value="valid">VALID</ToggleButton>
-                        <ToggleButton value="archive">ARCHIVE</ToggleButton>
-                      </ToggleButtonGroup>
-                      <ToggleButtonGroup
-                        exclusive
-                        value={contractsApprovalFilter}
-                        onChange={(_, v) => {
-                          setContractsApprovalFilter(v ?? "all");
-                        }}
-                        size="small"
-                        color="info"
-                        aria-label="Filter contracts table by approval status"
-                        sx={{ ml: { xs: 0, sm: 1.25 } }}
-                      >
-                        <ToggleButton value="approved">APPROVED</ToggleButton>
-                        <ToggleButton value="pending">PENDING</ToggleButton>
-                      </ToggleButtonGroup>
-                    </MDBox>
-                  </MDBox>
-                </MDBox>
+        {(loading || asOfRefreshing) && (
+          <MDBox
+            position="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            display="flex"
+            justifyContent="center"
+            alignItems="center"
+            zIndex={10}
+            sx={{
+              backgroundColor: "rgba(255, 255, 255, 0.8)",
+              backdropFilter: "blur(2px)",
+            }}
+          >
+            <CurrencyLoading size={50} />
+          </MDBox>
+        )}
 
-                <MDBox
-                  className="contracts-asof-grid-host"
-                  sx={{
-                    position: "relative",
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    minWidth: 0,
-                    maxWidth: "100%",
-                    overflow: "hidden",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignSelf: "stretch",
-                    width: "100%",
-                    "& > .MuiTableContainer-root": {
-                      flex: "1 1 0",
-                      minHeight: 0,
-                      alignSelf: "stretch",
-                      minWidth: 0,
-                      width: "100%",
-                      maxWidth: "100%",
-                      overflow: "hidden",
-                      display: "flex",
-                      flexDirection: "column",
-                    },
-                  }}
-                  aria-busy={asOfRefreshing}
-                >
-                  {asOfRefreshing && (
-                    <MDBox
-                      position="absolute"
-                      top={0}
-                      left={0}
-                      right={0}
-                      bottom={0}
-                      display="flex"
-                      justifyContent="center"
-                      alignItems="center"
-                      zIndex={20}
-                      sx={{
-                        backgroundColor: "rgba(255, 255, 255, 0.75)",
-                        backdropFilter: "blur(2px)",
-                        pointerEvents: "auto",
-                      }}
-                    >
-                      <CurrencyLoading size={50} />
-                    </MDBox>
-                  )}
-                  <DataTable
-                    table={{
-                      columns: contractGridColumns,
-                      rows: computedRows,
-                    }}
-                    isSorted={false}
-                    stickyToolbarAndHeader
-                    stickyBodyMinHeight="400px"
-                    entriesPerPage={false}
-                    pageSize={pageSize}
-                    page={0}
-                    onPageChange={() => {}}
-                    onEntriesPerPageChange={(n) => {
-                      setPageSize(n);
-                      setPageNumber(1);
-                    }}
-                    showTotalEntries={false}
-                    pagination={{ variant: "gradient", color: "info" }}
-                    noEndBorder
-                    canSearch
-                    toolbarStart={
-                      <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
-                        <Autocomplete
-                          multiple
-                          size="small"
-                          options={groupingColumnOptions}
-                          disableCloseOnSelect
-                          value={groupingColumnOptions.filter((opt) =>
-                            groupByColumns.includes(opt.value)
-                          )}
-                          isOptionEqualToValue={(option, value) => option.value === value.value}
-                          getOptionLabel={(option) => option.label}
-                          onChange={(event, newValue) => {
-                            setGroupByColumns((newValue || []).map((item) => item.value));
-                          }}
-                          renderInput={(params) => (
-                            <MDInput
-                              {...params}
-                              label="Group By Columns"
-                              placeholder="Select columns"
-                              sx={groupByInputSx}
-                            />
-                          )}
-                        />
-                      </MDBox>
-                    }
-                    exportFileName="Contracts"
-                    exportCellFormatter={contractsExportCellFormatter}
-                    exportExcludeGroupParentsWhenExpanded
-                    exportAllColumns
-                    extraFilterTypes={CONTRACTS_DATATABLE_EXTRA_FILTER_TYPES}
-                    initialHiddenColumns={CONTRACTS_GRID_INITIAL_HIDDEN_COLUMNS}
-                    onVisibleRowCountChange={setVisibleRowCount}
-                  />
-                </MDBox>
-              </MDBox>
-
-              {/* Server-side Pagination Footer (sibling to table area so it is not clipped by the grid host) */}
-              {totalCount > 0 && (
-                <MDBox
-                  display="flex"
-                  flexDirection={{ xs: "column", sm: "row" }}
-                  justifyContent="flex-start"
-                  alignItems={{ xs: "flex-start", sm: "center" }}
-                  py={1}
-                  px={2}
-                  pb={2}
-                  gap={1}
-                  sx={{
-                    fontSize: "0.7rem",
-                    "& .MuiPaginationItem-root": {
-                      fontSize: "0.7rem",
-                      minWidth: "1.5rem",
-                      height: "1.5rem",
-                    },
-                    "& .MuiPaginationItem-icon": { fontSize: "1rem" },
-                  }}
-                >
-                  <MDBox
-                    mb={{ xs: 0.5, sm: 0 }}
-                    display="flex"
-                    alignItems="center"
-                    gap={0.5}
-                    flexWrap="wrap"
-                  >
-                    <FormControl size="small" sx={{ minWidth: 12 }}>
-                      <Select
-                        value={String(pageSize)}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          setPageSize(value);
-                          setPageNumber(1);
-                          fetchContracts(1, value);
-                        }}
-                        sx={{
-                          fontSize: "0.7rem",
-                          "& .MuiSelect-select": { py: 0.25, fontSize: "0.7rem", minHeight: 0 },
-                          "& .MuiOutlinedInput-notchedOutline": { fontSize: "0.7rem" },
-                        }}
-                      >
-                        {[10, 20, 50, 100, 500, 1000].map((size) => (
-                          <MenuItem key={size} value={String(size)} sx={{ fontSize: "0.7rem" }}>
-                            {size}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <MDTypography
-                      variant="button"
-                      color="secondary"
-                      fontWeight="regular"
-                      sx={{ fontSize: "0.7rem" }}
-                    >
-                      {`${Math.min(pageNumber * pageSize, totalCount)} of ${totalCount} entries`}
-                    </MDTypography>
-                    {Math.ceil(totalCount / pageSize) > 1 && (
-                      <MDPagination
-                        variant="gradient"
-                        color="info"
-                        sx={{
-                          "& .MuiPaginationItem-root": { fontSize: "0.7rem" },
-                        }}
-                      >
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold", fontSize: "0.9rem" }}>
-                              chevron_left
-                            </Icon>
-                          </MDPagination>
-                        )}
-
-                        {Array.from({ length: Math.ceil(totalCount / pageSize) }, (_, i) => i + 1)
-                          .filter((p) => {
-                            const totalPages = Math.ceil(totalCount / pageSize);
-                            return (
-                              p === 1 ||
-                              p === totalPages ||
-                              (p >= pageNumber - 2 && p <= pageNumber + 2)
-                            );
-                          })
-                          .map((p, idx, arr) => {
-                            const prev = arr[idx - 1];
-                            const showEllipsis = prev && p - prev > 1;
-                            return (
-                              <React.Fragment key={p}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    <Icon sx={{ fontSize: "0.9rem" }}>more_horiz</Icon>
-                                  </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  onClick={() => setPageNumber(p)}
-                                  active={p === pageNumber}
-                                >
-                                  {p}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
-
-                        {pageNumber < Math.ceil(totalCount / pageSize) && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold", fontSize: "0.9rem" }}>
-                              chevron_right
-                            </Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
-                  </MDBox>
-                </MDBox>
-              )}
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+        <DataTable
+          table={{
+            columns: contractGridColumns,
+            rows: computedRows,
+          }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={{
+            defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+            entries: [10, 25, 50, 100],
+          }}
+          contentFitTable
+          pageSize={gridPageSize}
+          onEntriesPerPageChange={(n) => {
+            setGridPageSize(Number(n));
+          }}
+          showTotalEntries={false}
+          pagination={{ variant: "gradient", color: "info" }}
+          noEndBorder
+          canSearch
+          exportFileName="Contracts"
+          exportCellFormatter={contractsExportCellFormatter}
+          exportExcludeGroupParentsWhenExpanded
+          exportAllColumns
+          extraFilterTypes={CONTRACTS_DATATABLE_EXTRA_FILTER_TYPES}
+          initialHiddenColumns={CONTRACTS_GRID_INITIAL_HIDDEN_COLUMNS}
+          onVisibleRowCountChange={setVisibleRowCount}
+          toolbarStartInHeader
+          toolbarStart={
+            <>
+              <CompactGroupBySelect
+                options={groupingColumnOptions}
+                value={groupByColumns}
+                onChange={setGroupByColumns}
+              />
+              <CompactMultiSelectFilter
+                label="RAC"
+                options={[ALL_FILTER_VALUE, ...gridFilterOptions.commands]}
+                allValue={ALL_FILTER_VALUE}
+                value={commandFilterIds}
+                onChange={setCommandFilterIds}
+              />
+              <CompactMultiSelectFilter
+                label="Base"
+                options={[ALL_FILTER_VALUE, ...gridFilterOptions.bases]}
+                allValue={ALL_FILTER_VALUE}
+                value={baseFilterIds}
+                onChange={setBaseFilterIds}
+              />
+              <CompactMultiSelectFilter
+                label="Class"
+                options={[ALL_FILTER_VALUE, ...gridFilterOptions.classes]}
+                allValue={ALL_FILTER_VALUE}
+                value={classFilterIds}
+                onChange={setClassFilterIds}
+              />
+            </>
+          }
+        />
+      </EnterpriseWorkspace>
       <ContractsForm
         open={openForm}
         onClose={handleCloseForm}
@@ -10158,7 +10005,6 @@ export default function Contracts() {
                       }
                       sx={{
                         mb: 2,
-                        minHeight: "48px",
                         fontSize: "1rem",
                         fontWeight: 600,
                         px: 3,
@@ -10289,10 +10135,10 @@ export default function Contracts() {
                     if (value) {
                       setInvoiceFinalizeTab(value);
                       setInvoiceFinalizeSelectedKeys(new Set());
-                      if (value === "finalized") {
-                        setAgreementProvCreateDialogOpen(false);
-                        setAgreementProvCreateRowData(null);
-                      }
+                      setAgreementProvCreateDialogOpen(false);
+                      setAgreementProvCreateRowData(null);
+                      setAgreementProvEditDialogOpen(false);
+                      setAgreementProvEditRowData(null);
                     }
                   }}
                   disabled={invoiceFinalizeBusy}
@@ -10367,11 +10213,17 @@ export default function Contracts() {
                   rows={invoiceFinalizeFinalizedRows}
                   selectedKeys={invoiceFinalizeSelectedKeys}
                   onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
-                  busy={invoiceFinalizeBusy || agreementProvCreateDialogOpen}
+                  busy={
+                    invoiceFinalizeBusy ||
+                    agreementProvCreateDialogOpen ||
+                    agreementProvEditDialogOpen
+                  }
                   formatDate={formatDateDDMMMYYYY}
                   undoSelectable
                   showDuplicateAction
                   onDuplicateRow={handleDuplicateFinalizedInvoice}
+                  clickableInvoiceNo
+                  onInvoiceNoClick={handleOpenAgreementProvEditFromFinalizeRow}
                   hideSearchInput
                   searchValue={invoiceFinalizeSearch}
                   onSearchChange={setInvoiceFinalizeSearch}
@@ -10422,6 +10274,14 @@ export default function Contracts() {
         onSave={handleSaveAgreementProvCreateInvoice}
         saving={invoiceFinalizeBusy}
         createMode
+      />
+
+      <AgreementProvInvoiceEditDialog
+        open={agreementProvEditDialogOpen}
+        onClose={handleCloseAgreementProvEditDialog}
+        rowData={agreementProvEditRowData}
+        onSave={handleSaveAgreementProvEditInvoice}
+        saving={agreementProvEditSaving}
       />
 
       {/* Contract Details Dialog */}

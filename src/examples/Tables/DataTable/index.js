@@ -13,7 +13,16 @@ Coded by www.creative-tim.com
 * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 */
 
-import { useMemo, useEffect, useState, useCallback, isValidElement, useRef } from "react";
+import {
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useCallback,
+  isValidElement,
+  useRef,
+} from "react";
+import { createPortal } from "react-dom";
 
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
@@ -49,7 +58,7 @@ import * as XLSX from "xlsx";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
-import MDPagination from "components/MDPagination";
+import CompactGridPagination from "components/CompactGridPagination";
 
 // Material Dashboard 2 React contexts
 import { useMaterialUIController } from "context";
@@ -57,7 +66,11 @@ import { useMaterialUIController } from "context";
 // Material Dashboard 2 React example components
 import DataTableHeadCell from "examples/Tables/DataTable/DataTableHeadCell";
 import DataTableBodyCell from "examples/Tables/DataTable/DataTableBodyCell";
+import GridStatusChip from "components/GridStatusChip";
 import { canDeleteCurrentMenu, canEditCurrentMenu } from "services/api.service";
+import { isEnterpriseSettingsUI } from "utils/enterpriseSettingsUI";
+import { useWorkspaceShellDispatch } from "context/WorkspaceShellContext";
+import { useWorkspaceGridToolbarRegister } from "context/WorkspaceGridToolbarContext";
 
 /** Resolve primitive field value from react-table row for Excel export. */
 function getExportRawRowValue(tableRow, column) {
@@ -291,14 +304,17 @@ function extractText(value) {
  * Govt sets `nestedExpandedGroupDetail` on rows under an expanded rate subgroup.
  */
 function groupedRowBodyStyle(darkMode, rowIndex, original) {
+  const settingsUI = isEnterpriseSettingsUI();
   const orig = original || {};
   const isNestedExpandedDetail = Boolean(orig.nestedExpandedGroupDetail);
   const isExpandedTier1 = Boolean(orig.isExpandedRow) && !isNestedExpandedDetail;
   const isRateSubgroupParent = Boolean(orig.isGroupRow && orig.isRateSubGroupRow);
   const even = rowIndex % 2 === 0;
-  const zebraBgColor = even ? "#f0f0f0" : "#ffffff";
+  const zebraBgColor = settingsUI ? "transparent" : even ? "#f0f0f0" : "#ffffff";
 
-  const tier1Bg = darkMode
+  const tier1Bg = settingsUI
+    ? "transparent"
+    : darkMode
     ? even
       ? "rgb(48, 82, 126)"
       : "rgb(42, 71, 112)"
@@ -307,7 +323,7 @@ function groupedRowBodyStyle(darkMode, rowIndex, original) {
     : "#f0f7fc";
 
   /** Rate subgroup header + its expanded detail rows (same fill). */
-  const subgroupRowBg = "#b4c7cc";
+  const subgroupRowBg = settingsUI ? "transparent" : "#b4c7cc";
 
   let defaultBgColor = zebraBgColor;
   let stripeSx = {};
@@ -316,30 +332,45 @@ function groupedRowBodyStyle(darkMode, rowIndex, original) {
   if (isNestedExpandedDetail) {
     defaultBgColor = subgroupRowBg;
     rowHighlight = "nestedExpanded";
-    stripeSx = {
-      boxShadow: darkMode
-        ? "inset 5px 0 0 rgb(129,199,132), inset 0 0 0 1px rgba(165,214,167,0.32)"
-        : "inset 3px 0 0 rgba(46,125,50,0.5)",
-      "& td:first-of-type": { paddingLeft: "28px !important" },
-    };
+    stripeSx = settingsUI
+      ? {
+          boxShadow: "inset 2px 0 0 #22c55e",
+          "& td:first-of-type": { paddingLeft: "28px !important" },
+        }
+      : {
+          boxShadow: darkMode
+            ? "inset 5px 0 0 rgb(129,199,132), inset 0 0 0 1px rgba(165,214,167,0.32)"
+            : "inset 3px 0 0 rgba(46,125,50,0.5)",
+          "& td:first-of-type": { paddingLeft: "28px !important" },
+        };
   } else if (isRateSubgroupParent) {
     defaultBgColor = subgroupRowBg;
     rowHighlight = "rateSubgroup";
-    stripeSx = {
-      boxShadow: darkMode
-        ? "inset 5px 0 0rgba(239, 255, 11, 0.16), inset 0 0 0 1px rgba(186,104,255,0.22)"
-        : "inset 3px 0 0 rgba(236, 212, 250, 0.48)",
-      "& td:first-of-type": { paddingLeft: "22px !important" },
-    };
+    stripeSx = settingsUI
+      ? {
+          boxShadow: "inset 2px 0 0 #a855f7",
+          "& td:first-of-type": { paddingLeft: "22px !important" },
+        }
+      : {
+          boxShadow: darkMode
+            ? "inset 5px 0 0rgba(239, 255, 11, 0.16), inset 0 0 0 1px rgba(186,104,255,0.22)"
+            : "inset 3px 0 0 rgba(236, 212, 250, 0.48)",
+          "& td:first-of-type": { paddingLeft: "22px !important" },
+        };
   } else if (isExpandedTier1) {
     defaultBgColor = tier1Bg;
     rowHighlight = "expanded";
-    stripeSx = {
-      boxShadow: darkMode
-        ? "inset 5px 0 0 rgb(144,202,249), inset 0 0 0 1px rgba(144,202,249,0.45)"
-        : "inset 3px 0 0 rgba(25,118,210,0.35)",
-      "& td:first-of-type": { paddingLeft: "24px !important" },
-    };
+    stripeSx = settingsUI
+      ? {
+          boxShadow: "inset 2px 0 0 #2563eb",
+          "& td:first-of-type": { paddingLeft: "24px !important" },
+        }
+      : {
+          boxShadow: darkMode
+            ? "inset 5px 0 0 rgb(144,202,249), inset 0 0 0 1px rgba(144,202,249,0.45)"
+            : "inset 3px 0 0 rgba(25,118,210,0.35)",
+          "& td:first-of-type": { paddingLeft: "24px !important" },
+        };
   }
 
   const inheritRowBackground = isExpandedTier1 || isNestedExpandedDetail || isRateSubgroupParent;
@@ -395,6 +426,21 @@ function displayValueFromToken(token, column) {
     if (token === STATUS_INACTIVE_KEY) return "Inactive";
   }
   return token;
+}
+
+/** Default status renderer for grids without a custom Cell (enterprise soft pills). */
+function enhanceStatusColumn(column) {
+  if (!column || column.Cell || column.skipStatusNormalization) return column;
+  if (!isStatusColumn(column)) return column;
+  return {
+    ...column,
+    // eslint-disable-next-line react/prop-types -- react-table cell props
+    Cell: ({ value }) => {
+      if (value == null || value === "") return null;
+      if (isValidElement(value)) return value;
+      return <GridStatusChip value={value} />;
+    },
+  };
 }
 
 function ColumnValueFilter({ column }) {
@@ -469,10 +515,10 @@ function ColumnValueFilter({ column }) {
           onMouseDown={(e) => e.stopPropagation()}
           sx={{
             // Keep filter icon compact so it fits below sort controls in all grids
-            fontSize: "10px",
+            fontSize: "11px",
             padding: "0px",
-            minWidth: "14px",
-            minHeight: "14px",
+            minWidth: "12px",
+            minHeight: "12px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -623,15 +669,28 @@ function DataTable({
   onVisibleRowCountChange,
   autoResetFilters,
   toolbarStart,
+  /** When true in enterprise mode, renders toolbarStart in the page header beside search. */
+  toolbarStartInHeader,
+  toolbarEnd,
   /** Optional extra react-table filter types merged with defaults (column.filter must reference a key). */
   extraFilterTypes,
   /** Override entries label (e.g. server-side "12 of 500 entries"). Used when showTotalEntries is true. */
   totalEntriesText,
+  /** When true, page-level metadata prop owns header KPI chips (server-side grids). */
+  disableHeaderMetrics,
   /** Extra footer content beside entries (e.g. server-side pagination controls). */
   paginationFooter,
+  /** When set, client pagination is portaled into this element instead of the table footer. */
+  paginationHost,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const settingsUI = isEnterpriseSettingsUI();
+  const shellDispatch = useWorkspaceShellDispatch();
+  const registerGridToolbar = useWorkspaceGridToolbarRegister();
+  const effectiveEntriesPerPage = entriesPerPage === false ? false : entriesPerPage;
+  const effectiveShowTotalEntries = settingsUI ? false : showTotalEntries;
+  const publishHeaderMetrics = settingsUI && shellDispatch && !disableHeaderMetrics;
   // Ref to store pagination info for S.No column calculation
   const pageInfoRef = useRef({ pageIndex: 0, pageSize: 20 });
   const entriesPerPageConfig =
@@ -640,7 +699,21 @@ function DataTable({
   const entries = entriesPerPageConfig.entries
     ? entriesPerPageConfig.entries.map((el) => el.toString())
     : ["5", "10", "15", "20", "50", "100", "500", "1000"];
-  const baseColumns = useMemo(() => table.columns, [table]);
+  const allowedPageSizes = useMemo(
+    () => entries.map((el) => Number(el)).filter((n) => Number.isFinite(n) && n > 0),
+    [entries]
+  );
+  const resolveDisplayPageSize = useCallback(
+    (size) => {
+      const fallback = Number(defaultValue) || 20;
+      const n = Number(size);
+      if (!Number.isFinite(n) || n <= 0) return fallback;
+      if (allowedPageSizes.length > 0 && !allowedPageSizes.includes(n)) return fallback;
+      return n;
+    },
+    [allowedPageSizes, defaultValue]
+  );
+  const baseColumns = useMemo(() => table.columns, [table.columns]);
 
   // Function to check if a column is Actions column
   const isActionsColumn = useCallback((column) => {
@@ -714,12 +787,17 @@ function DataTable({
     return newColumns;
   }, [baseColumns, isActionsColumn, hasSNoColumn, shouldExcludeSNo]);
 
+  const columnsWithStatusCells = useMemo(
+    () => (columnsWithSNo || []).map(enhanceStatusColumn),
+    [columnsWithSNo]
+  );
+
   const columns = useMemo(() => {
-    if (canEditCurrentMenu() || canDeleteCurrentMenu()) return columnsWithSNo;
+    if (canEditCurrentMenu() || canDeleteCurrentMenu()) return columnsWithStatusCells;
     // Hide Action(s) column when both edit/delete are not allowed
-    return (columnsWithSNo || []).filter((c) => !isActionsColumn(c));
-  }, [columnsWithSNo, isActionsColumn]);
-  const data = useMemo(() => table.rows, [table]);
+    return (columnsWithStatusCells || []).filter((c) => !isActionsColumn(c));
+  }, [columnsWithStatusCells, isActionsColumn]);
+  const data = useMemo(() => table.rows, [table.rows]);
 
   // Function to detect if a column is an "Id" column
   const isIdColumn = useCallback((column) => {
@@ -811,18 +889,27 @@ function DataTable({
     []
   );
 
-  // Use controlled state if provided, otherwise use internal state
-  const isControlled = controlledPageIndex !== undefined;
+  // Controlled page index only when parent supplies onPageChange (not a no-op stub).
+  const isControlled =
+    controlledPageIndex !== undefined &&
+    controlledPageIndex !== null &&
+    typeof onPageChange === "function";
   const [internalPageIndex, setInternalPageIndex] = useState(0);
   const [internalPageSize, setInternalPageSize] = useState(defaultValue || 20);
 
   const currentPageIndex = isControlled ? controlledPageIndex : internalPageIndex;
-  const currentPageSize =
-    isControlled && onEntriesPerPageChange
-      ? controlledPageSize !== undefined && controlledPageSize !== null
-        ? controlledPageSize
-        : entriesPerPageConfig.defaultValue || defaultValue || 20
-      : internalPageSize;
+  const hasControlledPageSize = controlledPageSize !== undefined && controlledPageSize !== null;
+  const currentPageSize = hasControlledPageSize
+    ? resolveDisplayPageSize(controlledPageSize)
+    : internalPageSize;
+
+  const paginationState = useMemo(
+    () => ({
+      pageIndex: currentPageIndex,
+      pageSize: currentPageSize,
+    }),
+    [currentPageIndex, currentPageSize]
+  );
 
   const tableInstance = useTable(
     {
@@ -836,12 +923,8 @@ function DataTable({
       defaultColumn,
       filterTypes,
       autoResetFilters,
-      state: isControlled
-        ? {
-            pageIndex: currentPageIndex,
-            pageSize: currentPageSize,
-          }
-        : undefined,
+      autoResetPage: false,
+      state: paginationState,
       globalFilter: (rows, columnIds, filterValue) => {
         const searchValue = extractText(filterValue).trim().toLowerCase();
         if (!searchValue) return rows;
@@ -1089,85 +1172,128 @@ function DataTable({
     [allColumns, columnOrder, setColumnOrder]
   );
 
-  // Sync controlled state with table instance when it changes externally
+  // Correct parent when API pageSize (e.g. 1 from probe) was bound to display pageSize
   useEffect(() => {
-    if (isControlled) {
-      if (pageIndex !== currentPageIndex) {
-        gotoPage(currentPageIndex);
+    if (!hasControlledPageSize || !onEntriesPerPageChange) return;
+    const resolved = resolveDisplayPageSize(controlledPageSize);
+    if (Number(controlledPageSize) !== resolved) {
+      onEntriesPerPageChange(resolved);
+    }
+  }, [controlledPageSize, hasControlledPageSize, onEntriesPerPageChange, resolveDisplayPageSize]);
+
+  // Sync table pagination when parent-controlled page index / page size changes
+  useEffect(() => {
+    if (pageIndex !== currentPageIndex) {
+      gotoPage(currentPageIndex);
+      if (!isControlled) {
+        setInternalPageIndex(currentPageIndex);
       }
-      if (pageSize !== currentPageSize && onEntriesPerPageChange) {
-        setPageSize(currentPageSize);
+    }
+    if (pageSize !== currentPageSize) {
+      setPageSize(currentPageSize);
+      if (!hasControlledPageSize) {
+        setInternalPageSize(currentPageSize);
       }
     }
   }, [
     isControlled,
+    hasControlledPageSize,
     currentPageIndex,
     currentPageSize,
     pageIndex,
     pageSize,
     gotoPage,
     setPageSize,
-    onEntriesPerPageChange,
   ]);
 
-  // Set default page size on mount if not controlled
+  // Default page size on mount when page size is not parent-controlled
   useEffect(() => {
-    if (!isControlled) {
+    if (!isControlled && !hasControlledPageSize) {
       setPageSize(defaultValue || 10);
     }
-  }, [defaultValue, isControlled, setPageSize]);
+  }, [defaultValue, isControlled, hasControlledPageSize, setPageSize]);
+
+  const dataLength = data?.length ?? 0;
+  const prevDataLengthRef = useRef(dataLength);
+  const prevPageSizeRef = useRef(currentPageSize);
+  useEffect(() => {
+    const dataChanged = prevDataLengthRef.current !== dataLength;
+    const pageSizeChanged = prevPageSizeRef.current !== currentPageSize;
+    prevDataLengthRef.current = dataLength;
+    prevPageSizeRef.current = currentPageSize;
+    if (!dataChanged && !pageSizeChanged) return;
+    if (pageIndex === 0) return;
+    gotoPage(0);
+    if (!isControlled) {
+      setInternalPageIndex(0);
+    } else if (onPageChange) {
+      onPageChange(0);
+    }
+  }, [dataLength, currentPageSize, pageIndex, gotoPage, isControlled, onPageChange]);
 
   // Override gotoPage to call onPageChange if controlled
   const handleGotoPage = useCallback(
-    (page) => {
+    (nextPageIndex) => {
+      gotoPage(nextPageIndex);
       if (isControlled && onPageChange) {
-        onPageChange(page);
+        onPageChange(nextPageIndex);
       } else {
-        gotoPage(page);
-        setInternalPageIndex(page);
+        setInternalPageIndex(nextPageIndex);
       }
     },
     [isControlled, onPageChange, gotoPage]
   );
 
-  // Override setPageSize to call onEntriesPerPageChange if controlled
+  // Override setPageSize to call onEntriesPerPageChange when pageSize is controlled
   const handleSetPageSize = useCallback(
     (size) => {
-      const numSize = Number(size);
-      if (isControlled && onEntriesPerPageChange) {
-        onEntriesPerPageChange(numSize);
-      } else {
-        setPageSize(numSize);
-        setInternalPageSize(numSize);
+      const resolved = resolveDisplayPageSize(size);
+      setPageSize(resolved);
+      setInternalPageSize(resolved);
+      gotoPage(0);
+      setInternalPageIndex(0);
+      if (isControlled && onPageChange) {
+        onPageChange(0);
+      }
+      if (hasControlledPageSize && onEntriesPerPageChange) {
+        onEntriesPerPageChange(resolved);
       }
     },
-    [isControlled, onEntriesPerPageChange, setPageSize]
+    [
+      hasControlledPageSize,
+      isControlled,
+      onEntriesPerPageChange,
+      onPageChange,
+      resolveDisplayPageSize,
+      setPageSize,
+      gotoPage,
+    ]
   );
 
   // Set the entries per page value based on the select value
   const setEntriesPerPage = (value) => handleSetPageSize(Number(value));
 
-  // Render the paginations
-  const renderPagination = pageOptions.map((option) => (
-    <MDPagination
-      item
-      key={option}
-      onClick={() => handleGotoPage(Number(option))}
-      active={pageIndex === option}
-    >
-      {option + 1}
-    </MDPagination>
-  ));
+  const paginationTotalPages = pageSize > 0 ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
+  const showClientPagination = rows.length > pageSize;
 
-  // Handler for the input to set the pagination index
-  const handleInputPagination = ({ target: { value } }) =>
-    value > pageOptions.length || value < 0 ? handleGotoPage(0) : handleGotoPage(Number(value));
+  const clientPaginationNode = showClientPagination ? (
+    <CompactGridPagination
+      page={pageIndex + 1}
+      totalPages={paginationTotalPages}
+      onPageChange={(p) => handleGotoPage(p - 1)}
+      variant={pagination.variant ? pagination.variant : "gradient"}
+      color={pagination.color ? pagination.color : "info"}
+    />
+  ) : null;
 
-  // Customized page options starting from 1
-  const customizedPageOptions = pageOptions.map((option) => option + 1);
-
-  // Setting value for the pagination input
-  const handleInputPaginationValue = ({ target: value }) => handleGotoPage(Number(value.value - 1));
+  const topPaginationNode = paginationFooter ?? (settingsUI ? null : clientPaginationNode);
+  const footerPaginationNode = paginationHost
+    ? paginationFooter ?? null
+    : paginationFooter ?? clientPaginationNode;
+  const relocatedPaginationNode =
+    paginationHost && clientPaginationNode
+      ? createPortal(clientPaginationNode, paginationHost)
+      : null;
 
   // Search input value state
   const [search, setSearch] = useState(globalFilter ?? "");
@@ -1210,27 +1336,38 @@ function DataTable({
     entriesEnd = pageSize * (pageIndex + 1);
   }
 
+  const settingsScrollSx = {
+    scrollbarWidth: "thin",
+    scrollbarColor: "rgba(0,0,0,0.18) transparent",
+    "&::-webkit-scrollbar": { width: "6px", height: "6px" },
+    "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+    "&::-webkit-scrollbar-thumb": {
+      backgroundColor: "rgba(0,0,0,0.18)",
+      borderRadius: "999px",
+      "&:hover": { backgroundColor: "rgba(0,0,0,0.28)" },
+    },
+    "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+  };
+
   const tableContainerSx = {
     boxShadow: "none",
-    overflowX: "scroll",
-    overflowY: "scroll",
-    // Firefox - transparent track
+    overflowX: settingsUI ? "hidden" : "scroll",
+    overflowY: settingsUI ? "hidden" : "scroll",
     scrollbarWidth: "thin",
-    scrollbarColor: "#333333 transparent",
-    // Chrome/Safari/Edge - transparent track, visible thumb only
+    scrollbarColor: settingsUI ? "rgba(0,0,0,0.18) transparent" : "#333333 transparent",
     "&::-webkit-scrollbar": {
-      width: "8px",
-      height: "8px",
+      width: settingsUI ? "6px" : "8px",
+      height: settingsUI ? "6px" : "8px",
     },
     "&::-webkit-scrollbar-track": {
       backgroundColor: "transparent",
     },
     "&::-webkit-scrollbar-thumb": {
-      backgroundColor: "#333333",
-      borderRadius: "10px",
+      backgroundColor: settingsUI ? "rgba(0,0,0,0.18)" : "#333333",
+      borderRadius: settingsUI ? "999px" : "10px",
       border: "none",
       "&:hover": {
-        backgroundColor: "#1a1a1a",
+        backgroundColor: settingsUI ? "rgba(0,0,0,0.28)" : "#1a1a1a",
       },
     },
     "&::-webkit-scrollbar-button": {
@@ -1254,66 +1391,194 @@ function DataTable({
     }
   }
 
-  return (
-    <TableContainer sx={tableContainerSx}>
-      {/* Top toolbar should always be visible so Columns + Export are available on every grid */}
-      {true ? (
+  const settingsTableSx = {
+    tableLayout: contentFitTable ? "auto" : "fixed",
+    minWidth: contentFitTable ? "max-content" : "100%",
+    width: contentFitTable ? "max-content" : "100%",
+    whiteSpace: settingsUI ? "normal" : "nowrap",
+    "& th": {
+      padding: settingsUI ? "6px 8px" : "4px 8px",
+      fontSize: settingsUI ? "0.875rem !important" : "14px !important",
+    },
+    "& td": {
+      padding: settingsUI ? "6px 8px" : "4px 8px",
+      fontSize: settingsUI ? "0.8125rem" : "0.875rem",
+    },
+    "& thead": {
+      position: "sticky",
+      top: 0,
+      zIndex: settingsUI ? 10 : 2,
+      backgroundColor: settingsUI ? undefined : "#fff",
+      boxShadow: settingsUI ? undefined : "0 1px 0 0 #d0d0d0",
+    },
+    "& thead th": {
+      backgroundColor: settingsUI ? undefined : "#fff",
+    },
+  };
+
+  const toolbarIconSx = settingsUI
+    ? {
+        border: "none",
+        borderRadius: "6px",
+        ...(darkMode
+          ? {
+              "& .MuiSvgIcon-root": { color: "#ffffff !important" },
+              "&:hover": { backgroundColor: "rgba(255, 255, 255, 0.1) !important" },
+            }
+          : {}),
+      }
+    : {
+        border: "1px solid #d0d0d0",
+        borderRadius: "6px",
+        ...(darkMode
+          ? {
+              borderColor: "rgba(255, 255, 255, 0.3) !important",
+              "& .MuiSvgIcon-root": { color: "#ffffff !important" },
+              "&:hover": {
+                borderColor: "rgba(255, 255, 255, 0.5) !important",
+                backgroundColor: "rgba(255, 255, 255, 0.1) !important",
+              },
+            }
+          : {}),
+      };
+
+  const searchFieldSx = darkMode
+    ? {
+        "& .MuiInputBase-input": {
+          color: "#ffffff !important",
+          "&::placeholder": { color: "#ffffff !important", opacity: 0.7 },
+        },
+        "& .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.3) !important",
+        },
+        "&:hover .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.5) !important",
+        },
+        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+          borderColor: "rgba(255, 255, 255, 0.7) !important",
+        },
+      }
+    : {};
+
+  const hoistToolbarStartToHeader = settingsUI && toolbarStartInHeader && Boolean(toolbarStart);
+
+  const gridToolbarNode = useMemo(() => {
+    if (settingsUI) {
+      if (!toolbarStart || hoistToolbarStartToHeader) return null;
+      return (
         <MDBox
+          className="saas-settings-table-toolbar saas-settings-filter-toolbar"
           display="flex"
           flexDirection="row"
           alignItems="center"
-          p={3}
-          gap={2}
-          flexWrap="wrap"
-          width="100%"
+          gap={0.75}
+          flexWrap="nowrap"
+          sx={{
+            minWidth: 0,
+            height: 40,
+            maxHeight: 40,
+            overflow: "hidden",
+            flexShrink: 0,
+          }}
         >
-          {toolbarStart ? <MDBox sx={{ minWidth: 0 }}>{toolbarStart}</MDBox> : null}
-          {entriesPerPage && (
-            <MDBox display="flex" alignItems="center">
-              <Autocomplete
-                disableClearable
-                value={pageSize.toString()}
-                options={entries}
-                onChange={(event, newValue) => {
-                  setEntriesPerPage(parseInt(newValue, 10));
-                }}
-                size="small"
-                sx={{
-                  width: "5rem",
-                  ...(darkMode
-                    ? {
-                        "& .MuiInputBase-input": {
-                          color: "#ffffff !important",
-                        },
-                        "& .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.3) !important",
-                        },
-                        "&:hover .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.5) !important",
-                        },
-                        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.7) !important",
-                        },
-                        "& .MuiSvgIcon-root": {
-                          color: "#ffffff !important",
-                        },
-                      }
-                    : {}),
-                }}
-                renderInput={(params) => <MDInput {...params} />}
-              />
-              <MDTypography
-                variant="caption"
-                color="secondary"
-                sx={darkMode ? { color: "#ffffff !important" } : {}}
-              >
-                &nbsp;&nbsp;entries per page
-              </MDTypography>
-            </MDBox>
-          )}
-          <MDBox display="flex" alignItems="center" gap={1} marginLeft="auto" flexWrap="wrap">
-            {/* Search bar is always visible so toolbar tools can sit beside it on every grid */}
-            <MDBox width="12rem">
+          <MDBox
+            className="saas-toolbar-start"
+            sx={{
+              minWidth: 0,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 0.75,
+            }}
+          >
+            {toolbarStart}
+          </MDBox>
+        </MDBox>
+      );
+    }
+
+    return (
+      <MDBox
+        className="saas-settings-table-toolbar"
+        display="flex"
+        flexDirection="row"
+        alignItems="center"
+        gap={1}
+        flexWrap="nowrap"
+        sx={{
+          minWidth: 0,
+          height: 32,
+          maxHeight: 32,
+          overflow: "hidden",
+          flexShrink: 0,
+        }}
+      >
+        {toolbarStart ? (
+          <MDBox
+            className="saas-toolbar-start"
+            sx={{
+              minWidth: 0,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 0.75,
+            }}
+          >
+            {toolbarStart}
+          </MDBox>
+        ) : null}
+        {effectiveEntriesPerPage ? (
+          <MDBox display="flex" alignItems="center">
+            <Autocomplete
+              disableClearable
+              value={pageSize.toString()}
+              options={entries}
+              onChange={(event, newValue) => {
+                setEntriesPerPage(parseInt(newValue, 10));
+              }}
+              size="small"
+              sx={{
+                width: "5rem",
+                ...(darkMode
+                  ? {
+                      "& .MuiInputBase-input": {
+                        color: "#ffffff !important",
+                      },
+                      "& .MuiOutlinedInput-notchedOutline": {
+                        borderColor: "rgba(255, 255, 255, 0.3) !important",
+                      },
+                      "&:hover .MuiOutlinedInput-notchedOutline": {
+                        borderColor: "rgba(255, 255, 255, 0.5) !important",
+                      },
+                      "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                        borderColor: "rgba(255, 255, 255, 0.7) !important",
+                      },
+                      "& .MuiSvgIcon-root": {
+                        color: "#ffffff !important",
+                      },
+                    }
+                  : {}),
+              }}
+              renderInput={(params) => <MDInput {...params} />}
+            />
+            <MDTypography
+              variant="caption"
+              color="secondary"
+              sx={darkMode ? { color: "#ffffff !important" } : {}}
+            >
+              &nbsp;&nbsp;entries per page
+            </MDTypography>
+          </MDBox>
+        ) : null}
+        <MDBox
+          display="flex"
+          alignItems="center"
+          gap={0.75}
+          flexWrap="nowrap"
+          sx={{ minWidth: 0, marginLeft: "auto", flexShrink: 1, overflow: "hidden" }}
+        >
+          {canSearch ? (
+            <MDBox width="12rem" sx={{ minWidth: 0 }}>
               <MDInput
                 placeholder="Search..."
                 value={search}
@@ -1323,91 +1588,155 @@ function DataTable({
                   setSearch(currentTarget.value);
                   onSearchChange(currentTarget.value);
                 }}
-                sx={
-                  darkMode
-                    ? {
-                        "& .MuiInputBase-input": {
-                          color: "#ffffff !important",
-                          "&::placeholder": {
-                            color: "#ffffff !important",
-                            opacity: 0.7,
-                          },
-                        },
-                        "& .MuiInputLabel-root": {
-                          color: "#ffffff !important",
-                        },
-                        "& .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.3) !important",
-                        },
-                        "&:hover .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.5) !important",
-                        },
-                        "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                          borderColor: "rgba(255, 255, 255, 0.7) !important",
-                        },
-                      }
-                    : {}
-                }
+                sx={searchFieldSx}
               />
             </MDBox>
-
-            {/* Tools beside Search (right side) */}
-            <Tooltip title="Columns">
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setColumnsAnchorEl(e.currentTarget);
-                }}
-                sx={{
-                  border: "1px solid #d0d0d0",
-                  borderRadius: "6px",
-                  ...(darkMode
-                    ? {
-                        borderColor: "rgba(255, 255, 255, 0.3) !important",
-                        "& .MuiSvgIcon-root": {
-                          color: "#ffffff !important",
-                        },
-                        "&:hover": {
-                          borderColor: "rgba(255, 255, 255, 0.5) !important",
-                          backgroundColor: "rgba(255, 255, 255, 0.1) !important",
-                        },
-                      }
-                    : {}),
-                }}
-              >
-                <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
-                  view_column
-                </Icon>
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Export to Excel">
-              <IconButton
-                size="small"
-                onClick={exportToExcel}
-                sx={{
-                  border: "1px solid #d0d0d0",
-                  borderRadius: "6px",
-                  ...(darkMode
-                    ? {
-                        borderColor: "rgba(255, 255, 255, 0.3) !important",
-                        "& .MuiSvgIcon-root": {
-                          color: "#ffffff !important",
-                        },
-                        "&:hover": {
-                          borderColor: "rgba(255, 255, 255, 0.5) !important",
-                          backgroundColor: "rgba(255, 255, 255, 0.1) !important",
-                        },
-                      }
-                    : {}),
-                }}
-              >
-                <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
-                  file_download
-                </Icon>
-              </IconButton>
-            </Tooltip>
+          ) : null}
+          <Tooltip title="Columns">
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.preventDefault();
+                setColumnsAnchorEl(e.currentTarget);
+              }}
+              sx={toolbarIconSx}
+            >
+              <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
+                view_column
+              </Icon>
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Export to Excel">
+            <IconButton size="small" onClick={exportToExcel} sx={toolbarIconSx}>
+              <Icon fontSize="small" sx={darkMode ? { color: "#ffffff !important" } : {}}>
+                file_download
+              </Icon>
+            </IconButton>
+          </Tooltip>
+        </MDBox>
+        {toolbarEnd ? (
+          <MDBox
+            className="saas-toolbar-end"
+            sx={{ flexShrink: 0, display: "flex", alignItems: "center" }}
+          >
+            {toolbarEnd}
           </MDBox>
+        ) : null}
+      </MDBox>
+    );
+  }, [
+    settingsUI,
+    hoistToolbarStartToHeader,
+    toolbarStart,
+    effectiveEntriesPerPage,
+    pageSize,
+    entries,
+    darkMode,
+    canSearch,
+    search,
+    toolbarIconSx,
+    exportToExcel,
+    setEntriesPerPage,
+    onSearchChange,
+    searchFieldSx,
+    toolbarEnd,
+  ]);
+
+  const settingsMetricsChips = useMemo(() => {
+    if (!settingsUI) return null;
+    if (totalEntriesText) {
+      return [{ key: "records", label: "records", value: totalEntriesText }];
+    }
+    const total = rows.length;
+    const showingEnd = total === 0 ? 0 : Math.min(entriesEnd, total);
+    const chips = [{ key: "total", label: "records", value: total }];
+    if (total > 0 && (pageOptions.length > 1 || showingEnd !== total)) {
+      chips.push({ key: "showing", label: "showing", value: `${entriesStart}–${showingEnd}` });
+    }
+    if (pageOptions.length > 1) {
+      chips.push({
+        key: "page",
+        label: "page",
+        value: `${pageIndex + 1}/${pageOptions.length}`,
+      });
+    }
+    return chips;
+  }, [
+    settingsUI,
+    totalEntriesText,
+    rows.length,
+    entriesEnd,
+    entriesStart,
+    pageOptions.length,
+    pageIndex,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!publishHeaderMetrics) return undefined;
+    shellDispatch.setGridMetrics(settingsMetricsChips);
+    return undefined;
+  }, [publishHeaderMetrics, shellDispatch, settingsMetricsChips]);
+
+  useLayoutEffect(() => {
+    if (!settingsUI || !registerGridToolbar) return undefined;
+    registerGridToolbar({
+      canSearch,
+      search,
+      onSearchInput: (value) => {
+        setSearch(value);
+        onSearchChange(value);
+      },
+      openColumnsMenu: (anchorEl) => setColumnsAnchorEl(anchorEl),
+      exportToExcel,
+      showColumns: true,
+      showExport: true,
+      toolbarStart: hoistToolbarStartToHeader ? toolbarStart : null,
+    });
+    return () => registerGridToolbar(null);
+  }, [
+    settingsUI,
+    registerGridToolbar,
+    hoistToolbarStartToHeader,
+    toolbarStart,
+    canSearch,
+    search,
+    exportToExcel,
+    onSearchChange,
+    setSearch,
+  ]);
+
+  useEffect(() => {
+    if (!settingsUI || !shellDispatch) return undefined;
+    return () => shellDispatch.clearGridShell();
+  }, [settingsUI, shellDispatch]);
+
+  const showCompactFooter =
+    Boolean(footerPaginationNode) || (!settingsUI && effectiveShowTotalEntries);
+
+  return (
+    <TableContainer
+      className={`saas-settings-table${autoHeight ? " saas-settings-table--auto-height" : ""}`}
+      sx={tableContainerSx}
+    >
+      {gridToolbarNode}
+
+      {topPaginationNode ? (
+        <MDBox
+          className="saas-settings-table-pagination-top"
+          display="flex"
+          justifyContent="flex-end"
+          alignItems="center"
+          px={settingsUI ? 1 : 1.5}
+          py={0.25}
+          sx={{
+            flexShrink: 0,
+            minHeight: 28,
+            maxHeight: 32,
+            borderBottom: settingsUI ? "1px solid var(--layer-controls-border)" : "none",
+            background: settingsUI ? "var(--layer-controls)" : "transparent",
+          }}
+        >
+          {topPaginationNode}
         </MDBox>
       ) : null}
 
@@ -1535,6 +1864,7 @@ function DataTable({
       </Menu>
       {stickyToolbarAndHeader ? (
         <MDBox
+          className="saas-settings-table-scroll"
           sx={
             autoHeight
               ? {
@@ -1547,43 +1877,27 @@ function DataTable({
                   flex: "1 1 0",
                   minHeight: stickyBodyMinHeight || "300px",
                   maxHeight: stickyBodyMaxHeight || "none",
-                  overflowX: "scroll",
-                  overflowY: "scroll",
+                  overflowX: "auto",
+                  overflowY: "auto",
                   scrollbarGutter: "stable both-edges",
-                  scrollbarWidth: "thin",
-                  scrollbarColor: "#333333 transparent",
-                  "&::-webkit-scrollbar": { width: "8px", height: "8px" },
-                  "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
-                  "&::-webkit-scrollbar-thumb": {
-                    backgroundColor: "#333333",
-                    borderRadius: "10px",
-                    "&:hover": { backgroundColor: "#1a1a1a" },
-                  },
-                  "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+                  ...(settingsUI
+                    ? settingsScrollSx
+                    : {
+                        scrollbarWidth: "thin",
+                        scrollbarColor: "#333333 transparent",
+                        "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+                        "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+                        "&::-webkit-scrollbar-thumb": {
+                          backgroundColor: "#333333",
+                          borderRadius: "10px",
+                          "&:hover": { backgroundColor: "#1a1a1a" },
+                        },
+                        "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+                      }),
                 }
           }
         >
-          <Table
-            {...getTableProps()}
-            sx={{
-              tableLayout: contentFitTable ? "auto" : "fixed",
-              minWidth: contentFitTable ? "max-content" : "100%",
-              width: contentFitTable ? "max-content" : "100%",
-              whiteSpace: "nowrap",
-              "& th": { padding: "4px 8px", fontSize: "14px !important" },
-              "& td": { padding: "4px 8px", fontSize: "0.875rem" },
-              "& thead": {
-                position: "sticky",
-                top: 0,
-                zIndex: 2,
-                backgroundColor: "#fff",
-                boxShadow: "0 1px 0 0 #d0d0d0",
-              },
-              "& thead th": {
-                backgroundColor: "#fff",
-              },
-            }}
-          >
+          <Table {...getTableProps()} sx={settingsTableSx}>
             <MDBox component="thead">
               {headerGroups.map((headerGroup, key) => (
                 <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
@@ -1640,8 +1954,18 @@ function DataTable({
                     // eslint-disable-next-line react/prop-types
                     {...rtBodyRow.getRowProps()}
                     className={customRowClassName}
+                    data-settings-row={
+                      rowHighlight === "expanded"
+                        ? "expanded"
+                        : rowHighlight === "nestedExpanded"
+                        ? "nested"
+                        : rowHighlight === "rateSubgroup"
+                        ? "subgroup"
+                        : undefined
+                    }
                     sx={{
-                      backgroundColor: rowBgColor,
+                      backgroundColor:
+                        settingsUI && !inheritRowBackground ? "transparent" : rowBgColor,
                       ...stripeSx,
                       ...customRowStyle,
                     }}
@@ -1672,17 +1996,7 @@ function DataTable({
           </Table>
         </MDBox>
       ) : (
-        <Table
-          {...getTableProps()}
-          sx={{
-            tableLayout: contentFitTable ? "auto" : "fixed",
-            minWidth: contentFitTable ? "max-content" : "100%",
-            width: contentFitTable ? "max-content" : "100%",
-            whiteSpace: "nowrap",
-            "& th": { padding: "4px 8px", fontSize: "14px !important" },
-            "& td": { padding: "4px 8px", fontSize: "0.875rem" },
-          }}
-        >
+        <Table {...getTableProps()} sx={settingsTableSx}>
           <MDBox component="thead">
             {headerGroups.map((headerGroup, key) => (
               <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
@@ -1738,8 +2052,18 @@ function DataTable({
                   // eslint-disable-next-line react/prop-types
                   {...rtBodyRow.getRowProps()}
                   className={customRowClassName}
+                  data-settings-row={
+                    rowHighlight === "expanded"
+                      ? "expanded"
+                      : rowHighlight === "nestedExpanded"
+                      ? "nested"
+                      : rowHighlight === "rateSubgroup"
+                      ? "subgroup"
+                      : undefined
+                  }
                   sx={{
-                    backgroundColor: rowBgColor,
+                    backgroundColor:
+                      settingsUI && !inheritRowBackground ? "transparent" : rowBgColor,
                     ...stripeSx,
                     ...customRowStyle,
                   }}
@@ -1770,60 +2094,30 @@ function DataTable({
         </Table>
       )}
 
-      {(showTotalEntries || paginationFooter) && (
+      {showCompactFooter ? (
         <MDBox
+          className="saas-settings-table-footer"
           display="flex"
-          flexDirection={{ xs: "column", sm: "row" }}
-          justifyContent="flex-start"
-          alignItems={{ xs: "flex-start", sm: "center" }}
-          p={3}
-          gap={2}
+          flexDirection="row"
+          justifyContent="flex-end"
+          alignItems="center"
+          py={settingsUI ? 0.5 : 1}
+          px={settingsUI ? 1.5 : 2}
+          gap={1}
           sx={{ flexShrink: 0 }}
         >
-          <MDBox display="flex" alignItems="center" gap={2} flexWrap="wrap">
-            {showTotalEntries && (
-              <MDTypography variant="button" color="secondary" fontWeight="regular">
-                {totalEntriesText ??
-                  (rows.length === 0
-                    ? "0 of 0 entries"
-                    : `${Math.min(entriesEnd, rows.length)} of ${rows.length} entries`)}
-              </MDTypography>
-            )}
-            {paginationFooter}
-            {showTotalEntries &&
-              !totalEntriesText &&
-              !paginationFooter &&
-              pageOptions.length > 1 && (
-                <MDPagination
-                  variant={pagination.variant ? pagination.variant : "gradient"}
-                  color={pagination.color ? pagination.color : "info"}
-                >
-                  {canPreviousPage && (
-                    <MDPagination item onClick={() => handleGotoPage(pageIndex - 1)}>
-                      <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                    </MDPagination>
-                  )}
-                  {renderPagination.length > 6 ? (
-                    <MDBox width="5rem" mx={1}>
-                      <MDInput
-                        inputProps={{ type: "number", min: 1, max: customizedPageOptions.length }}
-                        value={customizedPageOptions[pageIndex]}
-                        onChange={(handleInputPagination, handleInputPaginationValue)}
-                      />
-                    </MDBox>
-                  ) : (
-                    renderPagination
-                  )}
-                  {canNextPage && (
-                    <MDPagination item onClick={() => handleGotoPage(pageIndex + 1)}>
-                      <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                    </MDPagination>
-                  )}
-                </MDPagination>
-              )}
-          </MDBox>
+          {footerPaginationNode}
+          {!settingsUI && effectiveShowTotalEntries && (
+            <MDTypography variant="button" color="secondary" fontWeight="regular">
+              {totalEntriesText ??
+                (rows.length === 0
+                  ? "0 of 0 entries"
+                  : `${Math.min(entriesEnd, rows.length)} of ${rows.length} entries`)}
+            </MDTypography>
+          )}
         </MDBox>
-      )}
+      ) : null}
+      {relocatedPaginationNode}
     </TableContainer>
   );
 }
@@ -1844,9 +2138,13 @@ DataTable.defaultProps = {
   onVisibleRowCountChange: undefined,
   autoResetFilters: true,
   toolbarStart: null,
+  toolbarStartInHeader: false,
+  toolbarEnd: null,
   extraFilterTypes: null,
   totalEntriesText: undefined,
   paginationFooter: null,
+  paginationHost: null,
+  disableHeaderMetrics: false,
 };
 
 // Typechecking props for the DataTable
@@ -1862,6 +2160,8 @@ DataTable.propTypes = {
   showTotalEntries: PropTypes.bool,
   totalEntriesText: PropTypes.string,
   paginationFooter: PropTypes.node,
+  paginationHost: PropTypes.object,
+  disableHeaderMetrics: PropTypes.bool,
   table: PropTypes.objectOf(PropTypes.array).isRequired,
   pagination: PropTypes.shape({
     variant: PropTypes.oneOf(["contained", "gradient"]),
@@ -1895,6 +2195,8 @@ DataTable.propTypes = {
   onVisibleRowCountChange: PropTypes.func,
   autoResetFilters: PropTypes.bool,
   toolbarStart: PropTypes.node,
+  toolbarStartInHeader: PropTypes.bool,
+  toolbarEnd: PropTypes.node,
   extraFilterTypes: PropTypes.object,
 };
 

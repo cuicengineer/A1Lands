@@ -59,7 +59,7 @@ function Footer({ company, links }) {
           alignItems: "center",
           justifyContent: "center",
           listStyle: "none",
-          mt: 3,
+          mt: 0,
           mb: 0,
           p: 0,
           [breakpoints.up("lg")]: {

@@ -21,7 +21,7 @@ const ASSET_CARD_FIXED_ORDER = ["categoryA", "categoryB", "categoryC", "bts", "h
 export function formatKpiMoneyAmount(valueInMillions) {
   const n = Number(valueInMillions);
   if (!Number.isFinite(n)) {
-    return { text: "0.00", suffix: "M." };
+    return { text: "0.00", suffix: "M" };
   }
   const abs = Math.abs(n);
   if (abs >= 1000) {
@@ -35,7 +35,7 @@ export function formatKpiMoneyAmount(valueInMillions) {
   }
   return {
     text: n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    suffix: "M.",
+    suffix: "M",
   };
 }
 

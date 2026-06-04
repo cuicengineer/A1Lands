@@ -25,11 +25,14 @@ import api, {
 } from "services/api.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
+import CurrencyLoading from "components/CurrencyLoading";
 import { format, parseISO, isValid } from "date-fns";
 
 /** Address column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
@@ -637,7 +640,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle
         component="div"
         sx={{
@@ -932,7 +935,6 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    minHeight: "45px",
                   },
                   "& .MuiSelect-icon": {
                     display: "block !important",
@@ -1043,13 +1045,17 @@ export default function Tenants() {
   const [selectedTenantNo, setSelectedTenantNo] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [loading, setLoading] = useState(true);
 
   const fetchTenants = async () => {
+    setLoading(true);
     try {
       const response = await api.list("tenant");
       setRows(response);
     } catch (error) {
       console.error("Error fetching tenants:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1348,141 +1354,120 @@ export default function Tenants() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Tenants
-                </MDTypography>
-                {canCreate && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                ref={tenantsGridHostRef}
-                pt={3}
-                position="relative"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "auto",
-                  },
-                  "& .MuiTableContainer-root > .MuiBox-root:nth-of-type(2)": {
-                    scrollBehavior: "smooth",
-                    scrollbarWidth: "thin",
-                    scrollbarColor: darkMode
-                      ? "rgba(255,255,255,0.24) rgba(255,255,255,0.04)"
-                      : "rgba(15, 23, 42, 0.28) transparent",
-                    "&::-webkit-scrollbar": { width: "8px", height: "8px" },
-                    "&::-webkit-scrollbar-track": { background: "transparent" },
-                    "&::-webkit-scrollbar-thumb": {
-                      backgroundColor: darkMode
-                        ? "rgba(255,255,255,0.26)"
-                        : "rgba(15, 23, 42, 0.3)",
-                      borderRadius: "100px",
-                      border: "2px solid transparent",
-                      backgroundClip: "padding-box",
-                      "&:hover": {
-                        backgroundColor: darkMode
-                          ? "rgba(255,255,255,0.42)"
-                          : "rgba(15, 23, 42, 0.45)",
-                      },
-                    },
-                    "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "auto",
-                    width: "max-content",
-                    borderCollapse: "collapse",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "12px !important",
-                    fontWeight: "700 !important",
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    lineHeight: 1.2,
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td": {
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    lineHeight: 1.22,
-                    fontSize: "0.875rem !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td .MuiButton-root": {
-                    minHeight: "auto !important",
-                    lineHeight: 1.2,
-                    paddingTop: "1px",
-                    paddingBottom: "1px",
-                  },
-                  "& .MuiTable-root td .MuiIconButton-root": {
-                    padding: "2px",
-                  },
-                }}
-              >
-                <TenantsTableTopScrollRail
-                  gridHostRef={tenantsGridHostRef}
-                  syncKey={`${rows.length}-${pageSize}-${pageNumber}`}
-                  darkMode={Boolean(darkMode)}
-                />
-                <DataTable
-                  table={{ columns, rows: computedRows }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100, 500, 1000],
-                  }}
-                  page={pageNumber - 1}
-                  pageSize={pageSize}
-                  onPageChange={(newPage) => {
-                    setPageNumber(newPage + 1);
-                  }}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchTenants();
-                  }}
-                  showTotalEntries={true}
-                  noEndBorder
-                  canSearch={true}
-                  pagination={{ variant: "gradient", color: "info" }}
-                  exportFileName="Tenants"
-                  contentFitTable
-                />
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Tenants"
+        subtitle="Manage tenant records"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "auto",
+          },
+          "& .MuiTableContainer-root > .saas-settings-table-scroll": {
+            scrollBehavior: "smooth",
+            scrollbarWidth: "thin",
+            scrollbarColor: darkMode
+              ? "rgba(255,255,255,0.24) rgba(255,255,255,0.04)"
+              : "rgba(15, 23, 42, 0.28) transparent",
+            "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+            "&::-webkit-scrollbar-track": { background: "transparent" },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: darkMode ? "rgba(255,255,255,0.26)" : "rgba(15, 23, 42, 0.3)",
+              borderRadius: "100px",
+              border: "2px solid transparent",
+              backgroundClip: "padding-box",
+              "&:hover": {
+                backgroundColor: darkMode ? "rgba(255,255,255,0.42)" : "rgba(15, 23, 42, 0.45)",
+              },
+            },
+            "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "10px !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            lineHeight: 1.2,
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            lineHeight: 1.22,
+            fontSize: "0.875rem !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td .MuiButton-root": {
+            minHeight: "auto !important",
+            lineHeight: 1.2,
+            paddingTop: "1px",
+            paddingBottom: "1px",
+          },
+          "& .MuiTable-root td .MuiIconButton-root": {
+            padding: "2px",
+          },
+        }}
+      >
+        <MDBox
+          ref={tenantsGridHostRef}
+          sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+        >
+          <TenantsTableTopScrollRail
+            gridHostRef={tenantsGridHostRef}
+            syncKey={`${rows.length}-${pageSize}-${pageNumber}`}
+            darkMode={Boolean(darkMode)}
+          />
+          <DataTable
+            table={{ columns, rows: computedRows }}
+            isSorted={false}
+            stickyToolbarAndHeader
+            entriesPerPage={{
+              defaultValue: 20,
+              entries: [10, 25, 50, 100, 500, 1000],
+            }}
+            page={pageNumber - 1}
+            pageSize={pageSize}
+            onPageChange={(newPage) => {
+              setPageNumber(newPage + 1);
+            }}
+            onEntriesPerPageChange={(value) => {
+              setPageSize(value);
+              setPageNumber(1);
+              fetchTenants();
+            }}
+            showTotalEntries={true}
+            noEndBorder
+            canSearch={true}
+            pagination={{ variant: "gradient", color: "info" }}
+            exportFileName="Tenants"
+            contentFitTable
+          />
+        </MDBox>
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
       <TenantsForm
         open={openForm}
         onClose={handleCloseForm}
@@ -1532,9 +1517,9 @@ export default function Tenants() {
         <DialogTitle>{`Contracts - Tenant No: ${selectedTenantNo}`}</DialogTitle>
         <DialogContent>
           {contractsDialogLoading ? (
-            <MDTypography variant="body2" sx={{ mt: 1 }}>
-              Loading...
-            </MDTypography>
+            <MDBox display="flex" justifyContent="center" py={3}>
+              <CurrencyLoading size={40} />
+            </MDBox>
           ) : tenantContracts.length === 0 ? (
             <MDTypography variant="body2" sx={{ mt: 1 }}>
               No contracts found.

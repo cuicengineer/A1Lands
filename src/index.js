@@ -23,10 +23,36 @@ import "@fontsource/roboto/300.css";
 import "@fontsource/roboto/400.css";
 import "@fontsource/roboto/500.css";
 import "@fontsource/roboto/700.css";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
 import "material-icons/iconfont/material-icons.css";
+import "material-icons/iconfont/outlined.css";
 
 // Custom scrollbar styles
 import "assets/css/scrollbar.css";
+
+// Enterprise visual theme (scoped to dashboard pages via body.enterprise-ui)
+import "assets/css/enterprise-theme.css";
+
+// PrimeStay-style SaaS workspace shell
+import "assets/css/saas-workspace.css";
+
+// Settings-first theme (Stripe / Vercel / GitHub / Linear)
+import "assets/css/saas-settings.css";
+
+// Premium micro-interactions & chip visualization
+import "assets/css/saas-polish.css";
+
+// ERP Dashboard v1.0 layout & KPI/chart panels
+import "assets/css/dashboard-redesign.css";
+
+// ERP v1.0 sidebar (280px, teal active nav, branding)
+import "assets/css/erp-sidenav.css";
+
+// ERP v1.0 global buttons (#025B64 / white text)
+import "assets/css/erp-buttons.css";
 
 // Material Dashboard 2 React Context Provider
 import { MaterialUIControllerProvider } from "context";

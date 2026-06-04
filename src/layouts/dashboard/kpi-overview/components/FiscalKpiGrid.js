@@ -19,13 +19,15 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import CircularProgress from "@mui/material/CircularProgress";
+import CurrencyLoading from "components/CurrencyLoading";
 import * as XLSX from "xlsx";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import { useMaterialUIController } from "context";
 import { getEnterpriseCardSx } from "./KpiCharts";
+import ChartExportButton from "./ChartExportButton";
+import { exportGroupedBarChartDataToExcel } from "utils/kpiChartExcelExport";
 import { formatKpiMoneyLabel } from "../kpiDataUtils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
@@ -106,7 +108,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
     XLSX.writeFile(wb, `Fiscal-KPIs-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }, [rows, periods]);
 
-  const cardSx = getEnterpriseCardSx(darkMode);
+  const cardSx = getEnterpriseCardSx();
   const headerBg = darkMode ? "rgba(255,255,255,0.06)" : "#f4f6f8";
   const stickyBg = darkMode ? "#1e1e1e" : "#ffffff";
   const rowBorder = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
@@ -301,7 +303,7 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
         >
           {loading ? (
             <MDBox display="flex" justifyContent="center" py={6}>
-              <CircularProgress color="info" size={32} />
+              <CurrencyLoading size={40} />
             </MDBox>
           ) : (
             <Table
@@ -484,15 +486,21 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
               borderTop: `1px solid ${tableShellBorder}`,
             }}
           >
-            <MDTypography
-              variant="button"
-              fontWeight="bold"
-              color={darkMode ? "white" : "dark"}
-              mb={1}
-              display="block"
-            >
-              AHQ / RAC / Base share by fiscal year (M.)
-            </MDTypography>
+            <MDBox display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+              <MDTypography variant="button" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+                AHQ / RAC / Base share by fiscal year (M.)
+              </MDTypography>
+              <ChartExportButton
+                disabled={loading}
+                ariaLabel="Export fiscal share chart to Excel"
+                onExport={() =>
+                  exportGroupedBarChartDataToExcel(
+                    "AHQ RAC Base share by fiscal year",
+                    shareStackChartData
+                  )
+                }
+              />
+            </MDBox>
             <MDBox height={280} sx={{ position: "relative" }}>
               <Bar
                 data={shareStackChartData}

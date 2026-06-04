@@ -69,12 +69,10 @@ function CurrencyLoading({ size = 40 }) {
   );
 }
 
-// Setting default values for the props of CurrencyLoading
 CurrencyLoading.defaultProps = {
   size: 40,
 };
 
-// Typechecking props for the CurrencyLoading
 CurrencyLoading.propTypes = {
   size: PropTypes.number,
 };

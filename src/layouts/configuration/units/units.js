@@ -8,9 +8,11 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
-import Card from "@mui/material/Card";
+import { gridValueChipCell } from "utils/gridValueChipCell";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -30,6 +32,7 @@ function UnitsConfig() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(true);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -37,6 +40,7 @@ function UnitsConfig() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      setLoading(true);
       try {
         const [unitData, commandData, baseData] = await Promise.all([
           api.list("Units"),
@@ -68,6 +72,8 @@ function UnitsConfig() {
         }
       } catch (e) {
         console.error("Failed to load data", e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -215,7 +221,7 @@ function UnitsConfig() {
     { Header: "Id", accessor: "id", align: "left", width: "10%" },
     { Header: "Name", accessor: "name", align: "left" },
     { Header: "Cmd", accessor: "cmd", align: "left" },
-    { Header: "Base", accessor: "base", align: "left" },
+    { Header: "Base", accessor: "base", align: "left", Cell: gridValueChipCell("base") },
     { Header: "Status", accessor: "status", align: "left" },
     { Header: "Actions", accessor: "actions", align: "center" },
   ];
@@ -422,59 +428,43 @@ function UnitsConfig() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Units
-            </MDTypography>
-            {canCreate && (
-              <MDButton variant="gradient" bgColor="dark" onClick={handleAddUnit}>
-                Add Unit
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-            }}
-          >
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              stickyToolbarAndHeader
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-              exportFileName="Units"
-            />
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Units"
+        subtitle="Manage units configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddUnit}>
+              Add Unit
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          showTotalEntries={true}
+          noEndBorder
+          exportFileName="Units"
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

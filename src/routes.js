@@ -70,7 +70,6 @@ import AgreementProvInvoice from "layouts/contracts/agreement-prov-invoice/agree
 import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-rate";
 import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
-import SummaryOfA1Activities from "layouts/dashboard/summary";
 import KpiOverview from "layouts/dashboard/kpi-overview";
 import BankAccounts from "layouts/accounts/bank-account/bank-account";
 // @mui icons
@@ -101,14 +100,6 @@ const routes = [
         icon: <Icon fontSize="small">dashboard</Icon>,
         route: "/dashboard",
         component: <Dashboard />,
-      },
-      {
-        type: "collapse",
-        name: "Summary Chart",
-        key: "dashboard-summary",
-        icon: <Icon fontSize="small">assessment</Icon>,
-        route: "/dashboard/summary",
-        component: <SummaryOfA1Activities />,
       },
       {
         type: "collapse",

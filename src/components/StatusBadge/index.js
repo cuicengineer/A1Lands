@@ -1,5 +1,7 @@
 import PropTypes from "prop-types";
 import MDBadge from "components/MDBadge";
+import GridStatusChip from "components/GridStatusChip";
+import { isEnterpriseSettingsUI } from "utils/enterpriseSettingsUI";
 
 function StatusBadge({
   value,
@@ -13,6 +15,15 @@ function StatusBadge({
     value === 1 ||
     value === "1" ||
     (typeof value === "string" && value.toLowerCase() === "active");
+
+  if (isEnterpriseSettingsUI()) {
+    return (
+      <GridStatusChip
+        value={isActive ? "active" : "inactive"}
+        label={isActive ? activeLabel : inactiveLabel}
+      />
+    );
+  }
 
   return (
     <MDBadge

@@ -1,0 +1,118 @@
+/* ERP v1.0 — global buttons: #025B64 background, white text (enterprise app shell) */
+
+:root {
+  --erp-btn-bg: #025b64;
+  --erp-btn-bg-hover: #024a52;
+  --erp-btn-bg-active: #013a41;
+  --erp-btn-text: #ffffff;
+}
+
+/* MuiButton only — not IconButton, Tab, ToggleButton */
+body.enterprise-ui .MuiButton-root {
+  background-color: var(--erp-btn-bg) !important;
+  background-image: none !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg) !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+  font-weight: 600 !important;
+}
+
+body.enterprise-ui .MuiButton-root:hover {
+  background-color: var(--erp-btn-bg-hover) !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg-hover) !important;
+  box-shadow: none !important;
+}
+
+body.enterprise-ui .MuiButton-root:active,
+body.enterprise-ui .MuiButton-root.Mui-focusVisible {
+  background-color: var(--erp-btn-bg-active) !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg-active) !important;
+}
+
+body.enterprise-ui .MuiButton-root.Mui-disabled {
+  background-color: rgba(2, 91, 100, 0.4) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Contained, outlined, and text variants — same solid brand fill */
+body.enterprise-ui .MuiButton-root.MuiButton-contained,
+body.enterprise-ui .MuiButton-root.MuiButton-outlined,
+body.enterprise-ui .MuiButton-root.MuiButton-text {
+  background-color: var(--erp-btn-bg) !important;
+  color: var(--erp-btn-text) !important;
+  border: 1px solid var(--erp-btn-bg) !important;
+}
+
+body.enterprise-ui .MuiButton-root.MuiButton-containedPrimary,
+body.enterprise-ui .MuiButton-root.MuiButton-containedSecondary,
+body.enterprise-ui .MuiButton-root.MuiButton-containedSuccess,
+body.enterprise-ui .MuiButton-root.MuiButton-containedError,
+body.enterprise-ui .MuiButton-root.MuiButton-containedWarning,
+body.enterprise-ui .MuiButton-root.MuiButton-containedInfo,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedPrimary,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedSecondary,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedError,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedSuccess,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedWarning,
+body.enterprise-ui .MuiButton-root.MuiButton-outlinedInfo {
+  background-color: var(--erp-btn-bg) !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg) !important;
+}
+
+body.enterprise-ui .MuiButton-root .MuiSvgIcon-root,
+body.enterprise-ui .MuiButton-root .MuiIcon-root,
+body.enterprise-ui .MuiButton-root .material-icons,
+body.enterprise-ui .MuiButton-root .material-icons-outlined {
+  color: var(--erp-btn-text) !important;
+}
+
+body.enterprise-ui .MuiLoadingButton-root {
+  background-color: var(--erp-btn-bg) !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg) !important;
+  box-shadow: none !important;
+}
+
+body.enterprise-ui .MuiLoadingButton-root:hover {
+  background-color: var(--erp-btn-bg-hover) !important;
+}
+
+body.enterprise-ui .MuiLoadingButton-root .MuiLoadingButton-loadingIndicator {
+  color: var(--erp-btn-text) !important;
+}
+
+body.enterprise-ui .MuiFab-root {
+  background-color: var(--erp-btn-bg) !important;
+  color: var(--erp-btn-text) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+
+body.enterprise-ui .MuiFab-root:hover {
+  background-color: var(--erp-btn-bg-hover) !important;
+}
+
+/* Toolbar / header actions (override legacy white-outline toolbar styles) */
+body.enterprise-ui .saas-toolbar-end .MuiButton-root,
+body.enterprise-ui .saas-header-primary-action .MuiButton-root,
+body.enterprise-ui .saas-settings-page .saas-workspace-page-actions .MuiButton-root,
+body.enterprise-ui .saas-workspace-page-actions .MuiButton-root {
+  background-color: var(--erp-btn-bg) !important;
+  color: var(--erp-btn-text) !important;
+  border-color: var(--erp-btn-bg) !important;
+  box-shadow: none !important;
+}
+
+body.enterprise-ui .saas-toolbar-end .MuiButton-root:hover,
+body.enterprise-ui .saas-header-primary-action .MuiButton-root:hover,
+body.enterprise-ui .saas-settings-page .saas-workspace-page-actions .MuiButton-root:hover,
+body.enterprise-ui .saas-workspace-page-actions .MuiButton-root:hover {
+  background-color: var(--erp-btn-bg-hover) !important;
+  color: var(--erp-btn-text) !important;
+  transform: none !important;
+}

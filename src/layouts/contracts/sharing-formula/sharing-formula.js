@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -23,9 +22,12 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import DataTable from "examples/Tables/DataTable";
-import CurrencyLoading from "components/CurrencyLoading";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import MDBadge from "components/MDBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import PropTypes from "prop-types";
 import api, {
@@ -35,6 +37,7 @@ import api, {
   getLoggedInUsername,
 } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
+import { withGridValueChip } from "utils/gridValueChipCell";
 import { format, parseISO, isValid } from "date-fns";
 
 const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
@@ -172,7 +175,6 @@ function ApplicationDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -414,7 +416,6 @@ function SharingFormulaMoneyColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -925,7 +926,6 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
     "& .MuiInputBase-input": {
       fontSize: "1rem",
       padding: "10px 12px",
-      minHeight: "45px",
     },
     "& .MuiInputLabel-root": {
       fontSize: "1rem",
@@ -937,12 +937,11 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
     "& .MuiSelect-select": {
       fontSize: "1rem",
       padding: "10px 12px",
-      minHeight: "45px",
     },
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
         {initialData ? "Edit Sharing Formula" : "New Sharing Formula"}
       </DialogTitle>
@@ -1058,7 +1057,6 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
                 "& .MuiInputBase-root": { minHeight: "45px" },
                 "& .MuiOutlinedInput-root": { minHeight: "45px" },
                 "& .MuiAutocomplete-inputRoot": {
-                  minHeight: "45px",
                   paddingTop: 0,
                   paddingBottom: 0,
                 },
@@ -1104,7 +1102,6 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
                 "& .MuiInputBase-root": { minHeight: "45px" },
                 "& .MuiOutlinedInput-root": { minHeight: "45px" },
                 "& .MuiAutocomplete-inputRoot": {
-                  minHeight: "45px",
                   paddingTop: 0,
                   paddingBottom: 0,
                 },
@@ -1302,10 +1299,9 @@ export default function SharingFormula() {
   const [classes, setClasses] = useState([]);
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const isSuperUser =
     String(getLoggedInUsername() || "")
@@ -1313,21 +1309,23 @@ export default function SharingFormula() {
       .toLowerCase()
       .replace(/\s+/g, "") === "superuser";
 
-  const fetchSharingFormulas = async (page = pageNumber, size = pageSize) => {
+  const fetchSharingFormulas = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await sharingFormulaApi.getAll(page, size);
+      const response = await sharingFormulaApi.getAllRecords();
       const data = response?.data ?? (Array.isArray(response) ? response : []);
-      const pagination = response?.pagination;
+      const arr = Array.isArray(data) ? data : [];
 
-      setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(Number(pagination?.totalCount || 0));
+      setTableRows(arr);
+      setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
     } catch (error) {
       console.error("Error fetching sharing formulas:", error);
+      setTableRows([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchClasses = async () => {
     try {
@@ -1363,8 +1361,8 @@ export default function SharingFormula() {
   }, []);
 
   useEffect(() => {
-    fetchSharingFormulas(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
+    fetchSharingFormulas();
+  }, [fetchSharingFormulas]);
 
   const handleOpenForm = () => {
     setOpenForm(true);
@@ -1417,7 +1415,7 @@ export default function SharingFormula() {
     if (window.confirm("Are you sure you want to delete this sharing formula?")) {
       try {
         await sharingFormulaApi.remove(id);
-        fetchSharingFormulas(pageNumber, pageSize);
+        fetchSharingFormulas();
       } catch (error) {
         console.error("Error deleting sharing formula:", error);
         alert("Failed to delete sharing formula. Please try again.");
@@ -1449,7 +1447,7 @@ export default function SharingFormula() {
       } else {
         await sharingFormulaApi.create(dataArray);
       }
-      fetchSharingFormulas(pageNumber, pageSize);
+      fetchSharingFormulas();
       handleCloseForm();
     } catch (error) {
       console.error("Error saving sharing formula:", error);
@@ -1631,18 +1629,14 @@ export default function SharingFormula() {
       accessor: "cmdName",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => {
-        return value || "-";
-      },
+      Cell: ({ value, row }) => withGridValueChip(value || "-", "rac", { row }),
     },
     {
       Header: "Base",
       accessor: "baseName",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => {
-        return value || "-";
-      },
+      Cell: ({ value, row }) => withGridValueChip(value || "-", "base", { row }),
     },
     {
       Header: "Class",
@@ -1655,9 +1649,10 @@ export default function SharingFormula() {
           // eslint-disable-next-line react/prop-types
           const classId = row.original.classId;
           const classItem = classes.find((c) => Number(c.id) === Number(classId));
-          return classItem ? classItem.name : value || "-";
+          const display = classItem ? classItem.name : value || "-";
+          return withGridValueChip(display, "class", { row });
         }
-        return value || "-";
+        return withGridValueChip(value || "-", "class", { row });
       },
     },
     {
@@ -1971,128 +1966,81 @@ export default function SharingFormula() {
 
   const computedRows = groupedData;
 
+  const handleGridPageSizeChange = useCallback((value) => {
+    setGridPageSize(Number(value));
+  }, []);
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Sharing Formula
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                position="relative"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "auto",
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "auto",
-                    width: "max-content",
-                    borderCollapse: "collapse",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "12px !important",
-                    fontWeight: "700 !important",
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td": {
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                }}
-              >
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
-                    }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
-
-                <DataTable
-                  table={{
-                    columns,
-                    rows: computedRows,
-                  }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100, 200, 500, 1000],
-                  }}
-                  page={pageNumber - 1}
-                  pageSize={pageSize}
-                  onPageChange={(newPage) => {
-                    setPageNumber(newPage + 1);
-                    fetchSharingFormulas(newPage + 1, pageSize);
-                  }}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchSharingFormulas(1, value);
-                  }}
-                  showTotalEntries={true}
-                  noEndBorder
-                  canSearch
-                  pagination={{ variant: "gradient", color: "info" }}
-                  exportFileName="Sharing-Formula"
-                  exportCellFormatter={exportCellFormatter}
-                  extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
-                  contentFitTable
-                />
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
+      <EnterpriseWorkspace
+        title="Sharing Formula"
+        subtitle="Manage sharing formula configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "auto",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "10px !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+        }}
+      >
+        <DataTable
+          table={{
+            columns,
+            rows: computedRows,
+          }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={{
+            defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+            entries: [10, 25, 50, 100],
+          }}
+          pageSize={gridPageSize}
+          onEntriesPerPageChange={handleGridPageSizeChange}
+          showTotalEntries={true}
+          noEndBorder
+          canSearch
+          pagination={{ variant: "gradient", color: "info" }}
+          exportFileName="Sharing-Formula"
+          exportCellFormatter={exportCellFormatter}
+          extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
+          contentFitTable
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
 
       <SharingFormulaForm
         open={openForm}

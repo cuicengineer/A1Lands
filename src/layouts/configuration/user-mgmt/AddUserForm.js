@@ -408,7 +408,7 @@ function AddUserForm({
   );
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
       <DialogTitle>Add New User</DialogTitle>
       <DialogContent dividers>
         <MDBox display="grid" gridTemplateColumns="1fr 1fr" gap={2}>

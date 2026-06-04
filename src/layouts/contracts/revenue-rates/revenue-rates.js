@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback, startTransition } from "react";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -36,11 +36,20 @@ import revenueRatesApi from "services/api.revenuerates.service";
 import CurrencyLoading from "components/CurrencyLoading";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import {
+  resolveBaseNameById,
+  resolveClassNameById,
+  resolveCommandNameById,
+} from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import { format, parseISO, isValid } from "date-fns";
+import { perfEnd, perfLog, perfMark } from "utils/pagePerfTrace";
 
 const REVENUE_RATES_GRID_DATE_FALLBACK_KEYS = {
   applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
@@ -72,6 +81,48 @@ function parseRevenueRatesGridDateYyyyMmDd(row, columnId) {
   const ts = Date.parse(s);
   if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
   return null;
+}
+
+function formatDateDDMMMYYYY(dateValue) {
+  if (!dateValue) return "";
+  const raw = String(dateValue).trim();
+  if (!raw) return "";
+  const monthShort = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  try {
+    const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
+    let day = "";
+    let month = "";
+    let year = "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      [year, month, day] = datePart.split("-");
+    } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+      [day, month, year] = datePart.split("-");
+    } else {
+      const parsed = new Date(raw);
+      if (!Number.isFinite(parsed.getTime())) return raw;
+      day = String(parsed.getDate()).padStart(2, "0");
+      month = String(parsed.getMonth() + 1).padStart(2, "0");
+      year = String(parsed.getFullYear());
+    }
+    const monthIndex = Number(month) - 1;
+    const monthText = monthShort[monthIndex] || month;
+    return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
+  } catch {
+    return raw;
+  }
 }
 
 function revenueRatesGridDateCompare(rowsToFilter, id, filterValue) {
@@ -176,7 +227,6 @@ function RevenueRatesDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -416,7 +466,6 @@ function RevenueRatesMoneyColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -513,6 +562,216 @@ const REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES = Object.freeze({
   revenueRatesDateCompare: revenueRatesGridDateCompare,
   revenueRatesMoneyCompare: revenueRatesGridMoneyCompare,
 });
+
+const RevenueRatesStatusCell = React.memo(function RevenueRatesStatusCell({ value }) {
+  return <StatusBadge value={value} />;
+});
+
+RevenueRatesStatusCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]),
+};
+
+const revenueRatesGridHandlersRef = { current: {} };
+const revenueRatesGridDataRef = {
+  current: { rentalPropertyById: new Map(), commandById: new Map() },
+};
+
+const RevenueRatesActionsCell = React.memo(function RevenueRatesActionsCell({ row }) {
+  const normalizedId = row?.original?.id;
+  const handlers = revenueRatesGridHandlersRef.current;
+  return (
+    <MDBox
+      alignItems="left"
+      justifyContent="left"
+      sx={{
+        backgroundColor: "#f8f9fa",
+        gap: "2px",
+        padding: "2px 2px",
+        borderRadius: "2px",
+      }}
+    >
+      {handlers.canEdit ? (
+        <IconButton
+          size="small"
+          color="info"
+          onClick={() => handlers.onEdit?.(normalizedId)}
+          title="Edit"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>edit</Icon>
+        </IconButton>
+      ) : null}
+      {handlers.canDelete ? (
+        <IconButton
+          size="small"
+          color="error"
+          onClick={() => handlers.onDelete?.(normalizedId)}
+          title="Delete"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>delete</Icon>
+        </IconButton>
+      ) : null}
+    </MDBox>
+  );
+});
+
+RevenueRatesActionsCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesPropertyCell = React.memo(function RevenueRatesPropertyCell({ value, row }) {
+  const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+  const textValue = value ?? row?.original?.propertyName ?? "";
+  if (textValue && String(textValue).trim() !== "") return String(textValue);
+  if (!propId) return "-";
+  const property = revenueRatesGridDataRef.current.rentalPropertyById.get(Number(propId));
+  return property ? property.pId ?? property.pid ?? property.PId ?? "" : String(propId);
+});
+
+RevenueRatesPropertyCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesRacCell = React.memo(function RevenueRatesRacCell({ value, row }) {
+  const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
+  const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
+  const display = isCmdAll ? "All" : value ?? "-";
+  return withGridValueChip(display, "rac", { row, forcePlain: isCmdAll });
+});
+
+RevenueRatesRacCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesBaseCell = React.memo(function RevenueRatesBaseCell({ value, row }) {
+  const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+  const isPropertyDash = propId === 0 || propId === null || propId === undefined || propId === "";
+  const display = isPropertyDash ? "All" : value ?? "-";
+  return withGridValueChip(display, "base", { row, forcePlain: isPropertyDash });
+});
+
+RevenueRatesBaseCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesClassCell = React.memo(function RevenueRatesClassCell({ value, row }) {
+  const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+  const isPropertyDash = propId === 0 || propId === null || propId === undefined || propId === "";
+  const display = isPropertyDash ? "All" : value ?? "-";
+  return withGridValueChip(display, "class", { row, forcePlain: isPropertyDash });
+});
+
+RevenueRatesClassCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesAreaCell = React.memo(function RevenueRatesAreaCell({ row }) {
+  const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+  const isPropertyDash = propId === 0 || propId === null || propId === undefined || propId === "";
+  if (isPropertyDash) return "-";
+  const property = revenueRatesGridDataRef.current.rentalPropertyById.get(Number(propId));
+  const area = property?.area ?? property?.Area ?? "";
+  const uoM = property?.uoM ?? property?.UoM ?? "";
+  const areaStr = area ? Number(area).toLocaleString() : "";
+  const uoMStr = uoM || "";
+  if (!areaStr && !uoMStr) return "-";
+  return [areaStr, uoMStr].filter(Boolean).join("  ");
+});
+
+RevenueRatesAreaCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesApplicableDateCell = React.memo(function RevenueRatesApplicableDateCell({
+  value,
+  row,
+}) {
+  const dateValue = value ?? row?.original?.applicableDate ?? row?.original?.ApplicableDate ?? null;
+  return formatDateDDMMMYYYY(dateValue) || "";
+});
+
+RevenueRatesApplicableDateCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesDeactiveDateCell = React.memo(function RevenueRatesDeactiveDateCell({
+  value,
+  row,
+}) {
+  const dateValue = value ?? row?.original?.deactiveDate ?? row?.original?.DeactiveDate ?? null;
+  return formatDateDDMMMYYYY(dateValue) || "";
+});
+
+RevenueRatesDeactiveDateCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesFiscalCell = React.memo(function RevenueRatesFiscalCell({ value, row }) {
+  const v = value ?? row?.original?.fiscal ?? row?.original?.Fiscal ?? "";
+  return v !== null && v !== undefined && String(v).trim() !== "" ? String(v) : "-";
+});
+
+RevenueRatesFiscalCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesRateCell = React.memo(function RevenueRatesRateCell({ value, row }) {
+  const rateValue = value ?? row?.original?.rate ?? row?.original?.Rate ?? 0;
+  if (rateValue === "" || rateValue == null) return "";
+  const parsedRate = Number(rateValue);
+  return Number.isFinite(parsedRate) ? parsedRate.toLocaleString() : "";
+});
+
+RevenueRatesRateCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RevenueRatesAttachmentsCell = React.memo(function RevenueRatesAttachmentsCell({ row }) {
+  const rowData = row?.original || {};
+  const handlers = revenueRatesGridHandlersRef.current;
+  const hasAttachments = rowData?.id;
+  const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
+  const countValue =
+    rowData?.attachmentCount ??
+    rowData?.attachmentsCount ??
+    rowData?.filesCount ??
+    rowData?.AttachmentCount ??
+    rowData?.AttachmentsCount ??
+    rowData?.FilesCount;
+  const hasAttachmentData =
+    rawIsAttachment === true ||
+    rawIsAttachment === 1 ||
+    rawIsAttachment === "1" ||
+    String(rawIsAttachment || "")
+      .trim()
+      .toLowerCase() === "true" ||
+    Number(countValue || 0) > 0;
+  if (!hasAttachments) return <span>-</span>;
+  return (
+    <IconButton
+      size="small"
+      color={hasAttachmentData ? "success" : "error"}
+      onClick={() => handlers.onViewAttachments?.(rowData)}
+      disabled={handlers.attachmentLoading && handlers.attachmentLoadingId === rowData.id}
+      title="View attachments"
+    >
+      <Icon>visibility</Icon>
+    </IconButton>
+  );
+});
+
+RevenueRatesAttachmentsCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
 
 function RevenueRatesForm({
   open,
@@ -906,7 +1165,7 @@ function RevenueRatesForm({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
         {initialData ? "Edit Revenue Rate" : "New Revenue Rate"}
       </DialogTitle>
@@ -1014,7 +1273,6 @@ function RevenueRatesForm({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    minHeight: "45px",
                     display: "flex",
                     alignItems: "center",
                   },
@@ -1250,7 +1508,6 @@ function RevenueRatesForm({
                         disabled={existingFiles.length + selectedFiles.length >= 5 || isUploading}
                         sx={{
                           mb: 2,
-                          minHeight: "56px",
                           fontSize: "1.1rem",
                           fontWeight: 600,
                           px: 4,
@@ -1348,7 +1605,6 @@ function RevenueRatesForm({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    minHeight: "45px",
                     display: "flex",
                     alignItems: "center",
                   },
@@ -1398,16 +1654,18 @@ RevenueRatesForm.propTypes = {
 };
 
 export default function RevenueRates() {
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+
   const [openForm, setOpenForm] = useState(false);
   const [currentRevenueRate, setCurrentRevenueRate] = useState(null);
   const [tableRows, setTableRows] = useState([]);
   const [rentalProperties, setRentalProperties] = useState([]);
   const [commandOptions, setCommandOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [classOptions, setClassOptions] = useState([]);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
   // Search is handled by shared DataTable (canSearch)
   const [successSB, setSuccessSB] = useState(false);
@@ -1427,21 +1685,31 @@ export default function RevenueRates() {
   const openSuccessSB = () => setSuccessSB(true);
   const closeSuccessSB = () => setSuccessSB(false);
 
-  const fetchRevenueRates = async (page = pageNumber, size = pageSize) => {
+  const fetchRevenueRates = useCallback(async () => {
+    perfMark("revenue-rates.api");
     setLoading(true);
     try {
-      const response = await revenueRatesApi.getAll(page, size);
+      const networkStart = performance.now();
+      const response = await revenueRatesApi.getAllRecords();
+      perfLog("revenue-rates.api.network", `${(performance.now() - networkStart).toFixed(1)}ms`);
+      const stateStart = performance.now();
       const data = response?.data ?? (Array.isArray(response) ? response : []);
-      const pagination = response?.pagination;
+      const arr = Array.isArray(data) ? data : [];
 
-      setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(Number(pagination?.totalCount || 0));
+      startTransition(() => {
+        setTableRows(arr);
+        setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
+      });
+      perfLog("revenue-rates.api.state", `${(performance.now() - stateStart).toFixed(1)}ms`);
     } catch (error) {
       console.error("Error fetching revenue rates:", error);
+      setTableRows([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
+      perfEnd("revenue-rates.api");
     }
-  };
+  }, []);
 
   const fetchRentalProperties = async () => {
     try {
@@ -1485,15 +1753,26 @@ export default function RevenueRates() {
     }
   };
 
+  const fetchClasses = async () => {
+    try {
+      const response = await api.list("class");
+      setClassOptions(Array.isArray(response) ? response : []);
+    } catch (error) {
+      console.error("Error fetching classes:", error);
+      setClassOptions([]);
+    }
+  };
+
   useEffect(() => {
     fetchRentalProperties();
     fetchCommands();
     fetchBases();
+    fetchClasses();
   }, []);
 
   useEffect(() => {
-    fetchRevenueRates(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
+    fetchRevenueRates();
+  }, [fetchRevenueRates]);
 
   const handleOpenForm = () => {
     setCurrentRevenueRate(null);
@@ -1548,7 +1827,7 @@ export default function RevenueRates() {
 
     try {
       await revenueRatesApi.remove(recordToDelete);
-      fetchRevenueRates(pageNumber, pageSize);
+      fetchRevenueRates();
       setDeleteDialogOpen(false);
       setRecordToDelete(null);
     } catch (error) {
@@ -1712,7 +1991,7 @@ export default function RevenueRates() {
       } else {
         await revenueRatesApi.create(formattedData);
       }
-      fetchRevenueRates(pageNumber, pageSize);
+      fetchRevenueRates();
       handleCloseForm();
     } catch (error) {
       console.error("Error saving revenue rate:", error);
@@ -1720,57 +1999,7 @@ export default function RevenueRates() {
     }
   };
 
-  // Status cell renderer with PropTypes
-  const StatusCell = ({ value }) => <StatusBadge value={value} />;
-  StatusCell.propTypes = {
-    value: PropTypes.oneOfType([PropTypes.bool, PropTypes.number, PropTypes.string]),
-  };
-
-  // Format date for display as dd-MMM-yyyy (e.g., 10-Feb-2026)
-  const formatDateDDMMMYYYY = (dateValue) => {
-    if (!dateValue) return "";
-    const raw = String(dateValue).trim();
-    if (!raw) return "";
-    const monthShort = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    try {
-      const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-      let day = "";
-      let month = "";
-      let year = "";
-      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-        [year, month, day] = datePart.split("-");
-      } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
-        [day, month, year] = datePart.split("-");
-      } else {
-        const parsed = new Date(raw);
-        if (!Number.isFinite(parsed.getTime())) return raw;
-        day = String(parsed.getDate()).padStart(2, "0");
-        month = String(parsed.getMonth() + 1).padStart(2, "0");
-        year = String(parsed.getFullYear());
-      }
-      const monthIndex = Number(month) - 1;
-      const monthText = monthShort[monthIndex] || month;
-      return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
-    } catch {
-      return raw;
-    }
-  };
-
-  // Excel export cell formatter to format dates as dd-MMM-yyyy
-  const exportCellFormatter = ({ value, column, row }) => {
+  const exportCellFormatter = useCallback(({ value, column, row }) => {
     const colId = String(column?.id || "").toLowerCase();
     if (colId === "applicabledate" || colId === "applicationdate" || colId === "deactivedate") {
       return formatDateDDMMMYYYY(value);
@@ -1782,425 +2011,340 @@ export default function RevenueRates() {
       return rowData.propertyName || value || "";
     }
     return value;
+  }, []);
+
+  const rentalPropertyById = useMemo(() => {
+    const m = new Map();
+    (rentalProperties || []).forEach((p) => {
+      const id = Number(p?.id ?? p?.Id);
+      if (Number.isFinite(id)) m.set(id, p);
+    });
+    return m;
+  }, [rentalProperties]);
+
+  const commandById = useMemo(() => {
+    const m = new Map();
+    (commandOptions || []).forEach((c) => {
+      const id = Number(c?.id);
+      if (Number.isFinite(id)) m.set(id, c);
+    });
+    return m;
+  }, [commandOptions]);
+
+  revenueRatesGridDataRef.current = { rentalPropertyById, commandById };
+  revenueRatesGridHandlersRef.current = {
+    onEdit: handleEditRevenueRate,
+    onDelete: handleDeleteRevenueRate,
+    onViewAttachments: handleViewAttachments,
+    attachmentLoading,
+    attachmentLoadingId,
+    canEdit: canEditCurrentMenu(),
+    canDelete: canDeleteCurrentMenu(),
   };
 
-  const columns = [
-    {
-      Header: "Actions",
-      accessor: "actions",
-      align: "center",
-    },
-    { Header: "ID", accessor: "id", align: "center" },
-    {
-      Header: "Property",
-      accessor: "propertyName",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        // Filter/search must run on text (propertyName), while preserving fallback for old rows.
-        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
-        const textValue = value ?? row?.original?.propertyName ?? "";
-        if (textValue && String(textValue).trim() !== "") return String(textValue);
-        if (!propId) return "-";
-        const property = rentalProperties.find((p) => Number(p.id) === Number(propId));
-        return property ? property.pId ?? property.pid ?? property.PId ?? "" : String(propId);
+  const columns = useMemo(
+    () => [
+      {
+        Header: "Actions",
+        accessor: "actions",
+        align: "center",
+        Cell: RevenueRatesActionsCell,
       },
-    },
-    {
-      Header: "RAC",
-      accessor: "cmdName",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
-        const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
-        return isCmdAll ? "All" : value ?? "-";
+      { Header: "ID", accessor: "id", align: "center" },
+      {
+        Header: "Property",
+        accessor: "propertyName",
+        align: "left",
+        Cell: RevenueRatesPropertyCell,
       },
-    },
-    {
-      Header: "Base",
-      accessor: "baseName",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
-        const isPropertyDash =
-          propId === 0 || propId === null || propId === undefined || propId === "";
-        return isPropertyDash ? "All" : value ?? "-";
+      {
+        Header: "RAC",
+        accessor: "cmdName",
+        align: "left",
+        Cell: RevenueRatesRacCell,
       },
-    },
-    {
-      Header: "Class",
-      accessor: "className",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
-        const isPropertyDash =
-          propId === 0 || propId === null || propId === undefined || propId === "";
-        return isPropertyDash ? "All" : value ?? "-";
+      {
+        Header: "Base",
+        accessor: "baseName",
+        align: "left",
+        Cell: RevenueRatesBaseCell,
       },
-    },
-    {
-      Header: "Area  UoM",
-      accessor: "areaUoM",
-      align: "left",
-      Cell: ({ row }) => {
-        const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
-        const isPropertyDash =
-          propId === 0 || propId === null || propId === undefined || propId === "";
-        if (isPropertyDash) return "-";
-        const property = rentalProperties.find((p) => Number(p.id) === Number(propId));
-        const area = property?.area ?? property?.Area ?? "";
-        const uoM = property?.uoM ?? property?.UoM ?? "";
+      {
+        Header: "Class",
+        accessor: "className",
+        align: "left",
+        Cell: RevenueRatesClassCell,
+      },
+      {
+        Header: "Area  UoM",
+        accessor: "areaDisplay",
+        align: "left",
+      },
+      {
+        id: "applicableDate",
+        Header: "Applicable Date",
+        accessor: "applicableDate",
+        align: "left",
+        filter: "revenueRatesDateCompare",
+        Filter: RevenueRatesDateColumnFilter,
+        Cell: ({ row }) => row?.original?.applicableDateDisplay ?? "",
+      },
+      {
+        Header: "RR FY",
+        accessor: "fiscalDisplay",
+        align: "left",
+      },
+      {
+        id: "rate",
+        Header: "Revenue Rate",
+        accessor: "rate",
+        align: "left",
+        filter: "revenueRatesMoneyCompare",
+        Filter: RevenueRatesMoneyColumnFilter,
+        Cell: ({ row }) => row?.original?.rateDisplay ?? "",
+      },
+      {
+        Header: "Attachments",
+        accessor: "attachments",
+        align: "left",
+        Cell: RevenueRatesAttachmentsCell,
+      },
+      {
+        Header: "Status",
+        accessor: "status",
+        align: "left",
+        Cell: RevenueRatesStatusCell,
+      },
+      {
+        Header: "Deactive Date",
+        accessor: "deactiveDateDisplay",
+        align: "left",
+      },
+    ],
+    []
+  );
+
+  const computedRows = useMemo(() => {
+    perfMark("revenue-rates.transform");
+    const result = tableRows.map((row) => {
+      const normalizedId = row?.id ?? row?.Id;
+      const propertyId = row.propertyId ?? row.PropertyId;
+      const prop = rentalPropertyById.get(Number(propertyId));
+      const propertyName = prop ? prop.pId ?? prop.pid ?? prop.PId ?? "" : "";
+      const isPropertyDash =
+        propertyId === 0 || propertyId === null || propertyId === undefined || propertyId === "";
+      const cmdId = row.cmdId ?? row.CmdId ?? prop?.cmdId ?? null;
+      const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
+      let resolvedCmdName = "All";
+      if (!isCmdAll) {
+        const cmd = commandById.get(Number(cmdId));
+        resolvedCmdName =
+          (cmd
+            ? cmd.name ?? cmd.Name ?? cmd.value ?? cmd.Value
+            : resolveCommandNameById(commandOptions, cmdId)) ||
+          (row.cmdName ?? row.CmdName ?? row.cmdname ?? prop?.cmdName) ||
+          "";
+      }
+
+      const baseId = row.baseId ?? row.BaseId ?? prop?.baseId ?? prop?.BaseId ?? null;
+      const isBaseAll =
+        baseId === 0 || baseId === "0" || baseId === null || baseId === undefined || isPropertyDash;
+      const resolvedBaseName = isBaseAll
+        ? "All"
+        : resolveBaseNameById(baseOptions, baseId) ||
+          (row.baseName ?? row.BaseName ?? row.basename ?? prop?.baseName) ||
+          "";
+
+      const classId = row.classId ?? row.ClassId ?? prop?.classId ?? prop?.ClassId ?? null;
+      const isClassAll =
+        isPropertyDash ||
+        classId === 0 ||
+        classId === "0" ||
+        classId === null ||
+        classId === undefined;
+      const resolvedClassName = isClassAll
+        ? "All"
+        : resolveClassNameById(classOptions, classId) ||
+          (row.className ?? row.ClassName ?? row.classname ?? prop?.className ?? prop?.classname) ||
+          "";
+
+      const applicableDateRaw = row.applicableDate ?? row.ApplicableDate ?? null;
+      const deactiveDateRaw = row.deactiveDate ?? row.DeactiveDate ?? null;
+      const rateRaw = row.rate ?? row.Rate ?? 0;
+      let areaDisplay = "-";
+      if (!isPropertyDash && prop) {
+        const area = prop.area ?? prop.Area ?? "";
+        const uoM = prop.uoM ?? prop.UoM ?? "";
         const areaStr = area ? Number(area).toLocaleString() : "";
         const uoMStr = uoM || "";
-        if (!areaStr && !uoMStr) return "-";
-        return [areaStr, uoMStr].filter(Boolean).join("  ");
-      },
-    },
-    {
-      id: "applicableDate",
-      Header: "Applicable Date",
-      accessor: "applicableDate",
-      align: "left",
-      filter: "revenueRatesDateCompare",
-      Filter: RevenueRatesDateColumnFilter,
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        const dateValue =
-          value ?? row?.original?.applicableDate ?? row?.original?.ApplicableDate ?? null;
-        return formatDateDDMMMYYYY(dateValue) || "";
-      },
-    },
-    {
-      Header: "RR FY",
-      accessor: "fiscal",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        const v = value ?? row?.original?.fiscal ?? row?.original?.Fiscal ?? "";
-        return v !== null && v !== undefined && String(v).trim() !== "" ? String(v) : "-";
-      },
-    },
-    {
-      id: "rate",
-      Header: "Revenue Rate",
-      accessor: "rate",
-      align: "left",
-      filter: "revenueRatesMoneyCompare",
-      Filter: RevenueRatesMoneyColumnFilter,
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        // Handle both camelCase and PascalCase - use value from accessor first, then fallback
-        const rateValue = value ?? row?.original?.rate ?? row?.original?.Rate ?? 0;
-        if (rateValue === "" || rateValue == null) return "";
-        const parsedRate = Number(rateValue);
-        return Number.isFinite(parsedRate) ? parsedRate.toLocaleString() : "";
-      },
-    },
-    {
-      Header: "Attachments",
-      accessor: "attachments",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // Show view icon if record has been saved (has an id)
-        // Files are uploaded separately, so we show the icon for any saved record
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        const hasAttachments = rowData?.id;
-        const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
-        const countValue =
-          rowData?.attachmentCount ??
-          rowData?.attachmentsCount ??
-          rowData?.filesCount ??
-          rowData?.AttachmentCount ??
-          rowData?.AttachmentsCount ??
-          rowData?.FilesCount;
-        const hasAttachmentData =
-          rawIsAttachment === true ||
-          rawIsAttachment === 1 ||
-          rawIsAttachment === "1" ||
-          String(rawIsAttachment || "")
-            .trim()
-            .toLowerCase() === "true" ||
-          Number(countValue || 0) > 0;
-        return hasAttachments ? (
-          <IconButton
-            size="small"
-            color={hasAttachmentData ? "success" : "error"}
-            // eslint-disable-next-line react/prop-types
-            onClick={() => handleViewAttachments(row.original)}
-            // eslint-disable-next-line react/prop-types
-            disabled={attachmentLoading && attachmentLoadingId === row?.original?.id}
-            title="View attachments"
-          >
-            <Icon>visibility</Icon>
-          </IconButton>
-        ) : (
-          <span>-</span>
-        );
-      },
-    },
-    {
-      Header: "Status",
-      accessor: "status",
-      align: "left",
-      Cell: StatusCell,
-    },
-    {
-      Header: "Deactive Date",
-      accessor: "deactiveDate",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const dateValue =
-          value ?? row?.original?.deactiveDate ?? row?.original?.DeactiveDate ?? null;
-        return formatDateDDMMMYYYY(dateValue) || "";
-      },
-    },
-  ];
+        if (areaStr || uoMStr) areaDisplay = [areaStr, uoMStr].filter(Boolean).join("  ");
+      }
+      const parsedRate = Number(rateRaw);
+      const rateDisplay =
+        rateRaw === "" || rateRaw == null
+          ? ""
+          : Number.isFinite(parsedRate)
+          ? parsedRate.toLocaleString()
+          : "";
+      const fiscalRaw = row.fiscal ?? row.Fiscal ?? "";
 
-  const computedRows = tableRows.map((row) => {
-    // Normalize id and propertyId (handle both camelCase and PascalCase)
-    const normalizedId = row?.id ?? row?.Id;
-    const propertyId = row.propertyId ?? row.PropertyId;
-    const prop = rentalProperties.find((p) => Number(p.id) === Number(propertyId));
-    const propertyName = prop ? prop.pId ?? prop.pid ?? prop.PId ?? "" : "";
-    const cmdId = row.cmdId ?? row.CmdId ?? prop?.cmdId ?? null;
-    const isCmdAll = cmdId === 0 || cmdId === "0" || cmdId === null || cmdId === undefined;
-    const resolvedCmdName = isCmdAll
-      ? "All"
-      : (() => {
-          const cmd = (commandOptions || []).find((c) => Number(c?.id) === Number(cmdId));
-          return cmd
-            ? cmd.name ?? cmd.Name ?? cmd.value ?? cmd.Value ?? String(cmdId)
-            : row.cmdName ?? row.CmdName ?? row.cmdname ?? prop?.cmdName ?? String(cmdId ?? "");
-        })();
+      return {
+        ...row,
+        id: normalizedId,
+        propertyId,
+        propertyName,
+        rate: rateRaw,
+        rateDisplay,
+        applicableDate: applicableDateRaw,
+        applicableDateDisplay: formatDateDDMMMYYYY(applicableDateRaw) || "",
+        fiscal: fiscalRaw,
+        fiscalDisplay:
+          fiscalRaw !== null && fiscalRaw !== undefined && String(fiscalRaw).trim() !== ""
+            ? String(fiscalRaw)
+            : "-",
+        deactiveDate: deactiveDateRaw,
+        deactiveDateDisplay: formatDateDDMMMYYYY(deactiveDateRaw) || "",
+        areaDisplay,
+        status: row.status ?? row.Status ?? true,
+        cmdName: resolvedCmdName,
+        baseName: resolvedBaseName,
+        className: resolvedClassName,
+      };
+    });
+    perfEnd("revenue-rates.transform");
+    return result;
+  }, [tableRows, rentalPropertyById, commandById, commandOptions, baseOptions, classOptions]);
 
-    return {
-      ...row,
-      id: normalizedId,
-      propertyId: propertyId,
-      propertyName: propertyName,
-      rate: row.rate ?? row.Rate ?? 0,
-      applicableDate: row.applicableDate ?? row.ApplicableDate ?? null,
-      fiscal: row.fiscal ?? row.Fiscal ?? "",
-      deactiveDate: row.deactiveDate ?? row.DeactiveDate ?? null,
-      status: row.status ?? row.Status ?? true,
-      cmdName: resolvedCmdName,
-      baseName:
-        row.baseName ??
-        row.BaseName ??
-        row.basename ??
-        prop?.baseName ??
-        prop?.basename ??
-        row.baseId ??
-        row.BaseId ??
-        prop?.baseId ??
-        "",
-      className:
-        row.className ??
-        row.ClassName ??
-        row.classname ??
-        prop?.className ??
-        prop?.classname ??
-        row.classId ??
-        row.ClassId ??
-        prop?.classId ??
-        "",
-      actions: (
-        <MDBox
-          alignItems="left"
-          justifyContent="left"
-          sx={{
-            backgroundColor: "#f8f9fa",
-            gap: "2px",
-            padding: "2px 2px",
-            borderRadius: "2px",
-          }}
-        >
-          {canEditCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="info"
-              onClick={() => handleEditRevenueRate(normalizedId)}
-              title="Edit"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>edit</Icon>
-            </IconButton>
-          )}
-          {canDeleteCurrentMenu() && (
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteRevenueRate(normalizedId)}
-              title="Delete"
-              sx={{ padding: "1px" }}
-            >
-              <Icon>delete</Icon>
-            </IconButton>
-          )}
-        </MDBox>
-      ),
-    };
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: totalCount,
+      }),
+    [totalCount]
+  );
+
+  const tableConfig = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
+
+  const handleGridPageSizeChange = useCallback((value) => {
+    setGridPageSize(Number(value));
+  }, []);
+
+  const showGrid = !loading || tableRows.length > 0;
+
+  useEffect(() => {
+    perfLog("revenue-rates.render", {
+      pass: renderCountRef.current,
+      rows: tableRows.length,
+      loading,
+    });
   });
 
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Revenue Rates
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  overflow: "hidden",
-                  position: "relative",
-                  "& .MuiTable-root": {
-                    tableLayout: "auto",
-                    width: "max-content",
-                    borderCollapse: "collapse",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "1.0rem !important",
-                    fontWeight: "700 !important",
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td": {
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                }}
-              >
-                {/* Scroll region: horizontal bar stays at bottom via overflow-x scroll + stable gutter */}
-                <MDBox
-                  sx={{
-                    position: "relative",
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflowX: "scroll",
-                    overflowY: "scroll",
-                    scrollbarGutter: "stable both-edges",
-                    scrollbarWidth: "thin",
-                    "&::-webkit-scrollbar": {
-                      width: "10px",
-                      height: "10px",
-                    },
-                    "&::-webkit-scrollbar-thumb": {
-                      backgroundColor: "#9e9e9e",
-                      borderRadius: "6px",
-                    },
-                  }}
-                >
-                  {/* Loading Overlay */}
-                  {loading && (
-                    <MDBox
-                      position="absolute"
-                      top={0}
-                      left={0}
-                      right={0}
-                      bottom={0}
-                      display="flex"
-                      justifyContent="center"
-                      alignItems="center"
-                      zIndex={10}
-                      sx={{
-                        backgroundColor: "rgba(255, 255, 255, 0.8)",
-                        backdropFilter: "blur(2px)",
-                      }}
-                    >
-                      <CurrencyLoading size={50} />
-                    </MDBox>
-                  )}
+      <EnterpriseWorkspace
+        title="Revenue Rates"
+        subtitle="Manage revenue rate records"
+        tabs={<ContractsModuleTabs />}
+        metadata={workspaceMetadata}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.875rem !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+        }}
+      >
+        <MDBox
+          className="saas-workspace-grid-scroll-host"
+          sx={{
+            position: "relative",
+            flex: "1 1 0",
+            minHeight: 0,
+            overflowX: "scroll",
+            overflowY: "scroll",
+            scrollbarGutter: "stable both-edges",
+            scrollbarWidth: "thin",
+            "&::-webkit-scrollbar": {
+              width: "10px",
+              height: "10px",
+            },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: "#9e9e9e",
+              borderRadius: "6px",
+            },
+          }}
+        >
+          {loading && (
+            <MDBox
+              position="absolute"
+              top={0}
+              left={0}
+              right={0}
+              bottom={0}
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              zIndex={10}
+              sx={{
+                backgroundColor: "rgba(255, 255, 255, 0.8)",
+                backdropFilter: "blur(2px)",
+              }}
+            >
+              <CurrencyLoading size={50} />
+            </MDBox>
+          )}
 
-                  <DataTable
-                    table={{
-                      columns,
-                      rows: computedRows,
-                    }}
-                    isSorted={false}
-                    stickyToolbarAndHeader
-                    autoHeight
-                    entriesPerPage={{
-                      defaultValue: 50,
-                      entries: [10, 25, 50, 100, 500, 1000, 2000],
-                    }}
-                    page={0}
-                    onPageChange={() => {}}
-                    pageSize={pageSize}
-                    onEntriesPerPageChange={(value) => {
-                      setPageNumber(1);
-                      setPageSize(value);
-                    }}
-                    showTotalEntries={false}
-                    noEndBorder
-                    canSearch
-                    autoResetFilters={false}
-                    exportFileName="Revenue-Rates"
-                    exportCellFormatter={exportCellFormatter}
-                    extraFilterTypes={REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES}
-                    onVisibleRowCountChange={setVisibleRowCount}
-                    contentFitTable
-                  />
-                </MDBox>
-
-                {/* Entries count footer (server-side total; no page controls) */}
-                <MDBox
-                  display="flex"
-                  alignItems="center"
-                  px={2}
-                  py={1.5}
-                  sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
-                >
-                  <MDTypography variant="button" color="secondary" fontWeight="regular">
-                    {(() => {
-                      const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                      const displayVisible = displayTotal === 0 ? 0 : visibleRowCount;
-                      return displayTotal === 0
-                        ? "0 of 0 entries"
-                        : `${displayVisible} of ${displayTotal} entries`;
-                    })()}
-                  </MDTypography>
-                </MDBox>
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+          {showGrid ? (
+            <DataTable
+              table={tableConfig}
+              isSorted={false}
+              stickyToolbarAndHeader
+              entriesPerPage={{
+                defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+                entries: [10, 25, 50, 100],
+              }}
+              pageSize={gridPageSize}
+              onEntriesPerPageChange={handleGridPageSizeChange}
+              showTotalEntries={false}
+              noEndBorder
+              canSearch
+              autoResetFilters={false}
+              exportFileName="Revenue-Rates"
+              exportCellFormatter={exportCellFormatter}
+              extraFilterTypes={REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES}
+              contentFitTable
+            />
+          ) : null}
+        </MDBox>
+      </EnterpriseWorkspace>
       <RevenueRatesForm
         open={openForm}
         onClose={handleCloseForm}

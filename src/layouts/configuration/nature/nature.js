@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 
 // @mui material components
-import Card from "@mui/material/Card";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -23,8 +22,10 @@ import MDInput from "components/MDInput";
 // Material Dashboard 2 React example components
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { compactActionSnoColumnsSx } from "utils/compactActionSnoColumnsSx";
 
 import api, {
   canCreateCurrentMenu,
@@ -32,6 +33,7 @@ import api, {
   canEditCurrentMenu,
 } from "services/api.service";
 import StatusBadge from "components/StatusBadge";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import { useMaterialUIController } from "context";
 
 function NatureConfig() {
@@ -50,6 +52,7 @@ function NatureConfig() {
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(20);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
   const canCreate = canCreateCurrentMenu();
@@ -61,11 +64,14 @@ function NatureConfig() {
   }, []);
 
   const fetchNatures = async () => {
+    setLoading(true);
     try {
       const response = await api.list("Nature");
       setTableRows(response);
     } catch (error) {
       console.error("Error fetching natures:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -187,7 +193,7 @@ function NatureConfig() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "60px" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "56px" },
     { Header: "Id", accessor: "id", align: "left", width: "50px" },
     { Header: "Name", accessor: "name", align: "left", width: "150px" },
     { Header: "Description", accessor: "description", align: "left", minWidth: "200px" },
@@ -396,119 +402,101 @@ function NatureConfig() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Nature
-            </MDTypography>
-            <MDBox display="flex" alignItems="center" gap={2}>
-              {canCreate && (
-                <MDButton variant="gradient" color="info" onClick={handleAddNature}>
-                  Add Nature
-                </MDButton>
-              )}
-            </MDBox>
-          </MDBox>
-          <MDBox pt={3}>
-            <MDBox
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                height: "70vh",
-                minHeight: "400px",
-                overflow: "hidden",
-                "& .MuiTableContainer-root": {
-                  flex: "1 1 0",
-                  minHeight: 0,
-                  overflow: "hidden",
-                },
-                "& .MuiTable-root": {
-                  tableLayout: "auto",
-                  width: "auto",
-                  minWidth: "100%",
-                },
-                "& .MuiTableCell-root": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                  maxWidth: "100%",
-                  verticalAlign: "top",
-                },
-                "& .MuiTableCell-root *": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.15rem !important",
-                  fontWeight: "700 !important",
-                  padding: "8px 6px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root td": {
-                  padding: "8px 6px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                  hyphens: "auto",
-                  maxWidth: "100%",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-                "& .MuiTable-root td > div": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root td *": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-              }}
-            >
-              <DataTable
-                table={tableData}
-                isSorted={false}
-                stickyToolbarAndHeader
-                canSearch={true}
-                page={pageIndex}
-                entriesPerPage={{
-                  defaultValue: 20,
-                  entries: [5, 10, 15, 20, 25],
-                }}
-                pageSize={pageSize}
-                onPageChange={(page) => setPageIndex(page)}
-                onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
-                  setPageIndex(0); // Reset to first page when page size changes
-                }}
-                showTotalEntries
-                exportFileName="Nature"
-                noEndBorder
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Nature"
+        subtitle="Manage nature configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddNature}>
+              Add Nature
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "auto",
+            minWidth: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+            maxWidth: "100%",
+            verticalAlign: "top",
+          },
+          "& .MuiTableCell-root *": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            maxWidth: "100%",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "1rem !important",
+            fontWeight: "700 !important",
+            padding: "8px 6px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "break-word",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root td": {
+            padding: "8px 6px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            hyphens: "auto",
+            maxWidth: "100%",
+            borderBottom: "1px solid #e0e0e0",
+          },
+          "& .MuiTable-root td > div": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          "& .MuiTable-root td *": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          ...compactActionSnoColumnsSx,
+        }}
+      >
+        <DataTable
+          table={tableData}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          page={pageIndex}
+          entriesPerPage={{
+            defaultValue: 20,
+            entries: [5, 10, 15, 20, 25],
+          }}
+          pageSize={pageSize}
+          onPageChange={(page) => setPageIndex(page)}
+          onEntriesPerPageChange={(value) => {
+            setPageSize(value);
+            setPageIndex(0);
+          }}
+          showTotalEntries
+          exportFileName="Nature"
+          noEndBorder
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>

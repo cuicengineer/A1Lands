@@ -19,6 +19,7 @@ import PropTypes from "prop-types";
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
 import { useMaterialUIController } from "context";
+import { isEnterpriseSettingsUI } from "utils/enterpriseSettingsUI";
 
 function DataTableBodyCell({
   noBorder,
@@ -32,6 +33,7 @@ function DataTableBodyCell({
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const settingsUI = isEnterpriseSettingsUI();
 
   const { style: cellInlineStyle, ...tdProps } = rest;
   const tdStyle =
@@ -61,13 +63,20 @@ function DataTableBodyCell({
       py={0.2}
       px={0.1}
       sx={({ palette: { light }, borders: { borderWidth } }) => ({
-        fontSize: "0.875rem",
-        borderBottom: noBorder ? "none" : `${borderWidth[1]} solid ${light.main}`,
-        // Paint tint on td (never rely on transparent + tr bg — gets covered by wrappers / rtl / table paint)
+        fontSize: settingsUI ? "0.8125rem" : "0.875rem",
+        borderBottom: noBorder
+          ? "none"
+          : settingsUI
+          ? `1px solid #f0f0f0`
+          : `${borderWidth[1]} solid ${light.main}`,
         backgroundColor: disabledRow
-          ? "#e6e6e6 !important"
+          ? settingsUI
+            ? "#f5f5f5 !important"
+            : "#e6e6e6 !important"
           : hasTint
           ? `${tintBackground} !important`
+          : settingsUI
+          ? "transparent !important"
           : isEvenRow
           ? "#f0f0f0 !important"
           : "#ffffff !important",
@@ -76,6 +85,9 @@ function DataTableBodyCell({
           {
             color: cellTextColor,
           },
+        "& .saas-grid-status-chip, & .MuiBadge-badge": {
+          color: "unset",
+        },
         whiteSpace: "normal",
         overflowWrap: "anywhere",
         wordBreak: "break-word",

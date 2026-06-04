@@ -64,10 +64,11 @@ const contained = {
   },
 
   primary: {
-    backgroundColor: info.main,
+    backgroundColor: "#025B64",
+    color: white.main,
 
     "&:hover": {
-      backgroundColor: info.main,
+      backgroundColor: "#024A52",
     },
 
     "&:focus:not(:hover)": {

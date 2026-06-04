@@ -2,105 +2,177 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>A-1 Lands Login</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A1 Login</title>
 
+<link href="assets/css/bootstrap.min.css" rel="stylesheet">
+<link href="assets/css/bootstrap-icons.css" rel="stylesheet">
+<link href="assets/css/style.css" rel="stylesheet">
 <!-- Poppins -->
 <link href="assets/fonts/custom-fonts.css" rel="stylesheet">
-<!-- FA Icons -->
-<link href="assets/css/all.min.css" rel="stylesheet">
 
-<link href="assets/css/style.css" rel="stylesheet">
 
 </head>
 <body>
 
-<div class="slider">
-    <div class="slide"></div>
-    <div class="slide"></div>
-    <div class="slide"></div>
-    <div class="slide"></div>
-    <div class="bg-overlay"></div>
-</div>
+<div class="login-layout">
 
-<div class="page">
-    
-    <div class="left-side">
-        <div class="login-card">
-            <div class="brand">
-                <div class=""><img class="logo-symb" src="assets/img/PAF-Logo.gif"></div>
-                <div class="brand-text">
-                    <h2>A-1 lands</h2>
-                    <small>Sub Heading</small>
-                </div>
-            </div>
+    <div class="left-wrapper">
 
-            <div class="welcome-section">
-                <h3>Welcome Text Here</h3>
-                <p>Sub Text Here</p>
-            </div>
+        <div id="landCarousel" class="carousel slide carousel-fade"
+             data-bs-ride="carousel"
+             data-bs-interval="5000"
+             data-bs-touch="true">
 
-            <div class="field-group">
-                <label>User Name</label>
-                <input type="text" class="input-underline" placeholder="Enter User Name">
-            </div>
+            <div class="carousel-inner">
 
-            <div class="field-group">
-                <label>Password</label>
-                <input type="password" class="input-underline" placeholder="Enter your password">
-            </div>
+                <div class="carousel-item active"><img src="assets/img/agri-land.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/bilboard2.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/petrol-station.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/mall.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/mall2.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/plot.jpg"></div>
 
-            <button class="btn-signin">
-                Sign In <i class="fa-solid fa-arrow-right-long" style="transform: rotate(-45deg);"></i>
-            </button>
-        </div>
-    </div>
-
-    <div class="right-side">
-        <div class="hex-grid">
-            <div class="hex-col c1">
-                <div class="hex-box">
-                    <i class="fa-solid fa-map"></i>
-                    <span>Plots</span>
-                </div>
-            </div>
-
-            <div class="hex-col c2">
-                <div class="hex-box">
-                    <i class="fa-solid fa-gas-pump"></i>
-                    <span>Petrol Station</span>
-                </div>
-                <div class="hex-box">
-                    <i class="fa-solid fa-building"></i>
-                    <span>Towers</span>
-                </div>
-            </div>
-
-            <div class="hex-col c3">
-                <div class="hex-box">
-                    <i class="fa-solid fa-rectangle-ad"></i>
-                    <span>Billboards</span>
-                </div>
-                <div class="hex-box">
-                    <i class="fa-solid fa-store"></i>
-                    <span>Shopping Malls</span>
-                </div>
-                <div class="hex-box">
-                    <i class="fa-solid fa-tractor"></i>
-                    <span>Agri Lands</span>
-                </div>
-            </div>
-
-            <div class="hex-col c4">
-                <div class="hex-box blank"></div>
-                <div class="hex-box blank"></div>
-                <div class="hex-box blank"></div>
-                <div class="hex-box blank"></div>
             </div>
         </div>
+
+        <div class="overlay"></div>
+
+        <div class="logo-placeholder"><img src="assets/img/PAF-Logo.webp"></div>
+
+        <div class="slide-content">
+            <div id="slideIcon" class="slide-icon"><i class="bi bi-tree"></i></div>
+            <div id="slideTitle" class="slide-title">Agricultural Land<br>Management</div>
+            <div id="slideDesc" class="slide-desc">
+                Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.
+            </div>
+
+            <div class="carousel-indicators custom-dots">
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="0"
+            class="active"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="1"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="2"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="3"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="4"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="5"></button>
+</div>
+        </div>
+
+    </div>
+
+    <div class="right-wrapper">
+
+        <div class="a1-header">
+            <div class="big-a1">A1</div>
+            <div class="v-line"></div>
+
+            <div class="system-title">
+                <small>PAKISTAN AIR FORCE</small>
+                <h1>LAND MANAGEMENT<br>&amp; FINANCIAL SYSTEM</h1>
+            </div>
+        </div>
+
+        <hr>
+
+        <div class="pointer">-</div>
+
+        <div class="main-heading">
+            A Unified Solution for<br>
+            Land Assets and Financial<br>
+            Excellence
+        </div>
+
+        <div class="main-description">
+            A centralized solution to manage land records, contracts, revenues and financial performance, providing actionable insights and analytics for effective planning and governance.
+        </div>
+
+        <hr>
+
+        <div class="login-title">Login Here</div>
+        <div class="login-sub">Enter Your Credentials to login</div>
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <input class="form-control" placeholder="Enter User Name">
+                    <span class="input-group-text"><i class="bi bi-person-circle"></i></span>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="input-group">
+                    <input type="password" class="form-control" placeholder="Enter Password">
+                    <span class="input-group-text"><i class="bi bi-key-fill"></i></span>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-login text-white">Login</button>
+
+        <div class="company">
+            Dte. of CNPF: <strong>Audit & Accounts Sub Branch</strong>
+        </div>
+
     </div>
 
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const slides=[
+{icon:'bi-tree',title:'Agricultural Land<br>Management',desc:'Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.'},
+{icon:'bi-signpost',title:'Billboard Asset<br>Management',desc:'Manage billboard locations, contracts and revenue records.'},
+{icon:'bi-fuel-pump',title:'Petrol Station<br>Management',desc:'Track petrol station assets and lease agreements.'},
+{icon:'bi bi-buildings',title:'Mall Property<br>Management',desc:'Manage commercial mall assets and rental records.'},
+{icon:'bi-building',title:'Tower Asset<br>Management',desc:'Monitor tower assets and infrastructure revenue.'},
+{icon:'bi-map',title:'Vacant Plot<br>Management',desc:'Track vacant plots, ownership and development plans.'}
+];
+
+const el=document.querySelector('#landCarousel');
+const carousel=bootstrap.Carousel.getOrCreateInstance(el);
+
+el.addEventListener('mouseenter',()=>carousel.pause());
+el.addEventListener('mouseleave',()=>carousel.cycle());
+
+el.addEventListener('slid.bs.carousel',function(e){
+document.getElementById('slideIcon').innerHTML='<i class="bi '+slides[e.to].icon+'"></i>';
+document.getElementById('slideTitle').innerHTML=slides[e.to].title;
+document.getElementById('slideDesc').innerHTML=slides[e.to].desc;
+});
+
+const indicators = document.querySelectorAll(
+    '.carousel-indicators button'
+);
+
+el.addEventListener('slide.bs.carousel', function(e){
+
+    indicators.forEach(btn=>{
+        btn.classList.remove('active');
+    });
+
+    indicators[e.to].classList.add('active');
+
+});
+
+</script>
 
 </body>
 </html>

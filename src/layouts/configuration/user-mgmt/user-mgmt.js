@@ -1,4 +1,3 @@
-import Card from "@mui/material/Card";
 import { useEffect, useMemo, useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -7,8 +6,11 @@ import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
+import { withGridValueChip } from "utils/gridValueChipCell";
 
 import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
@@ -74,6 +76,7 @@ function UserMgmt() {
   const [rightsDraftRows, setRightsDraftRows] = useState([]);
   const [rightsRowMetaByMenu, setRightsRowMetaByMenu] = useState({});
   const [isRightsSaving, setIsRightsSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -89,6 +92,7 @@ function UserMgmt() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      setLoading(true);
       try {
         const [userData, commandData, baseData, roleData] = await Promise.all([
           api.list("User"),
@@ -139,6 +143,8 @@ function UserMgmt() {
         );
       } catch (e) {
         console.error("Failed to load data", e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -659,7 +665,7 @@ function UserMgmt() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "72px" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "100px" },
     { Header: "Id", accessor: "id", align: "center", width: "56px" },
     { Header: "Username", accessor: "username", align: "left" },
     { Header: "PakNo", accessor: "pakNo", align: "left" },
@@ -676,9 +682,11 @@ function UserMgmt() {
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
-        return isEditing
-          ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
-          : commandOptions.find((cmd) => cmd.id === Number(value))?.name || value;
+        if (isEditing) {
+          return renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false);
+        }
+        const display = commandOptions.find((cmd) => cmd.id === Number(value))?.name || value;
+        return withGridValueChip(display, "rac", { row });
       },
     },
     {
@@ -689,14 +697,16 @@ function UserMgmt() {
       Cell: ({ cell: { value, row } }) => {
         const isEditing = editingRowId === row.original.id;
         const draft = isEditing ? editDraft : row.original;
-        return isEditing
-          ? renderBaseSelect(
-              "baseId",
-              draft.baseId ? Number(draft.baseId) : "",
-              Number(draft.cmdId),
-              false
-            )
-          : baseOptions.find((base) => base.id === Number(value))?.name || value;
+        if (isEditing) {
+          return renderBaseSelect(
+            "baseId",
+            draft.baseId ? Number(draft.baseId) : "",
+            Number(draft.cmdId),
+            false
+          );
+        }
+        const display = baseOptions.find((base) => base.id === Number(value))?.name || value;
+        return withGridValueChip(display, "base", { row });
       },
     },
     {
@@ -821,7 +831,6 @@ function UserMgmt() {
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
-          minHeight: "45px",
           display: "flex",
           alignItems: "center",
           paddingTop: 0,
@@ -883,7 +892,6 @@ function UserMgmt() {
         sx={{
           "& .MuiInputBase-root": { minHeight: "45px" },
           "& .MuiSelect-select": {
-            minHeight: "45px",
             display: "flex",
             alignItems: "center",
             paddingTop: 0,
@@ -919,7 +927,6 @@ function UserMgmt() {
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
-          minHeight: "45px",
           display: "flex",
           alignItems: "center",
           paddingTop: 0,
@@ -963,7 +970,6 @@ function UserMgmt() {
         sx={{
           "& .MuiInputBase-root": { minHeight: "45px" },
           "& .MuiSelect-select": {
-            minHeight: "45px",
             display: "flex",
             alignItems: "center",
             paddingTop: 0,
@@ -1005,7 +1011,6 @@ function UserMgmt() {
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
-          minHeight: "45px",
           display: "flex",
           alignItems: "center",
           paddingTop: 0,
@@ -1077,7 +1082,15 @@ function UserMgmt() {
             "-",
         status: isEditing ? renderStatusSelect("status", draft.status) : r.status, // Keep raw status value, let Cell function render it
         actions: isEditing ? (
-          <MDBox display="flex" gap={1}>
+          <MDBox
+            display="flex"
+            flexDirection="row"
+            flexWrap="nowrap"
+            alignItems="center"
+            justifyContent="center"
+            gap="2px"
+            sx={{ whiteSpace: "nowrap" }}
+          >
             <IconButton size="small" color="success" onClick={handleEditSave} title="Save">
               <Icon>check</Icon>
             </IconButton>
@@ -1087,13 +1100,17 @@ function UserMgmt() {
           </MDBox>
         ) : (
           <MDBox
-            alignItems="left"
-            justifyContent="left"
+            display="flex"
+            flexDirection="row"
+            flexWrap="nowrap"
+            alignItems="center"
+            justifyContent="center"
             sx={{
               backgroundColor: "#f8f9fa",
               gap: "2px",
               padding: "2px 2px",
               borderRadius: "2px",
+              whiteSpace: "nowrap",
             }}
           >
             {canEdit && (
@@ -1147,111 +1164,72 @@ function UserMgmt() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              User Management
-            </MDTypography>
-            {canCreate && (
-              <MDButton variant="gradient" color="info" onClick={handleAddUser}>
-                Add User
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "78vh",
-              minHeight: "560px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-              "& .MuiTable-root": {
-                tableLayout: "fixed",
-                width: "100%",
-              },
-              "& .MuiTable-root th": {
-                fontSize: "1.0rem !important",
-                fontWeight: "700 !important",
-                padding: "8px 8px !important",
-                borderBottom: "1px solid #d0d0d0",
-              },
-              "& .MuiTable-root td": {
-                padding: "6px 8px !important",
-                borderBottom: "1px solid #e0e0e0",
-              },
-            }}
-          >
-            <MDBox
-              sx={{
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-                "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.05rem !important",
-                  fontWeight: "700 !important",
-                  padding: "10px 10px !important",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root td": {
-                  padding: "8px 10px !important",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-                // Tighten spacing for numeric Id column after Actions / optional S.No
-                "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)":
-                  {
-                    paddingLeft: "6px !important",
-                    paddingRight: "6px !important",
-                  },
-                "& .MuiTable-root th:nth-of-type(2)": {
-                  whiteSpace: "nowrap !important",
-                },
-              }}
-            >
-              <DataTable
-                table={{ columns, rows: computedRows }}
-                isSorted={false}
-                stickyToolbarAndHeader
-                canSearch
-                page={pageIndex}
-                pageSize={pageSize}
-                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-                onPageChange={(page) => setPageIndex(page)}
-                onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
-                  setPageIndex(0);
-                }}
-                showTotalEntries
-                exportFileName="User-Management"
-                noEndBorder
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="User Management"
+        subtitle="Manage system users and access rights"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddUser}>
+              Add User
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTable-root": {
+            tableLayout: "fixed",
+            width: "100%",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.925rem !important",
+            fontWeight: "700 !important",
+            padding: "10px 10px !important",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root td": {
+            padding: "8px 10px !important",
+            borderBottom: "1px solid #e0e0e0",
+          },
+          "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2), & .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)":
+            {
+              paddingLeft: "6px !important",
+              paddingRight: "6px !important",
+            },
+          "& .MuiTable-root th:nth-of-type(2)": {
+            whiteSpace: "nowrap !important",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch
+          page={pageIndex}
+          pageSize={pageSize}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          onPageChange={(page) => setPageIndex(page)}
+          onEntriesPerPageChange={(value) => {
+            setPageSize(value);
+            setPageIndex(0);
+          }}
+          showTotalEntries
+          exportFileName="User-Management"
+          noEndBorder
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
 
       <Dialog open={isRightsModalOpen} onClose={handleCloseRightsModal} fullWidth maxWidth="md">
         <DialogTitle sx={{ color: "#344767" }}>

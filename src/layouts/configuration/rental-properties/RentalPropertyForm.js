@@ -439,7 +439,7 @@ function RentalPropertyForm({
   ];
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle>{initialData ? "Edit Rental Property" : "Add Rental Property"}</DialogTitle>
       <DialogContent>
         <Grid container spacing={2} mt={0.5}>

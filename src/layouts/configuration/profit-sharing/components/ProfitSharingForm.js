@@ -44,7 +44,7 @@ function ProfitSharingForm({ open, handleClose }) {
   const categoryOptions = ["Category-X", "Category-Y", "Category-Z"];
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
       <DialogTitle>Add New Profit Share</DialogTitle>
       <DialogContent>
         <MDBox component="form" role="form" display="flex" flexDirection="column">

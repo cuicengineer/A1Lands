@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 // @mui material components
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
@@ -13,8 +12,11 @@ import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { compactActionSnoColumnsSx } from "utils/compactActionSnoColumnsSx";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -31,6 +33,7 @@ function ClassConfig() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  const [loading, setLoading] = useState(true);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -40,12 +43,15 @@ function ClassConfig() {
   }, []);
 
   const fetchClasses = async () => {
+    setLoading(true);
     try {
       const data = await api.list("Class");
       const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
       setTableRows(arr);
     } catch (e) {
       console.error("Failed to load classes", e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -166,7 +172,7 @@ function ClassConfig() {
   };
 
   const columns = [
-    { Header: "Actions", accessor: "actions", align: "center", width: "8%" },
+    { Header: "Actions", accessor: "actions", align: "center", width: "56px" },
     { Header: "Id", accessor: "id", align: "left", width: "6%" },
     { Header: "Code", accessor: "code", align: "left", width: "8%" },
     { Header: "Class Name", accessor: "name", align: "left", width: "18%" },
@@ -374,138 +380,113 @@ function ClassConfig() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Class
-            </MDTypography>
-            <MDBox display="flex" alignItems="center" gap={2}>
-              {canCreate && (
-                <MDButton variant="gradient" color="info" onClick={handleAddClass}>
-                  Add Class
-                </MDButton>
-              )}
-            </MDBox>
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-            }}
-          >
-            <MDBox
-              sx={{
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-                "& .MuiTable-root": {
-                  tableLayout: "fixed",
-                  width: "100%",
-                },
-                "& .MuiTableCell-root": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                  maxWidth: "100%",
-                  verticalAlign: "top",
-                },
-                "& .MuiTableCell-root *": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.15rem !important",
-                  fontWeight: "700 !important",
-                  padding: "12px 10px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root td": {
-                  padding: "10px 10px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                  hyphens: "auto",
-                  maxWidth: "100%",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-                "& .MuiTable-root td > div": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root td *": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root th:nth-of-type(3), & .MuiTable-root td:nth-of-type(3)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                },
-                "& .MuiTable-root td:nth-of-type(3) > *": {
-                  display: "block",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th:nth-of-type(4), & .MuiTable-root td:nth-of-type(4)": {
-                  maxWidth: "240px",
-                  width: "20%",
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                },
-              }}
-            >
-              <DataTable
-                table={{ columns, rows: computedRows }}
-                isSorted={false}
-                stickyToolbarAndHeader
-                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-                showTotalEntries
-                noEndBorder
-                canSearch
-                exportFileName="Class"
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Class"
+        subtitle="Manage class configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddClass}>
+              Add Class
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTable-root": {
+            tableLayout: "fixed",
+            width: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+            maxWidth: "100%",
+            verticalAlign: "top",
+          },
+          "& .MuiTableCell-root *": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            maxWidth: "100%",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "1rem !important",
+            fontWeight: "700 !important",
+            padding: "12px 10px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "break-word",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root td": {
+            padding: "10px 10px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            hyphens: "auto",
+            maxWidth: "100%",
+            borderBottom: "1px solid #e0e0e0",
+          },
+          "& .MuiTable-root td > div": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          "& .MuiTable-root td *": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          "& .MuiTable-root th:nth-of-type(5), & .MuiTable-root td:nth-of-type(5)": {
+            maxWidth: "240px",
+            width: "20%",
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+          },
+          "& .MuiTable-root td:nth-of-type(5) > *": {
+            display: "block",
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            maxWidth: "100%",
+          },
+          "& .MuiTable-root th:nth-of-type(6), & .MuiTable-root td:nth-of-type(6)": {
+            maxWidth: "240px",
+            width: "20%",
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+          },
+          ...compactActionSnoColumnsSx,
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          showTotalEntries
+          noEndBorder
+          canSearch
+          exportFileName="Class"
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

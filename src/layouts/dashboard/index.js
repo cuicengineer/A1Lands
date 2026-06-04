@@ -1,216 +1,217 @@
 /**
-=========================================================
-* Material Dashboard 2 React - v2.2.0
-=========================================================
+ * Dashboard Home — ERP v1.0 executive layout (data-first KPIs + analytics).
+ */
 
-* Product Page: https://www.creative-tim.com/product/material-dashboard-react
-* Copyright 2023 Creative Tim (https://www.creative-tim.com)
-
-Coded by www.creative-tim.com
-
- =========================================================
-
-* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-*/
-
-// @mui material components
+import { useEffect, useMemo, useState } from "react";
 import Grid from "@mui/material/Grid";
-
-// Material Dashboard 2 React components
-import MDBox from "components/MDBox";
-import MDTypography from "components/MDTypography";
-
-// Material Dashboard 2 React example components
-import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
-import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import DashboardKpiCard from "components/DashboardKpiCard";
+import DashboardChartPanel from "components/DashboardChartPanel";
+import DashboardPageShell from "layouts/dashboard/components/DashboardPageShell";
 import ReportsBarChart from "examples/Charts/BarCharts/ReportsBarChart";
 import ReportsLineChart from "examples/Charts/LineCharts/ReportsLineChart";
-import DefaultLineChart from "examples/Charts/LineCharts/DefaultLineChart";
-import ComplexStatisticsCard from "examples/Cards/StatisticsCards/ComplexStatisticsCard";
-
-// Material Dashboard 2 React contexts
-import { useMaterialUIController } from "context";
-
-// Data
 import reportsBarChartData from "layouts/dashboard/data/reportsBarChartData";
 import reportsLineChartData from "layouts/dashboard/data/reportsLineChartData";
+import { CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
+import api from "services/api.service";
+import {
+  buildExecutiveKpis,
+  extractContractsSummaryRows,
+  extractPropertySummaryRows,
+} from "layouts/dashboard/kpi-overview/kpiDataUtils";
 
-// Dashboard components
-import Projects from "layouts/dashboard/components/Projects";
-import OrdersOverview from "layouts/dashboard/components/OrdersOverview";
+const KPI_ROW = [
+  {
+    label: "Total Lands",
+    trend: "+55% than last week",
+    trendVariant: "positive",
+    icon: "properties",
+    variant: "primary",
+  },
+  {
+    label: "Active Contracts",
+    trend: "+3% than last month",
+    trendVariant: "positive",
+    icon: "contracts",
+  },
+  {
+    label: "Revenue Last Month",
+    value: "3M",
+    trend: "+1% than last month",
+    trendVariant: "positive",
+    icon: "revenue",
+  },
+  {
+    label: "Tenants",
+    trend: "Just updated",
+    trendVariant: "neutral",
+    icon: "tenants",
+  },
+];
+
+function formatKpiCount(value, ready) {
+  if (!ready) return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString();
+}
 
 function Dashboard() {
-  const [controller] = useMaterialUIController();
-  const { darkMode } = controller;
+  const [propertyRows, setPropertyRows] = useState([]);
+  const [contractRows, setContractRows] = useState([]);
+  const [tenantCount, setTenantCount] = useState(null);
+  const [kpiReady, setKpiReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [summaryPayload, tenantsPayload] = await Promise.all([
+          api.request("GET", "/api/Dashboards/property-summary"),
+          api.list("tenant"),
+        ]);
+        if (!cancelled) {
+          setPropertyRows(extractPropertySummaryRows(summaryPayload));
+          setContractRows(extractContractsSummaryRows(summaryPayload));
+          const tenants = Array.isArray(tenantsPayload) ? tenantsPayload : [];
+          setTenantCount(tenants.length);
+        }
+      } catch (e) {
+        if (!cancelled) console.error("Dashboard home KPIs:", e);
+      } finally {
+        if (!cancelled) setKpiReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const executiveKpis = useMemo(
+    () => buildExecutiveKpis(propertyRows, contractRows, []),
+    [propertyRows, contractRows]
+  );
+
+  const kpiValueByLabel = useMemo(
+    () => ({
+      "Total Lands": executiveKpis.totalProperties,
+      "Active Contracts": executiveKpis.activeContracts,
+      Tenants: tenantCount,
+    }),
+    [executiveKpis.totalProperties, executiveKpis.activeContracts, tenantCount]
+  );
   const { sales, tasks } = reportsLineChartData;
 
-  // Dummy "A1 Land Activities" widgets (top)
   const a1AnnualRent = {
     labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Annual Rent", data: [2000000, 3000000, 4000000, 5000000, 6000000] }, // Round millions: 2M, 3M, 4M, 5M, 6M
+    datasets: { label: "Annual Rent", data: [2000000, 3000000, 4000000, 5000000, 6000000] },
   };
+
   const a1GovtShare = {
     labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "Govt Share", data: [1000000, 2000000, 3000000, 4000000, 5000000] }, // Round millions: 1M, 2M, 3M, 4M, 5M
-  };
-  const a1PafShare = {
-    labels: ["FAC", "NAC", "CAC", "SAC", "WAC"],
-    datasets: { label: "PAF Share", data: [17500, 0, 75500, 0, 0] },
-  };
-  const a1ReceiptTrend = {
-    labels: ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-    datasets: [
-      { label: "A", color: "info", data: [52, 48, 55, 49, 57, 54, 60, 58, 56, 59, 61, 62] },
-      { label: "B", color: "success", data: [44, 42, 46, 45, 47, 46, 48, 49, 50, 51, 50, 52] },
-      { label: "C", color: "warning", data: [30, 28, 31, 29, 32, 30, 33, 34, 35, 34, 36, 37] },
-      { label: "BT", color: "error", data: [15, 14, 15, 14, 16, 15, 16, 16, 17, 16, 17, 18] },
-      { label: "HB", color: "dark", data: [40, 39, 41, 40, 42, 41, 43, 44, 45, 46, 45, 47] },
-    ],
+    datasets: { label: "Govt Share", data: [1000000, 2000000, 3000000, 4000000, 5000000] },
   };
 
   return (
-    <DashboardLayout>
-      <DashboardNavbar />
-      <MDBox
-        py={3}
-        sx={{
-          "& .MuiTypography-root": {
-            color: darkMode ? "#ffffff !important" : "inherit",
-          },
-        }}
-      >
-        <Grid container spacing={2} mb={4}>
-          <Grid item xs={12} md={6}>
-            <MDBox mb={1}>
-              <ReportsBarChart
-                color="info"
-                title="Annual Rent"
-                description="PAF All RAC"
-                date="Updated just now"
-                chart={a1AnnualRent}
-              />
-            </MDBox>
+    <DashboardPageShell
+      title="Dashboard"
+      subtitle="Executive overview of land, contracts, and revenue performance"
+    >
+      <Grid container spacing={1} className="erp-dashboard-kpi-grid">
+        {KPI_ROW.map((kpi, index) => (
+          <Grid item xs={12} sm={6} lg={3} key={kpi.label}>
+            <DashboardKpiCard
+              label={kpi.label}
+              value={
+                kpi.value != null ? kpi.value : formatKpiCount(kpiValueByLabel[kpi.label], kpiReady)
+              }
+              trend={kpi.trend}
+              trendVariant={kpi.trendVariant}
+              variant={index === 0 || kpi.variant === "primary" ? "primary" : "default"}
+              icon={kpi.icon}
+            />
           </Grid>
-          <Grid item xs={12} md={6}>
-            <MDBox mb={3}>
-              <ReportsBarChart
-                color="dark"
-                title="Govt Share"
-                description="Command Wise"
-                date="Updated just now"
-                chart={a1GovtShare}
-              />
-            </MDBox>
-          </Grid>
+        ))}
+
+        <Grid item xs={12} lg={6}>
+          <DashboardChartPanel title="Annual Rent" description="PAF all RAC — updated just now">
+            <ReportsBarChart
+              flat
+              seriesColor={CHART_PRIMARY}
+              title=""
+              description=""
+              date=""
+              chart={a1AnnualRent}
+              chartHeight="260px"
+            />
+          </DashboardChartPanel>
         </Grid>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6} lg={3}>
-            <MDBox mb={1.5}>
-              <ComplexStatisticsCard
-                color="dark"
-                icon="weekend"
-                title="Class 'A' Land"
-                count={281}
-                percentage={{
-                  color: "success",
-                  amount: "+55%",
-                  label: "than lask week",
-                }}
-              />
-            </MDBox>
-          </Grid>
-          <Grid item xs={12} md={6} lg={3}>
-            <MDBox mb={1.5}>
-              <ComplexStatisticsCard
-                icon="leaderboard"
-                title="Active Contracts"
-                count="2,300"
-                percentage={{
-                  color: "success",
-                  amount: "+3%",
-                  label: "than last month",
-                }}
-              />
-            </MDBox>
-          </Grid>
-          <Grid item xs={12} md={6} lg={3}>
-            <MDBox mb={1.5}>
-              <ComplexStatisticsCard
-                color="success"
-                icon="store"
-                title="Revenue Last Month"
-                count="3 Million"
-                percentage={{
-                  color: "success",
-                  amount: "+1%",
-                  label: "than last month",
-                }}
-              />
-            </MDBox>
-          </Grid>
-          <Grid item xs={12} md={6} lg={3}>
-            <MDBox mb={1.5}>
-              <ComplexStatisticsCard
-                color="primary"
-                icon="person_add"
-                title="Tenants"
-                count="91"
-                percentage={{
-                  color: "success",
-                  amount: "",
-                  label: "Just updated",
-                }}
-              />
-            </MDBox>
-          </Grid>
+
+        <Grid item xs={12} lg={6}>
+          <DashboardChartPanel title="Govt Share" description="Command wise — updated just now">
+            <ReportsBarChart
+              flat
+              seriesColor={CHART_SECONDARY}
+              title=""
+              description=""
+              date=""
+              chart={a1GovtShare}
+              chartHeight="260px"
+            />
+          </DashboardChartPanel>
         </Grid>
-        <MDBox mt={4.5}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6} lg={4}>
-              <MDBox mb={3}>
-                <ReportsBarChart
-                  color="info"
-                  title="Daily New Contracts"
-                  description={
-                    <>
-                      (<strong>+5%</strong>) increase
-                    </>
-                  }
-                  date="campaign sent 2 days ago"
-                  chart={reportsBarChartData}
-                />
-              </MDBox>
-            </Grid>
-            <Grid item xs={12} md={6} lg={4}>
-              <MDBox mb={3}>
-                <ReportsLineChart
-                  color="success"
-                  title="Monthly Revenue Collection"
-                  description={
-                    <>
-                      (<strong>+15%</strong>) Dir. NPF
-                    </>
-                  }
-                  chart={sales}
-                />
-              </MDBox>
-            </Grid>
-            <Grid item xs={12} md={6} lg={4}>
-              <MDBox mb={3}>
-                <ReportsLineChart
-                  color="dark"
-                  title="Completed Contracts"
-                  description="Completion Trend PAF"
-                  chart={tasks}
-                />
-              </MDBox>
-            </Grid>
-          </Grid>
-        </MDBox>
-      </MDBox>
-      <Footer />
-    </DashboardLayout>
+
+        <Grid item xs={12}>
+          <p className="erp-dashboard-section-title erp-dashboard-section-title--spaced">
+            Activity & trends
+          </p>
+        </Grid>
+
+        <Grid item xs={12} md={6} lg={4}>
+          <DashboardChartPanel
+            title="Daily New Contracts"
+            description="(+5%) increase · campaign sent 2 days ago"
+          >
+            <ReportsBarChart
+              flat
+              seriesColor={CHART_PRIMARY}
+              title=""
+              description=""
+              date=""
+              chart={reportsBarChartData}
+              chartHeight="240px"
+            />
+          </DashboardChartPanel>
+        </Grid>
+
+        <Grid item xs={12} md={6} lg={4}>
+          <DashboardChartPanel title="Monthly Revenue Collection" description="(+15%) Dir. NPF">
+            <ReportsLineChart
+              flat
+              seriesColor={CHART_SECONDARY}
+              title=""
+              description=""
+              date=""
+              chart={sales}
+              chartHeight="240px"
+            />
+          </DashboardChartPanel>
+        </Grid>
+
+        <Grid item xs={12} md={6} lg={4}>
+          <DashboardChartPanel title="Completed Contracts" description="Completion trend PAF">
+            <ReportsLineChart
+              flat
+              seriesColor={CHART_PRIMARY}
+              title=""
+              description=""
+              date=""
+              chart={tasks}
+              chartHeight="240px"
+            />
+          </DashboardChartPanel>
+        </Grid>
+      </Grid>
+    </DashboardPageShell>
   );
 }
 

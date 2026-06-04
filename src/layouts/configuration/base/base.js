@@ -1,4 +1,3 @@
-import Card from "@mui/material/Card";
 import { useEffect, useState } from "react";
 import api, {
   canCreateCurrentMenu,
@@ -10,9 +9,11 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import StatusBadge from "components/StatusBadge";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
 import DataTable from "examples/Tables/DataTable";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -29,6 +30,7 @@ function Base() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(true);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -36,6 +38,7 @@ function Base() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      setLoading(true);
       try {
         const [baseData, commandData] = await Promise.all([api.list("Base"), api.list("Command")]);
         if (!mounted) return;
@@ -47,6 +50,8 @@ function Base() {
         setCommandOptions(commandArr.map((cmd) => ({ id: cmd.id, name: cmd.name })));
       } catch (e) {
         console.error("Failed to load data", e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -324,59 +329,43 @@ function Base() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Base
-            </MDTypography>
-            {canCreate && (
-              <MDButton variant="gradient" color="info" onClick={handleAddBase}>
-                Add Base
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-            }}
-          >
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              stickyToolbarAndHeader
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-              exportFileName="Base"
-            />
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Base"
+        subtitle="Manage base configuration records"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddBase}>
+              Add Base
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          showTotalEntries={true}
+          noEndBorder
+          exportFileName="Base"
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

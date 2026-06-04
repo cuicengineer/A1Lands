@@ -1,0 +1,347 @@
+/* =====================================================================
+   Premium SaaS polish — micro-interactions & metadata visualization
+   Visual layer only. Scoped to body.enterprise-ui
+   ===================================================================== */
+
+:root {
+  --polish-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --polish-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Grid value chips (RAC / Base / Class / Category) ---- */
+.saas-grid-value-chip,
+.saas-grid-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition: transform var(--polish-transition-fast), box-shadow var(--polish-transition-fast);
+}
+
+.saas-grid-value-chip--rac {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.saas-grid-value-chip--base {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #6d28d9;
+}
+
+.saas-grid-value-chip--class,
+.saas-grid-value-chip--category {
+  background: #ecfeff;
+  border-color: #a5f3fc;
+  color: #0e7490;
+}
+
+.saas-grid-value-chip--neutral {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #3f3f46;
+}
+
+/* ---- Grid status chips ---- */
+.saas-grid-status-chip--active {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.saas-grid-status-chip--approved {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.saas-grid-status-chip--pending {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.saas-grid-status-chip--inactive {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.saas-grid-status-chip--archive {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #52525b;
+}
+
+.saas-grid-status-chip--rejected {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.saas-grid-status-chip--neutral {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+body.enterprise-ui tr:hover .saas-grid-value-chip,
+body.enterprise-ui tr:hover .saas-grid-status-chip {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+/* Legacy gradient badges → soft pills in enterprise grids */
+body.enterprise-ui .saas-settings-table .MuiBadge-badge,
+body.enterprise-ui .saas-workspace-card .MuiBadge-badge,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiBadge-badge {
+  background-image: none !important;
+  box-shadow: none !important;
+  border-radius: 999px !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  padding: 3px 8px !important;
+  min-height: 20px !important;
+  letter-spacing: 0.01em;
+  text-transform: none !important;
+}
+
+body.enterprise-ui .saas-settings-table .badge-success,
+body.enterprise-ui .saas-workspace-card .badge-success,
+body.enterprise-ui .enterprise-workspace-grid-host .badge-success,
+body.enterprise-ui .saas-settings-table .bg-gradient-success,
+body.enterprise-ui .saas-workspace-card .bg-gradient-success,
+body.enterprise-ui .enterprise-workspace-grid-host .bg-gradient-success,
+body.enterprise-ui .saas-settings-table .MuiBadge-badge.bg-gradient-success,
+body.enterprise-ui .saas-workspace-card .MuiBadge-badge.bg-gradient-success,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiBadge-badge.bg-gradient-success {
+  background: #ecfdf3 !important;
+  color: #15803d !important;
+  border: 1px solid #86efac !important;
+}
+
+body.enterprise-ui .saas-settings-table .badge-error,
+body.enterprise-ui .saas-workspace-card .badge-error,
+body.enterprise-ui .enterprise-workspace-grid-host .badge-error,
+body.enterprise-ui .saas-settings-table .bg-gradient-error,
+body.enterprise-ui .saas-workspace-card .bg-gradient-error,
+body.enterprise-ui .enterprise-workspace-grid-host .bg-gradient-error,
+body.enterprise-ui .saas-settings-table .bg-gradient-dark,
+body.enterprise-ui .saas-workspace-card .bg-gradient-dark,
+body.enterprise-ui .enterprise-workspace-grid-host .bg-gradient-dark,
+body.enterprise-ui .saas-settings-table .MuiBadge-badge.bg-gradient-error,
+body.enterprise-ui .saas-workspace-card .MuiBadge-badge.bg-gradient-error,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiBadge-badge.bg-gradient-error,
+body.enterprise-ui .saas-settings-table .MuiBadge-badge.bg-gradient-dark,
+body.enterprise-ui .saas-workspace-card .MuiBadge-badge.bg-gradient-dark,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiBadge-badge.bg-gradient-dark {
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fecaca !important;
+}
+
+/* Status chips must keep readable green/red text in grid cells */
+body.enterprise-ui .saas-settings-table td .saas-grid-status-chip--active,
+body.enterprise-ui .saas-workspace-card td .saas-grid-status-chip--active,
+body.enterprise-ui .enterprise-workspace-grid-host td .saas-grid-status-chip--active {
+  color: #15803d !important;
+}
+
+body.enterprise-ui .saas-settings-table td .saas-grid-status-chip--inactive,
+body.enterprise-ui .saas-workspace-card td .saas-grid-status-chip--inactive,
+body.enterprise-ui .enterprise-workspace-grid-host td .saas-grid-status-chip--inactive,
+body.enterprise-ui .saas-settings-table td .saas-grid-status-chip--rejected,
+body.enterprise-ui .saas-workspace-card td .saas-grid-status-chip--rejected,
+body.enterprise-ui .enterprise-workspace-grid-host td .saas-grid-status-chip--rejected {
+  color: #b91c1c !important;
+}
+
+/* ---- Interactive rows ---- */
+body.enterprise-ui .saas-settings-table .MuiTableBody-root tr,
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr {
+  transition: background-color var(--polish-transition), box-shadow var(--polish-transition);
+}
+
+body.enterprise-ui .saas-settings-table .MuiTableBody-root tr:hover td,
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:hover td {
+  background-color: #f8fafc !important;
+}
+
+body.enterprise-ui .saas-settings-table .MuiTableBody-root tr:hover td:first-of-type,
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:hover td:first-of-type {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+body.enterprise-ui .saas-settings-table .MuiTableBody-root tr:hover,
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:hover {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.05);
+}
+
+/* ---- Row action icons — reveal on hover ---- */
+body.enterprise-ui .saas-settings-table td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]),
+body.enterprise-ui .saas-workspace-card td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]) {
+  opacity: 0.42 !important;
+}
+
+body.enterprise-ui .saas-settings-table tr:hover td .MuiIconButton-root,
+body.enterprise-ui .saas-workspace-card tr:hover td .MuiIconButton-root {
+  opacity: 1 !important;
+}
+
+/* ---- Grid headers ---- */
+body.enterprise-ui .saas-settings-table thead th,
+body.enterprise-ui .saas-workspace-card thead th,
+body.enterprise-ui .saas-settings-table-scroll thead th {
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  backdrop-filter: blur(6px);
+}
+
+/* ---- Segmented context filters (Contracts) ---- */
+.contracts-context-segmented {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 2px !important;
+  border-radius: 8px !important;
+  background: rgba(16, 24, 40, 0.04) !important;
+  border: 1px solid var(--layer-controls-border) !important;
+  gap: 1px !important;
+}
+
+.contracts-context-segmented .MuiToggleButtonGroup-grouped {
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 6px !important;
+}
+
+.contracts-context-segmented .MuiToggleButton-root {
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 2px 10px !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  min-height: 26px !important;
+  line-height: 1.2 !important;
+  color: var(--settings-muted) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  transition: color var(--polish-transition-fast), background-color var(--polish-transition-fast),
+    box-shadow var(--polish-transition-fast);
+}
+
+.contracts-context-segmented .MuiToggleButton-root:hover {
+  background: rgba(255, 255, 255, 0.65) !important;
+  color: var(--settings-text) !important;
+}
+
+.contracts-context-segmented .MuiToggleButton-root.Mui-selected {
+  background: #ffffff !important;
+  color: var(--settings-text) !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.07), 0 0 0 1px rgba(16, 24, 40, 0.04) !important;
+}
+
+.contracts-context-segmented .MuiToggleButton-root.Mui-selected:hover {
+  background: #ffffff !important;
+}
+
+/* ---- Toolbar micro-interactions ---- */
+body.enterprise-ui .compact-group-by-trigger {
+  transition: border-color var(--polish-transition-fast), box-shadow var(--polish-transition-fast),
+    background-color var(--polish-transition-fast), transform var(--polish-transition-fast) !important;
+}
+
+body.enterprise-ui .compact-group-by-trigger:hover {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06) !important;
+}
+
+body.enterprise-ui .compact-filter-trigger {
+  transition: border-color var(--polish-transition-fast), box-shadow var(--polish-transition-fast),
+    background-color var(--polish-transition-fast) !important;
+}
+
+body.enterprise-ui .compact-filter-trigger:hover {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+body.enterprise-ui .saas-header-primary-action .MuiButton-root:active,
+body.enterprise-ui .compact-group-by-trigger:active {
+  transform: translateY(0) !important;
+}
+
+/* ---- KPI metadata pills ---- */
+.saas-metadata-chip-badge--contracts {
+  background: #ecfdf3 !important;
+  border: 1px solid #86efac;
+}
+
+.saas-metadata-chip-badge--contracts .saas-metadata-chip-badge-value {
+  color: #15803d !important;
+}
+
+.saas-metadata-chip-badge--contracts .saas-metadata-chip-badge-label {
+  color: #16a34a !important;
+}
+
+.saas-metadata-chip-badge--racs {
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe;
+}
+
+.saas-metadata-chip-badge--racs .saas-metadata-chip-badge-value {
+  color: #1d4ed8 !important;
+}
+
+.saas-metadata-chip-badge--racs .saas-metadata-chip-badge-label {
+  color: #2563eb !important;
+}
+
+.saas-metadata-chip-badge--bases {
+  background: #f5f3ff !important;
+  border: 1px solid #ddd6fe;
+}
+
+.saas-metadata-chip-badge--bases .saas-metadata-chip-badge-value {
+  color: #6d28d9 !important;
+}
+
+.saas-metadata-chip-badge--bases .saas-metadata-chip-badge-label {
+  color: #7c3aed !important;
+}
+
+.saas-metadata-chip-badge--classes {
+  background: #ecfeff !important;
+  border: 1px solid #a5f3fc;
+}
+
+.saas-metadata-chip-badge--classes .saas-metadata-chip-badge-value {
+  color: #0e7490 !important;
+}
+
+.saas-metadata-chip-badge--classes .saas-metadata-chip-badge-label {
+  color: #0891b2 !important;
+}
+
+.saas-metadata-chip-badge--contracts .saas-metadata-chip-badge-label,
+.saas-metadata-chip-badge--racs .saas-metadata-chip-badge-label,
+.saas-metadata-chip-badge--bases .saas-metadata-chip-badge-label,
+.saas-metadata-chip-badge--classes .saas-metadata-chip-badge-label {
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

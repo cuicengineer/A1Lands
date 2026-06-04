@@ -1,0 +1,216 @@
+/* Lock viewport — no page scrollbars on login */
+html.a1-login-active,
+body.a1-login-active {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Poppins", sans-serif !important;
+}
+
+.a1-login-page--loading {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+html.a1-login-active #root {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+
+
+/* PageLayout uses 100vw which can trigger horizontal scroll */
+body.a1-login-active .MuiBox-root:has(> .a1-login-page) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+
+.a1-login-page {
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  max-height: 100dvh;
+ 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: clamp(8px, 1.5vh, 20px) clamp(8px, 1.5vw, 20px);
+  background: #ffffff;
+}
+
+.a1-login-page  .sm-btn { font-size:14px !important;}
+
+.a1-login-page .login-layout {
+  width: 100%;
+  max-width: min(1280px, 100%);
+  min-height: 0 !important;
+  height: auto;
+  max-height: 100%;
+  margin: 0 auto;
+  padding: 0 !important;
+  gap: clamp(16px, 2.5vw, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.a1-login-page .left-wrapper {
+  flex: 0 1 45%;
+  width: 45%;
+  max-width: 45%;
+  height: min(680px, calc(100dvh - 32px));
+  min-height: 220px;
+  max-height: calc(100dvh - 32px);
+}
+
+.a1-login-page .right-wrapper {
+  flex: 1 1 55%;
+  min-width: 0;
+  padding-right:100px;
+  padding-left:60px;
+  max-width: 55%;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.a1-login-page .carousel,
+.a1-login-page .carousel-inner,
+.a1-login-page .carousel-item {
+  min-height: 100%;
+}
+
+.a1-login-page .carousel-item img {
+  transform: none;
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.a1-login-page .carousel-item.active img {
+  transform: scale(1.04);
+}
+
+.a1-login-page .row {
+  --bs-gutter-x: 12px;
+  margin-left: 0;
+  margin-right: 0;
+  max-width: 100%;
+}
+
+.a1-login-page .row > [class*="col-"] {
+  padding-left: calc(var(--bs-gutter-x) * 0.5);
+  padding-right: calc(var(--bs-gutter-x) * 0.5);
+}
+
+.a1-login-page .auth-error {
+  margin-top: 12px;
+  color: #b42318;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.a1-login-page .btn-login:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+@media (max-height: 820px) {
+  .a1-login-page .left-wrapper {
+    height: min(520px, calc(100dvh - 24px));
+    max-height: calc(100dvh - 24px);
+  }
+
+  .a1-login-page .big-a1 {
+    /* font-size: clamp(54px, 9vh, 82px); */
+    font-weight:700 !important;
+    letter-spacing:-6px;
+  }
+
+  .a1-login-page .main-heading {
+    font-size: clamp(20px, 3.2vh, 28px);
+  }
+
+  .a1-login-page hr {
+    margin: 12px 0;
+  }
+
+  .a1-login-page .main-description {
+    margin-top: 12px;
+  }
+
+  .a1-login-page .company {
+    margin-top: 20px;
+  }
+
+  .a1-login-page .form-control,
+  .a1-login-page .btn-login {
+    height: 44px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .a1-login-page .login-layout {
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(12px, 2vh, 24px);
+  }
+
+  .a1-login-page .left-wrapper,
+  .a1-login-page .right-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 auto;
+  }
+
+  .a1-login-page .left-wrapper {
+    height: min(360px, 38dvh);
+    max-height: 38dvh;
+  }
+
+  .a1-login-page .right-wrapper {
+    max-height: calc(62dvh - 24px);
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 576px) {
+  .a1-login-page {
+    padding: 10px 12px;
+  }
+
+  .a1-login-page .left-wrapper {
+    height: min(280px, 34dvh);
+    max-height: 34dvh;
+    border-radius: 16px;
+  }
+
+  .a1-login-page .slide-title {
+    font-size: clamp(20px, 5vw, 30px);
+  }
+
+  .a1-login-page .system-title h1 {
+    font-size: clamp(18px, 4.5vw, 24px);
+  }
+
+  .a1-login-page .row > [class*="col-md-6"] {
+    width: 100%;
+  }
+}

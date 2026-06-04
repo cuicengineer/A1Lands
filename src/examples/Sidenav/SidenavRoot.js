@@ -21,19 +21,17 @@ export default styled(Drawer)(({ theme, ownerState }) => {
   const { palette, boxShadows, transitions, breakpoints, functions } = theme;
   const { transparentSidenav, whiteSidenav, miniSidenav, darkMode } = ownerState;
 
-  const sidebarWidth = 250;
+  const sidebarWidth = 280;
   const { transparent, gradients, white, background } = palette;
   const { xxl } = boxShadows;
   const { pxToRem, linearGradient } = functions;
 
-  let backgroundValue = darkMode
-    ? background.sidenav
-    : linearGradient(gradients.dark.main, gradients.dark.state);
+  let backgroundValue = darkMode ? background.sidenav : "#f9fafb";
 
   if (transparentSidenav) {
     backgroundValue = transparent.main;
   } else if (whiteSidenav) {
-    backgroundValue = white.main;
+    backgroundValue = "#025B64";
   }
 
   // styles for the sidenav when miniSidenav={false}
@@ -50,6 +48,7 @@ export default styled(Drawer)(({ theme, ownerState }) => {
       marginBottom: transparentSidenav ? 0 : "inherit",
       left: "0",
       width: sidebarWidth,
+      maxWidth: "100%",
       transform: "translateX(0)",
       transition: transitions.create(["width", "background-color"], {
         easing: transitions.easing.sharp,
@@ -71,7 +70,8 @@ export default styled(Drawer)(({ theme, ownerState }) => {
       boxShadow: transparentSidenav ? "none" : xxl,
       marginBottom: transparentSidenav ? 0 : "inherit",
       left: "0",
-      width: pxToRem(96),
+      width: pxToRem(72),
+      maxWidth: "100%",
       overflowX: "hidden",
       transform: "translateX(0)",
       transition: transitions.create(["width", "background-color"], {
@@ -85,6 +85,12 @@ export default styled(Drawer)(({ theme, ownerState }) => {
     "& .MuiDrawer-paper": {
       boxShadow: xxl,
       border: "none",
+      boxSizing: "border-box",
+      margin: 0,
+      borderRadius: 0,
+      height: "100vh",
+      maxWidth: "100%",
+      overflowX: "hidden",
 
       ...(miniSidenav ? drawerCloseStyles() : drawerOpenStyles()),
     },

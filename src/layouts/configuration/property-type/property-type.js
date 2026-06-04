@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 
 // @mui material components
-import Card from "@mui/material/Card";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -23,7 +22,8 @@ import MDInput from "components/MDInput";
 // Material Dashboard 2 React example components
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 
 import api, {
@@ -32,7 +32,8 @@ import api, {
   canEditCurrentMenu,
 } from "services/api.service";
 import StatusBadge from "components/StatusBadge";
-import CurrencyLoading from "components/CurrencyLoading";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
+import { ServerGridPagination } from "components/CompactGridPagination";
 import { useMaterialUIController } from "context";
 
 function PropertyType() {
@@ -49,9 +50,9 @@ function PropertyType() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(1000);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
@@ -423,145 +424,118 @@ function PropertyType() {
   // Memoize the table object to prevent DataTable from resetting pagination
   const tableData = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
 
+  const serverPaginationFooter = useMemo(
+    () => (
+      <ServerGridPagination
+        page={pageNumber}
+        totalCount={totalCount}
+        pageSize={pageSize}
+        onPageChange={setPageNumber}
+      />
+    ),
+    [totalCount, pageNumber, pageSize]
+  );
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Property Type
-            </MDTypography>
-            <MDBox display="flex" alignItems="center" gap={2}>
-              {canCreate && (
-                <MDButton variant="gradient" color="info" onClick={handleAddPropertyType}>
-                  Add Property Type
-                </MDButton>
-              )}
-            </MDBox>
-          </MDBox>
-          <MDBox pt={3} position="relative">
-            {loading && (
-              <MDBox
-                position="absolute"
-                top={0}
-                left={0}
-                right={0}
-                bottom={0}
-                display="flex"
-                justifyContent="center"
-                alignItems="center"
-                zIndex={10}
-                sx={{
-                  backgroundColor: "rgba(255, 255, 255, 0.8)",
-                  backdropFilter: "blur(2px)",
-                }}
-              >
-                <CurrencyLoading size={50} />
-              </MDBox>
-            )}
-            <MDBox
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                height: "70vh",
-                minHeight: "400px",
-                overflow: "hidden",
-                "& .MuiTableContainer-root": {
-                  flex: "1 1 0",
-                  minHeight: 0,
-                  overflow: "hidden",
-                },
-                "& .MuiTable-root": {
-                  tableLayout: "auto",
-                  width: "auto",
-                  minWidth: "100%",
-                },
-                "& .MuiTableCell-root": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                  maxWidth: "100%",
-                  verticalAlign: "top",
-                },
-                "& .MuiTableCell-root *": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "12px !important",
-                  fontWeight: "700 !important",
-                  padding: "6px 4px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root th:first-of-type": {
-                  padding: "6px 2px !important",
-                },
-                "& .MuiTable-root th:nth-of-type(2)": {
-                  padding: "6px 2px !important",
-                },
-                "& .MuiTable-root td": {
-                  padding: "6px 4px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                  hyphens: "auto",
-                  maxWidth: "100%",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-                "& .MuiTable-root td:first-of-type": {
-                  padding: "6px 2px !important",
-                },
-                "& .MuiTable-root td:nth-of-type(2)": {
-                  padding: "6px 2px !important",
-                },
-              }}
-            >
-              <DataTable
-                table={tableData}
-                isSorted={false}
-                stickyToolbarAndHeader
-                canSearch={true}
-                page={pageNumber - 1}
-                entriesPerPage={{
-                  defaultValue: 20,
-                  entries: [10, 25, 50, 100],
-                }}
-                pageSize={pageSize}
-                onPageChange={(page) => {
-                  setPageNumber(page + 1);
-                }}
-                onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
-                  setPageNumber(1);
-                }}
-                showTotalEntries
-                exportFileName="Property-Type"
-                noEndBorder
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Property Type"
+        subtitle="Manage property type configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddPropertyType}>
+              Add Property Type
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "auto",
+            minWidth: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+            maxWidth: "100%",
+            verticalAlign: "top",
+          },
+          "& .MuiTableCell-root *": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            maxWidth: "100%",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "10px !important",
+            fontWeight: "700 !important",
+            padding: "6px 4px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "break-word",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root th:first-of-type": {
+            padding: "6px 2px !important",
+          },
+          "& .MuiTable-root th:nth-of-type(2)": {
+            padding: "6px 2px !important",
+          },
+          "& .MuiTable-root td": {
+            padding: "6px 4px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            hyphens: "auto",
+            maxWidth: "100%",
+            borderBottom: "1px solid #e0e0e0",
+          },
+          "& .MuiTable-root td:first-of-type": {
+            padding: "6px 2px !important",
+          },
+          "& .MuiTable-root td:nth-of-type(2)": {
+            padding: "6px 2px !important",
+          },
+        }}
+      >
+        <DataTable
+          table={tableData}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          page={pageNumber - 1}
+          entriesPerPage={{
+            defaultValue: 20,
+            entries: [10, 25, 50, 100],
+          }}
+          pageSize={pageSize}
+          onPageChange={(page) => {
+            setPageNumber(page + 1);
+          }}
+          onEntriesPerPageChange={(value) => {
+            setPageSize(value);
+            setPageNumber(1);
+          }}
+          showTotalEntries
+          exportFileName="Property-Type"
+          noEndBorder
+          paginationFooter={serverPaginationFooter}
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>

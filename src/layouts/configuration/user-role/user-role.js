@@ -1,4 +1,3 @@
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
@@ -10,8 +9,11 @@ import MDInput from "components/MDInput";
 import StatusBadge from "components/StatusBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { compactActionSnoColumnsSx } from "utils/compactActionSnoColumnsSx";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import api, { isSuperuserUser } from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
@@ -19,6 +21,7 @@ function UserRole() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
@@ -32,12 +35,15 @@ function UserRole() {
   const canDelete = canMutateRoles;
 
   const fetchRoles = async () => {
+    setLoading(true);
     try {
       const data = await api.list("Role");
       const arr = Array.isArray(data) ? data : data && data.items ? data.items : [];
       setTableRows(arr);
     } catch (e) {
       console.error("Failed to load roles", e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -173,7 +179,7 @@ function UserRole() {
     { Header: "Status", accessor: "status", align: "center", width: "100px" },
   ];
   const columns = canMutateRoles
-    ? [{ Header: "Actions", accessor: "actions", align: "center", width: "80px" }, ...dataColumns]
+    ? [{ Header: "Actions", accessor: "actions", align: "center", width: "56px" }, ...dataColumns]
     : dataColumns;
 
   const renderStatusBadge = (status) => {
@@ -234,7 +240,6 @@ function UserRole() {
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
-          minHeight: "45px",
           display: "flex",
           alignItems: "center",
           paddingTop: 0,
@@ -376,121 +381,98 @@ function UserRole() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              User Roles
-            </MDTypography>
-            {canCreate && (
-              <MDButton variant="gradient" color="info" onClick={handleAddUser}>
-                Add Roles
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-            }}
-          >
-            <MDBox
-              sx={{
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-                "& .MuiTable-root": {
-                  tableLayout: "auto",
-                  width: "auto",
-                  minWidth: "100%",
-                },
-                "& .MuiTableCell-root": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                  maxWidth: "100%",
-                  verticalAlign: "top",
-                },
-                "& .MuiTableCell-root *": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  maxWidth: "100%",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.15rem !important",
-                  fontWeight: "700 !important",
-                  padding: "4px 4px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "break-word",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root td": {
-                  padding: "10px 10px !important",
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                  hyphens: "auto",
-                  maxWidth: "100%",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-                "& .MuiTable-root td > div": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-                "& .MuiTable-root td *": {
-                  whiteSpace: "normal",
-                  wordBreak: "break-word",
-                  overflowWrap: "anywhere",
-                },
-              }}
-            >
-              <DataTable
-                table={{ columns, rows: computedRows }}
-                isSorted={false}
-                stickyToolbarAndHeader
-                canSearch
-                page={pageIndex}
-                pageSize={pageSize}
-                entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-                onPageChange={(page) => setPageIndex(page)}
-                onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
-                  setPageIndex(0);
-                }}
-                showTotalEntries
-                exportFileName="User-Roles"
-                noEndBorder
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="User Roles"
+        subtitle="Manage user role configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddUser}>
+              Add Roles
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "auto",
+            minWidth: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+            maxWidth: "100%",
+            verticalAlign: "top",
+          },
+          "& .MuiTableCell-root *": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            maxWidth: "100%",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "1rem !important",
+            fontWeight: "700 !important",
+            padding: "4px 4px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "break-word",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root td": {
+            padding: "10px 10px !important",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            hyphens: "auto",
+            maxWidth: "100%",
+            borderBottom: "1px solid #e0e0e0",
+          },
+          "& .MuiTable-root td > div": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          "& .MuiTable-root td *": {
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+          },
+          ...compactActionSnoColumnsSx,
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch
+          page={pageIndex}
+          pageSize={pageSize}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          onPageChange={(page) => setPageIndex(page)}
+          onEntriesPerPageChange={(value) => {
+            setPageSize(value);
+            setPageIndex(0);
+          }}
+          showTotalEntries
+          exportFileName="User-Roles"
+          noEndBorder
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

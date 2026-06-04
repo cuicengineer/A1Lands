@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -12,7 +11,7 @@ import Menu from "@mui/material/Menu";
 import Popover from "@mui/material/Popover";
 import Divider from "@mui/material/Divider";
 import TableContainer from "@mui/material/TableContainer";
-import CircularProgress from "@mui/material/CircularProgress";
+import CurrencyLoading from "components/CurrencyLoading";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -24,15 +23,18 @@ import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
 import Autocomplete from "@mui/material/Autocomplete";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
-import CurrencyLoading from "components/CurrencyLoading";
+import CompactGroupBySelect from "components/CompactGroupBySelect";
+import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
-import { format, parseISO, isValid, addDays, addMonths } from "date-fns";
+import { format, parseISO, isValid, addDays, addMonths, addYears } from "date-fns";
 
 const AGREEMENT_PROV_GRID_DATE_FALLBACK_KEYS = {
   contractStartDate: ["contractStartDate", "ContractStartDate"],
@@ -55,9 +57,40 @@ function pickScheduleRowField(rowData, pascalKey, camelKey) {
 function pickScheduleRowIsLocked(rowData) {
   if (!rowData) return false;
   const v = rowData?.IsLocked ?? rowData?.isLocked;
+  if (v === null || v === undefined || v === "" || v === false || v === 0 || v === "0") {
+    return false;
+  }
+  if (v === true || v === 1 || v === "1") return true;
+  if (typeof v === "string" && v.trim().toLowerCase() === "true") return true;
+  const n = Number(v);
+  return Number.isFinite(n) && n === 1;
+}
+
+function pickScheduleRowIsFinalized(rowData) {
+  if (!rowData) return false;
+  const v =
+    rowData?.IsFinalized ?? rowData?.isFinalized ?? rowData?.IsFinalize ?? rowData?.isFinalize;
   if (v === true || v === 1 || v === "1") return true;
   if (typeof v === "string" && v.trim().toLowerCase() === "true") return true;
   return false;
+}
+
+/** Grid row flags: blur + disabled styling when invoice is locked (IsLocked = 1). */
+function agreementProvGridRowLockFlags(row) {
+  const locked =
+    row &&
+    !row.isGroupRow &&
+    !row.IsGroupRow &&
+    !isAgreementProvContractBasicInfoRow(row) &&
+    pickScheduleRowIsLocked(row);
+  if (!locked) {
+    return { __disabledRow: false, __rowClassName: "", __rowStyle: {} };
+  }
+  return {
+    __disabledRow: true,
+    __rowClassName: "agreement-prov-invoice-locked-row",
+    __rowStyle: {},
+  };
 }
 
 function formatScheduleGridNumber(value, integerOnly = false) {
@@ -208,7 +241,6 @@ function AgreementProvDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -332,6 +364,124 @@ function readAgreementProvInvoiceUrlParams() {
   return { contractNo: "", invoiceNo: "" };
 }
 
+const EMPTY_AGREEMENT_PROV_FILTERS = {
+  command: "",
+  base: "",
+  unit: "",
+  dateFrom: "",
+  dateTo: "",
+  contractNo: null,
+};
+
+function getAgreementProvDefaultDateTo() {
+  return format(addYears(new Date(), 1), "yyyy-MM-dd");
+}
+
+function scheduleRowDueDate(row) {
+  const raw = pickScheduleRowField(row, "DueDate", "dueDate");
+  if (!raw) return null;
+  try {
+    const text = String(raw).trim().split("T")[0];
+    const d = parseISO(text);
+    return isValid(d) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Earliest DueDate among finalized schedule rows (yyyy-MM-dd for date inputs). */
+function getOldestFinalizedInvoiceDueDateInput(scheduleRows) {
+  let oldest = null;
+  (scheduleRows || []).forEach((row) => {
+    if (!pickScheduleRowIsFinalized(row)) return;
+    const due = scheduleRowDueDate(row);
+    if (!due) return;
+    if (!oldest || due < oldest) oldest = due;
+  });
+  return oldest ? format(oldest, "yyyy-MM-dd") : "";
+}
+
+function buildInitialAgreementProvFilters() {
+  return {
+    ...EMPTY_AGREEMENT_PROV_FILTERS,
+    dateTo: getAgreementProvDefaultDateTo(),
+  };
+}
+
+function scheduleRowContractNo(row) {
+  return String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+}
+
+function scheduleRowFilterDate(row) {
+  const raw =
+    row?.InvoiceDate ??
+    row?.invoiceDate ??
+    row?.DueDate ??
+    row?.dueDate ??
+    row?.PeriodStart ??
+    row?.periodStart ??
+    "";
+  if (!raw) return null;
+  try {
+    const text = String(raw).trim().split("T")[0];
+    const d = parseISO(text);
+    return isValid(d) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+function filterAgreementProvScheduleRows(scheduleData, filters, units) {
+  let data = Array.isArray(scheduleData) ? scheduleData : [];
+  data = data.filter((row) => pickScheduleRowIsFinalized(row));
+  if (filters.command) {
+    data = data.filter((row) => Number(row.cmdId ?? row.CmdId) === Number(filters.command));
+  }
+  if (filters.base) {
+    data = data.filter((row) => Number(row.baseId ?? row.BaseId) === Number(filters.base));
+  }
+  if (filters.dateFrom) {
+    const from = parseISO(String(filters.dateFrom).trim());
+    if (isValid(from)) {
+      data = data.filter((row) => {
+        const d = scheduleRowFilterDate(row);
+        return !d || d >= from;
+      });
+    }
+  }
+  if (filters.dateTo) {
+    const to = parseISO(String(filters.dateTo).trim());
+    if (isValid(to)) {
+      data = data.filter((row) => {
+        const d = scheduleRowFilterDate(row);
+        return !d || d <= to;
+      });
+    }
+  }
+  if (filters.contractNo) {
+    const cn = String(
+      filters.contractNo.contractNo || filters.contractNo.ContractNo || filters.contractNo
+    ).trim();
+    if (cn) {
+      data = data.filter((row) => scheduleRowContractNo(row) === cn);
+    }
+  }
+  if (filters.unit) {
+    const selectedUnit = units.find((u) => Number(u.id) === Number(filters.unit));
+    const unitName = selectedUnit?.name || selectedUnit?.unitName || selectedUnit?.Name;
+    if (unitName) {
+      const unitKey = String(unitName).trim();
+      data = data.filter((row) => {
+        const rowUnit = String(
+          row.UnitName ?? row.unitName ?? row.UoM ?? row.uoM ?? row.UOM ?? row.uom ?? ""
+        ).trim();
+        return rowUnit === unitKey;
+      });
+    }
+  }
+  return data;
+}
+
 function openContractsFormInNewTab(contractNo) {
   const c = String(contractNo || "").trim();
   if (!c || c === "-") return;
@@ -407,6 +557,22 @@ function applyInvoiceLinesToForm(parentRow, lines, prevForm = {}) {
       String(pickScheduleRowField(sourceRow, "InvoiceNo", "invoiceNo") || ""),
     cod: pickScheduleCodDate(parentRow) || pickScheduleCodDate(sourceRow) || prevForm.cod || "",
     description: keptDescription !== "" ? keptDescription : headerDescription,
+    cmdName:
+      prevForm.cmdName ||
+      fromSource.cmdName ||
+      String(pickScheduleRowField(parentRow, "CmdName", "cmdName") || ""),
+    baseName:
+      prevForm.baseName ||
+      fromSource.baseName ||
+      String(pickScheduleRowField(parentRow, "BaseName", "baseName") || ""),
+    daysToDue:
+      prevForm.daysToDue ??
+      fromSource.daysToDue ??
+      pickScheduleRowField(parentRow, "DaysToDue", "daysToDue"),
+    daysOverdue:
+      prevForm.daysOverdue ??
+      fromSource.daysOverdue ??
+      pickScheduleRowField(parentRow, "DaysOverdue", "daysOverdue"),
   };
 }
 
@@ -523,6 +689,57 @@ function pickInvoiceLineSubInvoiceNo(lineRow) {
   return String(pickScheduleRowField(lineRow, "SubInvoiceNo", "subInvoiceNo") || "").trim();
 }
 
+/** Stable key for main-grid invoice rows (contract + invoice). */
+function getAgreementProvInvoiceActionKey(rowData) {
+  const contractNo = String(pickScheduleRowField(rowData, "ContractNo", "contractNo") || "").trim();
+  const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
+  if (!contractNo || !invoiceNo) return "";
+  return `${contractNo}|${invoiceNo}`;
+}
+
+function isAgreementProvInvoiceItemRecordRow(lineRow) {
+  const sub = pickInvoiceLineSubInvoiceNo(lineRow);
+  return sub !== "" && sub !== "0";
+}
+
+async function buildAgreementProvInvoiceItemRecordIndex(scheduleRows) {
+  const keysWithItems = new Set();
+  const invoiceNoToContractNo = new Map();
+
+  (scheduleRows || []).forEach((row) => {
+    if (isAgreementProvContractBasicInfoRow(row)) return;
+    if (row?.isGroupRow || row?.IsGroupRow) return;
+    const invoiceNo = String(pickScheduleRowField(row, "InvoiceNo", "invoiceNo") || "").trim();
+    const contractNo = String(pickScheduleRowField(row, "ContractNo", "contractNo") || "").trim();
+    if (!invoiceNo || !contractNo) return;
+    invoiceNoToContractNo.set(invoiceNo, contractNo);
+  });
+
+  const uniqueInvoiceNos = [...invoiceNoToContractNo.keys()];
+  await Promise.all(
+    uniqueInvoiceNos.map(async (invoiceNo) => {
+      try {
+        const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+        const lines = unwrapContractInvoiceScheduleList(response);
+        const itemRows = (lines || []).filter(isAgreementProvInvoiceItemRecordRow);
+        if (itemRows.length > 0) {
+          const contractNo =
+            String(
+              pickScheduleRowField(itemRows[0], "ContractNo", "contractNo") ||
+                invoiceNoToContractNo.get(invoiceNo) ||
+                ""
+            ).trim() || invoiceNoToContractNo.get(invoiceNo);
+          if (contractNo) keysWithItems.add(`${contractNo}|${invoiceNo}`);
+        }
+      } catch (error) {
+        console.error(`Error loading invoice item records for ${invoiceNo}:`, error);
+      }
+    })
+  );
+
+  return keysWithItems;
+}
+
 /** React row key — SubInvoiceNo only (never shared schedule Id). */
 function getInvoiceLineDraftRowKey(lineRow, idx) {
   const sub = pickInvoiceLineSubInvoiceNo(lineRow);
@@ -531,12 +748,425 @@ function getInvoiceLineDraftRowKey(lineRow, idx) {
   return `idx-${idx}`;
 }
 
-function isInvoiceLineDraftEditing(lineRow, draftLineForm) {
-  if (!draftLineForm?.editingLineKey) return false;
-  const editingSub = String(draftLineForm.editingSubInvoiceNo ?? "").trim();
+function isInvoiceLineDraftEditing(lineRow, editingLineDraft) {
+  if (!editingLineDraft?.editingLineKey) return false;
+  const editingSub = String(editingLineDraft.editingSubInvoiceNo ?? "").trim();
   const rowSub = pickInvoiceLineSubInvoiceNo(lineRow);
   if (editingSub && rowSub) return editingSub === rowSub;
   return false;
+}
+
+function isInvoiceLineDraftEmpty(draft) {
+  if (!draft) return true;
+  const fields = [
+    draft.itemCode,
+    draft.desc,
+    draft.accHead,
+    draft.months,
+    draft.calculatedRentPM,
+    draft.discountPercent,
+  ];
+  return fields.every((v) => v === null || v === undefined || String(v).trim() === "");
+}
+
+function createNewLineDraftId() {
+  return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildDuplicateDraftFromDraftForm(sourceDraft, parentForm, parentRow, scheduleRows) {
+  const pseudoLine = buildLocalLineRowFromDraft(sourceDraft, parentForm, parentRow);
+  return {
+    ...buildDuplicateDraftInvoiceAddForm(pseudoLine, parentForm, parentRow, scheduleRows),
+    __draftId: createNewLineDraftId(),
+  };
+}
+
+function isInvoiceLineDraftFieldFilled(value) {
+  return !(value === null || value === undefined || String(value).trim() === "");
+}
+
+function getInvoiceLineComputedTotal(draftForm) {
+  const computed = computeInvoiceRecordLineTotal(
+    draftForm?.months,
+    draftForm?.calculatedRentPM,
+    draftForm?.discountPercent
+  );
+  if (computed != null && Number.isFinite(computed)) return computed;
+  const savedTotal = Number(draftForm?.total);
+  if (Number.isFinite(savedTotal)) return savedTotal;
+  const savedRent = Number(
+    draftForm?.totalRent ?? draftForm?.TotalRent ?? draftForm?.Total ?? draftForm?.total
+  );
+  if (Number.isFinite(savedRent)) return savedRent;
+  return null;
+}
+
+function validateInvoiceLineDraftTotal(draftForm) {
+  const total = getInvoiceLineComputedTotal(draftForm);
+  if (total === null || !Number.isFinite(total) || total <= 0) {
+    return "Total must be greater than 0.";
+  }
+  return "";
+}
+
+function validateInvoiceLineDraftForm(draftForm, parentForm) {
+  const invoiceDate = String(draftForm?.invoiceDate || parentForm?.invoiceDate || "").trim();
+  if (!invoiceDate) return "Invoice Date is required.";
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.itemCode)) {
+    return "Item with Code is required.";
+  }
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.desc)) {
+    return "Description is required.";
+  }
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.accHead)) {
+    return "Acc Head is required.";
+  }
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.months)) {
+    return "Quantity is required.";
+  }
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.calculatedRentPM)) {
+    return "Unit Price is required.";
+  }
+  if (!isInvoiceLineDraftFieldFilled(draftForm?.discountPercent)) {
+    return "Discount % is required.";
+  }
+  const sub = String(draftForm?.pendingSubInvoiceNo ?? "").trim();
+  if (!sub) return "Sub Invoice is required.";
+  const totalErr = validateInvoiceLineDraftTotal(draftForm);
+  if (totalErr) return totalErr;
+  return "";
+}
+
+function getFirstIncompleteNewLineDraftError(newLineDrafts, parentForm) {
+  const drafts = newLineDrafts || [];
+  for (let i = 0; i < drafts.length; i += 1) {
+    const draft = drafts[i];
+    if (isInvoiceLineDraftEmpty(draft)) {
+      return "Complete or cancel the empty invoice row before adding another.";
+    }
+    const err = validateInvoiceLineDraftForm(draft, parentForm);
+    if (err) return err;
+  }
+  return "";
+}
+
+function buildLocalLineRowFromDraft(draftForm, parentForm, parentRow) {
+  const totalVal = computeInvoiceRecordLineTotal(
+    draftForm.months,
+    draftForm.calculatedRentPM,
+    draftForm.discountPercent
+  );
+  const sub = String(draftForm.pendingSubInvoiceNo ?? draftForm.editingSubInvoiceNo ?? "").trim();
+  const sortOrder = toScheduleIntOrNull(draftForm.sortOrder) ?? 1;
+  const invoiceDate =
+    draftForm.invoiceDate ||
+    parentForm?.invoiceDate ||
+    toScheduleDateInputValue(pickScheduleInvoiceDate(parentRow || {}));
+  const dueDate =
+    draftForm.dueDate ||
+    parentForm?.dueDate ||
+    toScheduleDateInputValue(pickScheduleRowField(parentRow || {}, "DueDate", "dueDate"));
+  const itemCode = String(draftForm.itemCode ?? "").trim();
+  const desc = String(draftForm.desc ?? "").trim();
+  const accHead = String(draftForm.accHead ?? "").trim();
+  const months = toScheduleIntOrNull(draftForm.months);
+  const calculatedRentPM = toScheduleNumberOrNull(draftForm.calculatedRentPM);
+  const discount = toScheduleIntOrNull(draftForm.discountPercent);
+  const lineTotal =
+    totalVal ??
+    toScheduleNumberOrNull(draftForm.total) ??
+    computeInvoiceRecordLineTotal(
+      draftForm.months,
+      draftForm.calculatedRentPM,
+      draftForm.discountPercent
+    );
+
+  return {
+    __isNewLocal: !draftForm.editingLineRow,
+    SubInvoiceNo: sub,
+    subInvoiceNo: sub,
+    SortOrder: sortOrder,
+    sortOrder,
+    InvoiceDate: invoiceDate,
+    invoiceDate,
+    DueDate: dueDate,
+    dueDate,
+    PeriodStart: invoiceDate,
+    periodStart: invoiceDate,
+    PeriodEnd: periodEndFromStartAndMonths(invoiceDate, months) || null,
+    periodEnd: periodEndFromStartAndMonths(invoiceDate, months) || null,
+    ItemwithCode: itemCode,
+    itemwithCode: itemCode,
+    ItemCode: itemCode,
+    itemCode,
+    Description: desc,
+    description: desc,
+    Desc: desc,
+    desc,
+    AccHead: accHead,
+    accHead,
+    Months: months,
+    months,
+    CalculatedRentPM: calculatedRentPM,
+    calculatedRentPM,
+    Discount: discount,
+    discount,
+    DiscountPercent: discount,
+    discountPercent: discount,
+    TotalRent: lineTotal,
+    totalRent: lineTotal,
+    Total: lineTotal,
+    total: lineTotal,
+    ContractNo:
+      parentForm?.contractNo ?? pickScheduleRowField(parentRow, "ContractNo", "contractNo"),
+    contractNo:
+      parentForm?.contractNo ?? pickScheduleRowField(parentRow, "ContractNo", "contractNo"),
+    InvoiceNo: parentForm?.invoiceNo ?? pickScheduleRowField(parentRow, "InvoiceNo", "invoiceNo"),
+    invoiceNo: parentForm?.invoiceNo ?? pickScheduleRowField(parentRow, "InvoiceNo", "invoiceNo"),
+  };
+}
+
+function pickInvoiceLineDraftField(src, camelKey, pascalKey) {
+  if (!src) return "";
+  const direct = src[camelKey];
+  if (direct !== null && direct !== undefined && String(direct).trim() !== "") {
+    return direct;
+  }
+  return pickScheduleRowField(src, pascalKey, camelKey);
+}
+
+/** Merge draft editor state with a schedule-shaped row for API payload building. */
+function buildInvoiceLinePersistSourceFromDraft(draft, parentForm, parentRow) {
+  const localRow = buildLocalLineRowFromDraft(draft, parentForm, parentRow);
+  const sub = String(
+    draft?.pendingSubInvoiceNo ??
+      draft?.editingSubInvoiceNo ??
+      pickInvoiceLineSubInvoiceNo(localRow) ??
+      ""
+  ).trim();
+  const totalVal = computeInvoiceRecordLineTotal(
+    draft?.months,
+    draft?.calculatedRentPM,
+    draft?.discountPercent
+  );
+  return {
+    ...localRow,
+    itemCode: String(pickInvoiceLineDraftField(draft, "itemCode", "ItemwithCode") || "").trim(),
+    desc: String(
+      pickInvoiceLineDraftField(draft, "desc", "Desc") ||
+        pickInvoiceLineDraftField(draft, "description", "Description") ||
+        ""
+    ).trim(),
+    accHead: String(pickInvoiceLineDraftField(draft, "accHead", "AccHead") || "").trim(),
+    months: draft?.months ?? pickScheduleRowField(localRow, "Months", "months"),
+    calculatedRentPM:
+      draft?.calculatedRentPM ??
+      pickScheduleRowField(localRow, "CalculatedRentPM", "calculatedRentPM"),
+    discountPercent:
+      draft?.discountPercent ??
+      pickScheduleRowField(localRow, "DiscountPercent", "discountPercent") ??
+      pickScheduleRowField(localRow, "Discount", "discount"),
+    sortOrder:
+      draft?.sortOrder ??
+      pickScheduleRowField(localRow, "SortOrder", "sortOrder") ??
+      pickScheduleRowField(localRow, "InvoiceOrder", "invoiceOrder"),
+    pendingSubInvoiceNo: sub,
+    invoiceDate:
+      draft?.invoiceDate ||
+      pickScheduleRowField(localRow, "PeriodStart", "periodStart") ||
+      parentForm?.invoiceDate,
+    dueDate:
+      draft?.dueDate || pickScheduleRowField(localRow, "DueDate", "dueDate") || parentForm?.dueDate,
+    total: totalVal != null ? String(totalVal) : String(draft?.total ?? localRow?.total ?? ""),
+  };
+}
+
+function buildInvoiceLineAddFormFromDraft(draft, parentForm, parentRow) {
+  return buildInvoiceLinePersistSourceFromDraft(draft, parentForm, parentRow);
+}
+
+function validateInvoiceLinesScheduledForPersist({
+  newLineDrafts,
+  editingLineDraft,
+  invoiceLines,
+  form,
+  rowData,
+}) {
+  if (editingLineDraft && !isInvoiceLineDraftEmpty(editingLineDraft)) {
+    const draftErr = validateInvoiceLineDraftForm(editingLineDraft, form);
+    if (draftErr) throw new Error(draftErr);
+  }
+
+  (newLineDrafts || []).forEach((draft) => {
+    if (isInvoiceLineDraftEmpty(draft)) return;
+    const draftErr = validateInvoiceLineDraftForm(draft, form);
+    if (draftErr) throw new Error(draftErr);
+  });
+
+  const existingItemRows = (invoiceLines || []).filter((r) => !isMainInvoiceScheduleRow(r));
+  existingItemRows.forEach((line, idx) => {
+    if (!line.__dirtyLocal) return;
+    const lineKey = getInvoiceLineDraftRowKey(line, idx);
+    const draft = buildDraftInvoiceEditFormFromLine(line, form, rowData, lineKey);
+    const lineErr = validateInvoiceLineDraftForm(
+      {
+        ...draft,
+        invoiceDate: draft.invoiceDate || form.invoiceDate,
+        dueDate: draft.dueDate || form.dueDate,
+      },
+      form
+    );
+    if (lineErr) throw new Error(lineErr);
+  });
+}
+
+function buildInvoiceLineAddFormFromLine(lineRow, parentForm, parentRow, lineKey) {
+  const draft = buildDraftInvoiceEditFormFromLine(lineRow, parentForm, parentRow, lineKey);
+  return buildInvoiceLinePersistSourceFromDraft(
+    {
+      ...draft,
+      invoiceDate: draft.invoiceDate || parentForm?.invoiceDate,
+      dueDate: draft.dueDate || parentForm?.dueDate,
+    },
+    parentForm,
+    parentRow
+  );
+}
+
+function captureOriginalInvoiceLinePayloadSnapshots(lines, parentForm, parentRow) {
+  const snapshots = new Map();
+  const itemRows = (lines || []).filter((r) => !isMainInvoiceScheduleRow(r));
+  itemRows.forEach((line, idx) => {
+    const sub = pickInvoiceLineSubInvoiceNo(line);
+    if (!sub) return;
+    const lineKey = getInvoiceLineDraftRowKey(line, idx);
+    const addForm = buildInvoiceLineAddFormFromLine(line, parentForm, parentRow, lineKey);
+    const payload = buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm);
+    snapshots.set(sub, JSON.stringify(payload));
+  });
+  return snapshots;
+}
+
+function mergeAllDraftsIntoWorkingInvoiceLines(
+  lines,
+  newLineDrafts,
+  editingLineDraft,
+  parentForm,
+  parentRow
+) {
+  const mainRows = (lines || []).filter((r) => isMainInvoiceScheduleRow(r));
+  let itemRows = (lines || []).filter((r) => !isMainInvoiceScheduleRow(r));
+
+  if (editingLineDraft?.editingLineKey) {
+    const localRow = buildLocalLineRowFromDraft(editingLineDraft, parentForm, parentRow);
+    const editingSub = String(editingLineDraft.editingSubInvoiceNo ?? "").trim();
+    if (editingSub) {
+      itemRows = itemRows.map((r) => {
+        if (pickInvoiceLineSubInvoiceNo(r) !== editingSub) return r;
+        return {
+          ...r,
+          ...localRow,
+          __isNewLocal: Boolean(r.__isNewLocal || localRow.__isNewLocal),
+        };
+      });
+    }
+  }
+
+  (newLineDrafts || []).forEach((draft) => {
+    if (isInvoiceLineDraftEmpty(draft)) return;
+    itemRows.push(buildLocalLineRowFromDraft(draft, parentForm, parentRow));
+  });
+
+  return [...mainRows, ...itemRows];
+}
+
+async function persistAllInvoiceScheduleLines({
+  rowData,
+  form,
+  invoiceLines,
+  pendingDeleteSubs,
+  newLineDrafts,
+  editingLineDraft,
+  originalServerSubs,
+  originalLinePayloadSnapshots,
+}) {
+  const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form);
+  if (!contractNo || !invoiceNo) {
+    throw new Error("Cannot save: Contract No and Invoice ID are required.");
+  }
+
+  validateInvoiceLinesScheduledForPersist({
+    newLineDrafts,
+    editingLineDraft,
+    invoiceLines,
+    form,
+    rowData,
+  });
+
+  await contractApi.updateInvoiceSchedule(
+    contractNo,
+    invoiceNo,
+    buildInvoiceSchedulePutPayload(rowData, form)
+  );
+
+  const deleteSubs = [
+    ...new Set((pendingDeleteSubs || []).map((s) => String(s).trim()).filter(Boolean)),
+  ];
+  for (const sub of deleteSubs) {
+    await contractApi.deleteInvoiceSchedule(contractNo, invoiceNo, sub);
+  }
+
+  const persistedSubs = new Set();
+
+  const persistLine = async (sub, addForm, isNew) => {
+    if (!sub || persistedSubs.has(sub)) return;
+    const payload = buildInvoiceScheduleCreatePayload(rowData, form, addForm);
+    if (isNew) {
+      await contractApi.createInvoiceSchedule(contractNo, invoiceNo, sub, payload);
+    } else {
+      const baselineKey = originalLinePayloadSnapshots?.get?.(sub);
+      if (baselineKey && baselineKey === JSON.stringify(payload)) return;
+      await contractApi.updateInvoiceScheduleSub(contractNo, invoiceNo, sub, payload);
+    }
+    persistedSubs.add(sub);
+  };
+
+  for (const draft of newLineDrafts || []) {
+    if (isInvoiceLineDraftEmpty(draft)) continue;
+    const sub = String(draft.pendingSubInvoiceNo ?? draft.editingSubInvoiceNo ?? "").trim();
+    if (!sub) continue;
+    await persistLine(sub, buildInvoiceLinePersistSourceFromDraft(draft, form, rowData), true);
+  }
+
+  if (editingLineDraft && !isInvoiceLineDraftEmpty(editingLineDraft)) {
+    const sub = String(
+      editingLineDraft.editingSubInvoiceNo ?? editingLineDraft.pendingSubInvoiceNo ?? ""
+    ).trim();
+    if (sub) {
+      const isNew =
+        Boolean(editingLineDraft.editingLineRow?.__isNewLocal) ||
+        !(originalServerSubs && originalServerSubs.has(sub));
+      await persistLine(
+        sub,
+        buildInvoiceLinePersistSourceFromDraft(editingLineDraft, form, rowData),
+        isNew
+      );
+    }
+  }
+
+  const existingItemRows = (invoiceLines || []).filter((r) => !isMainInvoiceScheduleRow(r));
+  const sortedExisting = sortInvoiceLinesByOrder(existingItemRows);
+  for (let idx = 0; idx < sortedExisting.length; idx += 1) {
+    const line = sortedExisting[idx];
+    const sub = pickInvoiceLineSubInvoiceNo(line);
+    if (!sub || persistedSubs.has(sub)) continue;
+    if (line.__isNewLocal) continue;
+    if (!line.__dirtyLocal) continue;
+
+    const lineKey = getInvoiceLineDraftRowKey(line, idx);
+    const addForm = buildInvoiceLineAddFormFromLine(line, form, rowData, lineKey);
+    await persistLine(sub, addForm, false);
+  }
 }
 
 function buildDraftInvoiceEditFormFromLine(lineRow, parentForm, parentRow, lineKey) {
@@ -598,14 +1228,12 @@ function AgreementProvInvoiceLineDraftRow({
   onDraftFieldChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
-  onDraftSave,
   onDraftCancel,
-  draftSaving,
+  onDuplicateLine,
+  hasIncompleteNewLineDrafts,
   saving,
-  lineActionSaving,
 }) {
   const subLabel = draftForm.pendingSubInvoiceNo || "—";
-  const isEditRow = Boolean(draftForm.editingLineKey);
 
   return (
     <MDBox
@@ -717,16 +1345,16 @@ function AgreementProvInvoiceLineDraftRow({
           gap: 0.25,
         }}
       >
-        <Tooltip title={isEditRow ? "Update" : "Save"}>
+        <Tooltip title="Duplicate">
           <span>
             <IconButton
               size="small"
-              color="info"
-              disabled={draftSaving || saving || lineActionSaving}
-              onClick={onDraftSave}
+              color="secondary"
+              disabled={saving || hasIncompleteNewLineDrafts}
+              onClick={() => onDuplicateLine?.(draftForm)}
               sx={{ padding: "2px" }}
             >
-              <Icon fontSize="small">check</Icon>
+              <Icon fontSize="small">content_copy</Icon>
             </IconButton>
           </span>
         </Tooltip>
@@ -735,7 +1363,7 @@ function AgreementProvInvoiceLineDraftRow({
             <IconButton
               size="small"
               color="secondary"
-              disabled={draftSaving || saving || lineActionSaving}
+              disabled={saving}
               onClick={onDraftCancel}
               sx={{ padding: "2px" }}
             >
@@ -755,18 +1383,16 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
   onDraftFieldChange: PropTypes.func.isRequired,
   onDraftIntegerFieldChange: PropTypes.func.isRequired,
   onDraftNumericFieldChange: PropTypes.func.isRequired,
-  onDraftSave: PropTypes.func.isRequired,
   onDraftCancel: PropTypes.func.isRequired,
-  draftSaving: PropTypes.bool,
+  onDuplicateLine: PropTypes.func,
+  hasIncompleteNewLineDrafts: PropTypes.bool,
   saving: PropTypes.bool,
-  lineActionSaving: PropTypes.bool,
 };
 
 function AgreementProvInvoiceLinesGrid({
   rows,
   loading,
   error,
-  lineActionSaving,
   saving,
   form,
   rowData,
@@ -775,15 +1401,16 @@ function AgreementProvInvoiceLinesGrid({
   onDuplicateLine,
   onMoveLine,
   readOnly,
-  draftLineForm,
+  newLineDrafts,
+  editingLineDraft,
+  hasIncompleteNewLineDrafts,
   onDraftFieldChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
-  onDraftSave,
   onDraftCancel,
-  draftSaving,
+  fillHeight,
 }) {
-  const draftAtTop = draftLineForm && !draftLineForm.editingLineKey;
+  const pendingNewDrafts = (newLineDrafts || []).filter((d) => !d.editingLineKey);
   const itemRows = (rows || []).filter((r) => !isMainInvoiceScheduleRow(r));
   const moveRows = sortInvoiceLinesByOrder(itemRows);
   const gridRowSx = {
@@ -823,7 +1450,7 @@ function AgreementProvInvoiceLinesGrid({
   if (loading) {
     return (
       <MDBox display="flex" justifyContent="center" py={3}>
-        <CircularProgress color="info" size={28} />
+        <CurrencyLoading size={36} />
       </MDBox>
     );
   }
@@ -836,6 +1463,10 @@ function AgreementProvInvoiceLinesGrid({
     );
   }
 
+  const linesBodySx = fillHeight
+    ? { flex: "1 1 0", minHeight: 0, overflow: "auto" }
+    : { maxHeight: 240, overflow: "auto" };
+
   return (
     <TableContainer
       component={MDBox}
@@ -843,7 +1474,10 @@ function AgreementProvInvoiceLinesGrid({
         border: "1px solid rgba(0,0,0,0.12)",
         borderRadius: 1,
         overflow: "hidden",
-        display: "block",
+        display: fillHeight ? "flex" : "block",
+        flexDirection: fillHeight ? "column" : undefined,
+        flex: fillHeight ? "1 1 0" : undefined,
+        minHeight: fillHeight ? 0 : undefined,
       }}
     >
       <MDBox sx={gridRowSx}>
@@ -861,46 +1495,47 @@ function AgreementProvInvoiceLinesGrid({
         {!readOnly && <MDBox sx={{ ...headerCellSx, textAlign: "center" }}>Action</MDBox>}
       </MDBox>
 
-      <MDBox sx={{ maxHeight: 240, overflow: "auto" }}>
-        {draftAtTop && !readOnly && (
-          <AgreementProvInvoiceLineDraftRow
-            gridRowSx={gridRowSx}
-            bodyCellSx={bodyCellSx}
-            draftForm={draftLineForm}
-            onDraftFieldChange={onDraftFieldChange}
-            onDraftIntegerFieldChange={onDraftIntegerFieldChange}
-            onDraftNumericFieldChange={onDraftNumericFieldChange}
-            onDraftSave={onDraftSave}
-            onDraftCancel={onDraftCancel}
-            draftSaving={draftSaving}
-            saving={saving}
-            lineActionSaving={lineActionSaving}
-          />
-        )}
-        {itemRows.length === 0 && !draftLineForm ? (
+      <MDBox sx={linesBodySx}>
+        {!readOnly &&
+          pendingNewDrafts.map((draftForm) => (
+            <AgreementProvInvoiceLineDraftRow
+              key={draftForm.__draftId || draftForm.pendingSubInvoiceNo}
+              gridRowSx={gridRowSx}
+              bodyCellSx={bodyCellSx}
+              draftForm={draftForm}
+              onDraftFieldChange={onDraftFieldChange(draftForm.__draftId)}
+              onDraftIntegerFieldChange={onDraftIntegerFieldChange(draftForm.__draftId)}
+              onDraftNumericFieldChange={onDraftNumericFieldChange(draftForm.__draftId)}
+              onDraftCancel={() => onDraftCancel?.(draftForm.__draftId)}
+              onDuplicateLine={onDuplicateLine}
+              hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+              saving={saving}
+            />
+          ))}
+        {itemRows.length === 0 && pendingNewDrafts.length === 0 ? (
           <MDTypography variant="caption" color="text" display="block" textAlign="center" py={2}>
             No records found for this invoice.
           </MDTypography>
         ) : (
           itemRows.map((lineRow, idx) => {
             const lineKey = getInvoiceLineDraftRowKey(lineRow, idx);
-            const isEditingRow = isInvoiceLineDraftEditing(lineRow, draftLineForm);
+            const isEditingRow = isInvoiceLineDraftEditing(lineRow, editingLineDraft);
 
-            if (isEditingRow && !readOnly) {
+            if (isEditingRow && !readOnly && editingLineDraft) {
+              const editDraftId = editingLineDraft.__draftId || editingLineDraft.editingLineKey;
               return (
                 <AgreementProvInvoiceLineDraftRow
                   key={lineKey}
                   gridRowSx={gridRowSx}
                   bodyCellSx={bodyCellSx}
-                  draftForm={draftLineForm}
-                  onDraftFieldChange={onDraftFieldChange}
-                  onDraftIntegerFieldChange={onDraftIntegerFieldChange}
-                  onDraftNumericFieldChange={onDraftNumericFieldChange}
-                  onDraftSave={onDraftSave}
-                  onDraftCancel={onDraftCancel}
-                  draftSaving={draftSaving}
+                  draftForm={editingLineDraft}
+                  onDraftFieldChange={onDraftFieldChange(editDraftId)}
+                  onDraftIntegerFieldChange={onDraftIntegerFieldChange(editDraftId)}
+                  onDraftNumericFieldChange={onDraftNumericFieldChange(editDraftId)}
+                  onDraftCancel={() => onDraftCancel?.(editDraftId)}
+                  onDuplicateLine={onDuplicateLine}
+                  hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
                   saving={saving}
-                  lineActionSaving={lineActionSaving}
                 />
               );
             }
@@ -959,13 +1594,7 @@ function AgreementProvInvoiceLinesGrid({
                         <IconButton
                           size="small"
                           color="info"
-                          disabled={
-                            !canMoveUp ||
-                            lineActionSaving ||
-                            saving ||
-                            Boolean(draftLineForm) ||
-                            draftSaving
-                          }
+                          disabled={!canMoveUp || saving || Boolean(editingLineDraft)}
                           onClick={() => onMoveLine?.(lineRow, "up")}
                           sx={{ padding: "2px" }}
                         >
@@ -978,13 +1607,7 @@ function AgreementProvInvoiceLinesGrid({
                         <IconButton
                           size="small"
                           color="info"
-                          disabled={
-                            !canMoveDown ||
-                            lineActionSaving ||
-                            saving ||
-                            Boolean(draftLineForm) ||
-                            draftSaving
-                          }
+                          disabled={!canMoveDown || saving || Boolean(editingLineDraft)}
                           onClick={() => onMoveLine?.(lineRow, "down")}
                           sx={{ padding: "2px" }}
                         >
@@ -997,9 +1620,7 @@ function AgreementProvInvoiceLinesGrid({
                         <IconButton
                           size="small"
                           color="info"
-                          disabled={
-                            lineActionSaving || saving || Boolean(draftLineForm) || draftSaving
-                          }
+                          disabled={saving || Boolean(editingLineDraft)}
                           onClick={() => onEditLine?.(lineRow, lineKey)}
                           sx={{ padding: "2px" }}
                         >
@@ -1013,9 +1634,9 @@ function AgreementProvInvoiceLinesGrid({
                           size="small"
                           color="secondary"
                           disabled={
-                            lineActionSaving || saving || Boolean(draftLineForm) || draftSaving
+                            saving || Boolean(editingLineDraft) || hasIncompleteNewLineDrafts
                           }
-                          onClick={() => onDuplicateLine?.(lineRow, form, rowData)}
+                          onClick={() => onDuplicateLine?.(lineRow)}
                           sx={{ padding: "2px" }}
                         >
                           <Icon fontSize="small">content_copy</Icon>
@@ -1027,10 +1648,8 @@ function AgreementProvInvoiceLinesGrid({
                         <IconButton
                           size="small"
                           color="error"
-                          disabled={
-                            lineActionSaving || saving || Boolean(draftLineForm) || draftSaving
-                          }
-                          onClick={() => onDeleteLine?.(lineRow, form, rowData)}
+                          disabled={saving || Boolean(editingLineDraft)}
+                          onClick={() => onDeleteLine?.(lineRow)}
                           sx={{ padding: "2px" }}
                         >
                           <Icon fontSize="small">delete</Icon>
@@ -1052,7 +1671,6 @@ AgreementProvInvoiceLinesGrid.propTypes = {
   rows: PropTypes.arrayOf(PropTypes.object),
   loading: PropTypes.bool,
   error: PropTypes.string,
-  lineActionSaving: PropTypes.bool,
   saving: PropTypes.bool,
   form: PropTypes.object,
   rowData: PropTypes.object,
@@ -1061,13 +1679,14 @@ AgreementProvInvoiceLinesGrid.propTypes = {
   onDuplicateLine: PropTypes.func,
   onMoveLine: PropTypes.func,
   readOnly: PropTypes.bool,
-  draftLineForm: PropTypes.object,
+  newLineDrafts: PropTypes.arrayOf(PropTypes.object),
+  editingLineDraft: PropTypes.object,
+  hasIncompleteNewLineDrafts: PropTypes.bool,
   onDraftFieldChange: PropTypes.func,
   onDraftIntegerFieldChange: PropTypes.func,
   onDraftNumericFieldChange: PropTypes.func,
-  onDraftSave: PropTypes.func,
   onDraftCancel: PropTypes.func,
-  draftSaving: PropTypes.bool,
+  fillHeight: PropTypes.bool,
 };
 
 function getInvoiceLineRouteKeys(lineRow, parentRow, parentForm) {
@@ -1169,6 +1788,78 @@ function openAgreementProvDatePicker(ref) {
     }
   }
 }
+
+/** Filter bar date: native picker (yyyy-MM-dd) with dd-MMM-yyyy display. */
+function AgreementProvFilterDateInput({
+  label,
+  value,
+  onChange,
+  min,
+  sx,
+  "aria-label": ariaLabel,
+}) {
+  const inputRef = useRef(null);
+  return (
+    <MDBox sx={{ position: "relative", width: "100%" }}>
+      <input
+        type="date"
+        ref={inputRef}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        min={min || undefined}
+        style={{
+          position: "absolute",
+          opacity: 0.01,
+          width: "100%",
+          height: "100%",
+          top: 0,
+          left: 0,
+          cursor: "pointer",
+          zIndex: 2,
+        }}
+        aria-label={ariaLabel || label}
+      />
+      <MDInput
+        label={label}
+        type="text"
+        value={toAgreementProvDisplayDate(value)}
+        fullWidth
+        size="small"
+        InputLabelProps={{ shrink: true }}
+        onClick={() => openAgreementProvDatePicker(inputRef)}
+        InputProps={{
+          readOnly: true,
+          endAdornment: (
+            <InputAdornment position="end">
+              <Icon
+                sx={{ cursor: "pointer", fontSize: "1.1rem" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openAgreementProvDatePicker(inputRef);
+                }}
+              >
+                calendar_today
+              </Icon>
+            </InputAdornment>
+          ),
+        }}
+        sx={{
+          ...sx,
+          "& .MuiInputBase-input": { cursor: "pointer" },
+        }}
+      />
+    </MDBox>
+  );
+}
+
+AgreementProvFilterDateInput.propTypes = {
+  label: PropTypes.string.isRequired,
+  value: PropTypes.string,
+  onChange: PropTypes.func.isRequired,
+  min: PropTypes.string,
+  sx: PropTypes.object,
+  "aria-label": PropTypes.string,
+};
 
 function formatInvoicePeriodDisplay(periodStart, periodEnd) {
   const start = formatDateDDMMMYYYY(periodStart);
@@ -1381,6 +2072,7 @@ function computeInvoiceRecordLineTotal(months, ratePM, discountPercent) {
 }
 
 function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
+  const src = addForm || {};
   const contractNo = String(
     parentForm?.contractNo ??
       pickScheduleRowField(parentRow || {}, "ContractNo", "contractNo") ??
@@ -1389,18 +2081,51 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
   const invoiceNo = String(
     parentForm?.invoiceNo ?? pickScheduleRowField(parentRow || {}, "InvoiceNo", "invoiceNo") ?? ""
   ).trim();
-  const periodStart = addForm.invoiceDate || null;
-  const months = toScheduleIntOrNull(addForm.months);
+  const periodStart =
+    src.invoiceDate ||
+    pickScheduleRowField(src, "PeriodStart", "periodStart") ||
+    parentForm?.invoiceDate ||
+    null;
+  const months = toScheduleIntOrNull(src.months ?? pickScheduleRowField(src, "Months", "months"));
   const periodEnd = periodEndFromStartAndMonths(periodStart, months) || null;
-  const calculatedRentPM = toScheduleNumberOrNull(addForm.calculatedRentPM);
+  const calculatedRentPM = toScheduleNumberOrNull(
+    src.calculatedRentPM ?? pickScheduleRowField(src, "CalculatedRentPM", "calculatedRentPM")
+  );
+  const discountRaw =
+    src.discountPercent ??
+    pickScheduleRowField(src, "DiscountPercent", "discountPercent") ??
+    pickScheduleRowField(src, "Discount", "discount");
+  const itemCode = String(
+    src.itemCode ??
+      pickScheduleRowField(src, "ItemwithCode", "itemwithCode") ??
+      pickScheduleRowField(src, "ItemCode", "itemCode") ??
+      ""
+  ).trim();
+  const desc = String(
+    src.desc ??
+      pickScheduleRowField(src, "Desc", "desc") ??
+      pickScheduleRowField(src, "Description", "description") ??
+      ""
+  ).trim();
+  const accHead = String(
+    src.accHead ?? pickScheduleRowField(src, "AccHead", "accHead") ?? ""
+  ).trim();
+  const sortOrder =
+    toScheduleIntOrNull(
+      src.sortOrder ??
+        pickScheduleRowField(src, "SortOrder", "sortOrder") ??
+        pickScheduleRowField(src, "InvoiceOrder", "invoiceOrder")
+    ) ?? 1;
   const lineTotal =
-    toScheduleNumberOrNull(addForm.total) ??
+    toScheduleNumberOrNull(src.total ?? pickScheduleRowField(src, "Total", "total")) ??
     computeInvoiceRecordLineTotal(
-      addForm.months,
-      addForm.calculatedRentPM,
-      addForm.discountPercent
+      src.months ?? pickScheduleRowField(src, "Months", "months"),
+      src.calculatedRentPM ?? pickScheduleRowField(src, "CalculatedRentPM", "calculatedRentPM"),
+      discountRaw
     );
-  const totalRent = lineTotal;
+  const totalRent =
+    toScheduleNumberOrNull(pickScheduleRowField(src, "TotalRent", "totalRent") ?? src.totalRent) ??
+    lineTotal;
 
   return {
     ContractId: pickRowNumberField(parentRow, "ContractId", "contractId"),
@@ -1423,15 +2148,16 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     InvoiceNo: invoiceNo,
     PeriodStart: periodStart,
     PeriodEnd: periodEnd,
-    DueDate: addForm.dueDate || null,
+    DueDate:
+      src.dueDate || pickScheduleRowField(src, "DueDate", "dueDate") || parentForm?.dueDate || null,
     CalculatedRentPM: calculatedRentPM,
     Months: months,
     TotalRent: totalRent,
-    ItemwithCode: String(addForm.itemCode ?? "").trim(),
-    Description: String(addForm.desc ?? "").trim(),
-    AccHead: String(addForm.accHead ?? "").trim(),
-    Discount: toScheduleIntOrNull(addForm.discountPercent),
-    Total: lineTotal,
+    ItemwithCode: itemCode || null,
+    Description: desc || null,
+    AccHead: accHead || null,
+    Discount: toScheduleIntOrNull(discountRaw),
+    SortOrder: sortOrder,
     Remarks: pickScheduleRowField(parentRow, "Remarks", "remarks") || "",
     AmountReceived: 0,
     AmountReceivable: totalRent,
@@ -1449,10 +2175,6 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     RiseTerm: pickScheduleRowField(parentRow, "RiseTerm", "riseTerm") || "",
     RiseRate: pickRowNumberField(parentRow, "RiseRate", "riseRate"),
     RiseDate: pickScheduleRowField(parentRow, "RiseDate", "riseDate") || null,
-    SubInvoiceNo: String(addForm.pendingSubInvoiceNo ?? "").trim(),
-    subInvoiceNo: String(addForm.pendingSubInvoiceNo ?? "").trim(),
-    SortOrder: toScheduleIntOrNull(addForm.sortOrder) ?? 1,
-    sortOrder: toScheduleIntOrNull(addForm.sortOrder) ?? 1,
   };
 }
 
@@ -1535,6 +2257,77 @@ const EDIT_BASIC_INFO_ROW_SX = {
   display: "grid",
   gap: 1.25,
   alignItems: "start",
+};
+
+const EDIT_BASIC_INFO_READONLY_SCROLL_SX = {
+  display: "flex",
+  flexWrap: "nowrap",
+  gap: 2,
+  overflowX: "auto",
+  overflowY: "hidden",
+  alignItems: "flex-start",
+  pb: 0.5,
+  scrollbarWidth: "thin",
+  "&::-webkit-scrollbar": { height: 6 },
+  "&::-webkit-scrollbar-thumb": {
+    borderRadius: 3,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+};
+
+function getAgreementProvEditDialogReadonlyBasicInfoItems(form) {
+  const f = form || {};
+  return [
+    { label: "Contract No", value: f.contractNo },
+    { label: "CSD", value: formatDateDDMMMYYYY(f.contractStartDate) },
+    { label: "CED", value: formatDateDDMMMYYYY(f.contractEndDate) },
+    { label: "COD", value: formatDateDDMMMYYYY(f.cod) },
+    { label: "Revenue Rate", value: formatScheduleGridNumber(f.rentalValueRate) },
+    { label: "Initial Rent PM", value: formatScheduleGridNumber(f.initialRentPM) },
+    { label: "Tenant No", value: f.prefixNo },
+    { label: "Business Name", value: f.businessName },
+    { label: "Address", value: f.address },
+    { label: "Period Start", value: formatDateDDMMMYYYY(f.periodStart) },
+    { label: "Period End", value: formatDateDDMMMYYYY(f.periodEnd) },
+    { label: "Invoice Date Type", value: f.invoiceDateType },
+    { label: "Invoice Status", value: f.invoiceStatus },
+    { label: "Rate PM", value: formatScheduleGridNumber(f.calculatedRentPM) },
+    { label: "Months", value: formatScheduleGridNumber(f.months, true) },
+    { label: "Total Amount", value: formatScheduleGridNumber(f.totalRent) },
+    { label: "Amount Received", value: formatScheduleGridNumber(f.amountReceived) },
+    { label: "Amount Receivable", value: formatScheduleGridNumber(f.amountReceivable) },
+    { label: "Amount Pending", value: formatScheduleGridNumber(f.amountPending) },
+    { label: "Days to Due", value: formatScheduleGridNumber(f.daysToDue, true) },
+    { label: "Days Overdue", value: formatScheduleGridNumber(f.daysOverdue, true) },
+    {
+      label: "Payment Term (Months)",
+      value: formatScheduleGridNumber(f.paymentTermMonths, true),
+    },
+    { label: "RAC", value: f.cmdName },
+    { label: "Base", value: f.baseName },
+    { label: "Rise Term Type", value: f.riseTermType },
+    { label: "Rise Term", value: f.riseTerm },
+    { label: "Rise Rate", value: formatScheduleGridNumber(f.riseRate) },
+    { label: "Rise Date", value: formatDateDDMMMYYYY(f.riseDate) },
+    { label: "Remarks", value: f.remarks },
+  ];
+}
+
+function AgreementProvEditDialogReadonlyStrip({ form }) {
+  const items = getAgreementProvEditDialogReadonlyBasicInfoItems(form);
+  return (
+    <MDBox sx={EDIT_BASIC_INFO_READONLY_SCROLL_SX}>
+      {items.map((item) => (
+        <MDBox key={item.label} sx={{ flex: "0 0 auto", minWidth: 88, maxWidth: 220 }}>
+          <AgreementProvReadOnlyField compact label={item.label} value={item.value} />
+        </MDBox>
+      ))}
+    </MDBox>
+  );
+}
+
+AgreementProvEditDialogReadonlyStrip.propTypes = {
+  form: PropTypes.object,
 };
 
 function AgreementProvReadOnlyField({ label, value, compact }) {
@@ -1663,14 +2456,15 @@ const agreementProvPanelFieldLabelSx = {
 };
 
 const agreementProvPanelInputSx = {
-  mt: 0.25,
+  mt: 0.15,
   "& .MuiInputBase-root": {
-    fontSize: "0.8125rem",
-    minHeight: 32,
+    fontSize: "0.75rem",
+    minHeight: 26,
     bgcolor: "#fff",
   },
   "& .MuiInputBase-input": {
-    py: 0.75,
+    py: 0.35,
+    px: 0.5,
   },
 };
 
@@ -1832,6 +2626,15 @@ function buildAgreementProvEditForm(row) {
     invoiceDateType: String(pickScheduleRowField(row, "InvoiceDateType", "invoiceDateType") || ""),
     invoiceStatus: String(pickScheduleRowField(row, "InvoiceStatus", "invoiceStatus") || ""),
     description: pickAgreementProvHeaderDescription(row),
+    paymentTermMonths: pickScheduleRowField(row, "PaymentTermMonths", "paymentTermMonths"),
+    riseTermType: String(pickScheduleRowField(row, "RiseTermType", "riseTermType") || ""),
+    riseTerm: String(pickScheduleRowField(row, "RiseTerm", "riseTerm") || ""),
+    riseRate: pickScheduleRowField(row, "RiseRate", "riseRate"),
+    riseDate: toScheduleDateInputValue(pickScheduleRowField(row, "RiseDate", "riseDate")),
+    daysToDue: pickScheduleRowField(row, "DaysToDue", "daysToDue"),
+    daysOverdue: pickScheduleRowField(row, "DaysOverdue", "daysOverdue"),
+    cmdName: String(pickScheduleRowField(row, "CmdName", "cmdName") || ""),
+    baseName: String(pickScheduleRowField(row, "BaseName", "baseName") || ""),
   };
 }
 
@@ -1853,9 +2656,6 @@ function AgreementProvInvoiceEditDialog({
   rowData,
   onSave,
   saving,
-  onSaveInvoiceLine,
-  onDeleteInvoiceLine,
-  lineActionSaving,
   registerReloadInvoiceLines,
   viewMode,
   createMode,
@@ -1867,11 +2667,53 @@ function AgreementProvInvoiceEditDialog({
   const [invoiceLinesRows, setInvoiceLinesRows] = useState([]);
   const [invoiceLinesLoading, setInvoiceLinesLoading] = useState(false);
   const [invoiceLinesError, setInvoiceLinesError] = useState("");
-  const [draftLineForm, setDraftLineForm] = useState(null);
-  const [draftSaving, setDraftSaving] = useState(false);
-  const [orderMoveSaving, setOrderMoveSaving] = useState(false);
+  const [newLineDrafts, setNewLineDrafts] = useState([]);
+  const [editingLineDraft, setEditingLineDraft] = useState(null);
+  const [pendingDeleteSubs, setPendingDeleteSubs] = useState([]);
+  const originalServerSubsRef = useRef(new Set());
+  const originalLinePayloadSnapshotsRef = useRef(new Map());
+  const newLineDraftsRef = useRef([]);
+  const editingLineDraftRef = useRef(null);
+  const invoiceLinesRowsRef = useRef([]);
+  const pendingDeleteSubsRef = useRef([]);
   const invoiceDateInputRef = useRef(null);
   const dueDateInputRef = useRef(null);
+
+  useEffect(() => {
+    newLineDraftsRef.current = newLineDrafts;
+  }, [newLineDrafts]);
+
+  useEffect(() => {
+    editingLineDraftRef.current = editingLineDraft;
+  }, [editingLineDraft]);
+
+  useEffect(() => {
+    invoiceLinesRowsRef.current = invoiceLinesRows;
+  }, [invoiceLinesRows]);
+
+  useEffect(() => {
+    pendingDeleteSubsRef.current = pendingDeleteSubs;
+  }, [pendingDeleteSubs]);
+
+  const getScheduleLinesForSuggest = useCallback(
+    () =>
+      mergeAllDraftsIntoWorkingInvoiceLines(
+        invoiceLinesRows,
+        newLineDrafts,
+        editingLineDraft,
+        form,
+        rowData
+      ),
+    [invoiceLinesRows, newLineDrafts, editingLineDraft, form, rowData]
+  );
+
+  const syncOriginalServerSubs = useCallback((lines) => {
+    const subs = sortInvoiceLinesByOrder(lines || [])
+      .filter((r) => !isMainInvoiceScheduleRow(r))
+      .map((r) => pickInvoiceLineSubInvoiceNo(r))
+      .filter(Boolean);
+    originalServerSubsRef.current = new Set(subs);
+  }, []);
 
   const reloadInvoiceLines = useCallback(async () => {
     if (!rowData) return [];
@@ -1879,6 +2721,8 @@ function AgreementProvInvoiceEditDialog({
     if (!invoiceNo) {
       setInvoiceLinesRows([]);
       setForm(buildAgreementProvEditForm(rowData));
+      originalServerSubsRef.current = new Set();
+      originalLinePayloadSnapshotsRef.current = new Map();
       return [];
     }
     setInvoiceLinesLoading(true);
@@ -1886,8 +2730,21 @@ function AgreementProvInvoiceEditDialog({
     try {
       const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
       const lines = unwrapContractInvoiceScheduleList(response);
-      setInvoiceLinesRows(sortInvoiceLinesByOrder(lines));
-      setForm((prev) => applyInvoiceLinesToForm(rowData, lines, prev));
+      const sorted = sortInvoiceLinesByOrder(lines);
+      setInvoiceLinesRows(sorted);
+      syncOriginalServerSubs(sorted);
+      setPendingDeleteSubs([]);
+      setNewLineDrafts([]);
+      setEditingLineDraft(null);
+      setForm((prev) => {
+        const next = applyInvoiceLinesToForm(rowData, lines, prev);
+        originalLinePayloadSnapshotsRef.current = captureOriginalInvoiceLinePayloadSnapshots(
+          sorted,
+          next,
+          rowData
+        );
+        return next;
+      });
       return lines;
     } catch (error) {
       console.error("Error loading invoice records by invoice no:", error);
@@ -1898,7 +2755,7 @@ function AgreementProvInvoiceEditDialog({
     } finally {
       setInvoiceLinesLoading(false);
     }
-  }, [rowData]);
+  }, [rowData, syncOriginalServerSubs]);
 
   useEffect(() => {
     if (!open || !rowData) {
@@ -1906,7 +2763,11 @@ function AgreementProvInvoiceEditDialog({
       setInvoiceLinesError("");
       setInvoiceLinesLoading(false);
       setForm({});
-      setDraftLineForm(null);
+      setNewLineDrafts([]);
+      setEditingLineDraft(null);
+      setPendingDeleteSubs([]);
+      originalServerSubsRef.current = new Set();
+      originalLinePayloadSnapshotsRef.current = new Map();
       return undefined;
     }
 
@@ -1929,7 +2790,8 @@ function AgreementProvInvoiceEditDialog({
       setInvoiceLinesRows([]);
       setInvoiceLinesError("");
       setInvoiceLinesLoading(false);
-      setDraftLineForm(null);
+      setNewLineDrafts([]);
+      setEditingLineDraft(null);
       return undefined;
     }
 
@@ -1971,104 +2833,136 @@ function AgreementProvInvoiceEditDialog({
 
   const handleSave = async () => {
     if (!onSave) return;
-    await onSave(form, rowData);
+    await onSave(form, rowData, {
+      invoiceLines: invoiceLinesRowsRef.current,
+      pendingDeleteSubs: pendingDeleteSubsRef.current,
+      newLineDrafts: newLineDraftsRef.current,
+      editingLineDraft: editingLineDraftRef.current,
+      originalServerSubs: originalServerSubsRef.current,
+      originalLinePayloadSnapshots: originalLinePayloadSnapshotsRef.current,
+    });
   };
 
   const canAddRecord = Boolean(
     String(form.contractNo || "").trim() && String(form.invoiceNo || "").trim()
   );
 
+  const hasIncompleteNewLineDrafts = useMemo(
+    () => Boolean(getFirstIncompleteNewLineDraftError(newLineDrafts, form)),
+    [newLineDrafts, form]
+  );
+
+  const appendNewLineDraft = (draftSeed) => {
+    setNewLineDrafts((prev) => [
+      ...prev,
+      {
+        ...draftSeed,
+        __draftId: draftSeed.__draftId || createNewLineDraftId(),
+      },
+    ]);
+  };
+
   const handleStartAddRecord = () => {
-    if (!canAddRecord || draftLineForm) return;
-    setDraftLineForm(buildEmptyDraftInvoiceAddForm(form, rowData, invoiceLinesRows));
+    if (!canAddRecord || saving || editingLineDraft) return;
+    const incompleteErr = getFirstIncompleteNewLineDraftError(newLineDrafts, form);
+    if (incompleteErr) {
+      alert(incompleteErr);
+      return;
+    }
+    const scheduleLines = getScheduleLinesForSuggest();
+    appendNewLineDraft(buildEmptyDraftInvoiceAddForm(form, rowData, scheduleLines));
   };
 
   const handleStartEditRecord = (lineRow, lineKey) => {
-    if (!canAddRecord || draftLineForm || !lineRow) return;
-    setDraftLineForm(buildDraftInvoiceEditFormFromLine(lineRow, form, rowData, lineKey));
+    if (!canAddRecord || editingLineDraft || !lineRow || saving) return;
+    setEditingLineDraft({
+      ...buildDraftInvoiceEditFormFromLine(lineRow, form, rowData, lineKey),
+      __draftId: lineKey,
+    });
   };
 
   const handleDuplicateRecord = (sourceLine) => {
-    if (!canAddRecord || draftLineForm || !sourceLine) return;
-    setDraftLineForm(
-      buildDuplicateDraftInvoiceAddForm(sourceLine, form, rowData, invoiceLinesRows)
+    if (!canAddRecord || saving || !sourceLine || editingLineDraft) return;
+    const incompleteErr = getFirstIncompleteNewLineDraftError(newLineDrafts, form);
+    if (incompleteErr) {
+      alert(incompleteErr);
+      return;
+    }
+    const scheduleLines = getScheduleLinesForSuggest();
+    if (sourceLine.__draftId) {
+      appendNewLineDraft(
+        buildDuplicateDraftFromDraftForm(sourceLine, form, rowData, scheduleLines)
+      );
+      return;
+    }
+    appendNewLineDraft({
+      ...buildDuplicateDraftInvoiceAddForm(sourceLine, form, rowData, scheduleLines),
+      __draftId: createNewLineDraftId(),
+    });
+  };
+
+  const handleMoveLineOrder = (lineRow, direction) => {
+    if (!canAddRecord || editingLineDraft || !lineRow || saving) return;
+    setInvoiceLinesRows((prev) => {
+      const mainRows = (prev || []).filter((r) => isMainInvoiceScheduleRow(r));
+      const orderedRows = sortInvoiceLinesByOrder(
+        (prev || []).filter((r) => !isMainInvoiceScheduleRow(r))
+      );
+      const currentSub = pickInvoiceLineSubInvoiceNo(lineRow);
+      const currentIndex = orderedRows.findIndex(
+        (r) => pickInvoiceLineSubInvoiceNo(r) === currentSub
+      );
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedRows.length) return prev;
+
+      const currentRow = orderedRows[currentIndex];
+      const targetRow = orderedRows[targetIndex];
+      const currentOrder = getInvoiceLineEffectiveSortOrder(currentRow, currentIndex);
+      const targetOrder = getInvoiceLineEffectiveSortOrder(targetRow, targetIndex);
+      const swapped = orderedRows.map((r) => {
+        const sub = pickInvoiceLineSubInvoiceNo(r);
+        if (sub === pickInvoiceLineSubInvoiceNo(currentRow)) {
+          return { ...r, SortOrder: targetOrder, sortOrder: targetOrder, __dirtyLocal: true };
+        }
+        if (sub === pickInvoiceLineSubInvoiceNo(targetRow)) {
+          return { ...r, SortOrder: currentOrder, sortOrder: currentOrder, __dirtyLocal: true };
+        }
+        return r;
+      });
+      return [...mainRows, ...swapped];
+    });
+  };
+
+  const handleDeleteLineLocal = (lineRow) => {
+    if (!lineRow || saving) return;
+    if (!window.confirm("Delete this invoice record?")) return;
+    const sub = pickInvoiceLineSubInvoiceNo(lineRow);
+    if (!sub) return;
+    if (!lineRow.__isNewLocal && originalServerSubsRef.current.has(sub)) {
+      setPendingDeleteSubs((prev) => (prev.includes(sub) ? prev : [...prev, sub]));
+    }
+    setInvoiceLinesRows((prev) =>
+      (prev || []).filter(
+        (r) => isMainInvoiceScheduleRow(r) || pickInvoiceLineSubInvoiceNo(r) !== sub
+      )
+    );
+    if (String(editingLineDraft?.editingSubInvoiceNo ?? "").trim() === sub) {
+      setEditingLineDraft(null);
+    }
+    setNewLineDrafts((prev) =>
+      prev.filter((d) => String(d.pendingSubInvoiceNo ?? "").trim() !== sub)
     );
   };
 
-  const handleMoveLineOrder = async (lineRow, direction) => {
-    if (!canAddRecord || draftLineForm || !lineRow || orderMoveSaving) return;
-    const orderedRows = sortInvoiceLinesByOrder(invoiceLinesRows || []).filter(
-      (r) => !isMainInvoiceScheduleRow(r)
-    );
-    const currentSub = pickInvoiceLineSubInvoiceNo(lineRow);
-    const currentIndex = orderedRows.findIndex(
-      (r) => pickInvoiceLineSubInvoiceNo(r) === currentSub
-    );
-    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedRows.length) return;
-
-    const currentRow = orderedRows[currentIndex];
-    const targetRow = orderedRows[targetIndex];
-    const currentKeys = getInvoiceLineRouteKeys(currentRow, rowData, form);
-    const targetKeys = getInvoiceLineRouteKeys(targetRow, rowData, form);
+  const updateDraftById = (draftId, updater) => {
     if (
-      !currentKeys.contractNo ||
-      !currentKeys.invoiceNo ||
-      !currentKeys.subInvoiceNo ||
-      !targetKeys.contractNo ||
-      !targetKeys.invoiceNo ||
-      !targetKeys.subInvoiceNo
+      editingLineDraft &&
+      (editingLineDraft.__draftId === draftId || editingLineDraft.editingLineKey === draftId)
     ) {
-      alert("Cannot move: Contract No, Invoice ID, and Sub Invoice are required.");
+      setEditingLineDraft((prev) => (prev ? updater(prev) : prev));
       return;
     }
-
-    const currentOrder = getInvoiceLineEffectiveSortOrder(currentRow, currentIndex);
-    const targetOrder = getInvoiceLineEffectiveSortOrder(targetRow, targetIndex);
-    const currentForm = {
-      ...buildDraftInvoiceEditFormFromLine(
-        currentRow,
-        form,
-        rowData,
-        `sub-${currentKeys.subInvoiceNo}`
-      ),
-      sortOrder: String(targetOrder),
-      pendingSubInvoiceNo: currentKeys.subInvoiceNo,
-    };
-    const targetForm = {
-      ...buildDraftInvoiceEditFormFromLine(
-        targetRow,
-        form,
-        rowData,
-        `sub-${targetKeys.subInvoiceNo}`
-      ),
-      sortOrder: String(currentOrder),
-      pendingSubInvoiceNo: targetKeys.subInvoiceNo,
-    };
-
-    setOrderMoveSaving(true);
-    try {
-      await Promise.all([
-        contractApi.updateInvoiceScheduleSub(
-          currentKeys.contractNo,
-          currentKeys.invoiceNo,
-          currentKeys.subInvoiceNo,
-          buildInvoiceScheduleCreatePayload(rowData, form, currentForm)
-        ),
-        contractApi.updateInvoiceScheduleSub(
-          targetKeys.contractNo,
-          targetKeys.invoiceNo,
-          targetKeys.subInvoiceNo,
-          buildInvoiceScheduleCreatePayload(rowData, form, targetForm)
-        ),
-      ]);
-      await reloadInvoiceLines();
-    } catch (error) {
-      console.error("Error moving invoice record:", error);
-      alert(getAgreementProvSaveErrorMessage(error));
-    } finally {
-      setOrderMoveSaving(false);
-    }
+    setNewLineDrafts((prev) => prev.map((d) => (d.__draftId === draftId ? updater(d) : d)));
   };
 
   const recalcDraftTotal = (draft) => {
@@ -2083,116 +2977,83 @@ function AgreementProvInvoiceEditDialog({
     };
   };
 
-  const handleDraftFieldChange = (field) => (e) => {
-    setDraftLineForm((prev) => {
-      if (!prev) return prev;
-      return { ...prev, [field]: e.target.value };
-    });
+  const handleDraftFieldChange = (draftId) => (field) => (e) => {
+    updateDraftById(draftId, (prev) => ({ ...prev, [field]: e.target.value }));
   };
 
-  const handleDraftIntegerFieldChange = (field) => (e) => {
+  const handleDraftIntegerFieldChange = (draftId) => (field) => (e) => {
     const value = sanitizeIntegerInputValue(e.target.value);
-    setDraftLineForm((prev) => {
-      if (!prev) return prev;
-      return recalcDraftTotal({ ...prev, [field]: value });
-    });
+    updateDraftById(draftId, (prev) => recalcDraftTotal({ ...prev, [field]: value }));
   };
 
-  const handleDraftNumericFieldChange = (field) => (e) => {
+  const handleDraftNumericFieldChange = (draftId) => (field) => (e) => {
     const value = sanitizeDecimalNumericInputValue(e.target.value);
-    setDraftLineForm((prev) => {
-      if (!prev) return prev;
-      return recalcDraftTotal({ ...prev, [field]: value });
-    });
+    updateDraftById(draftId, (prev) => recalcDraftTotal({ ...prev, [field]: value }));
   };
 
-  const handleDraftCancel = () => {
-    if (draftSaving) return;
-    setDraftLineForm(null);
-  };
-
-  const handleDraftSave = async () => {
-    if (!draftLineForm || !onSaveInvoiceLine) return;
-    const totalVal = computeInvoiceRecordLineTotal(
-      draftLineForm.months,
-      draftLineForm.calculatedRentPM,
-      draftLineForm.discountPercent
-    );
-    const addForm = {
-      ...draftLineForm,
-      invoiceDate: draftLineForm.invoiceDate || form.invoiceDate,
-      dueDate: draftLineForm.dueDate || form.dueDate,
-      total: totalVal != null ? String(totalVal) : draftLineForm.total,
-    };
-    setDraftSaving(true);
-    try {
-      await onSaveInvoiceLine(addForm, rowData, form, draftLineForm.editingLineRow || null);
-      setDraftLineForm(null);
-    } finally {
-      setDraftSaving(false);
+  const handleDraftCancel = (draftId) => {
+    if (saving) return;
+    if (draftId == null) {
+      setEditingLineDraft(null);
+      return;
     }
+    if (
+      editingLineDraft &&
+      (editingLineDraft.__draftId === draftId || editingLineDraft.editingLineKey === draftId)
+    ) {
+      setEditingLineDraft(null);
+      return;
+    }
+    setNewLineDrafts((prev) => prev.filter((d) => d.__draftId !== draftId));
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600, pb: 1 }}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullScreen
+      PaperProps={{
+        sx: {
+          display: "flex",
+          flexDirection: "column",
+          m: 0,
+          height: "100%",
+          maxHeight: "100%",
+          borderRadius: 0,
+        },
+      }}
+    >
+      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600, pb: 1, flexShrink: 0 }}>
         {isCreateMode ? "Create Agreement Invoice" : "Edit Agreement Invoice"}
       </DialogTitle>
-      <DialogContent sx={{ pt: 0.5 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
+      <DialogContent
+        sx={{
+          pt: 0.5,
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <MDBox
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            gap: 1.5,
+          }}
+        >
+          <MDBox sx={{ flexShrink: 0, width: "100%" }}>
             <AgreementProvReadOnlyInfoPanel>
-              <MDBox
-                sx={{
-                  ...EDIT_BASIC_INFO_ROW_SX,
-                  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-                }}
-              >
-                <AgreementProvReadOnlyField compact label="Contract No" value={form.contractNo} />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="CSD"
-                  value={formatDateDDMMMYYYY(form.contractStartDate)}
-                />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="CED"
-                  value={formatDateDDMMMYYYY(form.contractEndDate)}
-                />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="COD"
-                  value={formatDateDDMMMYYYY(form.cod)}
-                />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="Revenue Rate"
-                  value={formatScheduleGridNumber(form.rentalValueRate)}
-                />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="Initial Rent PM"
-                  value={formatScheduleGridNumber(form.initialRentPM)}
-                />
-              </MDBox>
-              <MDBox
-                sx={{
-                  ...EDIT_BASIC_INFO_ROW_SX,
-                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                }}
-              >
-                <AgreementProvReadOnlyField compact label="Tenant No" value={form.prefixNo} />
-                <AgreementProvReadOnlyField
-                  compact
-                  label="Business Name"
-                  value={form.businessName}
-                />
-                <AgreementProvReadOnlyField compact label="Address" value={form.address} />
-              </MDBox>
+              <AgreementProvEditDialogReadonlyStrip form={form} />
               <MDBox
                 sx={{
                   ...EDIT_BASIC_INFO_ROW_SX,
                   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  mt: 0.75,
                 }}
               >
                 <AgreementProvReadOnlyField compact label="Invoice No" value={form.invoiceNo} />
@@ -2343,32 +3204,46 @@ function AgreementProvInvoiceEditDialog({
                 )}
               </MDBox>
             </AgreementProvReadOnlyInfoPanel>
-          </Grid>
+          </MDBox>
           {!isCreateMode && (
-            <Grid item xs={12}>
+            <MDBox
+              sx={{
+                flex: "1 1 0",
+                minHeight: 0,
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
               <MDBox
                 display="flex"
                 alignItems="center"
                 justifyContent="space-between"
                 gap={1}
-                mt={1.5}
-                mb={1}
+                mt={0.5}
+                mb={0.75}
+                sx={{ flexShrink: 0 }}
               >
                 <MDTypography variant="button" fontWeight="bold">
                   Invoice Item records
                 </MDTypography>
                 {!viewMode && (
-                  <Tooltip title="Add invoice record">
+                  <Tooltip
+                    title={
+                      hasIncompleteNewLineDrafts
+                        ? "Complete all fields in the current row(s) before adding another"
+                        : "Add invoice record"
+                    }
+                  >
                     <span>
                       <IconButton
                         color="info"
                         size="small"
                         disabled={
                           saving ||
-                          orderMoveSaving ||
                           !canAddRecord ||
-                          Boolean(draftLineForm) ||
-                          draftSaving
+                          Boolean(editingLineDraft) ||
+                          hasIncompleteNewLineDrafts
                         }
                         onClick={handleStartAddRecord}
                         sx={{
@@ -2384,34 +3259,34 @@ function AgreementProvInvoiceEditDialog({
                   </Tooltip>
                 )}
               </MDBox>
-              <AgreementProvInvoiceLinesGrid
-                rows={invoiceLinesRows}
-                loading={invoiceLinesLoading}
-                error={invoiceLinesError}
-                lineActionSaving={lineActionSaving || orderMoveSaving}
-                saving={saving}
-                form={form}
-                rowData={rowData}
-                readOnly={viewMode}
-                draftLineForm={viewMode ? null : draftLineForm}
-                onDraftFieldChange={handleDraftFieldChange}
-                onDraftIntegerFieldChange={handleDraftIntegerFieldChange}
-                onDraftNumericFieldChange={handleDraftNumericFieldChange}
-                onDraftSave={handleDraftSave}
-                onDraftCancel={handleDraftCancel}
-                draftSaving={draftSaving}
-                onDuplicateLine={(lineRow) => handleDuplicateRecord(lineRow)}
-                onEditLine={(lineRow, lineKey) => handleStartEditRecord(lineRow, lineKey)}
-                onMoveLine={handleMoveLineOrder}
-                onDeleteLine={(lineRow, parentForm, parentRow) =>
-                  onDeleteInvoiceLine?.(lineRow, parentForm, parentRow, reloadInvoiceLines)
-                }
-              />
-            </Grid>
+              <MDBox sx={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <AgreementProvInvoiceLinesGrid
+                  fillHeight
+                  rows={invoiceLinesRows}
+                  loading={invoiceLinesLoading}
+                  error={invoiceLinesError}
+                  saving={saving}
+                  form={form}
+                  rowData={rowData}
+                  readOnly={viewMode}
+                  newLineDrafts={viewMode ? [] : newLineDrafts}
+                  editingLineDraft={viewMode ? null : editingLineDraft}
+                  hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+                  onDraftFieldChange={handleDraftFieldChange}
+                  onDraftIntegerFieldChange={handleDraftIntegerFieldChange}
+                  onDraftNumericFieldChange={handleDraftNumericFieldChange}
+                  onDraftCancel={handleDraftCancel}
+                  onDuplicateLine={handleDuplicateRecord}
+                  onEditLine={(lineRow, lineKey) => handleStartEditRecord(lineRow, lineKey)}
+                  onMoveLine={handleMoveLineOrder}
+                  onDeleteLine={handleDeleteLineLocal}
+                />
+              </MDBox>
+            </MDBox>
           )}
-        </Grid>
+        </MDBox>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions sx={{ px: 3, pb: 2, flexShrink: 0 }}>
         <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={saving}>
           Close
         </MDButton>
@@ -2437,9 +3312,6 @@ AgreementProvInvoiceEditDialog.propTypes = {
   onSave: PropTypes.func,
   saving: PropTypes.bool,
   rowData: PropTypes.object,
-  onSaveInvoiceLine: PropTypes.func,
-  onDeleteInvoiceLine: PropTypes.func,
-  lineActionSaving: PropTypes.bool,
   registerReloadInvoiceLines: PropTypes.func,
   viewMode: PropTypes.bool,
   createMode: PropTypes.bool,
@@ -2451,8 +3323,13 @@ function normalizeAgreementProvInvoiceRow(row) {
   const contractStartDate = row.ContractStartDate ?? row.contractStartDate ?? "";
   const contractEndDate = row.ContractEndDate ?? row.contractEndDate ?? "";
   const invoiceDate = pickScheduleInvoiceDate(row);
+  const isLocked = pickScheduleRowIsLocked(row);
   return {
     ...row,
+    IsLocked: isLocked ? 1 : 0,
+    isLocked,
+    IsFinalized: pickScheduleRowIsFinalized(row) ? 1 : 0,
+    isFinalized: pickScheduleRowIsFinalized(row),
     id:
       row.InvoiceScheduleId ??
       row.invoiceScheduleId ??
@@ -2513,29 +3390,24 @@ function normalizeAgreementProvInvoiceRow(row) {
 export default function AgreementProvInvoice() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
-  const [filters, setFilters] = useState({
-    command: "",
-    base: "",
-    unit: "",
-    dateFrom: "",
-    dateTo: "",
-    contractNo: null,
-  });
+  const [filters, setFilters] = useState(buildInitialAgreementProvFilters);
+  const [appliedFilters, setAppliedFilters] = useState(buildInitialAgreementProvFilters);
+  const [searchApplied, setSearchApplied] = useState(false);
+  const [paginationHost, setPaginationHost] = useState(null);
 
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [units, setUnits] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [filteredBases, setFilteredBases] = useState([]);
-  const [rows, setRows] = useState([]);
+  const [allScheduleRows, setAllScheduleRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editRowData, setEditRowData] = useState(null);
   const [editDialogViewMode, setEditDialogViewMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [savingAdd, setSavingAdd] = useState(false);
-  const [lineActionSaving, setLineActionSaving] = useState(false);
+  const [invoiceKeysWithItemRecords, setInvoiceKeysWithItemRecords] = useState(() => new Set());
   const [invoiceLockSavingKey, setInvoiceLockSavingKey] = useState("");
   const reloadInvoiceLinesRef = useRef(null);
   const urlDeepLink = useMemo(() => readAgreementProvInvoiceUrlParams(), []);
@@ -2588,14 +3460,50 @@ export default function AgreementProvInvoice() {
     fetchLookups();
   }, []);
 
-  // Fetch active contracts for contract dropdown
+  const reloadAllScheduleRows = useCallback(async () => {
+    const response = await contractApi.getAllInvoiceScheduleRecords();
+    const scheduleData = unwrapContractInvoiceScheduleList(response).map(
+      normalizeAgreementProvInvoiceRow
+    );
+    setAllScheduleRows(scheduleData);
+    return scheduleData;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        if (!cancelled) await reloadAllScheduleRows();
+      } catch (error) {
+        console.error("Error loading contract invoice schedule:", error);
+        if (!cancelled) setAllScheduleRows([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadAllScheduleRows]);
+
+  useEffect(() => {
+    if (!allScheduleRows.length) return;
+    const oldestDueDate = getOldestFinalizedInvoiceDueDateInput(allScheduleRows);
+    setFilters((prev) => {
+      const dateFrom = prev.dateFrom || oldestDueDate;
+      const dateTo = prev.dateTo || getAgreementProvDefaultDateTo();
+      if (dateFrom === prev.dateFrom && dateTo === prev.dateTo) return prev;
+      return { ...prev, dateFrom, dateTo };
+    });
+  }, [allScheduleRows]);
+
   useEffect(() => {
     const fetchActiveContracts = async () => {
       try {
-        const response = await contractApi.getAll(1, 10000); // Get all active contracts
-        const contractsData = response?.data || (Array.isArray(response) ? response : []);
-        // Filter only active contracts (handle both PascalCase and camelCase)
-        const activeContracts = contractsData.filter(
+        const response = await contractApi.getAllRecords();
+        const contractsData = response?.data ?? (Array.isArray(response) ? response : []);
+        const activeContracts = (Array.isArray(contractsData) ? contractsData : []).filter(
           (contract) =>
             contract.Status === true ||
             contract.Status === 1 ||
@@ -2618,39 +3526,11 @@ export default function AgreementProvInvoice() {
     urlDeepLinkAppliedRef.current = true;
 
     const contractNoParam = urlDeepLink.contractNo;
-    setFilters((prev) => ({
-      ...prev,
-      contractNo: { ContractNo: contractNoParam, contractNo: contractNoParam },
-    }));
-
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const response = await contractApi.getInvoiceSchedule({ contractNo: contractNoParam });
-        let scheduleData = unwrapContractInvoiceScheduleList(response);
-        if (urlDeepLink.invoiceNo) {
-          const invKey = urlDeepLink.invoiceNo.toLowerCase();
-          scheduleData = scheduleData.filter(
-            (row) =>
-              String(row.InvoiceNo ?? row.invoiceNo ?? "")
-                .trim()
-                .toLowerCase() === invKey
-          );
-        }
-        if (!cancelled) setRows(scheduleData.map(normalizeAgreementProvInvoiceRow));
-      } catch (error) {
-        console.error("Error loading contract invoice schedule from URL:", error);
-        if (!cancelled) setRows([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [urlDeepLink.contractNo, urlDeepLink.invoiceNo]);
+    const contractNoFilter = { ContractNo: contractNoParam, contractNo: contractNoParam };
+    setFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
+    setAppliedFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
+    setSearchApplied(true);
+  }, [urlDeepLink.contractNo]);
 
   useEffect(() => {
     if (!urlDeepLink.contractNo || !contracts.length) return;
@@ -2693,41 +3573,58 @@ export default function AgreementProvInvoice() {
     setFilters((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSearch = async () => {
+  const displayScheduleRows = useMemo(() => {
+    if (!searchApplied) return [];
+    return filterAgreementProvScheduleRows(allScheduleRows, appliedFilters, units);
+  }, [allScheduleRows, appliedFilters, units, searchApplied]);
+
+  useEffect(() => {
+    if (!searchApplied || displayScheduleRows.length === 0) {
+      setInvoiceKeysWithItemRecords(new Set());
+      return undefined;
+    }
+
+    let cancelled = false;
+    buildAgreementProvInvoiceItemRecordIndex(displayScheduleRows).then((keys) => {
+      if (!cancelled) setInvoiceKeysWithItemRecords(keys);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayScheduleRows, searchApplied]);
+
+  const refreshInvoiceItemRecordKey = useCallback(async (rowData, form) => {
+    const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form || {});
+    if (!contractNo || !invoiceNo) return;
+    const key = `${contractNo}|${invoiceNo}`;
+    try {
+      const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+      const lines = unwrapContractInvoiceScheduleList(response);
+      const hasItems = (lines || []).some(isAgreementProvInvoiceItemRecordRow);
+      setInvoiceKeysWithItemRecords((prev) => {
+        const next = new Set(prev);
+        if (hasItems) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+    } catch (error) {
+      console.error("Error refreshing invoice item record index:", error);
+    }
+  }, []);
+
+  const handleSearch = () => {
+    setAppliedFilters({ ...filters, contractNo: filters.contractNo });
+    setSearchApplied(true);
+  };
+
+  const refreshScheduleGrid = async () => {
     setLoading(true);
     try {
-      const apiParams = {};
-      if (filters.command) apiParams.cmdId = Number(filters.command);
-      if (filters.base) apiParams.baseId = Number(filters.base);
-      if (filters.dateFrom) apiParams.fromDate = filters.dateFrom;
-      if (filters.dateTo) apiParams.toDate = filters.dateTo;
-      if (filters.contractNo) {
-        apiParams.contractNo =
-          filters.contractNo.contractNo || filters.contractNo.ContractNo || filters.contractNo;
-      }
-
-      const response = await contractApi.getInvoiceSchedule(apiParams);
-      let scheduleData = unwrapContractInvoiceScheduleList(response);
-
-      // Unit (UoM) is not a ContractInvoiceSchedule query param; match on row UoM/UnitName when selected.
-      if (filters.unit) {
-        const selectedUnit = units.find((u) => Number(u.id) === Number(filters.unit));
-        const unitName = selectedUnit?.name || selectedUnit?.unitName || selectedUnit?.Name;
-        if (unitName) {
-          scheduleData = scheduleData.filter((row) => {
-            const rowUnit = String(
-              row.UnitName ?? row.unitName ?? row.UoM ?? row.uoM ?? row.UOM ?? row.uom ?? ""
-            ).trim();
-            return rowUnit === String(unitName).trim();
-          });
-        }
-      }
-
-      setRows(scheduleData.map(normalizeAgreementProvInvoiceRow));
+      await reloadAllScheduleRows();
     } catch (error) {
-      console.error("Error loading contract invoice schedule:", error);
-      alert("Failed to load invoice schedule. Please try again.");
-      setRows([]);
+      console.error("Error refreshing contract invoice schedule:", error);
+      alert("Failed to refresh invoice schedule. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -2750,7 +3647,7 @@ export default function AgreementProvInvoice() {
         invoiceNo,
         buildInvoiceScheduleLockPayload(rowData, nextLocked)
       );
-      await handleSearch();
+      await refreshScheduleGrid();
     } catch (error) {
       console.error("Error updating invoice lock:", error);
       alert(getAgreementProvSaveErrorMessage(error));
@@ -3158,7 +4055,7 @@ export default function AgreementProvInvoice() {
     setEditDialogViewMode(false);
   };
 
-  const handleSaveEditRow = async (form, rowData) => {
+  const handleSaveEditRow = async (form, rowData, lineSaveContext = {}) => {
     const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form);
     if (!contractNo || !invoiceNo) {
       alert("Cannot update: Contract No and Invoice ID are required.");
@@ -3167,112 +4064,24 @@ export default function AgreementProvInvoice() {
 
     setSavingEdit(true);
     try {
-      const payload = buildInvoiceSchedulePutPayload(rowData, form);
-      await contractApi.updateInvoiceSchedule(contractNo, invoiceNo, payload);
+      await persistAllInvoiceScheduleLines({
+        rowData,
+        form,
+        invoiceLines: lineSaveContext.invoiceLines ?? [],
+        pendingDeleteSubs: lineSaveContext.pendingDeleteSubs ?? [],
+        newLineDrafts: lineSaveContext.newLineDrafts ?? [],
+        editingLineDraft: lineSaveContext.editingLineDraft ?? null,
+        originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
+        originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
+      });
       handleCloseEditRow();
-      await handleSearch();
+      await refreshScheduleGrid();
+      await refreshInvoiceItemRecordKey(rowData, form);
     } catch (error) {
       console.error("Error updating contract invoice schedule:", error);
       alert(getAgreementProvSaveErrorMessage(error));
     } finally {
       setSavingEdit(false);
-    }
-  };
-
-  const handleDeleteInvoiceLine = async (lineRow, parentForm, parentRow, reloadInvoiceLines) => {
-    const { contractNo, invoiceNo, subInvoiceNo } = getInvoiceLineRouteKeys(
-      lineRow,
-      parentRow,
-      parentForm
-    );
-    if (!contractNo || !invoiceNo || !subInvoiceNo) {
-      alert("Cannot delete: Contract No, Invoice ID, and Sub Invoice are required.");
-      return;
-    }
-    if (!window.confirm("Delete this invoice record?")) return;
-
-    setLineActionSaving(true);
-    try {
-      await contractApi.deleteInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo);
-      if (typeof reloadInvoiceLines === "function") await reloadInvoiceLines();
-    } catch (error) {
-      console.error("Error deleting invoice record:", error);
-      alert(getAgreementProvSaveErrorMessage(error));
-    } finally {
-      setLineActionSaving(false);
-    }
-  };
-
-  const handleSaveAddRecord = async (addForm, parentRow, parentForm, editLineRow) => {
-    const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(parentRow, parentForm);
-    if (!contractNo || !invoiceNo) {
-      alert("Cannot add: Contract No and Invoice ID are required.");
-      return;
-    }
-    if (!addForm.invoiceDate?.trim()) {
-      alert("Invoice Date is required.");
-      return;
-    }
-    if (addForm.calculatedRentPM === "" || addForm.calculatedRentPM == null) {
-      alert("Rate PM is required.");
-      return;
-    }
-    if (addForm.months === "" || addForm.months == null) {
-      alert("Months is required.");
-      return;
-    }
-    let subInvoiceNo = "";
-    if (editLineRow) {
-      subInvoiceNo = getInvoiceLineRouteKeys(editLineRow, parentRow, parentForm).subInvoiceNo;
-      if (!subInvoiceNo) {
-        alert("Cannot update: Sub Invoice is required.");
-        return;
-      }
-    }
-
-    setSavingAdd(true);
-    try {
-      if (editLineRow) {
-        const payload = buildInvoiceScheduleCreatePayload(parentRow, parentForm, {
-          ...addForm,
-          pendingSubInvoiceNo: subInvoiceNo,
-          sortOrder: addForm.sortOrder || "1",
-        });
-        await contractApi.updateInvoiceScheduleSub(contractNo, invoiceNo, subInvoiceNo, payload);
-      } else {
-        let linesForSuggest = rows;
-        const reload = reloadInvoiceLinesRef.current;
-        if (typeof reload === "function") {
-          const freshLines = await reload();
-          if (Array.isArray(freshLines) && freshLines.length > 0) {
-            linesForSuggest = freshLines;
-          }
-        } else {
-          try {
-            const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
-            const apiLines = unwrapContractInvoiceScheduleList(response);
-            if (apiLines.length > 0) linesForSuggest = apiLines;
-          } catch (error) {
-            console.error("Error loading invoice lines for SubInvoiceNo:", error);
-          }
-        }
-        const newSubInvoiceNo =
-          String(addForm.pendingSubInvoiceNo || "").trim() ||
-          suggestNextSubInvoiceNo(parentRow, parentForm, linesForSuggest);
-        const payload = buildInvoiceScheduleCreatePayload(parentRow, parentForm, {
-          ...addForm,
-          pendingSubInvoiceNo: newSubInvoiceNo,
-          sortOrder: String(suggestNextInvoiceSortOrder(linesForSuggest)),
-        });
-        await contractApi.createInvoiceSchedule(contractNo, invoiceNo, newSubInvoiceNo, payload);
-      }
-      const reload = reloadInvoiceLinesRef.current;
-      if (typeof reload === "function") await reload();
-    } catch (error) {
-      console.error("Error saving contract invoice schedule:", error);
-      alert(getAgreementProvSaveErrorMessage(error));
-    } finally {
-      setSavingAdd(false);
     }
   };
 
@@ -3289,18 +4098,99 @@ export default function AgreementProvInvoice() {
       if (isAgreementProvContractBasicInfoRow(rowData)) return null;
       if (rowData.isGroupRow || rowData.IsGroupRow) return "";
       if (pickScheduleRowIsLocked(rowData) && !api.isSuperuserUser()) return "";
+      const hasItemRecords = invoiceKeysWithItemRecords.has(
+        getAgreementProvInvoiceActionKey(rowData)
+      );
       return (
-        <Tooltip title="Edit">
+        <Tooltip title={hasItemRecords ? "Edit (has invoice item records)" : "Edit"}>
           <IconButton
             size="small"
-            color="info"
+            className="erp-grid-action-edit"
             onClick={() => handleOpenEditRow(rowData)}
-            sx={{ padding: "2px" }}
+            aria-label="Edit"
+            sx={
+              hasItemRecords
+                ? agreementProvActionIconSx.editWithItemRecords
+                : agreementProvActionIconSx.edit
+            }
           >
             <Icon>edit</Icon>
           </IconButton>
         </Tooltip>
       );
+    },
+  };
+
+  const agreementProvActionIconSx = {
+    edit: {
+      padding: "2px",
+      color: "#2563eb",
+      opacity: "1 !important",
+      transform: "none !important",
+      filter: "none !important",
+      transition: "background-color 0.15s ease",
+      "&:hover": {
+        opacity: "1 !important",
+        transform: "none !important",
+        filter: "none !important",
+        backgroundColor: "rgba(37, 99, 235, 0.1)",
+      },
+      "& .MuiIcon-root": {
+        color: "#2563eb !important",
+        fontSize: "1.15rem",
+      },
+    },
+    editWithItemRecords: {
+      padding: "2px",
+      color: "#16a34a",
+      opacity: "1 !important",
+      transform: "none !important",
+      filter: "none !important",
+      transition: "background-color 0.15s ease",
+      "&:hover": {
+        opacity: "1 !important",
+        transform: "none !important",
+        filter: "none !important",
+        backgroundColor: "rgba(22, 163, 74, 0.12)",
+      },
+      "& .MuiIcon-root": {
+        color: "#16a34a !important",
+        fontSize: "1.15rem",
+      },
+    },
+  };
+
+  const viewColIconSx = {
+    expand: {
+      padding: "2px",
+      color: "#6a1b9a",
+      "&:hover": { backgroundColor: "rgba(106, 27, 154, 0.12)" },
+      "& .MuiIcon-root": { color: "#6a1b9a", fontSize: "1.15rem" },
+    },
+    lockOpen: {
+      padding: "2px",
+      color: "#ed6c02",
+      "&:hover:not(:disabled)": { backgroundColor: "rgba(237, 108, 2, 0.12)" },
+      "& .MuiIcon-root": { color: "#ed6c02", fontSize: "1.15rem" },
+    },
+    lockClosed: {
+      padding: "2px",
+      color: "#d32f2f",
+      "&:hover:not(:disabled)": { backgroundColor: "rgba(211, 47, 47, 0.12)" },
+      "& .MuiIcon-root": { color: "#d32f2f", fontSize: "1.15rem" },
+      "&.Mui-disabled .MuiIcon-root": { color: "rgba(211, 47, 47, 0.45)" },
+    },
+    visibility: {
+      padding: "2px",
+      color: "#0288d1",
+      "&:hover": { backgroundColor: "rgba(2, 136, 209, 0.12)" },
+      "& .MuiIcon-root": { color: "#0288d1", fontSize: "1.2rem" },
+    },
+    pdf: {
+      padding: "4px",
+      color: "#2e7d32",
+      "&:hover": { backgroundColor: "rgba(46, 125, 50, 0.12)" },
+      "& .MuiIcon-root": { color: "#2e7d32", fontSize: "1.35rem" },
     },
   };
 
@@ -3321,7 +4211,6 @@ export default function AgreementProvInvoice() {
         return (
           <IconButton
             size="small"
-            color="info"
             onClick={() => {
               setExpandedGroups((prev) => {
                 const next = new Set(prev);
@@ -3331,7 +4220,7 @@ export default function AgreementProvInvoice() {
               });
             }}
             title={isExpanded ? "Collapse" : "Expand"}
-            sx={{ padding: "2px" }}
+            sx={viewColIconSx.expand}
           >
             <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
           </IconButton>
@@ -3374,42 +4263,32 @@ export default function AgreementProvInvoice() {
             <span>
               <IconButton
                 size="small"
-                color={isLocked ? "secondary" : "default"}
                 disabled={lockBusy || (isLocked && !isSuper)}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isLocked) return;
                   void handleInvoiceLockChange(rowData, true);
                 }}
-                sx={{ padding: "2px" }}
+                sx={isLocked ? viewColIconSx.lockClosed : viewColIconSx.lockOpen}
               >
-                <Icon sx={{ fontSize: "1.15rem" }}>{isLocked ? "lock" : "lock_open"}</Icon>
+                <Icon>{isLocked ? "lock" : "lock_open"}</Icon>
               </IconButton>
             </span>
           </Tooltip>
           <Tooltip title="View invoice">
             <IconButton
               size="small"
-              color="info"
               onClick={() => handleOpenViewRow(rowData)}
-              sx={{ padding: "2px" }}
+              sx={viewColIconSx.visibility}
             >
-              <Icon sx={{ fontSize: "1.2rem" }}>visibility</Icon>
+              <Icon>visibility</Icon>
             </IconButton>
           </Tooltip>
-          <IconButton
-            onClick={() => generatePDF(rowData)}
-            size="medium"
-            sx={{
-              padding: "4px",
-              color: "#1976d2",
-              "&:hover": {
-                backgroundColor: "rgba(25, 118, 210, 0.1)",
-              },
-            }}
-          >
-            <Icon sx={{ fontSize: "1.35rem" }}>picture_as_pdf</Icon>
-          </IconButton>
+          <Tooltip title="Generate PDF">
+            <IconButton onClick={() => generatePDF(rowData)} size="medium" sx={viewColIconSx.pdf}>
+              <Icon>picture_as_pdf</Icon>
+            </IconButton>
+          </Tooltip>
         </MDBox>
       );
     },
@@ -3546,7 +4425,8 @@ export default function AgreementProvInvoice() {
       if (isAgreementProvContractBasicInfoRow(rowData)) return null;
       const id = pickScheduleRowField(rowData, "CmdId", "cmdId");
       const cmd = commands.find((c) => Number(c.id) === Number(id));
-      return cmd?.name || (id !== "" ? String(id) : "-");
+      const display = cmd?.name || (id !== "" ? String(id) : "-");
+      return withGridValueChip(display, "rac", { row });
     },
   };
 
@@ -3562,7 +4442,8 @@ export default function AgreementProvInvoice() {
       if (isAgreementProvContractBasicInfoRow(rowData)) return null;
       const id = pickScheduleRowField(rowData, "BaseId", "baseId");
       const base = bases.find((b) => Number(b.id) === Number(id));
-      return base?.name || (id !== "" ? String(id) : "-");
+      const display = base?.name || (id !== "" ? String(id) : "-");
+      return withGridValueChip(display, "base", { row });
     },
   };
 
@@ -3736,17 +4617,16 @@ export default function AgreementProvInvoice() {
   ];
 
   const groupedData = useMemo(() => {
-    const enrichedRows = (rows || []).map((row) => {
+    const enrichedRows = (displayScheduleRows || []).map((row) => {
       const cmdId = row.cmdId ?? row.CmdId;
       const baseId = row.baseId ?? row.BaseId;
       const cmd = commands.find((c) => Number(c.id) === Number(cmdId));
       const base = bases.find((b) => Number(b.id) === Number(baseId));
-      const locked = pickScheduleRowIsLocked(row);
       return {
         ...row,
         cmdName: cmd?.name || (cmdId !== "" && cmdId != null ? String(cmdId) : ""),
         baseName: base?.name || (baseId !== "" && baseId != null ? String(baseId) : ""),
-        __disabledRow: locked,
+        ...agreementProvGridRowLockFlags(row),
       };
     });
 
@@ -3841,6 +4721,9 @@ export default function AgreementProvInvoice() {
         GroupKey: groupKey,
         groupKey,
         GroupRows: groupRows,
+        __disabledRow: false,
+        __rowClassName: "",
+        __rowStyle: {},
       };
 
       result.push(groupRow);
@@ -3857,7 +4740,7 @@ export default function AgreementProvInvoice() {
     });
 
     return result;
-  }, [rows, commands, bases, expandedGroups, groupByColumns]);
+  }, [displayScheduleRows, commands, bases, expandedGroups, groupByColumns]);
 
   const computedRows = useMemo(() => {
     if (!urlDeepLink.invoiceNo) return groupedData;
@@ -3967,19 +4850,6 @@ export default function AgreementProvInvoice() {
   const filterInputSx = { ...baseFilterInputSx, ...darkModeFilterSx };
   const selectSx = filterInputSx;
   const inputSx = filterInputSx;
-  const dateFilterInputSx = [
-    inputSx,
-    {
-      "& .MuiInputBase-input": {
-        color: "transparent !important",
-        caretColor: "transparent",
-      },
-      "& input::-webkit-datetime-edit, & input::-webkit-datetime-edit-fields-wrapper, & input::-webkit-datetime-edit-text, & input::-webkit-datetime-edit-month-field, & input::-webkit-datetime-edit-day-field, & input::-webkit-datetime-edit-year-field":
-        {
-          color: "transparent",
-        },
-    },
-  ];
 
   // Autocomplete specific styling to match other inputs
   const autocompleteSx = {
@@ -4018,442 +4888,413 @@ export default function AgreementProvInvoice() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-              >
-                <MDTypography variant="h6" color="white">
-                  Agreement Invoice
-                </MDTypography>
+      <EnterpriseWorkspace
+        title="Agreement Invoice"
+        subtitle="Manage agreement provisional invoice records"
+        tabs={<ContractsModuleTabs />}
+        filters={
+          <MDBox px={3} sx={{ flexShrink: 0 }}>
+            {/* Filters — single compact row before Search */}
+            <MDBox
+              display="flex"
+              flexDirection="row"
+              flexWrap="nowrap"
+              alignItems="center"
+              gap={1}
+              mb={2}
+              sx={{ width: "100%", overflow: "hidden" }}
+            >
+              <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
+                <FormControl fullWidth size="small" sx={filterControlSx}>
+                  <InputLabel
+                    id="command-filter-label"
+                    sx={darkMode ? { color: "#ffffff !important" } : {}}
+                  >
+                    Command
+                  </InputLabel>
+                  <Select
+                    labelId="command-filter-label"
+                    value={filters.command}
+                    label="Command"
+                    onChange={(e) => handleFilterChange("command", e.target.value)}
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>All</em>
+                    </MenuItem>
+                    {commands.map((cmd) => (
+                      <MenuItem key={cmd.id} value={cmd.id}>
+                        {cmd.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </MDBox>
-              <MDBox pt={3} px={3}>
-                {/* Filters — single compact row before Search */}
-                <MDBox
-                  display="flex"
-                  flexDirection="row"
-                  flexWrap="nowrap"
-                  alignItems="center"
-                  gap={1}
-                  mb={2}
-                  sx={{ width: "100%", overflow: "hidden" }}
+
+              <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
+                <FormControl
+                  fullWidth
+                  size="small"
+                  disabled={!filters.command}
+                  sx={filterControlSx}
                 >
-                  <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
-                    <FormControl fullWidth size="small" sx={filterControlSx}>
-                      <InputLabel
-                        id="command-filter-label"
-                        sx={darkMode ? { color: "#ffffff !important" } : {}}
-                      >
-                        Command
-                      </InputLabel>
-                      <Select
-                        labelId="command-filter-label"
-                        value={filters.command}
-                        label="Command"
-                        onChange={(e) => handleFilterChange("command", e.target.value)}
-                        sx={selectSx}
-                      >
-                        <MenuItem value="">
-                          <em>All</em>
-                        </MenuItem>
-                        {commands.map((cmd) => (
-                          <MenuItem key={cmd.id} value={cmd.id}>
-                            {cmd.name}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </MDBox>
+                  <InputLabel
+                    id="base-filter-label"
+                    sx={darkMode ? { color: "#ffffff !important" } : {}}
+                  >
+                    Base
+                  </InputLabel>
+                  <Select
+                    labelId="base-filter-label"
+                    value={filters.base}
+                    label="Base"
+                    onChange={(e) => handleFilterChange("base", e.target.value)}
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>All</em>
+                    </MenuItem>
+                    {filteredBases.map((base) => (
+                      <MenuItem key={base.id} value={base.id}>
+                        {base.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </MDBox>
 
-                  <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
-                    <FormControl
-                      fullWidth
+              <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
+                <FormControl fullWidth size="small" sx={filterControlSx}>
+                  <InputLabel
+                    id="unit-filter-label"
+                    sx={darkMode ? { color: "#ffffff !important" } : {}}
+                  >
+                    Unit
+                  </InputLabel>
+                  <Select
+                    labelId="unit-filter-label"
+                    value={filters.unit}
+                    label="Unit"
+                    onChange={(e) => handleFilterChange("unit", e.target.value)}
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>All</em>
+                    </MenuItem>
+                    {units.map((unit) => (
+                      <MenuItem key={unit.id} value={unit.id}>
+                        {unit.name || unit.unitName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </MDBox>
+
+              <MDBox sx={{ flex: "1 1 115px", minWidth: 0 }}>
+                <AgreementProvFilterDateInput
+                  label="Date From"
+                  value={filters.dateFrom}
+                  onChange={(v) => handleFilterChange("dateFrom", v)}
+                  sx={inputSx}
+                  aria-label="Date From"
+                />
+              </MDBox>
+
+              <MDBox sx={{ flex: "1 1 115px", minWidth: 0 }}>
+                <AgreementProvFilterDateInput
+                  label="Date To"
+                  value={filters.dateTo}
+                  onChange={(v) => handleFilterChange("dateTo", v)}
+                  min={filters.dateFrom || undefined}
+                  sx={inputSx}
+                  aria-label="Date To"
+                />
+              </MDBox>
+
+              <MDBox sx={{ flex: "1 1 120px", minWidth: 0 }}>
+                <Autocomplete
+                  options={contracts}
+                  getOptionLabel={(option) =>
+                    option.ContractNo || option.contractNo || String(option)
+                  }
+                  value={
+                    filters.contractNo
+                      ? contracts.find(
+                          (c) =>
+                            (c.ContractNo || c.contractNo) ===
+                            (filters.contractNo.ContractNo ||
+                              filters.contractNo.contractNo ||
+                              filters.contractNo)
+                        ) || null
+                      : null
+                  }
+                  onChange={(event, newValue) => {
+                    handleFilterChange("contractNo", newValue);
+                  }}
+                  renderInput={(params) => (
+                    <MDInput
+                      {...params}
+                      label="Contract No"
                       size="small"
-                      disabled={!filters.command}
-                      sx={filterControlSx}
-                    >
-                      <InputLabel
-                        id="base-filter-label"
-                        sx={darkMode ? { color: "#ffffff !important" } : {}}
-                      >
-                        Base
-                      </InputLabel>
-                      <Select
-                        labelId="base-filter-label"
-                        value={filters.base}
-                        label="Base"
-                        onChange={(e) => handleFilterChange("base", e.target.value)}
-                        sx={selectSx}
-                      >
-                        <MenuItem value="">
-                          <em>All</em>
-                        </MenuItem>
-                        {filteredBases.map((base) => (
-                          <MenuItem key={base.id} value={base.id}>
-                            {base.name}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </MDBox>
-
-                  <MDBox sx={{ flex: "1 1 95px", minWidth: 0 }}>
-                    <FormControl fullWidth size="small" sx={filterControlSx}>
-                      <InputLabel
-                        id="unit-filter-label"
-                        sx={darkMode ? { color: "#ffffff !important" } : {}}
-                      >
-                        Unit
-                      </InputLabel>
-                      <Select
-                        labelId="unit-filter-label"
-                        value={filters.unit}
-                        label="Unit"
-                        onChange={(e) => handleFilterChange("unit", e.target.value)}
-                        sx={selectSx}
-                      >
-                        <MenuItem value="">
-                          <em>All</em>
-                        </MenuItem>
-                        {units.map((unit) => (
-                          <MenuItem key={unit.id} value={unit.id}>
-                            {unit.name || unit.unitName}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </MDBox>
-
-                  <MDBox sx={{ flex: "1 1 115px", minWidth: 0 }}>
-                    <MDBox position="relative" sx={{ width: "100%" }}>
-                      <MDInput
-                        type="date"
-                        value={filters.dateFrom}
-                        onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
-                        fullWidth
-                        size="small"
-                        inputProps={{ "aria-label": "Date From" }}
-                        sx={dateFilterInputSx}
-                      />
-                      <MDBox
-                        pointerEvents="none"
-                        sx={{
-                          position: "absolute",
-                          left: 10,
-                          right: 28,
-                          top: 8,
-                          bottom: 6,
-                          display: "flex",
-                          alignItems: "center",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        <MDTypography
-                          variant="caption"
-                          sx={{
-                            fontSize: "0.8125rem",
-                            color: filters.dateFrom
-                              ? "text.primary"
-                              : darkMode
-                              ? "rgba(255, 255, 255, 0.6)"
-                              : "text.secondary",
-                          }}
-                        >
-                          {filters.dateFrom ? formatDateDDMMMYYYY(filters.dateFrom) : "Date From"}
-                        </MDTypography>
-                      </MDBox>
-                    </MDBox>
-                  </MDBox>
-
-                  <MDBox sx={{ flex: "1 1 115px", minWidth: 0 }}>
-                    <MDBox position="relative" sx={{ width: "100%" }}>
-                      <MDInput
-                        type="date"
-                        value={filters.dateTo}
-                        onChange={(e) => handleFilterChange("dateTo", e.target.value)}
-                        fullWidth
-                        size="small"
-                        inputProps={{
-                          "aria-label": "Date To",
-                          min: filters.dateFrom || undefined,
-                        }}
-                        sx={dateFilterInputSx}
-                      />
-                      <MDBox
-                        pointerEvents="none"
-                        sx={{
-                          position: "absolute",
-                          left: 10,
-                          right: 28,
-                          top: 8,
-                          bottom: 6,
-                          display: "flex",
-                          alignItems: "center",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        <MDTypography
-                          variant="caption"
-                          sx={{
-                            fontSize: "0.8125rem",
-                            color: filters.dateTo
-                              ? "text.primary"
-                              : darkMode
-                              ? "rgba(255, 255, 255, 0.6)"
-                              : "text.secondary",
-                          }}
-                        >
-                          {filters.dateTo ? formatDateDDMMMYYYY(filters.dateTo) : "Date To"}
-                        </MDTypography>
-                      </MDBox>
-                    </MDBox>
-                  </MDBox>
-
-                  <MDBox sx={{ flex: "1 1 120px", minWidth: 0 }}>
-                    <Autocomplete
-                      options={contracts}
-                      getOptionLabel={(option) =>
-                        option.ContractNo || option.contractNo || String(option)
-                      }
-                      value={
-                        filters.contractNo
-                          ? contracts.find(
-                              (c) =>
-                                (c.ContractNo || c.contractNo) ===
-                                (filters.contractNo.ContractNo ||
-                                  filters.contractNo.contractNo ||
-                                  filters.contractNo)
-                            ) || null
-                          : null
-                      }
-                      onChange={(event, newValue) => {
-                        handleFilterChange("contractNo", newValue);
-                      }}
-                      renderInput={(params) => (
-                        <MDInput
-                          {...params}
-                          label="Contract No"
-                          size="small"
-                          sx={{ ...inputSx, ...autocompleteSx }}
-                        />
-                      )}
-                      renderOption={(props, option) => (
-                        <li
-                          {...props}
-                          key={option.Id || option.id || option.ContractNo || option.contractNo}
-                        >
-                          {option.ContractNo || option.contractNo}
-                        </li>
-                      )}
-                      sx={autocompleteSx}
+                      sx={{ ...inputSx, ...autocompleteSx }}
                     />
-                  </MDBox>
-
-                  <MDBox sx={{ flex: "0 0 auto" }}>
-                    <IconButton
-                      color="info"
-                      onClick={handleSearch}
-                      disabled={loading}
-                      sx={{
-                        minHeight: filterControlHeight,
-                        height: filterControlHeight,
-                        width: filterControlHeight,
-                        backgroundColor: "info.main",
-                        color: "white !important",
-                        "& .MuiSvgIcon-root": {
-                          color: "white !important",
-                          fontWeight: "bold",
-                          fontSize: "1.25rem",
-                        },
-                        "&:hover": {
-                          backgroundColor: "info.light",
-                          "& .MuiSvgIcon-root": {
-                            color: "white !important",
-                          },
-                        },
-                        "&:disabled": {
-                          backgroundColor: "action.disabledBackground",
-                          color: "action.disabled",
-                          "& .MuiSvgIcon-root": {
-                            color: "action.disabled",
-                          },
-                        },
-                        boxShadow: 2,
-                        transition: "all 0.3s ease",
-                      }}
-                      title="Search"
+                  )}
+                  renderOption={(props, option) => (
+                    <li
+                      {...props}
+                      key={option.Id || option.id || option.ContractNo || option.contractNo}
                     >
-                      <Icon sx={{ fontWeight: "bold", fontSize: "1.25rem" }}>search</Icon>
-                    </IconButton>
-                  </MDBox>
-                </MDBox>
+                      {option.ContractNo || option.contractNo}
+                    </li>
+                  )}
+                  sx={autocompleteSx}
+                />
+              </MDBox>
 
-                {/* Results Table */}
+              <MDBox
+                sx={{
+                  flex: "0 0 auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 0.25,
+                }}
+              >
                 <MDBox
-                  position="relative"
-                  aria-busy={loading}
                   sx={{
                     display: "flex",
-                    flexDirection: "column",
-                    height: "88vh",
-                    minHeight: "680px",
-                    overflow: "hidden",
-                    "& .MuiTableContainer-root": {
-                      flex: "1 1 0",
-                      minHeight: 0,
-                      overflow: "auto",
-                    },
-                    "& .MuiTable-root": {
-                      tableLayout: "auto",
-                      width: "max-content",
-                      minWidth: "100%",
-                      borderCollapse: "collapse",
-                    },
-                    "& .MuiTable-root th, & .MuiTable-root td": {
-                      textAlign: "center !important",
-                    },
-                    "& .MuiTable-root th": {
-                      fontSize: "1.0rem !important",
-                      fontWeight: "700 !important",
-                      width: "auto !important",
-                      minWidth: "0 !important",
-                      padding: "1px 4px !important",
-                      borderBottom: "1px solid #d0d0d0",
-                      whiteSpace: "nowrap",
-                      lineHeight: 1.3,
-                      verticalAlign: "middle",
-                    },
-                    "& .MuiTable-root td": {
-                      width: "auto !important",
-                      minWidth: "0 !important",
-                      padding: "1px 4px !important",
-                      borderBottom: "1px solid #e0e0e0",
-                      whiteSpace: "nowrap",
-                      lineHeight: 1.3,
-                      verticalAlign: "middle",
-                      fontSize: "0.875rem",
-                    },
-                    "& table th > div, & table td > div": {
-                      display: "inline-block !important",
-                      width: "max-content !important",
-                      maxWidth: "100% !important",
-                      marginLeft: "auto !important",
-                      marginRight: "auto !important",
-                      textAlign: "center !important",
-                    },
-                    "& .MuiTable-root thead th > .MuiBox-root": {
-                      justifyContent: "center !important",
-                      textAlign: "center !important",
-                    },
-                    "& .MuiTable-root tbody td.MuiBox-root": {
-                      textAlign: "center !important",
-                    },
-                    "& .MuiTable-root thead th:nth-of-type(3), & .MuiTable-root tbody td:nth-of-type(3)":
-                      {
-                        textAlign: "left !important",
-                      },
-                    "& .MuiTable-root thead th:nth-of-type(3) > .MuiBox-root": {
-                      justifyContent: "flex-end !important",
-                    },
-                    "& .MuiTable-root tbody td:nth-of-type(3) > div": {
-                      marginLeft: "auto !important",
-                      marginRight: "0 !important",
-                      textAlign: "left !important",
-                    },
-                    "& table td .MuiTypography-root": {
-                      fontSize: "0.875rem !important",
-                      lineHeight: "1.3 !important",
-                    },
-                    "& .MuiTable-root th:first-of-type, & .MuiTable-root td:first-of-type": {
-                      paddingLeft: "2px !important",
-                      paddingRight: "2px !important",
-                    },
-                    "& .MuiIconButton-root": {
-                      padding: "2px",
-                    },
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 0.75,
+                    flexShrink: 0,
                   }}
                 >
-                  {loading && (
-                    <MDBox
-                      position="absolute"
-                      top={0}
-                      left={0}
-                      right={0}
-                      bottom={0}
-                      display="flex"
-                      justifyContent="center"
-                      alignItems="center"
-                      zIndex={10}
-                      sx={{
-                        backgroundColor: darkMode
-                          ? "rgba(0, 0, 0, 0.65)"
-                          : "rgba(255, 255, 255, 0.8)",
-                        backdropFilter: "blur(2px)",
-                        pointerEvents: "auto",
-                      }}
-                    >
-                      <CurrencyLoading size={50} />
-                    </MDBox>
-                  )}
-                  <DataTable
-                    table={{ columns, rows: computedRows }}
-                    stickyToolbarAndHeader
-                    canSearch={true}
-                    entriesPerPage={false}
-                    showTotalEntries={true}
-                    pagination={true}
-                    isSorted={true}
-                    noEndBorder
-                    toolbarStart={
-                      <MDBox width={{ xs: "100%", sm: "200px" }} sx={{ minWidth: { sm: 200 } }}>
-                        <Autocomplete
-                          multiple
-                          size="small"
-                          options={groupingColumnOptions}
-                          disableCloseOnSelect
-                          value={groupingColumnOptions.filter((opt) =>
-                            groupByColumns.includes(opt.value)
-                          )}
-                          isOptionEqualToValue={(option, value) => option.value === value.value}
-                          getOptionLabel={(option) => option.label}
-                          onChange={(event, newValue) => {
-                            setGroupByColumns((newValue || []).map((item) => item.value));
-                          }}
-                          renderInput={(params) => (
-                            <MDInput
-                              {...params}
-                              label="Group By Columns"
-                              placeholder="Select columns"
-                              sx={{ ...filterInputSx, ...groupByInputSx }}
-                            />
-                          )}
-                        />
-                      </MDBox>
-                    }
-                    exportFileName="Agreement-Prov-Invoice"
-                    exportCellFormatter={exportCellFormatter}
-                    exportExcludeGroupParentsWhenExpanded
-                    extraFilterTypes={AGREEMENT_PROV_DATATABLE_DATE_FILTER_TYPES}
-                  />
+                  <IconButton
+                    color="info"
+                    onClick={handleSearch}
+                    disabled={loading}
+                    sx={{
+                      flexShrink: 0,
+                      minHeight: filterControlHeight,
+                      height: filterControlHeight,
+                      width: filterControlHeight,
+                      backgroundColor: "info.main",
+                      color: "white !important",
+                      "& .MuiSvgIcon-root": {
+                        color: "white !important",
+                        fontWeight: "bold",
+                        fontSize: "1.25rem",
+                      },
+                      "&:hover": {
+                        backgroundColor: "info.light",
+                        "& .MuiSvgIcon-root": {
+                          color: "white !important",
+                        },
+                      },
+                      "&:disabled": {
+                        backgroundColor: "action.disabledBackground",
+                        color: "action.disabled",
+                        "& .MuiSvgIcon-root": {
+                          color: "action.disabled",
+                        },
+                      },
+                      boxShadow: 2,
+                      transition: "all 0.3s ease",
+                    }}
+                    title="Search Finalized Invoices"
+                  >
+                    <Icon sx={{ fontWeight: "bold", fontSize: "1.25rem" }}>search</Icon>
+                  </IconButton>
+                  <MDTypography
+                    variant="caption"
+                    color="text"
+                    sx={{
+                      fontSize: "0.7rem",
+                      lineHeight: 1.2,
+                      fontWeight: 500,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Search Finalized Invoices
+                  </MDTypography>
                 </MDBox>
+                <MDBox
+                  ref={setPaginationHost}
+                  className="agreement-prov-invoice-filter-pagination"
+                  sx={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    minHeight: 22,
+                    "& .MuiPaginationItem-root": {
+                      fontSize: "0.6rem",
+                      minWidth: "1.2rem",
+                      height: "1.2rem",
+                      padding: "0 2px",
+                    },
+                    "& .MuiPaginationItem-icon": {
+                      fontSize: "0.8rem",
+                    },
+                    "& .compact-grid-pagination": {
+                      gap: 0,
+                    },
+                  }}
+                />
               </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
+            </MDBox>
+          </MDBox>
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <MDBox px={3} sx={{ flexShrink: 0 }}>
+          {/* Results Table */}
+          <MDBox
+            className="agreement-prov-invoice-page-grid"
+            position="relative"
+            aria-busy={loading}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 0",
+              minHeight: 0,
+              overflow: "hidden",
+              "& tr.agreement-prov-invoice-locked-row > td": {
+                filter: "blur(1px)",
+                WebkitFilter: "blur(1px)",
+                opacity: 0.72,
+                userSelect: "none",
+              },
+              "& td .MuiIconButton-root.erp-grid-action-edit, & td .MuiIconButton-root.erp-grid-action-edit:hover":
+                {
+                  opacity: "1 !important",
+                  transform: "none !important",
+                  filter: "none !important",
+                },
+              "& .MuiTableContainer-root": {
+                flex: "1 1 0",
+                minHeight: 0,
+                overflow: "auto",
+              },
+              "& .MuiTable-root": {
+                tableLayout: "auto",
+                width: "max-content",
+                minWidth: "100%",
+                borderCollapse: "collapse",
+              },
+              "& .MuiTable-root th, & .MuiTable-root td": {
+                textAlign: "center !important",
+              },
+              "& .MuiTable-root th": {
+                fontSize: "0.875rem !important",
+                fontWeight: "700 !important",
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
+                borderBottom: "1px solid #d0d0d0",
+                whiteSpace: "nowrap",
+                lineHeight: 1.3,
+                verticalAlign: "middle",
+              },
+              "& .MuiTable-root td": {
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
+                borderBottom: "1px solid #e0e0e0",
+                whiteSpace: "nowrap",
+                lineHeight: 1.3,
+                verticalAlign: "middle",
+                fontSize: "0.875rem",
+              },
+              "& table th > div, & table td > div": {
+                display: "inline-block !important",
+                width: "max-content !important",
+                maxWidth: "100% !important",
+                marginLeft: "auto !important",
+                marginRight: "auto !important",
+                textAlign: "center !important",
+              },
+              "& .MuiTable-root thead th > .MuiBox-root": {
+                justifyContent: "center !important",
+                textAlign: "center !important",
+              },
+              "& .MuiTable-root tbody td.MuiBox-root": {
+                textAlign: "center !important",
+              },
+              "& .MuiTable-root thead th:nth-of-type(3), & .MuiTable-root tbody td:nth-of-type(3)":
+                {
+                  textAlign: "left !important",
+                },
+              "& .MuiTable-root thead th:nth-of-type(3) > .MuiBox-root": {
+                justifyContent: "flex-end !important",
+              },
+              "& .MuiTable-root tbody td:nth-of-type(3) > div": {
+                marginLeft: "auto !important",
+                marginRight: "0 !important",
+                textAlign: "left !important",
+              },
+              "& table td .MuiTypography-root": {
+                fontSize: "0.875rem !important",
+                lineHeight: "1.3 !important",
+              },
+              "& .MuiTable-root th:first-of-type, & .MuiTable-root td:first-of-type": {
+                paddingLeft: "2px !important",
+                paddingRight: "2px !important",
+              },
+              "& .MuiIconButton-root": {
+                padding: "2px",
+              },
+            }}
+          >
+            {loading && (
+              <MDBox
+                position="absolute"
+                top={0}
+                left={0}
+                right={0}
+                bottom={0}
+                display="flex"
+                justifyContent="center"
+                alignItems="center"
+                zIndex={10}
+                sx={{
+                  backgroundColor: darkMode ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.8)",
+                  backdropFilter: "blur(2px)",
+                  pointerEvents: "auto",
+                }}
+              >
+                <CurrencyLoading size={50} />
+              </MDBox>
+            )}
+            <DataTable
+              table={{ columns, rows: computedRows }}
+              stickyToolbarAndHeader
+              canSearch={true}
+              entriesPerPage={false}
+              showTotalEntries={false}
+              pagination={true}
+              isSorted={true}
+              noEndBorder
+              exportFileName="Agreement-Prov-Invoice"
+              exportCellFormatter={exportCellFormatter}
+              exportExcludeGroupParentsWhenExpanded
+              extraFilterTypes={AGREEMENT_PROV_DATATABLE_DATE_FILTER_TYPES}
+              toolbarStartInHeader
+              toolbarStart={
+                <CompactGroupBySelect
+                  options={groupingColumnOptions}
+                  value={groupByColumns}
+                  onChange={setGroupByColumns}
+                />
+              }
+              paginationHost={paginationHost}
+            />
+          </MDBox>
+        </MDBox>
+      </EnterpriseWorkspace>
 
       <AgreementProvInvoiceEditDialog
         open={editDialogOpen}
@@ -4462,9 +5303,6 @@ export default function AgreementProvInvoice() {
         onSave={handleSaveEditRow}
         saving={savingEdit}
         viewMode={editDialogViewMode}
-        onSaveInvoiceLine={handleSaveAddRecord}
-        onDeleteInvoiceLine={handleDeleteInvoiceLine}
-        lineActionSaving={lineActionSaving}
         registerReloadInvoiceLines={registerReloadInvoiceLines}
       />
     </DashboardLayout>
@@ -4476,4 +5314,6 @@ export {
   AgreementProvInvoiceEditDialog,
   buildAgreementProvContractBasicInfoForm,
   buildAgreementProvEditForm,
+  getAgreementProvSaveErrorMessage,
+  persistAllInvoiceScheduleLines,
 };

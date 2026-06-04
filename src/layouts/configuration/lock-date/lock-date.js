@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from "react";
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MDBox from "components/MDBox";
@@ -8,8 +7,10 @@ import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import lockDateApi from "services/api.lockdate.service";
 import { canCreateCurrentMenu, canEditCurrentMenu } from "services/api.service";
 import { useMaterialUIController } from "context";
@@ -86,6 +87,7 @@ function LockDateConfig() {
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(20);
   const [newErrors, setNewErrors] = useState({});
+  const [loading, setLoading] = useState(true);
 
   const hasExistingRow = tableRows.length > 0;
 
@@ -94,6 +96,7 @@ function LockDateConfig() {
   }, []);
 
   const fetchLockDates = async () => {
+    setLoading(true);
     try {
       const response = await lockDateApi.getAll();
       const rows = unwrapLockDateList(response)
@@ -111,6 +114,8 @@ function LockDateConfig() {
     } catch (error) {
       console.error("Error fetching lock dates:", error);
       setTableRows([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -306,89 +311,70 @@ function LockDateConfig() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Lock Date
-            </MDTypography>
-          </MDBox>
-          <MDBox pt={3}>
-            <MDBox
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                height: "70vh",
-                minHeight: "400px",
-                overflow: "hidden",
-                "& .MuiTableContainer-root": {
-                  flex: "1 1 0",
-                  minHeight: 0,
-                  overflow: "hidden",
-                },
-                "& .MuiTable-root": {
-                  tableLayout: "auto",
-                  width: "auto",
-                  minWidth: "100%",
-                },
-                "& .MuiTableCell-root": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "anywhere !important",
-                  lineHeight: 1.4,
-                  maxWidth: "100%",
-                  verticalAlign: "top",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.15rem !important",
-                  fontWeight: "700 !important",
-                  padding: "8px 6px !important",
-                  borderBottom: "1px solid #d0d0d0",
-                },
-                "& .MuiTable-root td": {
-                  padding: "8px 6px !important",
-                  borderBottom: "1px solid #e0e0e0",
-                },
-              }}
-            >
-              <DataTable
-                key={tableKey}
-                table={tableData}
-                isSorted={false}
-                stickyToolbarAndHeader
-                canSearch={true}
-                page={pageIndex}
-                entriesPerPage={{
-                  defaultValue: 20,
-                  entries: [5, 10, 15, 20, 25],
-                }}
-                pageSize={pageSize}
-                onPageChange={(page) => setPageIndex(page)}
-                onEntriesPerPageChange={(value) => {
-                  setPageSize(value);
-                  setPageIndex(0);
-                }}
-                showTotalEntries
-                exportFileName="Lock-Date"
-                noEndBorder
-              />
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Lock Date"
+        subtitle="Manage lock date configuration"
+        tabs={<ConfigurationModuleTabs />}
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "auto",
+            minWidth: "100%",
+          },
+          "& .MuiTableCell-root": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "anywhere !important",
+            lineHeight: 1.4,
+            maxWidth: "100%",
+            verticalAlign: "top",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "1rem !important",
+            fontWeight: "700 !important",
+            padding: "8px 6px !important",
+            borderBottom: "1px solid #d0d0d0",
+          },
+          "& .MuiTable-root td": {
+            padding: "8px 6px !important",
+            borderBottom: "1px solid #e0e0e0",
+          },
+        }}
+      >
+        <DataTable
+          key={tableKey}
+          table={tableData}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          page={pageIndex}
+          entriesPerPage={{
+            defaultValue: 20,
+            entries: [5, 10, 15, 20, 25],
+          }}
+          pageSize={pageSize}
+          onPageChange={(page) => setPageIndex(page)}
+          onEntriesPerPageChange={(value) => {
+            setPageSize(value);
+            setPageIndex(0);
+          }}
+          showTotalEntries
+          exportFileName="Lock-Date"
+          noEndBorder
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

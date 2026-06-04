@@ -40,10 +40,28 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
   const [controller] = useMaterialUIController();
   const { miniSidenav, transparentSidenav, whiteSidenav, darkMode, sidenavColor } = controller;
 
+  const navItemClass = [
+    "enterprise-sidenav-nav-item",
+    miniSidenav ? "enterprise-sidenav-nav-item--mini" : "",
+    active ? "enterprise-sidenav-nav-item--active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <ListItem component="li">
+    <ListItem
+      component="li"
+      disablePadding
+      sx={{
+        px: miniSidenav ? 0.25 : 1,
+        py: 0.125,
+        display: "flex",
+        justifyContent: miniSidenav ? "center" : "flex-start",
+      }}
+    >
       <MDBox
         {...rest}
+        className={navItemClass}
         sx={(theme) =>
           collapseItem(theme, {
             active,
@@ -51,18 +69,47 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
             whiteSidenav,
             darkMode,
             sidenavColor,
+            miniSidenav,
           })
         }
       >
         <ListItemIcon
           sx={(theme) =>
-            collapseIconBox(theme, { transparentSidenav, whiteSidenav, darkMode, active })
+            collapseIconBox(theme, {
+              transparentSidenav,
+              whiteSidenav,
+              darkMode,
+              active,
+              miniSidenav,
+            })
           }
         >
           {typeof icon === "string" ? (
-            <Icon sx={(theme) => collapseIcon(theme, { active })}>{icon}</Icon>
+            <Icon
+              className="material-icons-outlined"
+              sx={(theme) => collapseIcon(theme, { active })}
+            >
+              {icon}
+            </Icon>
           ) : (
-            icon
+            <MDBox
+              className="enterprise-sidenav-nav-icon-wrap"
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "inherit",
+                lineHeight: 0,
+                "& .MuiIcon-root": {
+                  color: "inherit !important",
+                  fontSize: miniSidenav ? "1.2rem !important" : "1.125rem !important",
+                  width: miniSidenav ? "1.2rem !important" : "1.125rem !important",
+                  height: miniSidenav ? "1.2rem !important" : "1.125rem !important",
+                },
+              }}
+            >
+              {icon}
+            </MDBox>
           )}
         </ListItemIcon>
 

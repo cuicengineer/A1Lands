@@ -1,0 +1,303 @@
+/* =====================================================================
+   PrimeStay / Linear-style SaaS workspace theme
+   Visual layer only — scoped to body.enterprise-ui
+   Surface tokens defined in saas-settings.css (--layer-*)
+   ===================================================================== */
+
+/* ---- Page shell ---- */
+body.enterprise-ui {
+  background-color: var(--layer-app-bg) !important;
+  overflow: hidden;
+  height: 100vh;
+}
+
+body.enterprise-ui #app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---- Navigation rail ---- */
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper {
+  background: #025b64 !important;
+  background-image: none !important;
+  border-right: none !important;
+  box-shadow: none !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiTypography-root,
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiIcon-root,
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .material-icons {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiDivider-root {
+  border-color: var(--layer-sidebar-border) !important;
+  opacity: 1 !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .material-icons {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiBox-root[style*="linear-gradient"],
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiBox-root[style*="gradient"] {
+  background: var(--layer-card) !important;
+  background-image: none !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06) !important;
+  color: var(--saas-text) !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiBox-root[style*="linear-gradient"] .MuiTypography-root,
+body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper .MuiBox-root[style*="linear-gradient"] .MuiIcon-root {
+  color: var(--saas-text) !important;
+}
+
+/* ---- Minimal top navbar ---- */
+body.enterprise-ui .MuiAppBar-root {
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+}
+
+body.enterprise-ui .MuiAppBar-root .MuiToolbar-root {
+  min-height: 40px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+/* ---- SaaS workspace page ---- */
+.saas-workspace-page {
+  gap: 0;
+  padding: 0;
+}
+
+.saas-workspace-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 8px 4px;
+  min-height: 0;
+}
+
+.saas-workspace-title {
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  color: var(--saas-text) !important;
+  letter-spacing: -0.02em !important;
+  margin: 0 !important;
+}
+
+.saas-workspace-subtitle {
+  font-size: 0.6875rem !important;
+  font-weight: 400 !important;
+  line-height: 1.25 !important;
+  color: var(--saas-text-secondary) !important;
+  margin: 0 !important;
+}
+
+.saas-workspace-page-actions .MuiButton-root {
+  border-radius: 8px !important;
+  text-transform: none !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+  border: 1px solid var(--layer-card-border) !important;
+  background: var(--layer-card) !important;
+  color: var(--saas-text) !important;
+  padding: 8px 16px !important;
+}
+
+.saas-workspace-page-actions .MuiButton-root:hover {
+  background: var(--layer-grid-row-hover) !important;
+}
+
+/* Contextual tabs row */
+.saas-workspace-tabs {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--layer-tabs-border);
+  background: var(--layer-tabs);
+}
+
+.saas-workspace-tabs .MuiTabs-root {
+  min-height: 30px;
+}
+
+.saas-workspace-tabs .MuiTab-root {
+  text-transform: none !important;
+  font-weight: 500 !important;
+  font-size: 0.75rem !important;
+  color: var(--saas-text-secondary) !important;
+  min-height: 26px !important;
+  padding: 3px 10px !important;
+  border-radius: 6px !important;
+  transition: color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.saas-workspace-tabs .MuiTab-root.Mui-selected {
+  color: var(--settings-text) !important;
+  font-weight: 600 !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.07);
+}
+
+.saas-workspace-tabs .MuiTabs-indicator {
+  display: none !important;
+}
+
+/* ---- Workspace card (grid lives here) ---- */
+.saas-workspace-card {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--layer-card);
+  border-radius: 0 0 6px 6px;
+  box-shadow: none;
+  border: 1px solid var(--layer-card-border);
+  border-top: none;
+  overflow: hidden;
+}
+
+.saas-workspace-filters,
+.saas-workspace-card-toolbar {
+  flex-shrink: 0;
+  padding: 4px 8px 0;
+  border-bottom: none;
+  background: var(--layer-controls);
+}
+
+.saas-workspace-filters + .saas-workspace-grid-host,
+.saas-workspace-card-toolbar + .saas-workspace-grid-host {
+  border-top: 1px solid var(--layer-controls-border);
+}
+
+/* ---- Grid inside card ---- */
+.saas-workspace-grid-host > .MuiTableContainer-root {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--layer-grid-body) !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.saas-workspace-grid-host .MuiTableContainer-root > .saas-settings-table-toolbar,
+.saas-workspace-grid-host .MuiTableContainer-root > .saas-settings-filter-toolbar {
+  flex-shrink: 0;
+  background: var(--layer-controls) !important;
+  border-bottom: 1px solid var(--layer-controls-border) !important;
+  padding: 4px 8px !important;
+  gap: 6px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky-toolbar);
+}
+
+.saas-workspace-grid-host .MuiTableContainer-root > .saas-settings-table-scroll {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto !important;
+  background: var(--layer-grid-body) !important;
+  isolation: isolate;
+}
+
+body.enterprise-ui .saas-workspace-card thead th,
+body.enterprise-ui .saas-workspace-card .MuiTableContainer-root thead th {
+  background: var(--layer-grid-header) !important;
+  background-image: none !important;
+  border-bottom: 1px solid var(--layer-controls-border) !important;
+  box-shadow: inset 0 -1px 0 var(--layer-controls-border), 0 1px 0 var(--layer-grid-header) !important;
+  color: var(--layer-grid-header-text) !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+body.enterprise-ui .saas-workspace-card thead th * {
+  color: var(--layer-grid-header-text) !important;
+}
+
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:nth-of-type(even) td {
+  background-color: var(--layer-grid-body);
+}
+
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:hover td {
+  background-color: var(--layer-grid-row-hover) !important;
+}
+
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root td {
+  border-bottom: 1px solid var(--layer-grid-row-border) !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  font-size: 0.8125rem !important;
+  color: var(--saas-text) !important;
+  background-color: var(--layer-grid-body) !important;
+}
+
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root td:first-of-type {
+  font-weight: 600;
+}
+
+.saas-workspace-grid-host .MuiTableContainer-root > .MuiBox-root:last-child {
+  flex-shrink: 0;
+  background: var(--layer-controls) !important;
+  border-top: 1px solid var(--layer-controls-border) !important;
+  padding: 2px 8px !important;
+}
+
+.saas-workspace-card .MuiTableContainer-root .MuiInputBase-root {
+  border-radius: 8px !important;
+  background: var(--layer-card) !important;
+  border: 1px solid var(--layer-controls-border);
+}
+
+.saas-workspace-card .MuiTableContainer-root .MuiOutlinedInput-notchedOutline {
+  border-color: var(--layer-controls-border) !important;
+}
+
+body.enterprise-ui .saas-workspace-card .MuiBadge-badge,
+body.enterprise-ui .saas-workspace-card .MuiChip-root {
+  border-radius: 999px !important;
+  font-weight: 600 !important;
+  font-size: 0.75rem !important;
+}
+
+body.enterprise-ui .MuiDialog-paper {
+  border-radius: 12px !important;
+  box-shadow: 0 24px 48px rgba(16, 24, 40, 0.12) !important;
+  border: 1px solid var(--layer-card-border) !important;
+}
+
+body.enterprise-ui .saas-workspace-page .MuiButton-contained {
+  box-shadow: none !important;
+  border-radius: 8px !important;
+  text-transform: none !important;
+}
+
+body.enterprise-ui .enterprise-workspace {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+@media (max-width: 768px) {
+  .saas-workspace-title {
+    font-size: 1.125rem !important;
+  }
+  body.enterprise-ui .dashboard-layout-root {
+    padding: 6px !important;
+  }
+}

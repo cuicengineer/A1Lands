@@ -5,11 +5,11 @@
 */
 
 import { useEffect, useMemo, useState } from "react";
+import PropTypes from "prop-types";
 
 // @mui material components
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
-import CircularProgress from "@mui/material/CircularProgress";
+import CurrencyLoading from "components/CurrencyLoading";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
@@ -19,16 +19,12 @@ import Select from "@mui/material/Select";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 
-// Material Dashboard 2 React example components
-import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
-import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
 import PieChart from "examples/Charts/PieChart";
 import ReportsBarChart from "examples/Charts/BarCharts/ReportsBarChart";
-import ComplexStatisticsCard from "examples/Cards/StatisticsCards/ComplexStatisticsCard";
-
-// Material Dashboard 2 React contexts
-import { useMaterialUIController } from "context";
+import { CHART_PRIMARY } from "utils/executiveChartConfigs";
+import DashboardKpiCard from "components/DashboardKpiCard";
+import DashboardChartPanel from "components/DashboardChartPanel";
+import DashboardPageShell from "layouts/dashboard/components/DashboardPageShell";
 
 import api from "services/api.service";
 
@@ -206,7 +202,7 @@ function buildShareChartDataFromGovtPafRows(rows, classIdFilter) {
     datasets: {
       label: "Share Distribution",
       data: [0, 0],
-      backgroundColors: ["warning", "info"],
+      backgroundColors: ["#F5A524", "#025B64"],
     },
   };
 
@@ -394,6 +390,28 @@ const EMPTY_SUMMARY_DATA = {
   hb: { value: 0, amount: 0 },
 };
 
+function SummarySectionLoader({ minHeight }) {
+  return (
+    <MDBox
+      display="flex"
+      justifyContent="center"
+      alignItems="center"
+      minHeight={minHeight}
+      width="100%"
+    >
+      <CurrencyLoading size={50} />
+    </MDBox>
+  );
+}
+
+SummarySectionLoader.defaultProps = {
+  minHeight: 160,
+};
+
+SummarySectionLoader.propTypes = {
+  minHeight: PropTypes.number,
+};
+
 /** Build summaryData from PropertySummary rows (PropertyCount / ClassRevenue_Million per row; group by ClassId). */
 function buildSummaryDataFromPropertyRows(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
@@ -454,9 +472,16 @@ function buildSummaryDataFromPropertyRows(rows) {
   return out;
 }
 
+/** ERP chart palette — max 6 segments */
+const SUMMARY_CATEGORY_COLORS = {
+  A: "#025B64",
+  B: "#00D47E",
+  C: "#F5A524",
+  BTS: "#F31260",
+  HB: "#3B82F6",
+};
+
 function SummaryOfA1Activities() {
-  const [controller] = useMaterialUIController();
-  const { darkMode } = controller;
   const [propertySummaryRows, setPropertySummaryRows] = useState([]);
   const [contractsSummaryRows, setContractsSummaryRows] = useState([]);
   const [govtPafShareRows, setGovtPafShareRows] = useState([]);
@@ -508,15 +533,6 @@ function SummaryOfA1Activities() {
     return buildShareChartDataFromGovtPafRows(govtPafShareRows, shareClassIdFilter);
   }, [propertySummaryReady, govtPafShareRows, shareClassIdFilter]);
 
-  // Category distribution bar chart data
-  const categoryColors = {
-    A: "rgba(247, 14, 14, 0.8)", // Blue
-    B: "rgba(15, 1, 1, 0.93)", // Green
-    C: "rgba(255, 152, 0, 0.8)", // Orange
-    BTS: "rgba(244, 67, 54, 0.8)", // Red
-    HB: "rgba(156, 39, 176, 0.8)", // Purple
-  };
-
   const categoryChartData = useMemo(() => {
     const base = {
       labels: ["A", "B", "C", "BTS", "HB"],
@@ -524,11 +540,11 @@ function SummaryOfA1Activities() {
         label: "Category Distribution",
         data: [0, 0, 0, 0, 0],
         backgroundColor: [
-          categoryColors.A,
-          categoryColors.B,
-          categoryColors.C,
-          categoryColors.BTS,
-          categoryColors.HB,
+          SUMMARY_CATEGORY_COLORS.A,
+          SUMMARY_CATEGORY_COLORS.B,
+          SUMMARY_CATEGORY_COLORS.C,
+          SUMMARY_CATEGORY_COLORS.BTS,
+          SUMMARY_CATEGORY_COLORS.HB,
         ],
       },
     };
@@ -545,368 +561,174 @@ function SummaryOfA1Activities() {
     };
   }, [propertySummaryReady, summaryData]);
 
+  const propertyKpiItems = [
+    {
+      key: "total",
+      label: "Lands",
+      data: summaryData?.total,
+      icon: "properties",
+      variant: "primary",
+    },
+    { key: "categoryA", label: "CAT A", data: summaryData?.categoryA, icon: "category" },
+    { key: "categoryB", label: "CAT B", data: summaryData?.categoryB, icon: "category" },
+    { key: "categoryC", label: "CAT C", data: summaryData?.categoryC, icon: "category" },
+    { key: "bts", label: "BTS", data: summaryData?.bts, icon: "signal_cellular_alt" },
+    { key: "hb", label: "HB", data: summaryData?.hb, icon: "home" },
+  ];
+
+  const statusMeta = {
+    "Active Contracts": { icon: "contracts", trendVariant: "positive" },
+    "Expired Contracts": { icon: "schedule", trendVariant: "negative" },
+    "Border Line": { icon: "warning", trendVariant: "neutral" },
+    "Border Line Contracts": { icon: "warning", trendVariant: "neutral" },
+    "Closed Contracts": { icon: "archive", trendVariant: "neutral" },
+  };
+
   return (
-    <DashboardLayout>
-      <DashboardNavbar />
-      <MDBox py={3}>
-        {/* Main Container with Light Blue Border */}
-        <Card
-          sx={{
-            border: darkMode ? "3px solid rgba(255, 255, 255, 0.2)" : "0px solid #87CEEB",
-            borderRadius: "12px",
-            padding: 3,
-            backgroundColor: darkMode ? "#1a1a1a" : "Transparent",
-          }}
-        >
-          <Grid container spacing={2}>
-            {/* Top Section: Summary Cards - Using ComplexStatisticsCard format */}
-            <Grid item xs={12}>
-              {!propertySummaryReady || !summaryData ? (
-                <MDBox
-                  display="flex"
-                  justifyContent="center"
-                  alignItems="center"
-                  minHeight={160}
-                  width="100%"
-                >
-                  <CircularProgress color="info" />
-                </MDBox>
-              ) : (
-                <Grid container spacing={3}>
-                  {[
-                    {
-                      key: "total",
-                      label: "Lands",
-                      data: summaryData.total,
-                      icon: "dashboard",
-                      color: "info",
-                    },
-                    {
-                      key: "categoryA",
-                      label: "CAT A",
-                      data: summaryData.categoryA,
-                      icon: "category",
-                      color: "primary",
-                    },
-                    {
-                      key: "categoryB",
-                      label: "CAT B",
-                      data: summaryData.categoryB,
-                      icon: "category",
-                      color: "success",
-                    },
-                    {
-                      key: "categoryC",
-                      label: "CAT C",
-                      data: summaryData.categoryC,
-                      icon: "category",
-                      color: "warning",
-                    },
-                    {
-                      key: "bts",
-                      label: "BTS",
-                      data: summaryData.bts,
-                      icon: "signal_cellular_alt",
-                      color: "error",
-                    },
-                    { key: "hb", label: "HB", data: summaryData.hb, icon: "home", color: "dark" },
-                  ].map((item) => {
-                    const showAreaLine = item.key !== "total" && Boolean(item.data.areaLine);
-                    return (
-                      <Grid item xs={12} sm={6} md={2} key={item.key}>
-                        <MDBox mb={1.5}>
-                          <ComplexStatisticsCard
-                            color={item.color}
-                            icon={item.icon}
-                            title={item.label}
-                            count={
-                              showAreaLine ? (
-                                <MDBox
-                                  component="span"
-                                  display="flex"
-                                  flexDirection="column"
-                                  alignItems="flex-end"
-                                  lineHeight={1.2}
-                                >
-                                  <MDTypography
-                                    component="span"
-                                    variant="h4"
-                                    sx={{
-                                      color: darkMode ? "#ffffff !important" : "inherit",
-                                    }}
-                                  >
-                                    {item.data.value}
-                                  </MDTypography>
-                                  <MDTypography
-                                    component="span"
-                                    variant="caption"
-                                    sx={{
-                                      color: darkMode ? "#ffffff !important" : "#7b809a",
-                                      fontSize: "0.65rem",
-                                      fontWeight: 500,
-                                      mt: 0.25,
-                                      textAlign: "right",
-                                      lineHeight: 1.25,
-                                    }}
-                                  >
-                                    Area: {item.data.areaLine}
-                                  </MDTypography>
-                                </MDBox>
-                              ) : (
-                                item.data.value
-                              )
-                            }
-                            percentage={{
-                              color: "info",
-                              amount: `Worth: ${item.data.amount.toFixed(2)} Mil`,
-                            }}
-                          />
-                        </MDBox>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              )}
-            </Grid>
-
-            {/* Status Stickers - ContractsSummary (aggregated counts) */}
-            <Grid item xs={12}>
-              {!propertySummaryReady || !statusData ? (
-                <MDBox
-                  display="flex"
-                  justifyContent="center"
-                  alignItems="center"
-                  minHeight={120}
-                  width="100%"
-                >
-                  <CircularProgress color="info" />
-                </MDBox>
-              ) : (
-                <Grid container spacing={3} mt={2}>
-                  {statusData.map((status, index) => {
-                    let color = "success";
-                    let icon = "check_circle";
-                    let percentageColor = "success";
-                    let percentageAmount = "";
-                    let percentageLabel = "";
-
-                    if (status.label === "Active Contracts") {
-                      color = "success";
-                      icon = "check_circle";
-                      percentageColor = "success";
-                      percentageLabel = "Active contracts";
-                    } else if (status.label === "Expired Contracts") {
-                      color = "error";
-                      icon = "schedule";
-                      percentageColor = "error";
-                      percentageLabel = "Expired contracts";
-                    } else if (status.label === "Border Line") {
-                      color = "warning";
-                      icon = "warning";
-                      percentageColor = "warning";
-                      percentageLabel = "Border line contracts";
-                    } else if (status.label === "Closed Contracts") {
-                      color = "warning";
-                      icon = "close";
-                      percentageColor = "warning";
-                      percentageLabel = "Closed contracts";
-                    }
-
-                    return (
-                      <Grid item xs={12} sm={6} md={3} key={status.label}>
-                        <MDBox mb={1.5}>
-                          <ComplexStatisticsCard
-                            color={color}
-                            icon={icon}
-                            title={status.label}
-                            count={status.count}
-                            percentage={{
-                              color: percentageColor,
-                              amount: percentageAmount,
-                              label: percentageLabel,
-                            }}
-                          />
-                        </MDBox>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              )}
-            </Grid>
-
-            {/* Bottom Section: Charts in one row */}
-            <Grid item xs={12}>
-              <Grid container spacing={3} mt={2}>
-                {/* Share Distribution Pie Chart - 4 columns with modern styling */}
-                <Grid item xs={12} md={4}>
-                  <MDBox
-                    mb={3}
-                    sx={{
-                      "& .MuiCard-root": {
-                        borderRadius: "16px",
-                        boxShadow: darkMode
-                          ? "0 8px 24px rgba(0, 0, 0, 0.5)"
-                          : "0 8px 24px rgba(0, 0, 0, 0.12)",
-                        background: darkMode
-                          ? "linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%)"
-                          : "linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)",
-                        border: darkMode
-                          ? "1px solid rgba(255, 255, 255, 0.1)"
-                          : "1px solid rgba(0, 0, 0, 0.05)",
-                        transition: "all 0.3s ease-in-out",
-                        color: darkMode ? "#ffffff" : "inherit",
-                        "&:hover": {
-                          boxShadow: darkMode
-                            ? "0 12px 32px rgba(0, 0, 0, 0.7)"
-                            : "0 12px 32px rgba(0, 0, 0, 0.15)",
-                          transform: "translateY(-4px)",
-                        },
-                      },
-                      "& .MuiTypography-root": {
-                        color: darkMode ? "#ffffff !important" : "inherit",
-                      },
-                    }}
-                  >
-                    <PieChart
-                      chart={shareChartData}
-                      height="240px"
-                      icon={{ color: "info", component: "pie_chart" }}
-                      title={
-                        <MDBox
-                          display="flex"
-                          alignItems="center"
-                          justifyContent="space-between"
-                          gap={1}
-                          flexWrap="wrap"
-                          width="100%"
-                          pr={{ xs: 0, sm: 1 }}
-                        >
-                          <MDTypography
-                            variant="h6"
-                            sx={{
-                              color: darkMode ? "#ffffff !important" : "#000000 !important",
-                              fontSize: "1.25rem !important",
-                              fontWeight: "700 !important",
-                              m: 0,
-                            }}
-                          >
-                            Share Distribution
-                          </MDTypography>
-                          <FormControl size="small" sx={{ minWidth: 55, maxWidth: 50 }}>
-                            <InputLabel id="govt-paf-class-filter-label">Class</InputLabel>
-                            <Select
-                              labelId="govt-paf-class-filter-label"
-                              label="Class"
-                              value={shareClassIdFilter}
-                              onChange={(e) => setShareClassIdFilter(e.target.value)}
-                              renderValue={(val) =>
-                                val === "all" ? "All" : getGovtPafClassIdLabel(val)
-                              }
-                            >
-                              <MenuItem value="all">All</MenuItem>
-                              {shareClassIdOptions.map((id) => (
-                                <MenuItem key={id} value={String(id)}>
-                                  {getGovtPafClassIdLabel(id)}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </MDBox>
-                      }
-                      description="Govt Share vs PAF Share"
-                    />
-                  </MDBox>
-                </Grid>
-
-                {/* Category Distribution Bar Chart - 8 columns (remaining width) */}
-                <Grid item xs={12} md={8}>
-                  <MDBox
-                    mb={3}
-                    sx={{
-                      height: "300px",
-                      "& .MuiCard-root": {
-                        borderRadius: "16px",
-                        boxShadow: darkMode
-                          ? "0 8px 24px rgba(0, 0, 0, 0.5)"
-                          : "0 8px 24px rgba(0, 0, 0, 0.12)",
-                        background: darkMode
-                          ? "linear-gradient(135deg, #2a2a2a 0%, #1f1f1f 100%)"
-                          : "linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)",
-                        border: darkMode
-                          ? "1px solid rgba(255, 255, 255, 0.1)"
-                          : "1px solid rgba(0, 0, 0, 0.05)",
-                        transition: "all 0.3s ease-in-out",
-                        color: darkMode ? "#ffffff" : "inherit",
-                        height: "100%",
-                        "&:hover": {
-                          boxShadow: darkMode
-                            ? "0 12px 32px rgba(0, 0, 0, 0.7)"
-                            : "0 12px 32px rgba(0, 0, 0, 0.15)",
-                          transform: "translateY(-4px)",
-                        },
-                      },
-                      "& .MuiTypography-root": {
-                        color: darkMode ? "#ffffff !important" : "inherit",
-                      },
-                    }}
-                  >
-                    <MDBox>
-                      <ReportsBarChart
-                        color="info"
-                        title="Category Distribution"
-                        description=""
-                        date=""
-                        chart={categoryChartData}
-                        height="300px"
-                      />
-                      {/* Color Map Legend */}
-                      <MDBox
-                        mt={2}
-                        display="flex"
-                        flexWrap="wrap"
-                        gap={2}
-                        justifyContent="center"
-                        sx={{
-                          "& .color-item": {
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 1,
-                          },
-                          "& .color-box": {
-                            width: "20px",
-                            height: "20px",
-                            borderRadius: "4px",
-                            border: "1px solid rgba(0, 0, 0, 0.1)",
-                          },
-                          "& .color-label": {
-                            fontSize: "0.875rem",
-                            fontWeight: "600",
-                            color: darkMode ? "#ffffff !important" : "#000000",
-                          },
-                        }}
-                      >
-                        {Object.entries(categoryColors).map(([category, color]) => (
-                          <MDBox key={category} className="color-item">
-                            <MDBox
-                              className="color-box"
-                              sx={{
-                                backgroundColor: color,
-                              }}
-                            />
-                            <MDTypography className="color-label">{category}</MDTypography>
-                          </MDBox>
-                        ))}
-                      </MDBox>
+    <DashboardPageShell
+      title="Summary"
+      subtitle="Property, contract, and share distribution from live dashboard data"
+    >
+      <Grid container spacing={1}>
+        <Grid item xs={12}>
+          {!propertySummaryReady || !summaryData ? (
+            <SummarySectionLoader minHeight={160} />
+          ) : (
+            <Grid container spacing={1} className="erp-dashboard-kpi-grid">
+              {propertyKpiItems.map((item, itemIndex) => {
+                const showAreaLine = item.key !== "total" && Boolean(item.data?.areaLine);
+                const valueNode = showAreaLine ? (
+                  <MDBox component="span" display="block">
+                    <MDBox component="span" display="block">
+                      {item.data.value}
                     </MDBox>
+                    <MDTypography
+                      component="span"
+                      className="erp-kpi-card__subtext"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      Area: {item.data.areaLine}
+                    </MDTypography>
                   </MDBox>
-                </Grid>
-              </Grid>
+                ) : (
+                  item.data?.value ?? "—"
+                );
+
+                return (
+                  <Grid item xs={12} sm={6} md={4} lg={2} key={item.key}>
+                    <DashboardKpiCard
+                      label={item.label}
+                      value={valueNode}
+                      trend={`Worth: ${Number(item.data?.amount || 0).toFixed(2)} Mil`}
+                      variant={itemIndex === 0 || item.variant === "primary" ? "primary" : "default"}
+                      icon={item.icon}
+                    />
+                  </Grid>
+                );
+              })}
+            </Grid>
+          )}
+        </Grid>
+
+        <Grid item xs={12}>
+          <p className="erp-dashboard-section-title">Contract status</p>
+          {!propertySummaryReady || !statusData ? (
+            <SummarySectionLoader minHeight={120} />
+          ) : (
+            <Grid container spacing={1} className="erp-dashboard-kpi-grid">
+              {statusData.map((status, statusIndex) => {
+                const meta = statusMeta[status.label] || {
+                  icon: "info",
+                  trendVariant: "neutral",
+                };
+                return (
+                  <Grid item xs={12} sm={6} md={3} key={status.label}>
+                    <DashboardKpiCard
+                      className="erp-status-card"
+                      label={status.label}
+                      value={status.count.toLocaleString()}
+                      trend={status.label}
+                      trendVariant={meta.trendVariant}
+                      icon={meta.icon}
+                      variant={statusIndex === 0 ? "primary" : "default"}
+                    />
+                  </Grid>
+                );
+              })}
+            </Grid>
+          )}
+        </Grid>
+
+        <Grid item xs={12}>
+          <p className="erp-dashboard-section-title erp-dashboard-section-title--spaced">
+            Analytics
+          </p>
+          <Grid container spacing={1}>
+            <Grid item xs={12} md={4}>
+              <DashboardChartPanel
+                title="Share Distribution"
+                description="Govt Share vs PAF Share"
+                headerAction={
+                  <FormControl size="small" className="erp-dashboard-filter" sx={{ minWidth: 100 }}>
+                    <InputLabel id="govt-paf-class-filter-label">Class</InputLabel>
+                    <Select
+                      labelId="govt-paf-class-filter-label"
+                      label="Class"
+                      value={shareClassIdFilter}
+                      onChange={(e) => setShareClassIdFilter(e.target.value)}
+                      renderValue={(val) => (val === "all" ? "All" : getGovtPafClassIdLabel(val))}
+                    >
+                      <MenuItem value="all">All</MenuItem>
+                      {shareClassIdOptions.map((id) => (
+                        <MenuItem key={id} value={String(id)}>
+                          {getGovtPafClassIdLabel(id)}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                }
+              >
+                <PieChart chart={shareChartData} height="240px" icon={{}} title="" description="" />
+              </DashboardChartPanel>
+            </Grid>
+
+            <Grid item xs={12} md={8}>
+              <DashboardChartPanel
+                title="Category Distribution"
+                description="Property count by class"
+              >
+                <ReportsBarChart
+                  flat
+                  seriesColor={CHART_PRIMARY}
+                  title=""
+                  description=""
+                  date=""
+                  chart={categoryChartData}
+                  chartHeight="260px"
+                />
+                <MDBox mt={2} display="flex" flexWrap="wrap" gap={2} justifyContent="center">
+                  {Object.entries(SUMMARY_CATEGORY_COLORS).map(([category, color]) => (
+                    <MDBox key={category} display="flex" alignItems="center" gap={1}>
+                      <MDBox
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: "4px",
+                          backgroundColor: color,
+                        }}
+                      />
+                      <MDTypography variant="caption" sx={{ fontWeight: 600, color: "#6b7280" }}>
+                        {category}
+                      </MDTypography>
+                    </MDBox>
+                  ))}
+                </MDBox>
+              </DashboardChartPanel>
             </Grid>
           </Grid>
-        </Card>
-      </MDBox>
-      <Footer />
-    </DashboardLayout>
+        </Grid>
+      </Grid>
+    </DashboardPageShell>
   );
 }
 

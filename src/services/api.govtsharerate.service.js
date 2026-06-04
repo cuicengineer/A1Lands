@@ -1,4 +1,5 @@
 import api, { getActionBy } from "services/api.service";
+import { fetchAllPaginatedRecords } from "utils/fetchAllPaginatedRecords";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -26,13 +27,18 @@ async function requestWithPagination(method, path, body) {
   return data;
 }
 
-function getAll(pageNumber = 1, pageSize = 50) {
+function getAll(pageNumber = 1, pageSize = 1000) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
     type: "2", // Filter to only fetch type 2 values (Govt Share Rate)
   }).toString();
   return requestWithPagination("GET", `/api/RentalValueGovtShareRates?${params}`);
+}
+
+/** Load full govt share rate catalog (type=2); paginates until all rows are retrieved. */
+async function getAllRecords() {
+  return fetchAllPaginatedRecords(getAll);
 }
 
 async function create(data) {
@@ -65,5 +71,5 @@ async function remove(id) {
   return requestWithPagination("DELETE", `/api/RentalValueGovtShareRates/${id}`, payload);
 }
 
-const govtShareRateApi = { getAll, create, update, remove };
+const govtShareRateApi = { getAll, getAllRecords, create, update, remove };
 export default govtShareRateApi;

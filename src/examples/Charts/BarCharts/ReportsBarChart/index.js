@@ -44,13 +44,45 @@ import { useMaterialUIController } from "context";
 
 // ReportsBarChart configurations
 import configs from "examples/Charts/BarCharts/ReportsBarChart/configs";
+import { executiveBarConfigs, CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-function ReportsBarChart({ color, title, description, date, chart, chartHeight }) {
+function ReportsBarChart({
+  color,
+  title,
+  description,
+  date,
+  chart,
+  chartHeight,
+  flat,
+  seriesColor,
+}) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
-  const { data, options } = configs(chart.labels || [], chart.datasets || {});
+
+  const barColor =
+    seriesColor ||
+    (color === "success" ? CHART_SECONDARY : color === "dark" ? CHART_SECONDARY : CHART_PRIMARY);
+
+  const chartConfig = useMemo(() => {
+    const labels = chart.labels || [];
+    const datasets = chart.datasets || {};
+    if (flat) {
+      return executiveBarConfigs(labels, datasets, { color: barColor });
+    }
+    return configs(labels, datasets);
+  }, [flat, chart, barColor]);
+
+  const { data, options } = chartConfig;
+
+  if (flat) {
+    return (
+      <MDBox className="erp-flat-chart" sx={{ height: chartHeight, width: "100%", minHeight: 200 }}>
+        <Bar data={data} options={options} />
+      </MDBox>
+    );
+  }
 
   return (
     <Card sx={{ height: "100%" }}>
@@ -70,7 +102,7 @@ function ReportsBarChart({ color, title, description, date, chart, chartHeight }
               <Bar data={data} options={options} />
             </MDBox>
           ),
-          [color, chart, chartHeight]
+          [color, data, options, chartHeight]
         )}
         <MDBox>
           <MDTypography
@@ -108,6 +140,8 @@ ReportsBarChart.defaultProps = {
   color: "info",
   description: "",
   chartHeight: "12.5rem",
+  flat: false,
+  seriesColor: null,
 };
 
 // Typechecking props for the ReportsBarChart
@@ -118,6 +152,8 @@ ReportsBarChart.propTypes = {
   date: PropTypes.string.isRequired,
   chart: PropTypes.objectOf(PropTypes.oneOfType([PropTypes.array, PropTypes.object])).isRequired,
   chartHeight: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  flat: PropTypes.bool,
+  seriesColor: PropTypes.string,
 };
 
 export default ReportsBarChart;

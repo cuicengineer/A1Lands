@@ -1,4 +1,5 @@
 import api, { getActionBy } from "services/api.service";
+import { fetchAllPaginatedRecords } from "utils/fetchAllPaginatedRecords";
 
 async function requestWithPagination(method, path, body) {
   const res = await api.requestRaw(method, path, body);
@@ -26,7 +27,7 @@ async function requestWithPagination(method, path, body) {
   return data;
 }
 
-function getAll(pageNumber = 1, pageSize = 50) {
+function getAll(pageNumber = 1, pageSize = 1000) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),
@@ -34,10 +35,50 @@ function getAll(pageNumber = 1, pageSize = 50) {
   return requestWithPagination("GET", `/api/Contracts?${params}`);
 }
 
+/** Load the full contracts catalog in one round trip when possible. */
+async function getAllRecords() {
+  return fetchAllPaginatedRecords(getAll, {
+    listEntities: ["contract", "contracts", "Contracts"],
+  });
+}
+
+function getInvoiceSchedulePage(pageNumber = 1, pageSize = 1000, filters = {}) {
+  const params = new URLSearchParams({
+    pageNumber: pageNumber.toString(),
+    pageSize: pageSize.toString(),
+  });
+  const contractNo = filters.contractNo != null ? String(filters.contractNo).trim() : "";
+  if (contractNo) params.set("contractNo", contractNo);
+  if (filters.fromDate) params.set("fromDate", filters.fromDate);
+  if (filters.toDate) params.set("toDate", filters.toDate);
+  if (filters.cmdId != null && filters.cmdId !== "") {
+    params.set("cmdId", String(filters.cmdId));
+  }
+  if (filters.classId != null && filters.classId !== "") {
+    params.set("classId", String(filters.classId));
+  }
+  if (filters.baseId != null && filters.baseId !== "") {
+    params.set("baseId", String(filters.baseId));
+  }
+  const qs = params.toString();
+  return requestWithPagination("GET", `/api/ContractInvoiceSchedule?${qs}`);
+}
+
+/** Load all invoice schedule rows (no filter query) for client-side filtering. */
+async function getAllInvoiceScheduleRecords() {
+  return fetchAllPaginatedRecords((page, size) => getInvoiceSchedulePage(page, size), {
+    listEntities: ["contractinvoiceschedule", "ContractInvoiceSchedule"],
+  });
+}
+
 /**
  * GET /api/ContractInvoiceSchedule — optional query: contractNo, fromDate, toDate, cmdId, classId, baseId
  */
 function getInvoiceSchedule(filters = {}) {
+  const hasPagination = filters.pageNumber != null || filters.pageSize != null;
+  if (hasPagination) {
+    return getInvoiceSchedulePage(filters.pageNumber ?? 1, filters.pageSize ?? 1000, filters);
+  }
   const params = new URLSearchParams();
   const contractNo = filters.contractNo != null ? String(filters.contractNo).trim() : "";
   if (contractNo) params.set("contractNo", contractNo);
@@ -69,6 +110,7 @@ function getInvoiceScheduleByInvoiceNo(invoiceNo) {
 
 /**
  * POST /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}/{subInvoiceNo}
+ * Main invoice header (empty sub) uses PUT upsert — POST requires a sub segment (405 otherwise).
  */
 async function createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, data) {
   const actionBy = await getActionBy();
@@ -84,9 +126,13 @@ async function createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, data) 
     payload.IsFinalized = true;
     payload.isFinalized = true;
   }
+  const sub = String(subInvoiceNo ?? "").trim();
+  if (!sub) {
+    return updateInvoiceSchedule(contractNo, invoiceNo, payload);
+  }
   const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
   const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
-  const encodedSubInvoiceNo = encodeURIComponent(String(subInvoiceNo ?? "").trim());
+  const encodedSubInvoiceNo = encodeURIComponent(sub);
   return requestWithPagination(
     "POST",
     `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}/${encodedSubInvoiceNo}`,
@@ -167,7 +213,7 @@ function getActiveByAsOfDate(asOfDateYyyyMmDd) {
 }
 
 // Backwards-compatible alias
-function list(pageNumber = 1, pageSize = 50) {
+function list(pageNumber = 1, pageSize = 1000) {
   return getAll(pageNumber, pageSize);
 }
 
@@ -228,6 +274,8 @@ async function deleteContractRiseTerm(riseTermId) {
 
 const contractApi = {
   getAll,
+  getAllRecords,
+  getAllInvoiceScheduleRecords,
   getInvoiceSchedule,
   getInvoiceScheduleByInvoiceNo,
   createInvoiceSchedule,

@@ -1,15 +1,15 @@
-import Card from "@mui/material/Card";
 import MenuItem from "@mui/material/MenuItem";
 import { useEffect, useState } from "react";
 import MDBox from "components/MDBox";
-import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import StatusBadge from "components/StatusBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -22,6 +22,7 @@ function Command() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(true);
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -29,6 +30,7 @@ function Command() {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      setLoading(true);
       try {
         const data = await api.list("Command");
         if (!mounted) return;
@@ -36,6 +38,8 @@ function Command() {
         setTableRows(arr);
       } catch (e) {
         console.error("Failed to load commands", e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -167,21 +171,6 @@ function Command() {
       required={editingRowId === "__new__" && field === "name"}
       error={editingRowId === "__new__" && field === "name" && Boolean(errors?.name)}
       helperText={editingRowId === "__new__" && field === "name" ? errors?.name : undefined}
-      sx={
-        darkMode
-          ? {
-              "& .MuiInputBase-input": {
-                color: "#000000 !important",
-              },
-              "& .MuiInputLabel-root": {
-                color: "#000000 !important",
-              },
-              "& .MuiFormHelperText-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}
-      }
     />
   );
 
@@ -192,18 +181,6 @@ function Command() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
-      sx={
-        darkMode
-          ? {
-              "& .MuiSelect-select": {
-                color: "#000000 !important",
-              },
-              "& .MuiSvgIcon-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}
-      }
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>
@@ -281,59 +258,43 @@ function Command() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Command
-            </MDTypography>
-            {canCreate && (
-              <MDButton variant="gradient" color="info" onClick={handleAddCommand}>
-                Add Command
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "70vh",
-              minHeight: "400px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-              },
-            }}
-          >
-            <DataTable
-              table={{ columns, rows: computedRows }}
-              isSorted={false}
-              stickyToolbarAndHeader
-              canSearch={true}
-              entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-              showTotalEntries={true}
-              noEndBorder
-              exportFileName="Command"
-            />
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Command"
+        subtitle="Manage command configuration"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddCommand}>
+              Add Command
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          showTotalEntries={true}
+          noEndBorder
+          exportFileName="Command"
+        />
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

@@ -21,22 +21,20 @@ import Icon from "@mui/material/Icon";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
-
-// Material Dashboard 2 React contexts
-import { useMaterialUIController } from "context";
+import { isEnterpriseSettingsUI } from "utils/enterpriseSettingsUI";
 
 function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest }) {
-  const [controller] = useMaterialUIController();
-  const headerTextColor = "#111111 !important";
+  const settingsUI = isEnterpriseSettingsUI();
+  const headerTextColor = settingsUI ? "#737373 !important" : "#111111 !important";
   return (
     <MDBox
       component="th"
       width={width}
-      py={0.5}
-      px={0.5}
+      py={settingsUI ? 0.5 : 0.5}
+      px={settingsUI ? 1 : 0.5}
       sx={({ palette: { light }, borders: { borderWidth }, functions: { rgba } }) => ({
-        borderBottom: `${borderWidth[1]} solid ${light.main}`,
-        backgroundColor: rgba(light.main, 0.2),
+        borderBottom: settingsUI ? "1px solid #e5e5e5" : `${borderWidth[1]} solid ${light.main}`,
+        backgroundColor: settingsUI ? "transparent" : rgba(light.main, 0.2),
         // Allow multi-line headers and prevent overflow into adjacent columns
         whiteSpace: "normal",
         overflowWrap: "anywhere",
@@ -55,8 +53,8 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
         color={headerTextColor}
         opacity={1}
         sx={({ typography: { size, fontWeightBold } }) => ({
-          fontSize: "14px !important",
-          fontWeight: fontWeightBold,
+          fontSize: settingsUI ? "0.75rem !important" : "12px !important",
+          fontWeight: settingsUI ? 500 : fontWeightBold,
           textTransform: "none",
           cursor: "grab",
           userSelect: "none",

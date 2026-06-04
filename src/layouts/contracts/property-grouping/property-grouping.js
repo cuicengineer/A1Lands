@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, startTransition } from "react";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import Grid from "@mui/material/Grid";
 import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
@@ -18,6 +19,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
+import CompactGridPagination from "components/CompactGridPagination";
 import MDPagination from "components/MDPagination";
 import Autocomplete from "@mui/material/Autocomplete";
 import Select from "@mui/material/Select";
@@ -48,10 +50,35 @@ import revenueRatesApi from "services/api.revenuerates.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import {
+  resolveBaseNameById,
+  resolveClassNameById,
+  resolveCommandNameById,
+} from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import { gridValueChipCell } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
+
+let revenueRatesCatalogPromise = null;
+
+function resetRevenueRatesCatalogCache() {
+  revenueRatesCatalogPromise = null;
+}
+
+/** Full revenue-rates catalog via getAllRecords (never pageSize=1). */
+async function fetchRevenueRatesCatalog() {
+  if (!revenueRatesCatalogPromise) {
+    revenueRatesCatalogPromise = revenueRatesApi.getAllRecords().then((response) => {
+      const data = response?.data ?? (Array.isArray(response) ? response : []);
+      return Array.isArray(data) ? data : [];
+    });
+  }
+  return revenueRatesCatalogPromise;
+}
 
 /** Total area from selected properties. */
 function averageTotalAreaForPropertyIds(propertyIds, getPropertyById) {
@@ -148,6 +175,207 @@ function LocationTableCell({ value }) {
 
 LocationTableCell.propTypes = {
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.oneOf([null])]),
+};
+
+const propertyGroupingGridHandlersRef = { current: {} };
+
+function resolvePropertyLabelFromMap(propertyId, rentalPropertyById) {
+  if (propertyId === undefined || propertyId === null || propertyId === "") return "";
+  if (typeof propertyId === "object") {
+    return String(propertyId.PropertyName || propertyId.PId || "").trim();
+  }
+  const property = rentalPropertyById.get(Number(propertyId));
+  return property
+    ? String(property.PropertyName || property.PId || `Property ID: ${propertyId}`).trim()
+    : `Property ID: ${propertyId}`;
+}
+
+function resolveLinkedPropertyNamesForRow(row, rentalPropertyById) {
+  const linkings = row?.PropertyGroupLinkings;
+  if (!Array.isArray(linkings) || linkings.length === 0) {
+    const propStr = typeof row?.Property === "string" ? row.Property : "";
+    if (!propStr) return "";
+    return Array.from(
+      new Set(
+        propStr
+          .split(",")
+          .map((x) => Number(String(x).trim()))
+          .filter((id) => Number.isFinite(id))
+      )
+    )
+      .map((id) => resolvePropertyLabelFromMap(id, rentalPropertyById))
+      .filter((name) => String(name || "").trim().length > 0)
+      .join(", ");
+  }
+
+  const names = linkings
+    .map((link) => {
+      if (!link) return "";
+      if (typeof link === "string") return link.trim();
+      if (typeof link === "number") return resolvePropertyLabelFromMap(link, rentalPropertyById);
+      if (typeof link === "object") {
+        if (link.PropertyName || link.PId) {
+          return String(link.PropertyName || link.PId || "").trim();
+        }
+        const nested = link.Property;
+        if (nested && typeof nested === "object") {
+          return String(nested.PropertyName || nested.PId || "").trim();
+        }
+        const pid = link.PropertyId || link.PropId || link.Id;
+        return pid ? resolvePropertyLabelFromMap(pid, rentalPropertyById) : "";
+      }
+      return "";
+    })
+    .filter((name) => String(name || "").trim().length > 0);
+
+  if (names.length > 0) return names.join(", ");
+
+  const fallbackIds = linkings
+    .map((link) => {
+      if (link == null) return null;
+      if (typeof link === "number" || typeof link === "string") return Number(link);
+      if (typeof link === "object") {
+        const pid = link.PropertyId || link.PropId || link.Id;
+        return pid ? Number(pid) : null;
+      }
+      return null;
+    })
+    .filter((id) => id !== null && Number.isFinite(id));
+
+  return Array.from(new Set(fallbackIds))
+    .map((id) => resolvePropertyLabelFromMap(id, rentalPropertyById))
+    .filter((name) => String(name || "").trim().length > 0)
+    .join(", ");
+}
+
+const PropertyGroupingActionsCell = React.memo(function PropertyGroupingActionsCell({ row }) {
+  const rowData = row?.original || {};
+  const normalizedId = rowData.id ?? rowData.Id;
+  const handlers = propertyGroupingGridHandlersRef.current;
+  if (!handlers.canEdit && !handlers.canDelete) return null;
+  return (
+    <MDBox
+      alignItems="left"
+      justifyContent="left"
+      sx={{
+        backgroundColor: "#f8f9fa",
+        gap: "2px",
+        padding: "2px 2px",
+        borderRadius: "2px",
+      }}
+    >
+      {handlers.canEdit ? (
+        <IconButton
+          size="small"
+          color="info"
+          onClick={() => handlers.onEdit?.(normalizedId)}
+          title="Edit"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>edit</Icon>
+        </IconButton>
+      ) : null}
+      {handlers.canDelete ? (
+        <IconButton
+          size="small"
+          color="error"
+          onClick={() => handlers.onDelete?.(normalizedId)}
+          title="Delete"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>delete</Icon>
+        </IconButton>
+      ) : null}
+    </MDBox>
+  );
+});
+
+PropertyGroupingActionsCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const PropertyGroupingAreaCell = React.memo(function PropertyGroupingAreaCell({ row }) {
+  const rowData = row?.original || {};
+  return rowData.areaDisplay ?? "-";
+});
+
+PropertyGroupingAreaCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const PropertyGroupingLinkedCell = React.memo(function PropertyGroupingLinkedCell({ row }) {
+  const rowData = row?.original || {};
+  const recordId = rowData.id || rowData.Id;
+  const grpId = rowData.gId || rowData.GId || "";
+  const handlers = propertyGroupingGridHandlersRef.current;
+  return (
+    <IconButton
+      size="small"
+      color="primary"
+      onClick={() => handlers.onViewLinked?.(recordId, grpId)}
+      title="View linked properties"
+      disabled={!recordId}
+    >
+      <Icon>visibility</Icon>
+    </IconButton>
+  );
+});
+
+PropertyGroupingLinkedCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const PropertyGroupingContractsCell = React.memo(function PropertyGroupingContractsCell({ row }) {
+  const rowData = row?.original || {};
+  const groupId = rowData.gId || rowData.GId || "";
+  const handlers = propertyGroupingGridHandlersRef.current;
+  if (!groupId) return <span>-</span>;
+  return (
+    <IconButton
+      size="small"
+      color="info"
+      onClick={() => handlers.onViewContracts?.(groupId)}
+      disabled={handlers.loadingContracts}
+      title="View active contracts for this group"
+    >
+      <Icon>description</Icon>
+    </IconButton>
+  );
+});
+
+PropertyGroupingContractsCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const gridCellValuePropType = PropTypes.oneOfType([
+  PropTypes.string,
+  PropTypes.number,
+  PropTypes.bool,
+  PropTypes.oneOf([null]),
+]);
+
+const PropertyGroupingTypeCell = React.memo(function PropertyGroupingTypeCell({ value }) {
+  return value || "-";
+});
+
+PropertyGroupingTypeCell.propTypes = {
+  value: gridCellValuePropType,
+};
+
+const PropertyGroupingLocationCell = React.memo(function PropertyGroupingLocationCell({ value }) {
+  return <LocationTableCell value={value} />;
+});
+
+PropertyGroupingLocationCell.propTypes = {
+  value: gridCellValuePropType,
+};
+
+const PropertyGroupingStatusCell = React.memo(function PropertyGroupingStatusCell({ value }) {
+  return <StatusBadge value={value} />;
+});
+
+PropertyGroupingStatusCell.propTypes = {
+  value: gridCellValuePropType,
 };
 
 const PROPERTY_GROUPING_GRID_MONEY_FALLBACK_KEYS = {
@@ -304,7 +532,6 @@ function PropertyGroupingMoneyColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -644,13 +871,7 @@ function PropertyGroupingForm({
     }
 
     try {
-      // Fetch all revenue rates and filter by property ID
-      const response = await revenueRatesApi.getAll(1, 1000); // Get large page to find all rates
-      const rates = response?.pagination
-        ? response.data || []
-        : Array.isArray(response)
-        ? response
-        : [];
+      const rates = await fetchRevenueRatesCatalog();
 
       // Filter by property ID (API returns PascalCase)
       const propertyRates = rates
@@ -1601,7 +1822,7 @@ function PropertyGroupingForm({
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
         <DialogTitle>New Property Grouping</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} mt={0.5}>
@@ -1714,7 +1935,6 @@ function PropertyGroupingForm({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
-                      minHeight: "45px",
                       display: "flex",
                       alignItems: "center",
                     },
@@ -1827,7 +2047,6 @@ function PropertyGroupingForm({
                     "& .MuiSelect-select": {
                       fontSize: "1rem",
                       padding: "0 32px 0 14px",
-                      minHeight: "45px",
                       display: "flex",
                       alignItems: "center",
                     },
@@ -2134,7 +2353,6 @@ function PropertyGroupingForm({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
-                      minHeight: "45px",
                       display: "flex",
                       alignItems: "center",
                     },
@@ -2313,11 +2531,10 @@ export default function PropertyGrouping() {
   const [currentGroupCmdId, setCurrentGroupCmdId] = useState(null);
   const [currentGroupBaseId, setCurrentGroupBaseId] = useState(null);
 
-  // Pagination state for main table
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [visibleRowCount, setVisibleRowCount] = useState(0);
+  const canEdit = canEditCurrentMenu();
+  const canDelete = canDeleteCurrentMenu();
   const [loading, setLoading] = useState(false);
   const [propertyTypes, setPropertyTypes] = useState([]);
 
@@ -2346,63 +2563,43 @@ export default function PropertyGrouping() {
 
   // Pagination state for linked properties dialog
   const [linkedPropertiesPageNumber, setLinkedPropertiesPageNumber] = useState(1);
-  const [linkedPropertiesPageSize, setLinkedPropertiesPageSize] = useState(100);
+  const [linkedPropertiesPageSize, setLinkedPropertiesPageSize] = useState(1000);
   const [linkedPropertiesTotalCount, setLinkedPropertiesTotalCount] = useState(0);
 
   const allPropertyGroupingsFetchedForOpenRef = useRef(false);
 
-  const fetchPropertyGroupings = async (page = pageNumber, size = pageSize) => {
+  const fetchPropertyGroupings = async () => {
     setLoading(true);
     try {
-      const response = await propertyGroupingApi.list(page, size);
-      if (response && response.pagination) {
-        setRows(response.data || []);
-        setTotalCount(response.pagination.totalCount || 0);
-        setPageNumber(response.pagination.pageNumber || page);
-        setPageSize(response.pagination.pageSize || size);
-      } else {
-        // Fallback for non-paginated response
-        setRows(Array.isArray(response) ? response : []);
-        setTotalCount(Array.isArray(response) ? response.length : 0);
-      }
+      const response = await propertyGroupingApi.getAllRecords();
+      const nextRows = response?.data ?? (Array.isArray(response) ? response : []);
+      const arr = Array.isArray(nextRows) ? nextRows : [];
+      startTransition(() => {
+        setRows(arr);
+        setAllPropertyGroupings(arr);
+        setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
+      });
     } catch (error) {
       console.error("Error fetching property groupings:", error);
-      setRows([]);
-      setTotalCount(0);
+      startTransition(() => {
+        setRows([]);
+        setAllPropertyGroupings([]);
+        setTotalCount(0);
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch all property groupings for duplicate validation (single API call)
   const fetchAllPropertyGroupings = async () => {
+    if (rows.length > 0) {
+      setAllPropertyGroupings(rows);
+      return;
+    }
     try {
-      const response = await propertyGroupingApi.list(1, 10000);
-      if (response && response.pagination) {
-        const data = response.data || [];
-        const totalCount = Number(response.pagination.totalCount || 0);
-        // If backend capped our request and there are more records, fall back to multi-page fetch
-        if (totalCount > 0 && data.length < totalCount) {
-          const serverPageSize = Number(response.pagination.pageSize || data.length || 1);
-          const totalPages = serverPageSize > 0 ? Math.ceil(totalCount / serverPageSize) : 1;
-          if (totalPages > 1) {
-            const pagePromises = [];
-            for (let page = 2; page <= totalPages; page += 1) {
-              pagePromises.push(propertyGroupingApi.list(page, serverPageSize));
-            }
-            const rest = await Promise.allSettled(pagePromises);
-            const allData = [...data];
-            rest.forEach((r) => {
-              if (r.status === "fulfilled" && r.value?.data) allData.push(...r.value.data);
-            });
-            setAllPropertyGroupings(allData);
-            return;
-          }
-        }
-        setAllPropertyGroupings(data);
-      } else {
-        setAllPropertyGroupings(Array.isArray(response) ? response : []);
-      }
+      const response = await propertyGroupingApi.getAllRecords();
+      const data = response?.data ?? (Array.isArray(response) ? response : []);
+      setAllPropertyGroupings(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching all property groupings:", error);
       setAllPropertyGroupings([]);
@@ -2446,9 +2643,8 @@ export default function PropertyGrouping() {
   };
 
   useEffect(() => {
-    // On page load / pagination changes, only load the paginated PropertyGroup list
-    fetchPropertyGroupings(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
+    fetchPropertyGroupings();
+  }, []);
 
   // Lazy-load dropdown/filter data only when form opens (Add/Edit)
   useEffect(() => {
@@ -2599,7 +2795,7 @@ export default function PropertyGrouping() {
     setLinkingSelection([]);
     setSavingLinkings(false);
     setLinkedPropertiesPageNumber(1);
-    setLinkedPropertiesPageSize(100);
+    setLinkedPropertiesPageSize(1000);
     setLinkedPropertiesTotalCount(0);
     setAvailablePropertiesForLinking([]);
     setCurrentGroupCmdId(null);
@@ -2698,7 +2894,7 @@ export default function PropertyGrouping() {
         linkedPropertiesPageNumber,
         linkedPropertiesPageSize
       );
-      fetchPropertyGroupings(pageNumber, pageSize);
+      fetchPropertyGroupings();
     } catch (e) {
       console.error("Error creating property group linkings:", e);
       alert("Failed to add linked properties. Please try again.");
@@ -2795,12 +2991,7 @@ export default function PropertyGrouping() {
         if (propertyRate === 0) {
           // Fetch revenue rate for this property
           try {
-            const response = await revenueRatesApi.getAll(1, 1000);
-            const rates = response?.pagination
-              ? response.data || []
-              : Array.isArray(response)
-              ? response
-              : [];
+            const rates = await fetchRevenueRatesCatalog();
 
             // Filter by property ID and get latest applicable date (not after today)
             const propertyRates = rates
@@ -2911,7 +3102,7 @@ export default function PropertyGrouping() {
         setLinkedPropertiesTotalCount(Array.isArray(response) ? response.length : 0);
       }
       // Refresh the main table
-      fetchPropertyGroupings(pageNumber, pageSize);
+      fetchPropertyGroupings();
       alert("Property removed successfully and grouping updated!");
     } catch (error) {
       console.error("Error removing property:", error);
@@ -2936,114 +3127,6 @@ export default function PropertyGrouping() {
       ? String(property.PropertyName || property.PId || `Property ID: ${propertyId}`)
       : `Property ID: ${propertyId}`;
   };
-
-  const columns = [
-    {
-      Header: "Actions",
-      accessor: "actions",
-      align: "center",
-    },
-    { Header: "ID", accessor: "id", align: "left" },
-    { Header: "RAC", accessor: "cmdName", align: "left" },
-    { Header: "Base", accessor: "baseName", align: "left" },
-    { Header: "Class", accessor: "className", align: "left" },
-    {
-      Header: "Type",
-      accessor: "propertyTypeName",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => value || "-",
-    },
-    { Header: "Group ID", accessor: "gId", align: "left" },
-    {
-      id: "rate",
-      Header: "Rate",
-      accessor: "rate",
-      align: "center",
-      filter: "propertyGroupingMoneyCompare",
-      Filter: PropertyGroupingMoneyColumnFilter,
-    },
-    {
-      Header: "Area (UoM)",
-      accessor: "area",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => {
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        const areaValue = value ?? rowData.area ?? rowData.Area ?? "";
-        const uoM = rowData.uoM ?? rowData.UoM ?? rowData.uom ?? "";
-        const formattedArea =
-          areaValue || areaValue === 0 ? Number(areaValue).toLocaleString() : "";
-        const combined = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim();
-        return combined || "-";
-      },
-    },
-    {
-      Header: "Location",
-      accessor: "location",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <LocationTableCell value={value} />,
-    },
-    { Header: "Remarks", accessor: "remarks", align: "left" },
-    {
-      Header: "Status",
-      accessor: "status",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <StatusBadge value={value} />,
-    },
-    {
-      Header: "Linked",
-      accessor: "linkedProperties", // Accessor matches field in computedRows
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        // Use id from computedRows (lowercase) or fallback to original Id (PascalCase)
-        const recordId = rowData.id || rowData.Id;
-        const grpId = rowData.gId || rowData.GId || "";
-        // Always show the icon - it was displaying before
-        return (
-          <IconButton
-            size="small"
-            color="primary"
-            onClick={() => handleViewLinkedProperties(recordId, grpId)}
-            title="View linked properties"
-            disabled={!recordId}
-          >
-            <Icon>visibility</Icon>
-          </IconButton>
-        );
-      },
-    },
-    {
-      Header: "Contracts",
-      accessor: "activeContracts",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        const groupId = rowData.gId || rowData.GId || "";
-        return groupId ? (
-          <IconButton
-            size="small"
-            color="info"
-            onClick={() => handleViewActiveContractsForGroup(groupId)}
-            disabled={loadingContracts}
-            title="View active contracts for this group"
-          >
-            <Icon>description</Icon>
-          </IconButton>
-        ) : (
-          <span>-</span>
-        );
-      },
-    },
-  ];
 
   const handleOpenForm = () => {
     setCurrentPropertyGrouping(null);
@@ -3369,7 +3452,7 @@ export default function PropertyGrouping() {
       } else {
         await propertyGroupingApi.create(formattedData);
       }
-      fetchPropertyGroupings(pageNumber, pageSize);
+      fetchPropertyGroupings();
       setCurrentPropertyGrouping(null);
       handleCloseForm();
     } catch (error) {
@@ -3388,7 +3471,7 @@ export default function PropertyGrouping() {
         return;
       }
       if (currentPropertyGrouping && isSuperuserUser()) {
-        fetchPropertyGroupings(pageNumber, pageSize);
+        fetchPropertyGroupings();
         setCurrentPropertyGrouping(null);
         handleCloseForm();
         return;
@@ -3397,300 +3480,291 @@ export default function PropertyGrouping() {
     }
   };
 
-  const computedRows = rows
-    .map((row) => {
-      // API returns PascalCase
+  const rentalPropertyById = useMemo(() => {
+    const map = new Map();
+    (rentalProperties || []).forEach((p) => {
+      const id = p?.Id ?? p?.PropertyId ?? p?.id;
+      if (id != null && Number.isFinite(Number(id))) {
+        map.set(Number(id), p);
+      }
+    });
+    return map;
+  }, [rentalProperties]);
+
+  const propertyTypeById = useMemo(() => {
+    const map = new Map();
+    (propertyTypes || []).forEach((pt) => {
+      const id = pt?.id ?? pt?.Id;
+      if (id != null) map.set(Number(id), pt);
+    });
+    return map;
+  }, [propertyTypes]);
+
+  propertyGroupingGridHandlersRef.current = {
+    onEdit: handleEditPropertyGrouping,
+    onDelete: handleDeletePropertyGrouping,
+    onViewLinked: handleViewLinkedProperties,
+    onViewContracts: handleViewActiveContractsForGroup,
+    loadingContracts,
+    canEdit,
+    canDelete,
+  };
+
+  const columns = useMemo(
+    () => [
+      {
+        id: "actions",
+        Header: "Actions",
+        accessor: "id",
+        align: "center",
+        Cell: PropertyGroupingActionsCell,
+        disableFilters: true,
+      },
+      { id: "recordId", Header: "ID", accessor: "id", align: "left" },
+      { Header: "RAC", accessor: "cmdName", align: "left", Cell: gridValueChipCell("rac") },
+      { Header: "Base", accessor: "baseName", align: "left", Cell: gridValueChipCell("base") },
+      { Header: "Class", accessor: "className", align: "left", Cell: gridValueChipCell("class") },
+      {
+        Header: "Type",
+        accessor: "propertyTypeName",
+        align: "left",
+        Cell: PropertyGroupingTypeCell,
+      },
+      { Header: "Group ID", accessor: "gId", align: "left" },
+      {
+        id: "rate",
+        Header: "Rate",
+        accessor: "rate",
+        align: "center",
+        filter: "propertyGroupingMoneyCompare",
+        Filter: PropertyGroupingMoneyColumnFilter,
+      },
+      {
+        Header: "Area (UoM)",
+        accessor: "areaDisplay",
+        align: "center",
+        Cell: PropertyGroupingAreaCell,
+      },
+      {
+        Header: "Location",
+        accessor: "location",
+        align: "left",
+        Cell: PropertyGroupingLocationCell,
+      },
+      { Header: "Remarks", accessor: "remarks", align: "left" },
+      {
+        Header: "Status",
+        accessor: "status",
+        align: "center",
+        Cell: PropertyGroupingStatusCell,
+      },
+      {
+        Header: "Linked",
+        accessor: "linkedProperties",
+        align: "center",
+        Cell: PropertyGroupingLinkedCell,
+      },
+      {
+        id: "contracts",
+        Header: "Contracts",
+        accessor: "gId",
+        align: "center",
+        Cell: PropertyGroupingContractsCell,
+        disableFilters: true,
+      },
+    ],
+    []
+  );
+
+  const computedRows = useMemo(() => {
+    const mapped = (rows || []).map((row) => {
       const normalizedId = row.Id;
-      const linkedPropertyNames = (() => {
-        const namesFromLinkings = Array.isArray(row.PropertyGroupLinkings)
-          ? row.PropertyGroupLinkings.map((link) => {
-              if (!link) return "";
-              if (typeof link === "string") return link.trim();
-              if (typeof link === "number") return getPropertyName(link);
-              if (typeof link === "object") {
-                if (link.PropertyName || link.PId) {
-                  return String(link.PropertyName || link.PId || "").trim();
-                }
-                const nested = link.Property;
-                if (nested && typeof nested === "object") {
-                  return String(nested.PropertyName || nested.PId || "").trim();
-                }
-                const pid = link.PropertyId || link.PropId || link.Id;
-                return pid ? getPropertyName(pid) : "";
-              }
-              return "";
-            }).filter((name) => String(name || "").trim().length > 0)
-          : [];
-
-        if (namesFromLinkings.length > 0) {
-          return namesFromLinkings.join(", ");
-        }
-
-        const fallbackIds = Array.isArray(row.PropertyGroupLinkings)
-          ? row.PropertyGroupLinkings.map((link) => {
-              if (link == null) return null;
-              if (typeof link === "number" || typeof link === "string") return Number(link);
-              if (typeof link === "object") {
-                const pid = link.PropertyId || link.PropId || link.Id;
-                return pid ? Number(pid) : null;
-              }
-              return null;
-            }).filter((id) => id !== null && Number.isFinite(id))
-          : typeof row.Property === "string"
-          ? row.Property.split(",")
-              .map((x) => Number(String(x).trim()))
-              .filter((id) => Number.isFinite(id))
-          : [];
-
-        return Array.from(new Set(fallbackIds))
-          .map((id) => getPropertyName(id))
-          .filter((name) => String(name || "").trim().length > 0)
-          .join(", ");
-      })();
       const propertyTypeId = row.PropertyType ?? row.propertyType;
-      const propertyTypeObj = propertyTypes.find((pt) => Number(pt.id) === Number(propertyTypeId));
+      const propertyTypeObj = propertyTypeById.get(Number(propertyTypeId));
       const propertyTypeName =
         propertyTypeObj?.name || row.PropertyTypeName || row.propertyTypeName || "";
+      const areaValue = Number(row.Area || 0);
+      const uoM = row.UoM || "";
+      const formattedArea = areaValue || areaValue === 0 ? areaValue.toLocaleString() : "";
+      const areaDisplay = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim() || "-";
 
       return {
         id: normalizedId,
         cmdId: row.CmdId,
         baseId: row.BaseId,
         classId: row.ClassId,
-        cmdName: row.CmdName || "",
-        baseName: row.BaseName || "",
-        className: row.ClassName || "",
+        cmdName:
+          resolveCommandNameById(commands, row.CmdId ?? row.cmdId) ||
+          String(row.CmdName ?? row.cmdName ?? "").trim(),
+        baseName:
+          resolveBaseNameById(bases, row.BaseId ?? row.baseId) ||
+          String(row.BaseName ?? row.baseName ?? "").trim(),
+        className:
+          resolveClassNameById(classes, row.ClassId ?? row.classId) ||
+          String(row.ClassName ?? row.className ?? "").trim(),
         propertyTypeName,
         gId: row.GId || "",
         rate: Number(row.Rate || 0),
-        area: Number(row.Area || 0),
-        uoM: row.UoM || "",
+        area: areaValue,
+        uoM,
+        areaDisplay,
         location: row.Location || "",
         remarks: row.Remarks || "",
-        attachedproperties: row.attachedproperties || row.attachedproperties || "",
+        attachedproperties: row.attachedproperties || "",
         status: row.Status,
-        linkedProperties: linkedPropertyNames,
-        actions: (
-          <MDBox
-            alignItems="left"
-            justifyContent="left"
-            sx={{
-              backgroundColor: "#f8f9fa", // Light grey background (same as rental-properties)
-              gap: "2px", // Small gap between icons
-              padding: "2px 2px", // Compact padding
-              borderRadius: "2px",
-            }}
-          >
-            {canEditCurrentMenu() && (
-              <IconButton
-                size="small"
-                color="info"
-                onClick={() => handleEditPropertyGrouping(normalizedId)}
-                title="Edit"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>edit</Icon>
-              </IconButton>
-            )}
-            {canDeleteCurrentMenu() && (
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDeletePropertyGrouping(normalizedId)}
-                title="Delete"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>delete</Icon>
-              </IconButton>
-            )}
-          </MDBox>
-        ),
+        linkedProperties: resolveLinkedPropertyNamesForRow(row, rentalPropertyById),
       };
-    })
-    .filter((row) => {
-      if (!urlGrpIdFilter) return true;
-      return (
+    });
+
+    if (!urlGrpIdFilter) return mapped;
+    return mapped.filter(
+      (row) =>
         String(row.gId || "")
           .trim()
           .toLowerCase() === urlGrpIdFilter
-      );
-    });
+    );
+  }, [rows, rentalPropertyById, propertyTypeById, urlGrpIdFilter, commands, bases, classes]);
+
+  const tableConfig = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
+
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: totalCount,
+        visible: urlGrpIdFilter ? computedRows.length : null,
+      }),
+    [totalCount, urlGrpIdFilter, computedRows.length]
+  );
 
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Property Grouping
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  overflow: "hidden",
-                  position: "relative",
-                }}
-              >
-                {/* Single scrollport: toolbar+table grow with rows (autoHeight); bar gutter keeps H-scroll space */}
-                <MDBox
-                  sx={{
-                    position: "relative",
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflowX: "scroll",
-                    overflowY: "scroll",
-                    scrollbarGutter: "stable both-edges",
-                    WebkitOverflowScrolling: "touch",
-                    scrollbarWidth: "thin",
-                    scrollbarColor: "#6b6b6b #e8e8e8",
-                    "&::-webkit-scrollbar": {
-                      width: "10px",
-                      height: "12px",
-                    },
-                    "&::-webkit-scrollbar-track": {
-                      backgroundColor: "#e8e8e8",
-                      borderRadius: "6px",
-                    },
-                    "&::-webkit-scrollbar-thumb": {
-                      backgroundColor: "#6b6b6b",
-                      borderRadius: "6px",
-                      border: "2px solid #e8e8e8",
-                      "&:hover": { backgroundColor: "#4a4a4a" },
-                    },
-                    "&::-webkit-scrollbar-corner": {
-                      backgroundColor: "#e8e8e8",
-                    },
-                    "& .MuiTable-root": {
-                      tableLayout: "auto",
-                      width: "max-content",
-                      borderCollapse: "collapse",
-                    },
-                    "& .MuiTable-root th": {
-                      fontSize: "0.875rem !important",
-                      fontWeight: "700 !important",
-                      width: "auto !important",
-                      minWidth: "0 !important",
-                      padding: "1px 4px !important",
-                      lineHeight: 1.25,
-                      borderBottom: "1px solid #d0d0d0",
-                      whiteSpace: "nowrap",
-                    },
-                    "& .MuiTable-root td": {
-                      width: "auto !important",
-                      minWidth: "0 !important",
-                      padding: "1px 4px !important",
-                      lineHeight: 1.3,
-                      borderBottom: "1px solid #e8e8e8",
-                      whiteSpace: "nowrap",
-                    },
-                    "& table td > div": {
-                      maxWidth: "100% !important",
-                    },
-                    "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
-                      whiteSpace: "normal !important",
-                      wordBreak: "break-word !important",
-                      overflowWrap: "break-word !important",
-                    },
-                    "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-                      whiteSpace: "nowrap !important",
-                      textAlign: "center !important",
-                    },
-                  }}
-                >
-                  {/* Loading Overlay */}
-                  {loading && (
-                    <MDBox
-                      position="absolute"
-                      top={0}
-                      left={0}
-                      right={0}
-                      bottom={0}
-                      display="flex"
-                      justifyContent="center"
-                      alignItems="center"
-                      zIndex={10}
-                      sx={{
-                        backgroundColor: "rgba(255, 255, 255, 0.8)",
-                        backdropFilter: "blur(2px)",
-                      }}
-                    >
-                      <CurrencyLoading size={50} />
-                    </MDBox>
-                  )}
-                  <DataTable
-                    table={{ columns, rows: computedRows }}
-                    isSorted={false}
-                    stickyToolbarAndHeader
-                    autoHeight
-                    entriesPerPage={{
-                      defaultValue: 20,
-                      entries: [10, 25, 50, 100, 500, 1000],
-                    }}
-                    page={0}
-                    onPageChange={() => {}}
-                    pageSize={pageSize}
-                    onEntriesPerPageChange={(value) => {
-                      setPageSize(value);
-                      setPageNumber(1);
-                      fetchPropertyGroupings(1, value);
-                    }}
-                    showTotalEntries={false}
-                    noEndBorder
-                    canSearch
-                    autoResetFilters={false}
-                    pagination={{ variant: "gradient", color: "info" }}
-                    exportFileName="Property-Grouping"
-                    onVisibleRowCountChange={setVisibleRowCount}
-                    extraFilterTypes={PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES}
-                    contentFitTable
-                  />
-                </MDBox>
-
-                {/* Entries count footer (server-side total; no page controls) */}
-                <MDBox
-                  display="flex"
-                  alignItems="center"
-                  px={2}
-                  py={1.5}
-                  sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
-                >
-                  <MDTypography variant="button" color="secondary" fontWeight="regular">
-                    {totalCount === 0
-                      ? "0 of 0 entries"
-                      : `${visibleRowCount} of ${totalCount} entries`}
-                  </MDTypography>
-                </MDBox>
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Property Grouping"
+        subtitle="Manage property grouping records"
+        tabs={<ContractsModuleTabs />}
+        metadata={workspaceMetadata}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        <MDBox
+          className="saas-workspace-grid-scroll-host"
+          sx={{
+            position: "relative",
+            flex: "1 1 0",
+            minHeight: 0,
+            overflowX: "scroll",
+            overflowY: "scroll",
+            scrollbarGutter: "stable both-edges",
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "thin",
+            scrollbarColor: "#6b6b6b #e8e8e8",
+            "&::-webkit-scrollbar": {
+              width: "10px",
+              height: "12px",
+            },
+            "&::-webkit-scrollbar-track": {
+              backgroundColor: "#e8e8e8",
+              borderRadius: "6px",
+            },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: "#6b6b6b",
+              borderRadius: "6px",
+              border: "2px solid #e8e8e8",
+              "&:hover": { backgroundColor: "#4a4a4a" },
+            },
+            "&::-webkit-scrollbar-corner": {
+              backgroundColor: "#e8e8e8",
+            },
+            "& .MuiTable-root": {
+              tableLayout: "auto",
+              width: "max-content",
+              borderCollapse: "collapse",
+            },
+            "& .MuiTable-root th": {
+              fontSize: "0.75rem !important",
+              fontWeight: "700 !important",
+              width: "auto !important",
+              minWidth: "0 !important",
+              padding: "1px 4px !important",
+              lineHeight: 1.25,
+              borderBottom: "1px solid #d0d0d0",
+              whiteSpace: "nowrap",
+            },
+            "& .MuiTable-root td": {
+              width: "auto !important",
+              minWidth: "0 !important",
+              padding: "1px 4px !important",
+              lineHeight: 1.3,
+              borderBottom: "1px solid #e8e8e8",
+              whiteSpace: "nowrap",
+            },
+            "& table td > div": {
+              maxWidth: "100% !important",
+            },
+            "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
+              whiteSpace: "normal !important",
+              wordBreak: "break-word !important",
+              overflowWrap: "break-word !important",
+            },
+            "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
+              whiteSpace: "nowrap !important",
+              textAlign: "center !important",
+            },
+          }}
+        >
+          {loading && (
+            <MDBox
+              position="absolute"
+              top={0}
+              left={0}
+              right={0}
+              bottom={0}
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              zIndex={10}
+              sx={{
+                backgroundColor: "rgba(255, 255, 255, 0.8)",
+                backdropFilter: "blur(2px)",
+              }}
+            >
+              <CurrencyLoading size={50} />
+            </MDBox>
+          )}
+          <DataTable
+            table={tableConfig}
+            isSorted={false}
+            stickyToolbarAndHeader
+            autoHeight
+            entriesPerPage={{
+              defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+              entries: [10, 25, 50, 100],
+            }}
+            pageSize={gridPageSize}
+            onEntriesPerPageChange={(value) => setGridPageSize(Number(value))}
+            autoResetFilters={false}
+            showTotalEntries={false}
+            noEndBorder
+            canSearch
+            pagination={{ variant: "gradient", color: "info" }}
+            exportFileName="Property-Grouping"
+            extraFilterTypes={PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES}
+            contentFitTable
+          />
+        </MDBox>
+      </EnterpriseWorkspace>
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>

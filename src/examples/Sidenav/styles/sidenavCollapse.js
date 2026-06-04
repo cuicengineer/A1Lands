@@ -14,7 +14,8 @@ Coded by www.creative-tim.com
 */
 function collapseItem(theme, ownerState) {
   const { palette, transitions, breakpoints, boxShadows, borders, functions } = theme;
-  const { active, transparentSidenav, whiteSidenav, darkMode, sidenavColor } = ownerState;
+  const { active, transparentSidenav, whiteSidenav, darkMode, sidenavColor, miniSidenav } =
+    ownerState;
 
   const { white, transparent, dark, grey, gradients } = palette;
   const { md } = boxShadows;
@@ -32,12 +33,15 @@ function collapseItem(theme, ownerState) {
     display: "flex",
     alignItems: "center",
     width: "100%",
-    padding: `${pxToRem(8)} ${pxToRem(10)}`,
-    margin: `${pxToRem(1.5)} ${pxToRem(16)}`,
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    padding: miniSidenav ? `${pxToRem(8)} ${pxToRem(6)}` : `${pxToRem(8)} ${pxToRem(10)}`,
+    margin: `${pxToRem(1.5)} 0`,
     borderRadius: borderRadius.md,
     cursor: "pointer",
     userSelect: "none",
-    whiteSpace: "nowrap",
+    overflow: "hidden",
     boxShadow: active && !whiteSidenav && !darkMode && !transparentSidenav ? md : "none",
     [breakpoints.up("xl")]: {
       transition: transitions.create(["box-shadow", "background-color"], {
@@ -65,15 +69,17 @@ function collapseItem(theme, ownerState) {
 
 function collapseIconBox(theme, ownerState) {
   const { palette, transitions, borders, functions } = theme;
-  const { transparentSidenav, whiteSidenav, darkMode, active } = ownerState;
+  const { transparentSidenav, whiteSidenav, darkMode, active, miniSidenav } = ownerState;
 
   const { white, dark } = palette;
   const { borderRadius } = borders;
   const { pxToRem } = functions;
 
   return {
-    minWidth: pxToRem(32),
+    minWidth: miniSidenav ? pxToRem(28) : pxToRem(32),
     minHeight: pxToRem(32),
+    flexShrink: 0,
+    marginRight: miniSidenav ? 0 : undefined,
     color:
       (transparentSidenav && !darkMode && !active) || (whiteSidenav && !active)
         ? dark.main
@@ -104,7 +110,10 @@ function collapseText(theme, ownerState) {
   const { pxToRem } = functions;
 
   return {
-    marginLeft: pxToRem(10),
+    marginLeft: miniSidenav ? 0 : pxToRem(10),
+    minWidth: 0,
+    flex: "1 1 auto",
+    overflow: "hidden",
 
     [breakpoints.up("xl")]: {
       opacity: miniSidenav || (miniSidenav && transparentSidenav) ? 0 : 1,
@@ -119,8 +128,12 @@ function collapseText(theme, ownerState) {
     "& span": {
       fontWeight: active ? fontWeightRegular : fontWeightLight,
       fontSize: size.sm,
-      lineHeight: 0,
-      opacity: miniSidenav ? 0 : 1, // Add this line to hide text when miniSidenav is true
+      lineHeight: 1.2,
+      display: "block",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      opacity: miniSidenav ? 0 : 1,
     },
   };
 }

@@ -38,13 +38,22 @@ function DashboardLayout({ children }) {
 
   return (
     <MDBox
+      className="dashboard-layout-root"
       sx={({ breakpoints, transitions, functions: { pxToRem } }) => ({
-        p: 3,
+        p: 0,
         position: "relative",
+        backgroundColor: "transparent",
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        minHeight: 0,
+        overflow: "hidden",
+        boxSizing: "border-box",
 
         [breakpoints.up("xl")]: {
-          marginLeft: miniSidenav ? pxToRem(120) : pxToRem(274),
-          transition: transitions.create(["margin-left", "margin-right"], {
+          marginLeft: miniSidenav ? pxToRem(72) : pxToRem(280),
+          width: `calc(100% - ${miniSidenav ? pxToRem(72) : pxToRem(280)})`,
+          transition: transitions.create(["margin-left", "margin-right", "width"], {
             easing: transitions.easing.easeInOut,
             duration: transitions.duration.standard,
           }),

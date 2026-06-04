@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import Icon from "@mui/material/Icon";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -11,10 +10,13 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import IconButton from "@mui/material/IconButton";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import { withGridValueChip } from "utils/gridValueChipCell";
 import CurrencyLoading from "components/CurrencyLoading";
-import MDPagination from "components/MDPagination";
+import { ServerGridPagination } from "components/CompactGridPagination";
 import BankAccountForm from "layouts/accounts/bank-account/BankAccountForm";
 import bankAccountApi, {
   UPLOAD_TABLE_NAME,
@@ -202,7 +204,6 @@ function BankAccountsDateColumnFilter({ column }) {
             fontSize: "10px",
             padding: "0px",
             minWidth: "14px",
-            minHeight: "14px",
             color: hasActiveFilter ? "#1A73E8" : "#111111",
           }}
         >
@@ -1217,14 +1218,14 @@ export default function BankAccounts() {
         Header: "RAC",
         accessor: "racDisplay",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ value, row }) => withGridValueChip(txt(value), "rac", { row }),
       },
       {
         id: "baseDisplay",
         Header: "Base",
         accessor: "baseDisplay",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ value, row }) => withGridValueChip(txt(value), "base", { row }),
       },
       {
         id: "fundingSource",
@@ -1490,231 +1491,164 @@ export default function BankAccounts() {
     };
   });
 
+  const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: displayTotal,
+        page: pageNumber,
+        pageSize,
+      }),
+    [displayTotal, pageNumber, pageSize]
+  );
+
+  const serverPaginationFooter = useMemo(
+    () => (
+      <ServerGridPagination
+        page={pageNumber}
+        totalCount={displayTotal}
+        pageSize={pageSize}
+        onPageChange={setPageNumber}
+      />
+    ),
+    [displayTotal, pageNumber, pageSize]
+  );
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Inst. Bank Accounts
-                </MDTypography>
-                {canCreateCurrentMenu() && (
-                  <MDButton variant="contained" color="white" onClick={handleOpenForm}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                ref={bankAccountsGridHostRef}
-                pt={3}
-                position="relative"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "88vh",
-                  minHeight: "680px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "auto",
-                  },
-                  "& .MuiTableContainer-root > .MuiBox-root:nth-of-type(2)": {
-                    scrollBehavior: "smooth",
-                    scrollbarWidth: "thin",
-                    scrollbarColor: darkMode
-                      ? "rgba(255,255,255,0.24) rgba(255,255,255,0.04)"
-                      : "rgba(15, 23, 42, 0.28) transparent",
-                    "&::-webkit-scrollbar": { width: "8px", height: "8px" },
-                    "&::-webkit-scrollbar-track": { background: "transparent" },
-                    "&::-webkit-scrollbar-thumb": {
-                      backgroundColor: darkMode
-                        ? "rgba(255,255,255,0.26)"
-                        : "rgba(15, 23, 42, 0.3)",
-                      borderRadius: "100px",
-                      border: "2px solid transparent",
-                      backgroundClip: "padding-box",
-                      "&:hover": {
-                        backgroundColor: darkMode
-                          ? "rgba(255,255,255,0.42)"
-                          : "rgba(15, 23, 42, 0.45)",
-                      },
-                    },
-                    "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
-                  },
-                  "& .MuiTable-root": {
-                    tableLayout: "auto",
-                    width: "max-content",
-                    borderCollapse: "collapse",
-                  },
-                  "& .MuiTable-root th": {
-                    fontSize: "1.0rem !important",
-                    fontWeight: "700 !important",
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #d0d0d0",
-                    whiteSpace: "nowrap",
-                  },
-                  "& .MuiTable-root td": {
-                    width: "auto !important",
-                    minWidth: "0 !important",
-                    padding: "1px 4px !important",
-                    borderBottom: "1px solid #e0e0e0",
-                    whiteSpace: "nowrap",
-                  },
-                }}
-              >
-                {loading && (
-                  <MDBox
-                    position="absolute"
-                    top={0}
-                    left={0}
-                    right={0}
-                    bottom={0}
-                    display="flex"
-                    justifyContent="center"
-                    alignItems="center"
-                    zIndex={10}
-                    sx={{
-                      backgroundColor: "rgba(255, 255, 255, 0.8)",
-                      backdropFilter: "blur(2px)",
-                    }}
-                  >
-                    <CurrencyLoading size={50} />
-                  </MDBox>
-                )}
+      <EnterpriseWorkspace
+        title="Inst. Bank Accounts"
+        subtitle="Manage institutional bank account records"
+        metadata={workspaceMetadata}
+        actions={
+          canCreateCurrentMenu() ? (
+            <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "auto",
+          },
+          "& .MuiTableContainer-root > .saas-settings-table-scroll": {
+            scrollBehavior: "smooth",
+            scrollbarWidth: "thin",
+            scrollbarColor: darkMode
+              ? "rgba(255,255,255,0.24) rgba(255,255,255,0.04)"
+              : "rgba(15, 23, 42, 0.28) transparent",
+            "&::-webkit-scrollbar": { width: "8px", height: "8px" },
+            "&::-webkit-scrollbar-track": { background: "transparent" },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: darkMode ? "rgba(255,255,255,0.26)" : "rgba(15, 23, 42, 0.3)",
+              borderRadius: "100px",
+              border: "2px solid transparent",
+              backgroundClip: "padding-box",
+              "&:hover": {
+                backgroundColor: darkMode ? "rgba(255,255,255,0.42)" : "rgba(15, 23, 42, 0.45)",
+              },
+            },
+            "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+          },
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.875rem !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+        }}
+      >
+        <MDBox
+          ref={bankAccountsGridHostRef}
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          {loading && (
+            <MDBox
+              position="absolute"
+              top={0}
+              left={0}
+              right={0}
+              bottom={0}
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              zIndex={10}
+              sx={{
+                backgroundColor: "rgba(255, 255, 255, 0.8)",
+                backdropFilter: "blur(2px)",
+              }}
+            >
+              <CurrencyLoading size={50} />
+            </MDBox>
+          )}
 
-                <BankAccountsTableTopScrollRail
-                  gridHostRef={bankAccountsGridHostRef}
-                  syncKey={`${loading}-${tableRows.length}-${pageNumber}-${pageSize}-${totalCount}`}
-                  darkMode={Boolean(darkMode)}
-                />
+          <BankAccountsTableTopScrollRail
+            gridHostRef={bankAccountsGridHostRef}
+            syncKey={`${loading}-${tableRows.length}-${pageNumber}-${pageSize}-${totalCount}`}
+            darkMode={Boolean(darkMode)}
+          />
 
-                <DataTable
-                  table={{
-                    columns,
-                    rows: computedRows,
-                  }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={{
-                    defaultValue: 20,
-                    entries: [10, 25, 50, 100, 500, 1000],
-                  }}
-                  page={pageNumber - 1}
-                  pageSize={pageSize}
-                  onPageChange={(newPage) => {
-                    setPageNumber(newPage + 1);
-                    fetchBankAccounts(newPage + 1, pageSize);
-                  }}
-                  onEntriesPerPageChange={(value) => {
-                    setPageSize(value);
-                    setPageNumber(1);
-                    fetchBankAccounts(1, value);
-                  }}
-                  showTotalEntries={false}
-                  noEndBorder
-                  canSearch
-                  exportFileName="Bank-Accounts"
-                  exportCellFormatter={exportCellFormatter}
-                  extraFilterTypes={BANK_ACCOUNTS_DATATABLE_DATE_FILTER_TYPES}
-                  contentFitTable
-                />
-
-                <MDBox
-                  display="flex"
-                  flexDirection={{ xs: "column", sm: "row" }}
-                  justifyContent="flex-start"
-                  alignItems={{ xs: "flex-start", sm: "center" }}
-                  p={3}
-                  gap={2}
-                >
-                  <MDBox mb={{ xs: 3, sm: 0 }} display="flex" alignItems="center" gap={2}>
-                    <MDTypography variant="button" color="secondary" fontWeight="regular">
-                      {(() => {
-                        const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                        return displayTotal === 0
-                          ? "0 of 0 entries"
-                          : `${Math.min(
-                              pageNumber * pageSize,
-                              displayTotal
-                            )} of ${displayTotal} entries`;
-                      })()}
-                    </MDTypography>
-                    {(() => {
-                      const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
-                      return displayTotal > 0 && Math.ceil(displayTotal / pageSize) > 1;
-                    })() && (
-                      <MDPagination variant="gradient" color="info">
-                        {pageNumber > 1 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber - 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_left</Icon>
-                          </MDPagination>
-                        )}
-
-                        {Array.from(
-                          { length: Math.ceil(totalCount / pageSize) || 1 },
-                          (_, i) => i + 1
-                        )
-                          .filter((page) => {
-                            const totalPages = Math.ceil(totalCount / pageSize) || 1;
-                            return (
-                              page === 1 ||
-                              page === totalPages ||
-                              (page >= pageNumber - 2 && page <= pageNumber + 2)
-                            );
-                          })
-                          .map((page, index, array) => {
-                            const prevPage = array[index - 1];
-                            const showEllipsis = prevPage && page - prevPage > 1;
-                            return (
-                              <React.Fragment key={page}>
-                                {showEllipsis && (
-                                  <MDPagination item disabled>
-                                    ...
-                                  </MDPagination>
-                                )}
-                                <MDPagination
-                                  item
-                                  active={page === pageNumber}
-                                  onClick={() => setPageNumber(page)}
-                                >
-                                  {page}
-                                </MDPagination>
-                              </React.Fragment>
-                            );
-                          })}
-
-                        {pageNumber < Math.ceil(totalCount / pageSize) && totalCount > 0 && (
-                          <MDPagination item onClick={() => setPageNumber(pageNumber + 1)}>
-                            <Icon sx={{ fontWeight: "bold" }}>chevron_right</Icon>
-                          </MDPagination>
-                        )}
-                      </MDPagination>
-                    )}
-                  </MDBox>
-                </MDBox>
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
+          <DataTable
+            table={{
+              columns,
+              rows: computedRows,
+            }}
+            isSorted={false}
+            stickyToolbarAndHeader
+            entriesPerPage={{
+              defaultValue: 20,
+              entries: [10, 25, 50, 100, 500, 1000],
+            }}
+            page={pageNumber - 1}
+            pageSize={pageSize}
+            onPageChange={(newPage) => {
+              setPageNumber(newPage + 1);
+              fetchBankAccounts(newPage + 1, pageSize);
+            }}
+            onEntriesPerPageChange={(value) => {
+              setPageSize(value);
+              setPageNumber(1);
+              fetchBankAccounts(1, value);
+            }}
+            showTotalEntries={false}
+            noEndBorder
+            canSearch
+            exportFileName="Bank-Accounts"
+            exportCellFormatter={exportCellFormatter}
+            extraFilterTypes={BANK_ACCOUNTS_DATATABLE_DATE_FILTER_TYPES}
+            contentFitTable
+            disableHeaderMetrics
+            paginationFooter={serverPaginationFooter}
+          />
+        </MDBox>
+      </EnterpriseWorkspace>
 
       <BankAccountForm
         open={openForm}

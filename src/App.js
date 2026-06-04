@@ -177,6 +177,16 @@ export default function App() {
     hasStoredAccessToken() && layout === "dashboard" && !isPublicAuthRoute(pathname);
   const useContractsAlertSkin = pathname === "/contracts" || pathname.startsWith("/contracts/");
 
+  // Enterprise visual theme is applied to every dashboard page but never to
+  // the login / public auth screens, which keep their original design.
+  useEffect(() => {
+    const enableEnterpriseUi = !isPublicAuthRoute(pathname);
+    document.body.classList.toggle("enterprise-ui", enableEnterpriseUi);
+    return () => {
+      document.body.classList.remove("enterprise-ui");
+    };
+  }, [pathname]);
+
   // Cache for the rtl
   useMemo(() => {
     const cacheRtl = createCache({
@@ -199,6 +209,16 @@ export default function App() {
   useEffect(() => {
     document.documentElement.scrollTop = 0;
     document.scrollingElement.scrollTop = 0;
+
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) {
+      const inWorkspaceHeader =
+        active.closest(".saas-workspace-page-header") ||
+        active.closest(".saas-workspace-page-heading");
+      if (inWorkspaceHeader) {
+        active.blur();
+      }
+    }
   }, [pathname]);
 
   // Fetch user context (including IP) from backend when authenticated - no external IP APIs

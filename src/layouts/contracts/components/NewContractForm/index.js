@@ -69,7 +69,7 @@ function NewContractForm({ open, handleClose }) {
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ color: "#000000" }}>Add New A1 Contract</DialogTitle>
       <DialogContent>
         <MDBox

@@ -30,10 +30,15 @@ import {
   formatKpiMoneyLabel,
   SHARE_DISTRIBUTION_CLASS_OPTIONS,
 } from "../kpiDataUtils";
+import ChartExportButton from "./ChartExportButton";
+import {
+  exportDonutChartDataToExcel,
+  exportGroupedBarChartDataToExcel,
+} from "utils/kpiChartExcelExport";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
-const SHARE_COLORS = ["#1A73E8", "#34A853", "#FBBC04", "#EA4335", "#9334E6"];
+const SHARE_COLORS = ["#025B64", "#00D47E", "#F5A524", "#3B82F6", "#6B7280"];
 
 const CATEGORY_SERIES = [
   { milKey: "incomePA", label: "Income PA" },
@@ -49,7 +54,7 @@ const AHQ_RAC_BASE_SERIES = CATEGORY_SERIES.filter(
   (s) => s.milKey === "ahq" || s.milKey === "rac" || s.milKey === "base"
 );
 
-const CATEGORY_BAR_COLORS = ["#5C6BC0", "#1A73E8", "#34A853", "#FBBC04", "#EA4335", "#9334E6"];
+const CATEGORY_BAR_COLORS = ["#025B64", "#00D47E", "#F5A524", "#3B82F6", "#6B7280", "#94A3B8"];
 
 const SERIES_COLOR_BY_MIL_KEY = Object.fromEntries(
   CATEGORY_SERIES.map((s, i) => [s.milKey, CATEGORY_BAR_COLORS[i % CATEGORY_BAR_COLORS.length]])
@@ -63,16 +68,16 @@ const DONUT_COLOR_BY_SHARE_ID = {
   base: SHARE_COLORS[4],
 };
 
-export function getEnterpriseCardSx(darkMode) {
+export function getEnterpriseCardSx() {
   return {
-    borderRadius: 2,
+    borderRadius: "16px",
     height: "100%",
-    border: darkMode ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)",
-    boxShadow: darkMode ? "0 4px 24px rgba(0,0,0,0.35)" : "0 4px 20px rgba(0,0,0,0.06)",
-    transition: "transform 0.25s ease, box-shadow 0.25s ease",
+    border: "1px solid var(--ent-border, #dce6e7)",
+    boxShadow: "var(--ent-shadow, 0 1px 2px rgba(0, 0, 0, 0.04))",
+    background: "var(--ent-surface, #ffffff)",
+    transition: "box-shadow 200ms ease-in-out",
     "&:hover": {
-      transform: "translateY(-3px)",
-      boxShadow: darkMode ? "0 8px 32px rgba(0,0,0,0.5)" : "0 8px 28px rgba(0,0,0,0.1)",
+      boxShadow: "var(--ent-shadow, 0 1px 2px rgba(0, 0, 0, 0.04))",
     },
   };
 }
@@ -93,7 +98,7 @@ function buildGroupedBarData(cards, series) {
       label: s.label,
       data: cards.map((a) => Number(a.mil?.[s.milKey]) || 0),
       backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
-      borderRadius: 3,
+      borderRadius: 6,
       maxBarThickness: 16,
     })),
   };
@@ -115,7 +120,7 @@ function buildShareDonutChart(shareItems, shareIds, darkMode) {
           backgroundColor: shareIds.map((id) => DONUT_COLOR_BY_SHARE_ID[id] || SHARE_COLORS[0]),
           borderWidth: 2,
           borderColor: darkMode ? "#1e1e1e" : "#fff",
-          hoverOffset: 6,
+          hoverOffset: 4,
         },
       ],
     },
@@ -229,7 +234,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
   const ahqRacBaseBarData = useMemo(() => buildGroupedBarData(cards, AHQ_RAC_BASE_SERIES), [cards]);
 
   const textColor = darkMode ? "#e8e8e8" : "#344767";
-  const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+  const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)";
 
   const donutChart = useMemo(
     () => buildShareDonutChart(donutShares, ["govt", "paf", "ahq", "rac", "base"], darkMode),
@@ -280,7 +285,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
     },
   };
 
-  const cardSx = getEnterpriseCardSx(darkMode);
+  const cardSx = getEnterpriseCardSx();
   const zoomEnabled = Boolean(chartZoomOnClick) && !loading;
 
   const zoomedBarOptions = useMemo(
@@ -321,7 +326,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
   const zoomDialogConfig = useMemo(() => {
     const configsByKey = {
       [ZOOM_CHART.assetsBar]: {
-        title: "Financial share by category (M.)",
+        title: "Financial share by category (M)",
         type: "bar",
         data: groupedBarData,
         options: zoomedBarOptions,
@@ -391,6 +396,30 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
     </FormControl>
   );
 
+  const renderBarCard = (title, barData, zoomKey) => (
+    <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
+      <MDBox display="flex" alignItems="center" justifyContent="space-between" gap={0.5} mb={1}>
+        <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+          {title}
+        </MDTypography>
+        <ChartExportButton
+          disabled={loading}
+          ariaLabel={`Export ${title} to Excel`}
+          onExport={() => exportGroupedBarChartDataToExcel(title, barData)}
+        />
+      </MDBox>
+      <MDBox height={220} opacity={loading ? 0.4 : 1}>
+        <ChartZoomSurface
+          enabled={zoomEnabled}
+          darkMode={darkMode}
+          onZoom={() => setZoomChart(zoomKey)}
+        >
+          <Bar data={barData} options={groupedBarOptions} />
+        </ChartZoomSurface>
+      </MDBox>
+    </Card>
+  );
+
   const renderDonutCard = (
     title,
     donut,
@@ -409,7 +438,14 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
         <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
           {title}
         </MDTypography>
-        {renderShareClassFilter(filterIdSuffix)}
+        <MDBox display="flex" alignItems="center" gap={0.5} flexShrink={0}>
+          {renderShareClassFilter(filterIdSuffix)}
+          <ChartExportButton
+            disabled={loading}
+            ariaLabel={`Export ${title} to Excel`}
+            onExport={() => exportDonutChartDataToExcel(title, donut.data)}
+          />
+        </MDBox>
       </MDBox>
       <MDBox height={220} opacity={loading ? 0.4 : 1}>
         <ChartZoomSurface
@@ -429,25 +465,11 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
         <>
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
-              <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
-                <MDTypography
-                  variant="h6"
-                  fontWeight="bold"
-                  mb={1}
-                  color={darkMode ? "white" : "dark"}
-                >
-                  Govt & PAF share by category (M.)
-                </MDTypography>
-                <MDBox height={220} opacity={loading ? 0.4 : 1}>
-                  <ChartZoomSurface
-                    enabled={zoomEnabled}
-                    darkMode={darkMode}
-                    onZoom={() => setZoomChart(ZOOM_CHART.govtPafBar)}
-                  >
-                    <Bar data={govtPafBarData} options={groupedBarOptions} />
-                  </ChartZoomSurface>
-                </MDBox>
-              </Card>
+              {renderBarCard(
+                "Govt & PAF share by category (M.)",
+                govtPafBarData,
+                ZOOM_CHART.govtPafBar
+              )}
             </Grid>
             <Grid item xs={12} md={6}>
               {renderDonutCard(
@@ -460,25 +482,11 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
           </Grid>
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid item xs={12} md={6}>
-              <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
-                <MDTypography
-                  variant="h6"
-                  fontWeight="bold"
-                  mb={1}
-                  color={darkMode ? "white" : "dark"}
-                >
-                  AHQ, RAC & Base share by category (M.)
-                </MDTypography>
-                <MDBox height={220} opacity={loading ? 0.4 : 1}>
-                  <ChartZoomSurface
-                    enabled={zoomEnabled}
-                    darkMode={darkMode}
-                    onZoom={() => setZoomChart(ZOOM_CHART.ahqRacBaseBar)}
-                  >
-                    <Bar data={ahqRacBaseBarData} options={groupedBarOptions} />
-                  </ChartZoomSurface>
-                </MDBox>
-              </Card>
+              {renderBarCard(
+                "AHQ, RAC & Base share by category (M.)",
+                ahqRacBaseBarData,
+                ZOOM_CHART.ahqRacBaseBar
+              )}
             </Grid>
             <Grid item xs={12} md={6}>
               {renderDonutCard(
@@ -493,25 +501,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
       ) : (
         <Grid container spacing={2}>
           <Grid item xs={12} lg={7}>
-            <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
-              <MDTypography
-                variant="h6"
-                fontWeight="bold"
-                mb={1}
-                color={darkMode ? "white" : "dark"}
-              >
-                Financial share by category (M.)
-              </MDTypography>
-              <MDBox height={220} opacity={loading ? 0.4 : 1}>
-                <ChartZoomSurface
-                  enabled={zoomEnabled}
-                  darkMode={darkMode}
-                  onZoom={() => setZoomChart(ZOOM_CHART.assetsBar)}
-                >
-                  <Bar data={groupedBarData} options={groupedBarOptions} />
-                </ChartZoomSurface>
-              </MDBox>
-            </Card>
+            {renderBarCard("Financial share by category (M)", groupedBarData, ZOOM_CHART.assetsBar)}
           </Grid>
           <Grid item xs={12} lg={5}>
             {renderDonutCard("Share Distribution", donutChart, "assets")}
@@ -520,13 +510,17 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
       )}
 
       <Dialog
+        fullScreen
         open={Boolean(zoomChart)}
         onClose={closeZoom}
-        maxWidth="lg"
-        fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 2,
+            display: "flex",
+            flexDirection: "column",
+            m: 0,
+            height: "100%",
+            maxHeight: "100%",
+            borderRadius: 0,
             bgcolor: darkMode ? "background.default" : "background.paper",
           },
         }}
@@ -537,23 +531,49 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
             alignItems: "center",
             justifyContent: "space-between",
             pr: 1,
+            flexShrink: 0,
           }}
         >
           <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
             {zoomDialogConfig?.title || ""}
           </MDTypography>
-          <IconButton onClick={closeZoom} size="small" aria-label="Close enlarged chart">
-            <Icon>close</Icon>
-          </IconButton>
+          <MDBox display="flex" alignItems="center" gap={0.5}>
+            {zoomDialogConfig ? (
+              <ChartExportButton
+                disabled={loading}
+                ariaLabel={`Export ${zoomDialogConfig.title} to Excel`}
+                onExport={() => {
+                  if (zoomDialogConfig.type === "bar") {
+                    exportGroupedBarChartDataToExcel(zoomDialogConfig.title, zoomDialogConfig.data);
+                  } else {
+                    exportDonutChartDataToExcel(zoomDialogConfig.title, zoomDialogConfig.data);
+                  }
+                }}
+              />
+            ) : null}
+            <IconButton onClick={closeZoom} size="small" aria-label="Close enlarged chart">
+              <Icon>close</Icon>
+            </IconButton>
+          </MDBox>
         </DialogTitle>
-        <DialogContent dividers>
+        <DialogContent
+          dividers
+          sx={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            overflow: "hidden",
+            p: { xs: 1.5, sm: 2 },
+          }}
+        >
           {zoomDialogConfig?.type === "bar" && (
-            <MDBox height={{ xs: 360, sm: 420, md: 480 }}>
+            <MDBox sx={{ flex: 1, minHeight: 0, width: "100%", position: "relative" }}>
               <Bar data={zoomDialogConfig.data} options={zoomDialogConfig.options} />
             </MDBox>
           )}
           {zoomDialogConfig?.type === "donut" && (
-            <MDBox height={{ xs: 360, sm: 420, md: 480 }}>
+            <MDBox sx={{ flex: 1, minHeight: 0, width: "100%", position: "relative" }}>
               <Doughnut data={zoomDialogConfig.data} options={zoomDialogConfig.options} />
             </MDBox>
           )}

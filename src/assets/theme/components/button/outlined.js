@@ -61,11 +61,13 @@ const outlined = {
   },
 
   primary: {
-    backgroundColor: transparent.main,
-    borderColor: info.main,
+    backgroundColor: "#025B64",
+    borderColor: "#025B64",
+    color: "#ffffff",
 
     "&:hover": {
-      backgroundColor: transparent.main,
+      backgroundColor: "#024A52",
+      borderColor: "#024A52",
     },
   },
 

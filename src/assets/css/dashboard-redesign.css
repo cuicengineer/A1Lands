@@ -1,0 +1,479 @@
+/* ERP Dashboard v1.0 — scoped under .dashboard-redesign-page */
+
+.dashboard-redesign-page.saas-workspace-page {
+  --dash-chart-primary: #025b64;
+  --dash-chart-secondary: #00d47e;
+  --ent-border: #dce6e7;
+  --ent-card-border: #dce6e7;
+  background-color: #ffffff !important;
+}
+
+.dashboard-redesign-page .saas-workspace-grid-host {
+  overflow: auto !important;
+  padding: 12px 16px;
+  background-color: #ffffff !important;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header {
+  background-color: #e7eced !important;
+  padding-bottom: 4px !important;
+}
+
+.dashboard-redesign-page .saas-workspace-title {
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  color: #111827 !important;
+  margin: 0 !important;
+}
+
+.dashboard-redesign-page .saas-workspace-subtitle,
+.dashboard-redesign-page .saas-workspace-page-header h3 + p,
+.dashboard-redesign-page .saas-workspace-page-header p {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+  color: #6b7280 !important;
+  margin: 2px 0 0 !important;
+}
+
+/* Chart / panel: paragraph immediately after h3 title */
+.dashboard-redesign-page h3 + p,
+.dashboard-redesign-page .erp-chart-panel__title + .erp-chart-panel__description,
+.dashboard-redesign-page .erp-chart-panel__header h3 + p {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+  color: #6b7280 !important;
+  margin: 2px 0 0 !important;
+}
+
+/* Tighter grid gaps between sections */
+.dashboard-redesign-page .MuiGrid-container {
+  margin-top: 0 !important;
+  width: 100% !important;
+}
+
+.dashboard-redesign-page .MuiGrid-item {
+  padding-top: 6px !important;
+  padding-left: 6px !important;
+}
+
+.dashboard-redesign-page .erp-dashboard-kpi-grid.MuiGrid-container {
+  margin-left: 0 !important;
+}
+
+.dashboard-redesign-page .erp-dashboard-kpi-grid > .MuiGrid-item:first-of-type {
+  padding-left: 0 !important;
+}
+
+.dashboard-redesign-page .erp-asset-cards-track {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+  padding-left: 0 !important;
+  scroll-padding-left: 0;
+}
+
+/* KPI cards */
+.erp-kpi-card {
+  min-height: 140px;
+  height: 100%;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px solid #dce6e7;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: Inter, Helvetica, Arial, sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+.erp-kpi-card:hover {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.erp-kpi-card--primary,
+.dashboard-redesign-page .erp-kpi-card--primary.MuiBox-root {
+  background: #025b64 !important;
+  background-color: #025b64 !important;
+  border: none !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  color: #ffffff !important;
+}
+
+.erp-kpi-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  order: 1;
+}
+
+.erp-kpi-card__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.35;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__label {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.erp-kpi-card__icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(2, 91, 100, 0.06);
+  flex-shrink: 0;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__icon-wrap {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.erp-kpi-card__icon {
+  font-size: 18px !important;
+  width: 18px !important;
+  height: 18px !important;
+  color: #025b64 !important;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__icon,
+.erp-kpi-card--primary .erp-kpi-card__icon.MuiSvgIcon-root {
+  color: #ffffff !important;
+  fill: currentColor !important;
+}
+
+.erp-kpi-card__metric {
+  font-size: 32px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.02em;
+  order: 2;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__metric {
+  color: #ffffff !important;
+}
+
+.erp-kpi-card__trend {
+  font-size: 13px;
+  font-weight: 600;
+  color: #9ca3af;
+  margin: 0;
+  line-height: 1.35;
+  order: 3;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__trend {
+  color: #ffffff !important;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__trend--positive,
+.erp-kpi-card--primary .erp-kpi-card__trend--negative {
+  color: #ffffff !important;
+}
+
+.erp-kpi-card__trend--positive {
+  color: #00d47e;
+}
+
+.erp-kpi-card__trend--negative {
+  color: #f31260;
+}
+
+.erp-kpi-card__trend + .erp-kpi-card__trend {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #dce6e7;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__trend + .erp-kpi-card__trend {
+  border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+.erp-kpi-card__details {
+  order: 4;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid #dce6e7;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.45;
+}
+
+.erp-kpi-card__details .erp-kpi-card__stat-row,
+.erp-kpi-card__stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px solid #dce6e7;
+}
+
+.erp-kpi-card__details > :first-child,
+.erp-kpi-card__details > .erp-kpi-card__stat-row:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__details,
+.erp-kpi-card--primary .erp-kpi-card__stat-row {
+  border-top-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.erp-kpi-card--asset {
+  min-height: 200px;
+}
+
+.erp-kpi-card.erp-kpi-card--asset:not(.erp-kpi-card--primary),
+.erp-kpi-card.erp-status-card:not(.erp-kpi-card--primary) {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.erp-kpi-card.erp-kpi-card--asset:not(.erp-kpi-card--primary):hover,
+.erp-kpi-card.erp-status-card:not(.erp-kpi-card--primary):hover,
+.dashboard-redesign-page .erp-kpi-card.erp-kpi-card--asset:not(.erp-kpi-card--primary).MuiBox-root:hover,
+.dashboard-redesign-page .erp-kpi-card.erp-status-card:not(.erp-kpi-card--primary).MuiBox-root:hover {
+  background: #ebf4f5 !important;
+  background-color: #ebf4f5 !important;
+}
+
+.erp-status-card .erp-kpi-card__metric {
+  font-size: 28px;
+}
+
+/* Chart panels */
+.erp-chart-panel {
+  border-radius: 16px;
+  border: 1px solid #dce6e7;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  padding: 20px;
+  min-height: 300px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.erp-chart-panel__header {
+  margin-bottom: 8px;
+}
+
+.erp-chart-panel__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 !important;
+}
+
+.erp-chart-panel__description {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #6b7280 !important;
+  margin: 2px 0 0 !important;
+  line-height: 1.35 !important;
+}
+
+.erp-chart-panel__body {
+  flex: 1;
+  min-height: 220px;
+}
+
+.dashboard-redesign-page .erp-chart-panel .MuiCard-root {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+.dashboard-redesign-page .erp-chart-panel .MuiCard-root:hover {
+  transform: none !important;
+}
+
+.dashboard-redesign-page .erp-chart-panel .erp-flat-chart {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.dashboard-redesign-page .erp-chart-panel .MuiBox-root[variant="gradient"],
+.dashboard-redesign-page .erp-chart-panel [class*="coloredShadow"] {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  margin-top: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.dashboard-redesign-page .kpi-chart-zoom-hint,
+.dashboard-redesign-page .kpi-financial-chart-zoom-hint {
+  display: none !important;
+}
+
+.dashboard-redesign-page .erp-chart-panel canvas {
+  animation: none !important;
+}
+
+/* Section headings */
+.erp-dashboard-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px;
+}
+
+.erp-dashboard-section-title--spaced {
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.dashboard-redesign-page .erp-kpi-home-section {
+  margin-bottom: 8px;
+}
+
+.dashboard-redesign-page .erp-kpi-home-section:last-child {
+  margin-bottom: 0;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__details,
+.erp-kpi-card--primary .erp-kpi-card__trend {
+  color: #ffffff;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__details {
+  border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+.erp-kpi-card--primary .erp-kpi-card__stat-row {
+  border-top-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.erp-kpi-card--primary .erp-kpi-card__detail-value {
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+.erp-kpi-card__subtext {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #6b7280 !important;
+  line-height: 1.35 !important;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__subtext {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.erp-kpi-card--primary .erp-kpi-card__metric,
+.erp-kpi-card--primary .erp-kpi-card__metric * {
+  color: #ffffff !important;
+}
+
+.erp-status-card .erp-kpi-card__metric {
+  font-size: 28px;
+}
+
+.dashboard-redesign-page .erp-dashboard-filter .MuiOutlinedInput-root {
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+/* KPI Overview — flat white page header (no grey box / border) */
+.dashboard-kpi-overview-page .saas-workspace-page-header {
+  background: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 8px 16px 4px !important;
+}
+
+.dashboard-kpi-overview-page .saas-workspace-page-header::after {
+  display: none !important;
+}
+
+/* KPI Overview — content-sized body; page scrolls when content is tall */
+.dashboard-kpi-overview-page.saas-workspace-page {
+  overflow: auto !important;
+  flex: 1 1 0;
+  min-height: 0;
+  background: #ffffff !important;
+}
+
+.dashboard-kpi-overview-page .saas-workspace-card {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.dashboard-kpi-overview-page .saas-workspace-grid-host {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+}
+
+.dashboard-kpi-overview-page .erp-kpi-tab-panel {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: auto;
+}
+
+/* KPI Overview — filters inline with page title (header toolbar) */
+.dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters {
+  position: relative;
+  z-index: 31;
+  pointer-events: auto;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters .MuiOutlinedInput-root {
+  min-height: 32px;
+  border-radius: 8px;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header .saas-workspace-header-toolbar {
+  position: relative;
+  z-index: 31;
+  pointer-events: auto;
+}
+
+.dashboard-redesign-page .MuiTabs-root .MuiTab-root.Mui-selected {
+  color: var(--erp-primary, #025b64);
+}
+
+.dashboard-redesign-page .MuiTabs-indicator {
+  background-color: var(--erp-primary, #025b64);
+}
+
+/* KPI Overview tab card shell */
+.dashboard-redesign-page .MuiCard-root.erp-dashboard-tabs-card,
+.dashboard-redesign-page > .MuiGrid-root > .MuiGrid-item > .MuiCard-root {
+  border: 1px solid #dce6e7 !important;
+}

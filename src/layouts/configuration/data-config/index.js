@@ -1,5 +1,3 @@
-import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import { useState } from "react";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -7,8 +5,10 @@ import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
+import { gridValueChipCell } from "utils/gridValueChipCell";
 import Icon from "@mui/material/Icon";
 import { useMaterialUIController } from "context";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
@@ -60,7 +60,7 @@ function DataConfig() {
     },
   ]);
   const columns = [
-    { Header: "Class", accessor: "className", align: "left" },
+    { Header: "Class", accessor: "className", align: "left", Cell: gridValueChipCell("class") },
     { Header: "Cmd", accessor: "cmd", align: "left" },
     { Header: "Units", accessor: "units", align: "left" },
     { Header: "Nature of Business", accessor: "natureOfBusiness", align: "left" },
@@ -241,62 +241,38 @@ function DataConfig() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Data Config
-                </MDTypography>
-                {canCreate && (
-                  <MDButton variant="contained" color="white" onClick={handleAddNew}>
-                    <Icon>add</Icon>&nbsp;Add New
-                  </MDButton>
-                )}
-              </MDBox>
-              <MDBox
-                pt={3}
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "hidden",
-                  },
-                }}
-              >
-                <DataTable
-                  table={{ columns, rows: computedRows }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  canSearch={true}
-                  entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
-                  showTotalEntries={true}
-                  noEndBorder
-                />
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Data Config"
+        subtitle="Manage data configuration records"
+        tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddNew}>
+              <Icon>add</Icon>&nbsp;Add New
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows: computedRows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          canSearch={true}
+          entriesPerPage={{ defaultValue: 20, entries: [5, 10, 15, 20, 25] }}
+          showTotalEntries={true}
+          noEndBorder
+        />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

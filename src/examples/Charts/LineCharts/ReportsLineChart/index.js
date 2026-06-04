@@ -46,6 +46,7 @@ import { useMaterialUIController } from "context";
 
 // ReportsLineChart configurations
 import configs from "examples/Charts/LineCharts/ReportsLineChart/configs";
+import { executiveLineConfigs, CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
 
 ChartJS.register(
   CategoryScale,
@@ -58,10 +59,45 @@ ChartJS.register(
   Filler
 );
 
-function ReportsLineChart({ color, title, description, date, chart }) {
+function ReportsLineChart({
+  color,
+  title,
+  description,
+  date,
+  chart,
+  chartHeight,
+  flat,
+  seriesColor,
+}) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
-  const { data, options } = configs(chart.labels || [], chart.datasets || {});
+
+  const lineColor =
+    seriesColor ||
+    (color === "success" ? CHART_SECONDARY : color === "dark" ? CHART_SECONDARY : CHART_PRIMARY);
+
+  const chartConfig = useMemo(() => {
+    const labels = chart.labels || [];
+    const datasets = chart.datasets || {};
+    if (flat) {
+      return executiveLineConfigs(labels, datasets, { color: lineColor });
+    }
+    return configs(labels, datasets);
+  }, [flat, chart, lineColor]);
+
+  const { data, options } = chartConfig;
+  const resolvedHeight = chartHeight || "11rem";
+
+  if (flat) {
+    return (
+      <MDBox
+        className="erp-flat-chart"
+        sx={{ height: resolvedHeight, width: "100%", minHeight: 200 }}
+      >
+        <Line data={data} options={options} />
+      </MDBox>
+    );
+  }
 
   return (
     <Card sx={{ height: "100%" }}>
@@ -76,12 +112,12 @@ function ReportsLineChart({ color, title, description, date, chart }) {
               py={2}
               pr={0.5}
               mt={-5}
-              height="11rem"
+              height={resolvedHeight}
             >
               <Line data={data} options={options} redraw />
             </MDBox>
           ),
-          [chart, color]
+          [color, data, options, resolvedHeight]
         )}
         <MDBox pt={3} pb={1} px={1}>
           <MDTypography
@@ -115,6 +151,9 @@ function ReportsLineChart({ color, title, description, date, chart }) {
 ReportsLineChart.defaultProps = {
   color: "info",
   description: "",
+  chartHeight: "11rem",
+  flat: false,
+  seriesColor: null,
 };
 
 // Typechecking props for the ReportsLineChart
@@ -124,6 +163,9 @@ ReportsLineChart.propTypes = {
   description: PropTypes.oneOfType([PropTypes.string, PropTypes.node]),
   date: PropTypes.string.isRequired,
   chart: PropTypes.objectOf(PropTypes.oneOfType([PropTypes.array, PropTypes.object])).isRequired,
+  chartHeight: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  flat: PropTypes.bool,
+  seriesColor: PropTypes.string,
 };
 
 export default ReportsLineChart;

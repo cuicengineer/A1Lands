@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback, startTransition } from "react";
 import PropTypes from "prop-types";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
@@ -6,11 +6,18 @@ import MDButton from "components/MDButton";
 import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
 import CurrencyLoading from "components/CurrencyLoading";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DataTable from "examples/Tables/DataTable";
-import Card from "@mui/material/Card";
+import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import {
+  resolveBaseNameById,
+  resolveCommandNameById,
+} from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import { gridValueChipCell } from "utils/gridValueChipCell";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -38,9 +45,161 @@ import propertyGroupingApi from "services/api.propertygrouping.service";
 import {
   hasRentalPropertiesUrlFilters,
   readRentalPropertiesUrlFilters,
-  resolveClassNameById,
 } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import api from "services/api.service";
+import { perfEnd, perfLog, perfMark } from "utils/pagePerfTrace";
+import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
+
+/** Stable action handlers for memoized grid cells (assigned each render). */
+const rentalPropertiesGridHandlersRef = { current: {} };
+
+const RentalPropertyActionsCell = React.memo(function RentalPropertyActionsCell({ row }) {
+  const rowData = row?.original || {};
+  const normalizedId = rowData.id;
+  const handlers = rentalPropertiesGridHandlersRef.current;
+  const showEdit = rowData._canEdit && handlers.onEdit;
+  const showDelete = rowData._canDelete && handlers.onDelete;
+  if (!showEdit && !showDelete) return null;
+  return (
+    <MDBox
+      alignItems="left"
+      justifyContent="left"
+      sx={{
+        backgroundColor: "#f8f9fa",
+        gap: "2px",
+        padding: "2px 2px",
+        borderRadius: "2px",
+      }}
+    >
+      {showEdit ? (
+        <IconButton
+          size="small"
+          color="info"
+          onClick={() => handlers.onEdit(normalizedId)}
+          title="Edit"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>edit</Icon>
+        </IconButton>
+      ) : null}
+      {showDelete ? (
+        <IconButton
+          size="small"
+          color="error"
+          onClick={() => handlers.onDelete(normalizedId)}
+          title="Delete"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>delete</Icon>
+        </IconButton>
+      ) : null}
+    </MDBox>
+  );
+});
+
+RentalPropertyActionsCell.propTypes = {
+  row: PropTypes.shape({
+    original: PropTypes.object,
+  }),
+};
+
+const RentalPropertyAttachmentsCell = React.memo(function RentalPropertyAttachmentsCell({ row }) {
+  const rowData = row?.original || {};
+  const handlers = rentalPropertiesGridHandlersRef.current;
+  const hasAttachments = rowData?.id;
+  const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
+  const countValue =
+    rowData?.attachmentCount ??
+    rowData?.attachmentsCount ??
+    rowData?.filesCount ??
+    rowData?.AttachmentCount ??
+    rowData?.AttachmentsCount ??
+    rowData?.FilesCount;
+  const hasAttachmentData =
+    rawIsAttachment === true ||
+    rawIsAttachment === 1 ||
+    rawIsAttachment === "1" ||
+    String(rawIsAttachment || "")
+      .trim()
+      .toLowerCase() === "true" ||
+    Number(countValue || 0) > 0;
+  if (!hasAttachments) return <span>-</span>;
+  return (
+    <IconButton
+      size="small"
+      color={hasAttachmentData ? "success" : "error"}
+      onClick={() => handlers.onViewAttachments?.(rowData)}
+      disabled={handlers.attachmentLoading && handlers.attachmentLoadingId === rowData.id}
+      title="View attachments"
+    >
+      <Icon>visibility</Icon>
+    </IconButton>
+  );
+});
+
+RentalPropertyAttachmentsCell.propTypes = {
+  row: PropTypes.shape({
+    original: PropTypes.object,
+  }),
+};
+
+const RentalPropertyGroupsCell = React.memo(function RentalPropertyGroupsCell({ row }) {
+  const rowData = row?.original || {};
+  const propertyId = rowData?.id ?? rowData?.Id;
+  const handlers = rentalPropertiesGridHandlersRef.current;
+  if (!propertyId) return <span>-</span>;
+  return (
+    <IconButton
+      size="small"
+      color="warning"
+      onClick={() => handlers.onViewActiveGroups?.(propertyId)}
+      disabled={handlers.loadingActiveData}
+      title="View active property groupings using this property"
+    >
+      <Icon>group</Icon>
+    </IconButton>
+  );
+});
+
+RentalPropertyGroupsCell.propTypes = {
+  row: PropTypes.shape({
+    original: PropTypes.object,
+  }),
+};
+
+const RentalPropertyAreaCell = React.memo(function RentalPropertyAreaCell({ value, row }) {
+  const rowData = row?.original || {};
+  const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
+  const uoM = rowData?.uoM ?? rowData?.UoM ?? rowData?.uom ?? "";
+  const formattedArea = areaValue || areaValue === 0 ? Number(areaValue).toLocaleString() : "";
+  const combined = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim();
+  return combined || "-";
+});
+
+RentalPropertyAreaCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RentalPropertyPidCell = React.memo(function RentalPropertyPidCell({ value, row }) {
+  const rowData = row?.original || {};
+  return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
+});
+
+RentalPropertyPidCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
+const RentalPropertyRemarksCell = React.memo(function RentalPropertyRemarksCell({ value, row }) {
+  const rowData = row?.original || {};
+  return value ?? rowData?.remarks ?? rowData?.Remarks ?? "-";
+});
+
+RentalPropertyRemarksCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
 
 const StatusBadge = ({ value }) => (
   <MDBadge
@@ -133,6 +292,9 @@ LocationTableCell.propTypes = {
 };
 
 function RentalProperties() {
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -157,49 +319,45 @@ function RentalProperties() {
   const baseReadCanMutate = !isBaseReadUser || userBaseId != null;
   const lockedBaseIdForForm = isBaseReadUser && userBaseId != null ? userBaseId : null;
   const [tableRows, setTableRows] = useState([]);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [visibleRowCount, setVisibleRowCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   // Search is handled by shared DataTable (canSearch)
 
   const urlFilters = useMemo(() => readRentalPropertiesUrlFilters(), []);
   const urlFilterActive = hasRentalPropertiesUrlFilters(urlFilters);
-  const urlFilterFetchRef = useRef(false);
 
-  const fetchRentalProperties = async (page = pageNumber, size = pageSize) => {
+  const fetchRentalProperties = useCallback(async () => {
+    perfMark("rental-properties.api");
     setLoading(true);
     try {
-      const response = await rentalPropertiesApi.getAll(page, size);
-      if (response && response.pagination) {
-        setTableRows(response.data || []);
-        setTotalCount(response.pagination.totalCount || 0);
-        setPageNumber(response.pagination.pageNumber || page);
-        setPageSize(response.pagination.pageSize || size);
-      } else {
-        const arr = Array.isArray(response) ? response : [];
+      const networkStart = performance.now();
+      const response = await rentalPropertiesApi.getAllRecords();
+      perfLog(
+        "rental-properties.api.network",
+        `${(performance.now() - networkStart).toFixed(1)}ms`
+      );
+      const stateStart = performance.now();
+      startTransition(() => {
+        const rows = response?.data ?? (Array.isArray(response) ? response : []);
+        const arr = Array.isArray(rows) ? rows : [];
         setTableRows(arr);
-        setTotalCount(arr.length);
-      }
+        setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
+      });
+      perfLog("rental-properties.api.state", `${(performance.now() - stateStart).toFixed(1)}ms`);
     } catch (error) {
       console.error("Error fetching rental properties:", error);
       setTableRows([]);
       setTotalCount(0);
     } finally {
       setLoading(false);
+      perfEnd("rental-properties.api");
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchRentalProperties(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
-
-  useEffect(() => {
-    if (!urlFilterActive || urlFilterFetchRef.current) return;
-    urlFilterFetchRef.current = true;
-    fetchRentalProperties(1, 10000);
-  }, [urlFilterActive]);
+    fetchRentalProperties();
+  }, [fetchRentalProperties]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [currentProperty, setCurrentProperty] = useState(null);
@@ -219,17 +377,30 @@ function RentalProperties() {
   const [loadingActiveData, setLoadingActiveData] = useState(false);
   const [currentPropertyId, setCurrentPropertyId] = useState(null);
 
-  /** Master class list — row payloads sometimes send wrong ClassName; Class column uses classId + this list. */
+  /** Master lists — grid labels resolve IDs via catalogs when API rows omit names. */
   const [classesList, setClassesList] = useState([]);
+  const [commandsList, setCommandsList] = useState([]);
+  const [basesList, setBasesList] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.list("class");
-        if (!cancelled && Array.isArray(res)) setClassesList(res);
+        const [classRes, cmdRes, baseRes] = await Promise.all([
+          api.list("class"),
+          api.list("command"),
+          api.list("base"),
+        ]);
+        if (cancelled) return;
+        setClassesList(Array.isArray(classRes) ? classRes : []);
+        setCommandsList(Array.isArray(cmdRes) ? cmdRes : []);
+        setBasesList(Array.isArray(baseRes) ? baseRes : []);
       } catch (e) {
-        if (!cancelled) setClassesList([]);
+        if (!cancelled) {
+          setClassesList([]);
+          setCommandsList([]);
+          setBasesList([]);
+        }
       }
     })();
     return () => {
@@ -335,7 +506,7 @@ function RentalProperties() {
         // Extract ID from response (could be response.id or response.data.id)
         createdOrUpdatedId = response?.id || response?.data?.id || null;
       }
-      await fetchRentalProperties(pageNumber, pageSize);
+      await fetchRentalProperties();
       setFormOpen(false);
 
       // Return the ID so the form can upload files if needed
@@ -379,7 +550,7 @@ function RentalProperties() {
     }
     try {
       await rentalPropertiesApi.remove(propertyToDelete);
-      await fetchRentalProperties(pageNumber, pageSize);
+      await fetchRentalProperties();
       setShowDeleteDialog(false);
       setPropertyToDelete(null);
     } catch (error) {
@@ -498,7 +669,7 @@ function RentalProperties() {
 
   const handleUploadSuccess = () => {
     // Refresh the table after successful upload
-    fetchRentalProperties(pageNumber, pageSize);
+    fetchRentalProperties();
   };
 
   // Helper function to normalize property IDs from a group (same logic as property-grouping)
@@ -642,197 +813,125 @@ function RentalProperties() {
     }
   };
 
-  const columns = [
-    { Header: "Actions", accessor: "actions", align: "center" },
-    { Header: "Status", accessor: "status", align: "center", Cell: StatusBadge },
-    { Header: "Id", accessor: "id", align: "left" },
-    { Header: "RAC", accessor: "cmdName", align: "left" },
-    { Header: "Base", accessor: "baseName", align: "left" },
-    { Header: "Class", accessor: "className", align: "left" },
-    {
-      Header: "Property",
-      accessor: "pId",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const rowData = row?.original || {};
-        return value ?? rowData?.pId ?? rowData?.PId ?? rowData?.pid ?? "-";
-      },
-    },
-    {
-      Header: "Area(UoM)",
-      accessor: "area",
-      align: "right",
-      Cell: ({ value, row }) => {
-        const rowData = row?.original || {};
-        const areaValue = value ?? rowData?.area ?? rowData?.Area ?? "";
-        const uoM = rowData?.uoM ?? rowData?.UoM ?? rowData?.uom ?? "";
-        const formattedArea =
-          areaValue || areaValue === 0 ? Number(areaValue).toLocaleString() : "";
-        const combined = `${formattedArea}${uoM ? ` (${uoM})` : ""}`.trim();
-        return combined || "-";
-      },
-    },
-    {
-      Header: "Location",
-      accessor: "location",
-      align: "left",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <LocationTableCell value={value} />,
-    },
-    {
-      Header: "Remarks",
-      accessor: "remarks",
-      align: "left",
-      Cell: ({ value, row }) => {
-        const rowData = row?.original || {};
-        return value ?? rowData?.remarks ?? rowData?.Remarks ?? "-";
-      },
-    },
-    {
-      Header: "Attach",
-      accessor: "attachments",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        const hasAttachments = rowData?.id;
-        const rawIsAttachment = rowData?.IsAttachment ?? rowData?.isAttachment;
-        const countValue =
-          rowData?.attachmentCount ??
-          rowData?.attachmentsCount ??
-          rowData?.filesCount ??
-          rowData?.AttachmentCount ??
-          rowData?.AttachmentsCount ??
-          rowData?.FilesCount;
-        const hasAttachmentData =
-          rawIsAttachment === true ||
-          rawIsAttachment === 1 ||
-          rawIsAttachment === "1" ||
-          String(rawIsAttachment || "")
-            .trim()
-            .toLowerCase() === "true" ||
-          Number(countValue || 0) > 0;
-        return hasAttachments ? (
-          <IconButton
-            size="small"
-            color={hasAttachmentData ? "success" : "error"}
-            // eslint-disable-next-line react/prop-types
-            onClick={() => handleViewAttachments(row.original)}
-            // eslint-disable-next-line react/prop-types
-            disabled={attachmentLoading && attachmentLoadingId === row?.original?.id}
-            title="View attachments"
-          >
-            <Icon>visibility</Icon>
-          </IconButton>
-        ) : (
-          <span>-</span>
-        );
-      },
-    },
-    {
-      Header: "Groups",
-      accessor: "activeGroups",
-      align: "center",
-      // eslint-disable-next-line react/prop-types
-      Cell: ({ row }) => {
-        // eslint-disable-next-line react/prop-types
-        const rowData = row?.original || {};
-        const propertyId = rowData?.id ?? rowData?.Id;
-        return propertyId ? (
-          <IconButton
-            size="small"
-            color="warning"
-            onClick={() => handleViewActiveGroups(propertyId)}
-            disabled={loadingActiveData}
-            title="View active property groupings using this property"
-          >
-            <Icon>group</Icon>
-          </IconButton>
-        ) : (
-          <span>-</span>
-        );
-      },
-    },
-  ];
+  rentalPropertiesGridHandlersRef.current = {
+    onEdit: handleEditProperty,
+    onDelete: handleDeleteProperty,
+    onViewAttachments: handleViewAttachments,
+    onViewActiveGroups: handleViewActiveGroups,
+    attachmentLoading,
+    attachmentLoadingId,
+    loadingActiveData,
+  };
 
-  const computedRows = useMemo(
-    () =>
-      tableRows.map((row) => {
-        // Normalize id (handle both camelCase and PascalCase)
-        const normalizedId = row?.id ?? row?.Id;
-        const baseReadAllowsActions = rowIsEditableOrDeletableByBase(row);
-        const rowClassId = row.classId ?? row.ClassId;
-        const classNameFromId = resolveClassNameById(classesList, rowClassId);
-
-        return {
-          ...row,
-          id: normalizedId,
-          status: row.status ?? row.Status ?? true,
-          // Normalize property fields (handle both camelCase and PascalCase)
-          pId: row.pId ?? row.PId ?? row.pid ?? "",
-          uoM: row.uoM ?? row.UoM ?? row.uom ?? "",
-          area: row.area ?? row.Area ?? "",
-          remarks: row.remarks ?? row.Remarks ?? "",
-          // Show backend names; fallback to IDs if backend doesn't send names (handle both camelCase and PascalCase)
-          cmdName:
-            row.cmdName ??
-            row.CmdName ??
-            row.cmdname ??
-            row.commandName ??
-            row.cmdId ??
-            row.CmdId ??
-            "",
-          baseName: row.baseName ?? row.BaseName ?? row.basename ?? row.baseId ?? row.BaseId ?? "",
-          className:
-            classNameFromId ||
-            row.className ||
-            row.ClassName ||
-            row.classname ||
-            (rowClassId !== undefined && rowClassId !== null && rowClassId !== ""
-              ? String(rowClassId)
-              : ""),
-          // Location string (clamped to 3 lines + popover in column Cell) — both camelCase and PascalCase
-          location: row.location ?? row.Location ?? "",
-          actions: (
-            <MDBox
-              alignItems="left"
-              justifyContent="left"
-              sx={{
-                backgroundColor: "#f8f9fa", // Light grey background
-                gap: "2px", // Small gap between icons
-                padding: "2px 2px", // Compact padding
-                borderRadius: "2px",
-              }}
-            >
-              {canEdit && baseReadAllowsActions && (
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => handleEditProperty(normalizedId)}
-                  title="Edit"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>edit</Icon>
-                </IconButton>
-              )}
-              {canDelete && baseReadAllowsActions && (
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDeleteProperty(normalizedId)}
-                  title="Delete"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>delete</Icon>
-                </IconButton>
-              )}
-            </MDBox>
-          ),
-        };
-      }),
-    [tableRows, isBaseReadUser, userBaseId, classesList]
+  const columns = useMemo(
+    () => [
+      { Header: "Actions", accessor: "actions", align: "center", Cell: RentalPropertyActionsCell },
+      { Header: "Status", accessor: "status", align: "center", Cell: StatusBadge },
+      { Header: "Id", accessor: "id", align: "left" },
+      { Header: "RAC", accessor: "cmdName", align: "left", Cell: gridValueChipCell("rac") },
+      { Header: "Base", accessor: "baseName", align: "left", Cell: gridValueChipCell("base") },
+      { Header: "Class", accessor: "className", align: "left", Cell: gridValueChipCell("class") },
+      {
+        Header: "Property",
+        accessor: "pId",
+        align: "left",
+        Cell: RentalPropertyPidCell,
+      },
+      {
+        Header: "Area(UoM)",
+        accessor: "area",
+        align: "right",
+        Cell: RentalPropertyAreaCell,
+      },
+      {
+        Header: "Location",
+        accessor: "location",
+        align: "left",
+        Cell: LocationTableCell,
+      },
+      {
+        Header: "Remarks",
+        accessor: "remarks",
+        align: "left",
+        Cell: RentalPropertyRemarksCell,
+      },
+      {
+        Header: "Attach",
+        accessor: "attachments",
+        align: "center",
+        Cell: RentalPropertyAttachmentsCell,
+      },
+      {
+        Header: "Groups",
+        accessor: "activeGroups",
+        align: "center",
+        Cell: RentalPropertyGroupsCell,
+      },
+    ],
+    []
   );
+
+  const classById = useMemo(() => {
+    const map = new Map();
+    (classesList || []).forEach((c) => {
+      const id = Number(c?.id ?? c?.Id);
+      if (Number.isFinite(id)) map.set(id, c);
+    });
+    return map;
+  }, [classesList]);
+
+  const computedRows = useMemo(() => {
+    perfMark("rental-properties.transform");
+    const result = tableRows.map((row) => {
+      const normalizedId = row?.id ?? row?.Id;
+      const baseReadAllowsActions = rowIsEditableOrDeletableByBase(row);
+      const rowClassId = row.classId ?? row.ClassId;
+      const classMatch = classById.get(Number(rowClassId));
+      const classNameFromId = classMatch
+        ? String(
+            classMatch.name ?? classMatch.Name ?? classMatch.className ?? classMatch.ClassName ?? ""
+          ).trim()
+        : "";
+
+      return {
+        ...row,
+        id: normalizedId,
+        status: row.status ?? row.Status ?? true,
+        pId: row.pId ?? row.PId ?? row.pid ?? "",
+        uoM: row.uoM ?? row.UoM ?? row.uom ?? "",
+        area: row.area ?? row.Area ?? "",
+        remarks: row.remarks ?? row.Remarks ?? "",
+        cmdName:
+          resolveCommandNameById(commandsList, row.cmdId ?? row.CmdId) ||
+          (row.cmdName ?? row.CmdName ?? row.cmdname ?? row.commandName ?? ""),
+        baseName:
+          resolveBaseNameById(basesList, row.baseId ?? row.BaseId) ||
+          (row.baseName ?? row.BaseName ?? row.basename ?? ""),
+        className:
+          classNameFromId ||
+          row.className ||
+          row.ClassName ||
+          row.classname ||
+          (rowClassId !== undefined && rowClassId !== null && rowClassId !== ""
+            ? String(rowClassId)
+            : ""),
+        location: row.location ?? row.Location ?? "",
+        _canEdit: canEdit && baseReadAllowsActions,
+        _canDelete: canDelete && baseReadAllowsActions,
+      };
+    });
+    perfEnd("rental-properties.transform");
+    return result;
+  }, [
+    tableRows,
+    isBaseReadUser,
+    userBaseId,
+    classById,
+    canEdit,
+    canDelete,
+    commandsList,
+    basesList,
+  ]);
 
   const displayRows = useMemo(() => {
     if (!urlFilterActive) return computedRows;
@@ -847,172 +946,111 @@ function RentalProperties() {
     });
   }, [computedRows, urlFilterActive, urlFilters]);
 
+  const workspaceMetadata = useMemo(
+    () =>
+      buildWorkspaceRecordMetrics({
+        total: totalCount,
+        visible: urlFilterActive ? displayRows.length : null,
+      }),
+    [totalCount, urlFilterActive, displayRows.length]
+  );
+
+  const tableConfig = useMemo(() => ({ columns, rows: displayRows }), [columns, displayRows]);
+
+  const handleGridPageSizeChange = useCallback((value) => {
+    setGridPageSize(Number(value));
+  }, []);
+
+  const showGrid = !loading || tableRows.length > 0;
+
+  useEffect(() => {
+    perfLog("rental-properties.render", {
+      pass: renderCountRef.current,
+      rows: tableRows.length,
+      displayRows: displayRows.length,
+      loading,
+    });
+  });
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Card>
-          <MDBox
-            mx={2}
-            mt={-3}
-            py={3}
-            px={2}
-            variant="gradient"
-            bgColor="info"
-            borderRadius="lg"
-            coloredShadow="info"
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <MDTypography variant="h6" color="white">
-              Rental Properties
-            </MDTypography>
-            {canCreate && baseReadCanMutate && (
-              <MDButton variant="gradient" color="info" onClick={handleAddProperty}>
-                Add Rental Property
-              </MDButton>
-            )}
-          </MDBox>
-          <MDBox
-            pt={3}
-            position="relative"
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              height: "78vh",
-              minHeight: "560px",
-              overflow: "hidden",
-              "& .MuiTableContainer-root": {
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "auto",
-              },
-              "& .MuiTable-root": {
-                tableLayout: "auto",
-                width: "max-content",
-                borderCollapse: "collapse",
-              },
-              "& .MuiTable-root th": {
-                fontSize: "1.0rem !important",
-                fontWeight: "700 !important",
-                width: "auto !important",
-                minWidth: "0 !important",
-                padding: "1px 4px !important",
-                borderBottom: "1px solid #d0d0d0",
-                whiteSpace: "nowrap",
-              },
-              "& .MuiTable-root td": {
-                width: "auto !important",
-                minWidth: "0 !important",
-                padding: "1px 4px !important",
-                borderBottom: "1px solid #e0e0e0",
-                whiteSpace: "nowrap",
-              },
+      <EnterpriseWorkspace
+        title="Rental Properties"
+        subtitle="Manage rental property records"
+        tabs={<ContractsModuleTabs />}
+        metadata={workspaceMetadata}
+        actions={
+          canCreate && baseReadCanMutate ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAddProperty}>
+              Add Rental Property
+            </MDButton>
+          ) : null
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "auto",
+          },
+          flex: "1 1 0",
+          minHeight: 0,
+          "& .MuiTable-root": {
+            tableLayout: "auto",
+            width: "max-content",
+            borderCollapse: "collapse",
+          },
+          "& .MuiTable-root th": {
+            fontSize: "0.925rem !important",
+            fontWeight: "700 !important",
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #d0d0d0",
+            whiteSpace: "nowrap",
+          },
+          "& .MuiTable-root td": {
+            width: "auto !important",
+            minWidth: "0 !important",
+            padding: "1px 4px !important",
+            borderBottom: "1px solid #e0e0e0",
+            whiteSpace: "nowrap",
+          },
+          "& table td > div": {
+            maxWidth: "100% !important",
+          },
+          "& .MuiTable-root td:nth-of-type(9)": {
+            whiteSpace: "normal !important",
+            wordBreak: "break-word !important",
+            overflowWrap: "break-word !important",
+          },
+        }}
+      >
+        {showGrid ? (
+          <DataTable
+            table={tableConfig}
+            isSorted={false}
+            stickyToolbarAndHeader
+            entriesPerPage={{
+              defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+              entries: [10, 25, 50, 100],
             }}
-          >
-            {/* Loading Overlay */}
-            {loading && (
-              <MDBox
-                position="absolute"
-                top={0}
-                left={0}
-                right={0}
-                bottom={0}
-                display="flex"
-                justifyContent="center"
-                alignItems="center"
-                zIndex={10}
-                sx={{
-                  backgroundColor: "rgba(255, 255, 255, 0.8)",
-                  backdropFilter: "blur(2px)",
-                }}
-              >
-                <CurrencyLoading size={50} />
-              </MDBox>
-            )}
-
-            <MDBox
-              sx={{
-                flex: "1 1 0",
-                minHeight: 0,
-                overflow: "hidden",
-                "& .MuiTable-root": {
-                  tableLayout: "auto",
-                  width: "max-content",
-                  borderCollapse: "collapse",
-                },
-                "& .MuiTable-root th": {
-                  fontSize: "1.05rem !important",
-                  fontWeight: "700 !important",
-                  width: "auto !important",
-                  minWidth: "0 !important",
-                  padding: "1px 4px !important",
-                  borderBottom: "1px solid #d0d0d0",
-                  whiteSpace: "nowrap",
-                },
-                "& .MuiTable-root td": {
-                  width: "auto !important",
-                  minWidth: "0 !important",
-                  padding: "1px 4px !important",
-                  borderBottom: "1px solid #e0e0e0",
-                  whiteSpace: "nowrap",
-                },
-                "& table td > div": {
-                  maxWidth: "100% !important",
-                },
-                "& .MuiTable-root td:nth-of-type(9)": {
-                  whiteSpace: "normal !important",
-                  wordBreak: "break-word !important",
-                  overflowWrap: "break-word !important",
-                },
-              }}
-            >
-              <DataTable
-                table={{
-                  columns,
-                  rows: displayRows,
-                }}
-                isSorted={false}
-                stickyToolbarAndHeader
-                entriesPerPage={{
-                  defaultValue: 20,
-                  entries: [10, 25, 50, 100, 500, 1000],
-                }}
-                page={0}
-                onPageChange={() => {}}
-                pageSize={pageSize}
-                onEntriesPerPageChange={(value) => {
-                  setPageNumber(1);
-                  setPageSize(value);
-                }}
-                showTotalEntries={false}
-                noEndBorder
-                canSearch
-                exportFileName="Rental-Properties"
-                onVisibleRowCountChange={setVisibleRowCount}
-                contentFitTable
-              />
-            </MDBox>
-
-            {/* Entries count footer (server-side total; no page controls) */}
-            <MDBox
-              display="flex"
-              alignItems="center"
-              px={2}
-              py={1.5}
-              sx={{ flexShrink: 0, borderTop: "1px solid #e0e0e0" }}
-            >
-              <MDTypography variant="button" color="secondary" fontWeight="regular">
-                {totalCount === 0
-                  ? "0 of 0 entries"
-                  : `${visibleRowCount} of ${totalCount} entries`}
-              </MDTypography>
-            </MDBox>
-          </MDBox>
-        </Card>
-      </MDBox>
-      <Footer />
+            pageSize={gridPageSize}
+            onEntriesPerPageChange={handleGridPageSizeChange}
+            autoResetFilters={false}
+            showTotalEntries={false}
+            noEndBorder
+            canSearch
+            exportFileName="Rental-Properties"
+            contentFitTable
+          />
+        ) : null}
+        <WorkspaceLoadingOverlay active={loading} />
+      </EnterpriseWorkspace>
 
       <RentalPropertyForm
         open={formOpen}

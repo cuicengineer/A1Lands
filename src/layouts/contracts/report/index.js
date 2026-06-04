@@ -1,11 +1,10 @@
 import React, { useState } from "react";
 import Grid from "@mui/material/Grid";
-import Card from "@mui/material/Card";
 import MDBox from "components/MDBox";
-import MDTypography from "components/MDTypography";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import Footer from "examples/Footer";
+import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
+import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
 import MDButton from "components/MDButton";
@@ -189,102 +188,78 @@ function ContractsReport() {
   return (
     <DashboardLayout>
       <DashboardNavbar />
-      <MDBox pt={6} pb={3}>
-        <Grid container spacing={6}>
-          <Grid item xs={12}>
-            <Card>
-              <MDBox
-                mx={2}
-                mt={-3}
-                py={3}
-                px={2}
-                variant="gradient"
-                bgColor="info"
-                borderRadius="lg"
-                coloredShadow="info"
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <MDTypography variant="h6" color="white">
-                  Contracts Report
-                </MDTypography>
-              </MDBox>
-              <MDBox pt={3} px={2}>
-                <Grid container spacing={3} alignItems="center">
-                  <Grid item xs={12} sm={4}>
-                    <FormControl variant="standard" fullWidth>
-                      <InputLabel id="command-label">Command</InputLabel>
-                      <Select
-                        labelId="command-label"
-                        id="command"
-                        value={command}
-                        onChange={handleCommandChange}
-                        label="Command"
-                      >
-                        {commandOptions.map((option) => (
-                          <MenuItem key={option} value={option}>
-                            {option}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <FormControl variant="standard" fullWidth>
-                      <InputLabel id="base-label">Base</InputLabel>
-                      <Select
-                        labelId="base-label"
-                        id="base"
-                        value={base}
-                        onChange={handleBaseChange}
-                        label="Base"
-                      >
-                        {baseOptions.map((option) => (
-                          <MenuItem key={option} value={option}>
-                            {option}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <MDButton variant="gradient" color="info" onClick={handleSearch}>
-                      Search
-                    </MDButton>
-                  </Grid>
-                </Grid>
-              </MDBox>
-              <MDBox
-                pt={3}
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  height: "70vh",
-                  minHeight: "400px",
-                  overflow: "hidden",
-                  "& .MuiTableContainer-root": {
-                    flex: "1 1 0",
-                    minHeight: 0,
-                    overflow: "hidden",
-                  },
-                }}
-              >
-                <DataTable
-                  table={{ columns, rows }}
-                  isSorted={false}
-                  stickyToolbarAndHeader
-                  entriesPerPage={false}
-                  showTotalEntries={false}
-                  noEndBorder
-                  canSearch={false}
-                />
-              </MDBox>
-            </Card>
-          </Grid>
-        </Grid>
-      </MDBox>
-      <Footer />
+      <EnterpriseWorkspace
+        title="Contracts Report"
+        subtitle="View contract summary by formation"
+        tabs={<ContractsModuleTabs />}
+        filters={
+          <MDBox px={2} pb={2} sx={{ flexShrink: 0 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} sm={4}>
+                <FormControl variant="standard" fullWidth>
+                  <InputLabel id="command-label">Command</InputLabel>
+                  <Select
+                    labelId="command-label"
+                    id="command"
+                    value={command}
+                    onChange={handleCommandChange}
+                    label="Command"
+                  >
+                    {commandOptions.map((option) => (
+                      <MenuItem key={option} value={option}>
+                        {option}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <FormControl variant="standard" fullWidth>
+                  <InputLabel id="base-label">Base</InputLabel>
+                  <Select
+                    labelId="base-label"
+                    id="base"
+                    value={base}
+                    onChange={handleBaseChange}
+                    label="Base"
+                  >
+                    {baseOptions.map((option) => (
+                      <MenuItem key={option} value={option}>
+                        {option}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <MDButton variant="gradient" color="info" onClick={handleSearch}>
+                  Search
+                </MDButton>
+              </Grid>
+            </Grid>
+          </MDBox>
+        }
+        bodySx={{
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          "& .MuiTableContainer-root": {
+            flex: "1 1 0",
+            minHeight: 0,
+            overflow: "hidden",
+          },
+        }}
+      >
+        <DataTable
+          table={{ columns, rows }}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={false}
+          showTotalEntries={false}
+          noEndBorder
+          canSearch={false}
+        />
+      </EnterpriseWorkspace>
     </DashboardLayout>
   );
 }

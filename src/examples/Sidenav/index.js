@@ -4,7 +4,7 @@
 =========================================================
 */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // react-router-dom components
 import { useLocation, useNavigate } from "react-router-dom";
@@ -28,11 +28,10 @@ import MDAvatar from "components/MDAvatar";
 
 // Material Dashboard 2 React example components
 import SidenavCollapse from "examples/Sidenav/SidenavCollapse";
+import SidenavBrand from "components/SidenavBrand";
 
 // Custom styles for the Sidenav
 import SidenavRoot from "examples/Sidenav/SidenavRoot";
-import sidenavLogoLabel from "examples/Sidenav/styles/sidenav";
-
 // Material Dashboard 2 React context
 import {
   useMaterialUIController,
@@ -154,6 +153,52 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const normalizePath = (p) => {
+    const s = String(p || "").trim();
+    if (!s) return "";
+    return s.replace(/\/$/, "") || "/";
+  };
+
+  const allNavRoutePaths = useMemo(() => {
+    const paths = [];
+    const walk = (items) => {
+      if (!Array.isArray(items)) return;
+      items.forEach((item) => {
+        if (item?.route) paths.push(normalizePath(item.route));
+        if (item?.collapse) walk(item.collapse);
+      });
+    };
+    walk(routes);
+    return paths;
+  }, [routes]);
+
+  const isPathActive = (path) => {
+    const target = normalizePath(path);
+    if (!target) return false;
+    const current = normalizePath(location.pathname);
+    if (target === "/") return current === "/";
+    if (current === target) return true;
+    if (!current.startsWith(`${target}/`)) return false;
+    // Avoid marking parent paths active when a more specific nav route matches
+    // (e.g. /contracts must not stay active on /contracts/rental-properties).
+    const hasMoreSpecificNavMatch = allNavRoutePaths.some(
+      (other) =>
+        other !== target &&
+        other.startsWith(`${target}/`) &&
+        (current === other || current.startsWith(`${other}/`))
+    );
+    return !hasMoreSpecificNavMatch;
+  };
+
+  const collapseHasActiveChild = (collapse) => {
+    if (!Array.isArray(collapse)) return false;
+    return collapse.some((child) => {
+      if (child.route && isPathActive(child.route)) return true;
+      if (child.collapse) return collapseHasActiveChild(child.collapse);
+      return false;
+    });
+  };
+
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
     allRoutes
@@ -169,6 +214,9 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         if (type === "collapse") {
           const iconNode = icon || defaultIcon;
           const isOpen = openCollapse === key;
+          const routeActive = path ? isPathActive(path) : false;
+          const childActive = collapseHasActiveChild(collapse);
+          const navActive = routeActive || childActive;
 
           const handleClick = () => {
             if (Array.isArray(collapse)) {
@@ -187,7 +235,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               <SidenavCollapse
                 name={name}
                 icon={iconNode}
-                active={isOpen}
+                active={navActive}
                 noCollapse={noCollapse}
                 onClick={handleClick}
               />
@@ -217,14 +265,14 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
                 }
               }}
             >
-              <SidenavCollapse name={name} icon={iconNode} active={isOpen} />
+              <SidenavCollapse name={name} icon={iconNode} active={navActive} />
             </Link>
           ) : (
             <SidenavCollapse
               key={key}
               name={name}
               icon={iconNode}
-              active={isOpen}
+              active={navActive || isOpen}
               onClick={handleClick}
             />
           );
@@ -233,7 +281,18 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             return (
               <MDBox key={`${key}-wrapper`}>
                 {item}
-                {isOpen && <MDBox ml={2}>{renderNestedRoutes(collapse)}</MDBox>}
+                {isOpen && (
+                  <MDBox
+                    sx={{
+                      pl: miniSidenav ? 0 : 1,
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {renderNestedRoutes(collapse)}
+                  </MDBox>
+                )}
               </MDBox>
             );
           }
@@ -250,10 +309,10 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               variant="caption"
               fontWeight="bold"
               textTransform="uppercase"
-              pl={3}
+              px={2}
               mt={2}
               mb={1}
-              ml={1}
+              sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             >
               {title}
             </MDTypography>
@@ -279,11 +338,24 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     <SidenavRoot
       {...rest}
       variant="permanent"
+      className={`enterprise-sidenav${miniSidenav ? " enterprise-sidenav--mini" : ""}`}
       ownerState={{ transparentSidenav, whiteSidenav, miniSidenav, darkMode }}
     >
-      <MDBox display="flex" flexDirection="column" height="100%">
+      <MDBox
+        display="flex"
+        flexDirection="column"
+        height="100%"
+        sx={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}
+      >
         {/* Header */}
-        <MDBox pt={3} pb={1} px={4} textAlign="center">
+        <MDBox
+          pt={miniSidenav ? 2 : 3}
+          pb={1}
+          px={miniSidenav ? 1 : 2}
+          textAlign="center"
+          position="relative"
+          sx={{ minWidth: 0, overflow: "hidden" }}
+        >
           <MDBox
             display={{ xs: "block", xl: "none" }}
             position="absolute"
@@ -310,33 +382,56 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               <Icon sx={{ fontWeight: "bold" }}>{miniSidenav ? "menu_open" : "menu"}</Icon>
             </MDTypography>
           </MDBox>
-          <MDBox
-            display="flex"
-            alignItems="center"
-            sx={{ textDecoration: "none", cursor: "default" }}
-          >
-            {brand && <MDBox component="img" src={brand} alt="Brand" width="2rem" />}
-            <MDBox
-              width={!brandName && "100%"}
-              sx={(theme) => sidenavLogoLabel(theme, { miniSidenav })}
-            >
-              <MDTypography component="h6" variant="button" fontWeight="medium" color={textColor}>
-                {brandName}
-              </MDTypography>
+
+          {miniSidenav ? (
+            <MDBox display="flex" flexDirection="column" alignItems="center" gap={1}>
+              <SidenavBrand mini />
+              <MDBox
+                display={{ xs: "none", xl: "flex" }}
+                alignItems="center"
+                justifyContent="center"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSidenavCollapse(e);
+                }}
+                sx={{
+                  cursor: "pointer",
+                  width: "100%",
+                  py: 0.5,
+                  borderRadius: 1,
+                  "&:hover": { backgroundColor: "rgba(0,0,0,0.04)" },
+                }}
+                title="Expand sidebar"
+              >
+                <Icon className="material-icons-outlined" sx={{ fontWeight: "bold" }}>
+                  menu_open
+                </Icon>
+              </MDBox>
             </MDBox>
+          ) : (
             <MDBox
-              display={{ xs: "none", xl: "block" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleSidenavCollapse(e);
-              }}
-              sx={{ cursor: "pointer", ml: "auto", zIndex: 1 }}
+              display="flex"
+              alignItems="center"
+              sx={{ textDecoration: "none", cursor: "default", minWidth: 0, width: "100%" }}
             >
-              <MDTypography variant="h6" color="secondary">
-                <Icon sx={{ fontWeight: "bold" }}>{miniSidenav ? "menu_open" : "menu"}</Icon>
-              </MDTypography>
+              <SidenavBrand />
+              <MDBox
+                display={{ xs: "none", xl: "block" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSidenavCollapse(e);
+                }}
+                sx={{ cursor: "pointer", ml: "auto", zIndex: 1, flexShrink: 0 }}
+                title="Collapse sidebar"
+              >
+                <MDTypography variant="h6" color="secondary">
+                  <Icon className="material-icons-outlined" sx={{ fontWeight: "bold" }}>
+                    menu
+                  </Icon>
+                </MDTypography>
+              </MDBox>
             </MDBox>
-          </MDBox>
+          )}
         </MDBox>
 
         <Divider
@@ -351,10 +446,12 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           flex={1}
           overflow="auto"
           sx={{
-            // Firefox - transparent track
+            minWidth: 0,
+            maxWidth: "100%",
+            overflowX: "hidden",
+            scrollbarGutter: "stable",
             scrollbarWidth: "thin",
             scrollbarColor: "#333333 transparent",
-            // Chrome/Safari/Edge - transparent track, visible thumb only
             "&::-webkit-scrollbar": {
               width: "8px",
             },
@@ -376,7 +473,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             },
           }}
         >
-          <List>
+          <List sx={{ py: 0, minWidth: 0, maxWidth: "100%" }}>
             {renderNestedRoutes(
               routes.filter((route) => route?.type !== "collapse" || canViewMenu(route?.name))
             )}
@@ -391,28 +488,40 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
           }
         />
         <MDBox
-          px={miniSidenav ? 2 : 3}
+          className="enterprise-sidenav-footer"
+          px={miniSidenav ? 1 : 2}
           py={2}
           display="flex"
           alignItems="center"
           justifyContent={miniSidenav ? "center" : "space-between"}
           gap={1}
+          sx={{ minWidth: 0, maxWidth: "100%", overflow: "hidden", flexShrink: 0 }}
         >
-          <MDBox display="flex" alignItems="center" gap={1}>
+          <MDBox display="flex" alignItems="center" gap={1} sx={{ minWidth: 0, flex: "1 1 auto" }}>
             <MDAvatar
               src={adminProfile}
               alt="Admin User"
               size="sm"
               shadow="sm"
-              sx={{ cursor: "pointer" }}
+              sx={{ cursor: "pointer", flexShrink: 0 }}
               onClick={handleOpenUserMenu}
             />
             {!miniSidenav && (
-              <MDBox display="flex" flexDirection="column" lineHeight={1.2}>
-                <MDTypography variant="button" fontWeight="medium" color={textColor}>
+              <MDBox display="flex" flexDirection="column" lineHeight={1.2} sx={{ minWidth: 0 }}>
+                <MDTypography
+                  variant="button"
+                  fontWeight="medium"
+                  color={textColor}
+                  sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
                   {loggedInUser.username}
                 </MDTypography>
-                <MDTypography variant="caption" fontWeight="regular" color={textColor}>
+                <MDTypography
+                  variant="caption"
+                  fontWeight="regular"
+                  color={textColor}
+                  sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
                   {loggedInUser.category}
                 </MDTypography>
               </MDBox>
@@ -424,6 +533,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             onClick={handleConfiguratorOpen}
             sx={{
               color: "#ffffff !important",
+              flexShrink: 0,
             }}
             title="Settings"
           >

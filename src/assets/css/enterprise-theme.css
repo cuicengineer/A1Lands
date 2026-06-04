@@ -1,0 +1,575 @@
+/* =====================================================================
+   Enterprise Land Management Portal — Global Visual Theme
+   ---------------------------------------------------------------------
+   VISUAL LAYER ONLY. No business logic, API, routing or data binding is
+   affected by this file. Everything is scoped under `body.enterprise-ui`
+   which is toggled on for dashboard pages and OFF for the login page,
+   so the login screen keeps its original design untouched.
+   ===================================================================== */
+
+:root {
+  /* ERP Redesign v1.0 — see docs/ERP-REDESIGN-STYLE-GUIDE.md */
+  --erp-primary: #025b64;
+  --erp-secondary: #00d47e;
+  --erp-warning: #f5a524;
+  --erp-danger: #f31260;
+  --erp-info: #3b82f6;
+  --erp-nav-active-bg: #e7f6f7;
+
+  /* ---- Surfaces & lines (light theme) ---- */
+  --ent-bg: #f6f8fa;
+  --ent-surface: #ffffff;
+  --ent-surface-alt: #ffffff;
+  --ent-border: #dce6e7;
+  --ent-border-strong: #cbd5e1;
+
+  /* ---- Text ---- */
+  --ent-text: #111827;
+  --ent-text-secondary: #6b7280;
+  --ent-muted: #9ca3af;
+
+  /* ---- Brand accent ---- */
+  --ent-primary: var(--erp-primary);
+  --ent-primary-dark: #024a52;
+  --ent-accent-soft: var(--erp-nav-active-bg);
+
+  /* ---- Radius (8 / 12 / 16 / 20) ---- */
+  --ent-radius-sm: 8px;
+  --ent-radius: 12px;
+  --ent-radius-lg: 16px;
+  --ent-radius-modal: 20px;
+
+  /* ---- Spacing system (8px base; 4–48 only) ---- */
+  --ent-sp-1: 4px;
+  --ent-sp-2: 8px;
+  --ent-sp-3: 12px;
+  --ent-sp-4: 16px;
+  --ent-sp-5: 24px;
+  --ent-sp-6: 32px;
+  --ent-sp-7: 40px;
+  --ent-sp-8: 48px;
+
+  /* ---- Shadows (levels 1–3; cards/modals only) ---- */
+  --ent-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --ent-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --ent-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.08);
+
+  /* ---- Data grid (52px row / 56px header per style guide) ---- */
+  --ent-grid-row-height: 52px;
+  --ent-grid-header-height: 56px;
+  --ent-grid-header-bg: #ffffff;
+  --ent-grid-header-text: #6b7280;
+  --ent-grid-header-border: #e7eaee;
+  --ent-row-alt: #ffffff;
+  --ent-row-hover: #f8fafc;
+  --ent-page-header: #ffffff;
+
+  /* ---- Layout chrome ---- */
+  --ent-sidebar-width: 280px;
+  --ent-sidebar-collapsed: 72px;
+  --ent-header-height: 64px;
+
+  /* ---- Soft chip palette ---- */
+  --ent-chip-radius: 8px;
+
+  /* ---- Motion ---- */
+  --ent-motion-duration: 200ms;
+  --ent-motion-easing: ease-in-out;
+}
+
+/* ============================ PAGE SHELL ============================ */
+body.enterprise-ui {
+  background-color: var(--ent-bg) !important;
+  font-family: Inter, Helvetica, Arial, sans-serif;
+  /* Page itself never scrolls horizontally; grids scroll internally. */
+  overflow-x: hidden;
+}
+
+/* Tighten the default dashboard content padding for higher density and
+   fuller width utilisation (Material Dashboard uses a 24px pad). */
+body.enterprise-ui .MuiDrawer-docked + * .MuiBox-root,
+body.enterprise-ui main {
+  scrollbar-gutter: stable;
+}
+
+/* ============================ CARDS / PANELS ======================= */
+body.enterprise-ui .MuiCard-root {
+  border-radius: var(--ent-radius) !important;
+  box-shadow: var(--ent-shadow) !important;
+  border: 1px solid var(--ent-border);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+body.enterprise-ui .MuiCard-root:hover {
+  box-shadow: var(--ent-shadow-md) !important;
+}
+
+/* ============================ TYPOGRAPHY =========================== */
+body.enterprise-ui {
+  color: var(--ent-text);
+}
+
+body.enterprise-ui .MuiTypography-h1,
+body.enterprise-ui .MuiTypography-h2,
+body.enterprise-ui .MuiTypography-h3,
+body.enterprise-ui .MuiTypography-h4,
+body.enterprise-ui .MuiTypography-h5,
+body.enterprise-ui .MuiTypography-h6 {
+  letter-spacing: 0.01em;
+}
+
+/* ============================ DATA GRIDS =========================== */
+/* Professional ERP-style grid: sticky header, striped rows, hover,
+   compact density, clear separation between header and body. */
+
+body.enterprise-ui .MuiTableContainer-root {
+  border-radius: var(--ent-radius-sm);
+}
+
+/* Sticky grid header — header stays fixed while the body scrolls inside
+   the table's own scroll container. Strong, distinct header band. */
+body.enterprise-ui .MuiTableContainer-root thead th,
+body.enterprise-ui table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky-thead, 10);
+  background-color: var(--layer-grid-header, var(--ent-grid-header-bg)) !important;
+  background-clip: padding-box;
+  background-image: none !important;
+  border-bottom: 1px solid var(--layer-controls-border, var(--ent-grid-header-border)) !important;
+  color: var(--layer-grid-header-text, var(--ent-grid-header-text)) !important;
+  box-shadow: inset 0 -1px 0 var(--layer-controls-border, var(--ent-grid-header-border)),
+    0 1px 0 var(--layer-grid-header, var(--ent-grid-header-bg)) !important;
+}
+
+body.enterprise-ui .MuiTableContainer-root thead th * {
+  color: var(--ent-grid-header-text) !important;
+}
+
+/* Compact body cells = high-density enterprise presentation (~40% denser). */
+body.enterprise-ui .MuiTableBody-root td,
+body.enterprise-ui table tbody td {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  border-bottom: 1px solid var(--ent-border) !important;
+  font-size: 0.875rem;
+}
+
+/* Alternate row shading (not !important so per-row state colours win). */
+body.enterprise-ui .MuiTableBody-root tr:nth-of-type(even) td {
+  background-color: var(--ent-row-alt);
+}
+
+/* Professional row hover effect across the whole row. */
+body.enterprise-ui .MuiTableBody-root tr {
+  transition: background-color 0.14s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body.enterprise-ui .MuiTableBody-root tr:hover td {
+  background-color: #f8fafc !important;
+}
+
+/* Compact pagination / total-entries footer: trim the empty band. */
+body.enterprise-ui .MuiTableContainer-root .MuiPagination-root,
+body.enterprise-ui .MuiTableContainer-root [class*="MDPagination"] {
+  margin: 0;
+}
+
+/* First data column reads as the primary record label (reference look). */
+body.enterprise-ui .MuiTableBody-root td:first-of-type {
+  font-weight: 600;
+  color: var(--ent-text);
+}
+
+/* =====================================================================
+   REFERENCE-STYLE GRID POLISH (chips, badges, filter popovers, search)
+   Pure visual layer — applied to every grid via body.enterprise-ui.
+   ===================================================================== */
+
+/* Category / status values render as clean soft pill chips. */
+body.enterprise-ui .MuiBadge-badge,
+body.enterprise-ui .MuiChip-root {
+  border-radius: var(--ent-chip-radius) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+  text-transform: none !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+  box-shadow: none !important;
+}
+
+/* Filter / Columns / Export popovers + menus look like crisp enterprise cards. */
+body.enterprise-ui .MuiPopover-paper,
+body.enterprise-ui .MuiMenu-paper,
+body.enterprise-ui .MuiAutocomplete-paper {
+  background-color: var(--ent-surface) !important;
+  background-image: none !important;
+  border-radius: var(--ent-radius) !important;
+  border: 1px solid var(--ent-border);
+  box-shadow: var(--ent-shadow-lg) !important;
+}
+
+body.enterprise-ui .MuiMenu-list {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+body.enterprise-ui .MuiMenuItem-root {
+  border-radius: var(--ent-radius-sm);
+  margin: 1px 6px;
+  min-height: 36px;
+  background-color: var(--ent-surface) !important;
+}
+
+body.enterprise-ui .MuiMenuItem-root:hover {
+  background-color: var(--ent-accent-soft);
+}
+
+/* Grid search field: rounded, subtle, reference-style. */
+body.enterprise-ui .MuiTableContainer-root .MuiInputBase-root {
+  border-radius: 999px;
+}
+
+/* Toolbar action icon buttons (Columns / Export / Filter): tidy hover. */
+body.enterprise-ui .MuiTableContainer-root .MuiIconButton-root {
+  border: 1px solid transparent;
+  border-radius: var(--ent-radius-sm);
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+body.enterprise-ui .MuiTableContainer-root .MuiIconButton-root:hover {
+  background-color: var(--ent-accent-soft);
+  border-color: var(--ent-border);
+}
+
+/* Active column filter indicator + sort affordances stay crisp. */
+body.enterprise-ui thead th .MuiIconButton-root {
+  border-radius: var(--ent-radius-sm);
+}
+
+/* =====================================================================
+   PREMIUM GRID WORKSPACE
+   The Card frames the grid; the grid's own contextual toolbar (search /
+   columns / export / filters) and pagination footer become clearly
+   delineated chrome, so every table reads as a contained, intentional
+   workspace rather than a flat full-width table.
+   ===================================================================== */
+
+/* Contextual toolbar band at the top of every grid. */
+body.enterprise-ui .MuiTableContainer-root > .MuiBox-root:first-of-type {
+  background-color: #fbfcfe;
+  border-bottom: 1px solid var(--ent-border);
+}
+
+/* Pagination / total-entries footer band at the bottom of every grid. */
+body.enterprise-ui .MuiTableContainer-root > .MuiBox-root:last-child {
+  background-color: #fbfcfe;
+  border-top: 1px solid var(--ent-border);
+}
+
+/* Premium elevation for the grid card specifically (the card IS the
+   workspace container — no nested card-in-card frame is added). */
+body.enterprise-ui .MuiCard-root:has(.MuiTableContainer-root) {
+  box-shadow: var(--ent-shadow-md) !important;
+}
+
+/* =====================================================================
+   CLEAN WHITE PAGE HEADER
+   Converts the legacy floating gradient header bar into a flat, premium
+   white header (bold dark title + action button), matching modern ERP /
+   compliance platforms. Targets ONLY the first box of a grid workspace
+   card, so dashboard stat cards and the login page are never affected.
+   Purely visual — no JSX/markup changes.
+   ===================================================================== */
+body.enterprise-ui .MuiCard-root:has(.MuiTableContainer-root) > .MuiBox-root:first-child {
+  background-image: none !important;
+  background-color: var(--ent-surface) !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  border-radius: var(--ent-radius) var(--ent-radius) 0 0 !important;
+  border-bottom: 1px solid var(--ent-border);
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+}
+
+/* Strong dark page title on the white header. */
+body.enterprise-ui
+  .MuiCard-root:has(.MuiTableContainer-root)
+  > .MuiBox-root:first-child
+  .MuiTypography-root {
+  color: var(--ent-text) !important;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* ============================ INPUT CONTROLS ======================= */
+/* Comfortable enterprise control height (42-48px) inside forms, filter
+   panels and dialogs. Deliberately NOT applied inside table cells so
+   dense inline-edit grids keep their compact rows. */
+body.enterprise-ui .MuiDialog-paper .MuiInputBase-root,
+body.enterprise-ui .form-panel .MuiInputBase-root,
+body.enterprise-ui .filter-panel .MuiInputBase-root,
+body.enterprise-ui .search-panel .MuiInputBase-root {
+  min-height: 44px;
+  border-radius: var(--ent-radius-sm);
+}
+
+body.enterprise-ui .MuiDialog-paper .MuiInputBase-multiline,
+body.enterprise-ui .form-panel .MuiInputBase-multiline,
+body.enterprise-ui .filter-panel .MuiInputBase-multiline {
+  min-height: 0;
+}
+
+/* Never enlarge or pill-round controls embedded directly in grid cells. */
+body.enterprise-ui td .MuiInputBase-root,
+body.enterprise-ui th .MuiInputBase-root {
+  min-height: 0;
+  border-radius: var(--ent-radius-sm);
+}
+
+/* ============================ BUTTONS ============================== */
+/* Brand fill — see erp-buttons.css for colors; radius/typography here */
+body.enterprise-ui .MuiButton-root,
+body.enterprise-ui .MuiLoadingButton-root {
+  border-radius: var(--ent-radius-sm);
+  letter-spacing: 0.01em;
+}
+
+/* ============================ DIALOGS ============================== */
+body.enterprise-ui .MuiDialog-paper {
+  border-radius: 10px !important;
+  box-shadow: var(--ent-shadow-lg) !important;
+}
+
+body.enterprise-ui .MuiDialogTitle-root {
+  border-bottom: 1px solid var(--ent-border);
+  font-weight: 700;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+/* Strong, consistent form labels across forms, filters and dialogs. */
+body.enterprise-ui .MuiDialog-paper .MuiInputLabel-root,
+body.enterprise-ui .MuiDialog-paper .MuiFormLabel-root,
+body.enterprise-ui .form-panel .MuiInputLabel-root,
+body.enterprise-ui .filter-panel .MuiInputLabel-root {
+  font-weight: 600;
+}
+
+/* Optional section grouping inside a form. */
+.form-section {
+  border: 1px solid var(--ent-border);
+  border-radius: var(--ent-radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.form-section > .form-section-title {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ent-muted);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ent-border);
+}
+
+/* ============================ NAVIGATION =========================== */
+/* Dark navigation rail accent + crisp separation from the white content. */
+body.enterprise-ui .MuiDrawer-paper {
+  box-shadow: var(--ent-shadow-md);
+}
+
+/* =====================================================================
+   REUSABLE UTILITY CLASSES
+   Drop these on any page to opt into the enterprise layout primitives.
+   ===================================================================== */
+
+/* Full-width, compact page wrapper. */
+.page-container {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Generic white surface panel (form / detail). */
+.form-panel,
+.filter-panel,
+.search-panel,
+.grid-panel {
+  background-color: var(--ent-surface);
+  border: 1px solid var(--ent-border);
+  border-radius: var(--ent-radius);
+  box-shadow: var(--ent-shadow);
+  padding: 16px;
+}
+
+/* Filter panel = horizontal, wrapping band of compact controls. */
+.filter-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+/* Search panel = slim toolbar row. */
+.search-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+
+/* Grid panel = clip a data grid and let it scroll internally only. */
+.grid-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.grid-panel .grid-panel-scroll {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+/* Sticky grid header utility for custom (non-MUI) grids. */
+.sticky-grid-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background-color: var(--ent-grid-header-bg);
+  color: var(--ent-grid-header-text);
+  border-bottom: 2px solid var(--ent-border-strong);
+}
+
+/* Compact, horizontally-dense form row: forms occupy more width. */
+.compact-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+  align-items: end;
+}
+
+/* Strong header hierarchy helpers. */
+.page-header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background-color: var(--ent-page-header);
+  border-bottom: 1px solid var(--ent-border);
+  box-shadow: var(--ent-shadow);
+  border-radius: var(--ent-radius);
+  padding: 12px 16px;
+}
+
+.section-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 10px;
+  border-bottom: 1px solid var(--ent-border);
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+/* ============================ RESPONSIVE =========================== */
+@media (max-width: 1200px) {
+  .compact-form-row {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .grid-panel .grid-panel-scroll {
+    max-height: calc(100vh - 230px);
+  }
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 10px 10px 18px;
+  }
+  .filter-panel,
+  .search-panel {
+    padding: 10px 12px;
+  }
+  .compact-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .compact-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =====================================================================
+   WORKSPACE ARCHITECTURE
+   Viewport-filling SaaS shell: unified toolbar + grid dominates screen.
+   ===================================================================== */
+.enterprise-workspace {
+  background: var(--ent-surface);
+  border: 1px solid var(--ent-border);
+  border-radius: var(--ent-radius);
+  box-shadow: var(--ent-shadow-md);
+  overflow: hidden;
+}
+
+.enterprise-workspace-grid-host {
+  background: var(--ent-surface);
+}
+
+/* DataTable fills the workspace; page never scrolls because of the grid. */
+.enterprise-workspace-grid-host > .MuiTableContainer-root {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+/* Unified toolbar band — toolbar classes only */
+.enterprise-workspace-grid-host .MuiTableContainer-root > .saas-settings-table-toolbar,
+.enterprise-workspace-grid-host .MuiTableContainer-root > .saas-settings-filter-toolbar {
+  flex-shrink: 0;
+  background: var(--layer-controls, #f5f6f8) !important;
+  border-bottom: 1px solid var(--layer-controls-border, var(--ent-border));
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky-toolbar, 15);
+}
+
+/* Grid body scroll region consumes all remaining height */
+.enterprise-workspace-grid-host .MuiTableContainer-root > .saas-settings-table-scroll {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto !important;
+}
+
+/* Compact pagination footer — no dead band. */
+.enterprise-workspace-grid-host .MuiTableContainer-root > .MuiBox-root:last-child {
+  flex-shrink: 0;
+  background: var(--layer-controls, #f5f6f8) !important;
+  border-top: 1px solid var(--layer-controls-border, var(--ent-border));
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+@media (max-width: 768px) {
+  .enterprise-workspace {
+    height: calc(100vh - 64px) !important;
+    max-height: calc(100vh - 64px) !important;
+  }
+}
