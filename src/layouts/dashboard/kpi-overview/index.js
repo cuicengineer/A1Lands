@@ -46,9 +46,11 @@ import {
   buildExecutiveKpis,
   buildFinancialShares,
   buildFiscalKpiGridRows,
+  buildKpiCommandFinancialBarChart,
   extractContractsSummaryRows,
   extractGovtPafShareRows,
   extractPropertySummaryRows,
+  filterKpiRowsByRacBase,
   formatKpiMoneyLabel,
   getFiscalYearPeriods,
 } from "./kpiDataUtils";
@@ -245,84 +247,6 @@ function getKpiOptionName(option) {
       option?.BaseName ??
       ""
   ).trim();
-}
-
-function readKpiRowNumber(row, keys) {
-  for (const key of keys) {
-    const n = Number(row?.[key]);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-function readKpiRowId(row, keys) {
-  for (const key of keys) {
-    const raw = row?.[key];
-    if (raw === undefined || raw === null || raw === "") continue;
-    return String(raw);
-  }
-  return "";
-}
-
-function getKpiRowCmdId(row) {
-  return readKpiRowId(row, ["CmdId", "cmdId", "RacId", "racId", "CommandId", "commandId"]);
-}
-
-function getKpiRowBaseId(row) {
-  return readKpiRowId(row, ["BaseId", "baseId", "FormationId", "formationId"]);
-}
-
-function filterKpiRowsByRacBase(rows, racIds, baseIds) {
-  const racSet = new Set((racIds || []).map(String));
-  const baseSet = new Set((baseIds || []).map(String));
-  const hasRacFilter = racSet.size > 0;
-  const hasBaseFilter = baseSet.size > 0;
-  if (!hasRacFilter && !hasBaseFilter) return rows;
-
-  return (rows || []).filter((row) => {
-    const rowCmdId = getKpiRowCmdId(row);
-    const rowBaseId = getKpiRowBaseId(row);
-    if (hasRacFilter && (!rowCmdId || !racSet.has(rowCmdId))) return false;
-    if (hasBaseFilter && (!rowBaseId || !baseSet.has(rowBaseId))) return false;
-    return true;
-  });
-}
-
-function buildKpiFinancialBarChart({
-  shareRows,
-  racOptions,
-  baseOptions,
-  racIds,
-  baseIds,
-  fieldKeys,
-}) {
-  const groupByBase = (racIds || []).length > 0 || (baseIds || []).length > 0;
-  const selectedBaseSet = new Set((baseIds || []).map(String));
-  const sourceOptions = groupByBase
-    ? (baseOptions || []).filter(
-        (option) =>
-          selectedBaseSet.size === 0 || selectedBaseSet.has(String(option.id ?? option.Id))
-      )
-    : racOptions || [];
-
-  const labels = sourceOptions.map((option) => getKpiOptionName(option) || String(option.id ?? ""));
-  const data = sourceOptions.map((option) => {
-    const optionId = String(option.id ?? option.Id ?? "");
-    return (shareRows || []).reduce((sum, row) => {
-      const rowId = groupByBase ? getKpiRowBaseId(row) : getKpiRowCmdId(row);
-      if (rowId !== optionId) return sum;
-      return sum + (readKpiRowNumber(row, fieldKeys) || 0);
-    }, 0);
-  });
-
-  if (labels.length > 0) return { labels, data };
-
-  return {
-    labels: ["All"],
-    data: [
-      (shareRows || []).reduce((sum, row) => sum + (readKpiRowNumber(row, fieldKeys) || 0), 0),
-    ],
-  };
 }
 
 const EXTRA_ASSET_CARD_COLORS = [
@@ -816,8 +740,8 @@ function KpiOverview() {
     [filteredPropertyRows, filteredContractRows, filteredShareRows]
   );
   const assetCards = useMemo(
-    () => buildAssetCards(filteredPropertyRows, filteredShareRows),
-    [filteredPropertyRows, filteredShareRows]
+    () => buildAssetCards(filteredPropertyRows, filteredShareRows, filteredContractRows),
+    [filteredPropertyRows, filteredShareRows, filteredContractRows]
   );
   const health = useMemo(() => buildContractHealth(filteredContractRows), [filteredContractRows]);
   const contractStatus = useMemo(
@@ -825,7 +749,10 @@ function KpiOverview() {
     [filteredContractRows]
   );
   const ahqApproval = useMemo(() => buildAhqApproval(filteredContractRows), [filteredContractRows]);
-  const shares = useMemo(() => buildFinancialShares(filteredShareRows), [filteredShareRows]);
+  const shares = useMemo(
+    () => buildFinancialShares(filteredShareRows, "all", filteredContractRows),
+    [filteredShareRows, filteredContractRows]
+  );
   const fiscalRows = useMemo(
     () =>
       buildFiscalKpiGridRows(
@@ -937,6 +864,7 @@ function KpiOverview() {
       <MDBox mt={1}>
         <KpiCharts
           shareRows={filteredShareRows}
+          contractRows={filteredContractRows}
           assetCards={assetCards}
           loading={loading}
           chartZoomOnClick
@@ -1002,34 +930,37 @@ function KpiOverview() {
   );
 
   const pafAnnualRentChart = useMemo(() => {
-    const chart = buildKpiFinancialBarChart({
+    const chart = buildKpiCommandFinancialBarChart({
       shareRows: filteredShareRows,
+      propertyRows: filteredPropertyRows,
       racOptions,
       baseOptions,
       racIds,
       baseIds,
-      fieldKeys: ["IncomePA", "incomePA", "IncomePA_Million", "incomePA_Million"],
+      usePropertyFallback: true,
     });
     return {
       labels: chart.labels,
       datasets: { label: "Annual Rent", data: chart.data },
     };
-  }, [filteredShareRows, racOptions, baseOptions, racIds, baseIds]);
+  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds]);
 
   const govtShareChart = useMemo(() => {
-    const chart = buildKpiFinancialBarChart({
+    const chart = buildKpiCommandFinancialBarChart({
       shareRows: filteredShareRows,
+      propertyRows: filteredPropertyRows,
       racOptions,
       baseOptions,
       racIds,
       baseIds,
-      fieldKeys: ["GovtShare", "govtShare"],
+      shareFieldKeys: ["GovtShare", "govtShare", "GovtShare_Million", "govtShare_Million"],
+      usePropertyFallback: false,
     });
     return {
       labels: chart.labels,
       datasets: { label: "Govt Share", data: chart.data },
     };
-  }, [filteredShareRows, racOptions, baseOptions, racIds, baseIds]);
+  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds]);
 
   const financialZoomConfig = useMemo(() => {
     const configs = {
@@ -1154,6 +1085,7 @@ function KpiOverview() {
       </Grid>
       <KpiCharts
         shareRows={filteredShareRows}
+        contractRows={filteredContractRows}
         assetCards={assetCards}
         loading={loading}
         chartZoomOnClick

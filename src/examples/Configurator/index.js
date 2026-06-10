@@ -27,15 +27,11 @@ import ConfiguratorRoot from "examples/Configurator/ConfiguratorRoot";
 
 // Material Dashboard 2 React context
 import { useMaterialUIController, setOpenConfigurator, setSidenavColor } from "context";
+import { SIDENAV_COLOR_OPTIONS } from "utils/sidenavColorTheme";
 
 function Configurator() {
   const [controller, dispatch] = useMaterialUIController();
   const { openConfigurator, sidenavColor, darkMode } = controller;
-  const sidenavColorOptions = [
-    { value: "default", color: "#025B64" },
-    { value: "grey", color: "#4B5563" },
-    { value: "blue", color: "#2563EB" },
-  ];
 
   const handleCloseConfigurator = () => setOpenConfigurator(dispatch, false);
 
@@ -78,7 +74,7 @@ function Configurator() {
           <MDTypography variant="h6">Sidenav Colors</MDTypography>
 
           <MDBox mb={0.5}>
-            {sidenavColorOptions.map(({ value, color }) => (
+            {SIDENAV_COLOR_OPTIONS.map(({ value, color }) => (
               <IconButton
                 key={value}
                 sx={({

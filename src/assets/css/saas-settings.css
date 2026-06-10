@@ -501,6 +501,12 @@ body.enterprise-ui .dashboard-layout-root {
   user-select: none;
 }
 
+.saas-module-tabs-brand:empty {
+  display: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
 .saas-settings-page .saas-settings-nav-tabs .MuiTabs-scroller {
   border-bottom: 1px solid var(--layer-tabs-border) !important;
 }
@@ -675,7 +681,7 @@ body.enterprise-ui .saas-settings-table-footer .grid-entry-count {
 .saas-settings-nav-tabs .MuiTab-root.Mui-selected {
   color: #ffffff !important;
   font-weight: 600 !important;
-  background: #025b64 !important;
+  background: var(--erp-primary, #025b64) !important;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.07), 0 0 0 1px rgba(16, 24, 40, 0.04);
 }
 
@@ -684,22 +690,41 @@ body.enterprise-ui .saas-settings-table-footer .grid-entry-count {
 }
 
 .saas-settings-nav-tabs .MuiTabScrollButton-root {
+  flex: 0 0 28px !important;
   width: 28px !important;
+  min-width: 28px !important;
   border-radius: 6px !important;
-  transition: background-color var(--motion-micro);
+  transition: background-color var(--motion-micro), width var(--motion-micro), flex-basis var(--motion-micro);
 }
 
 .saas-settings-nav-tabs .MuiTabScrollButton-root:hover {
   background: rgba(255, 255, 255, 0.65) !important;
 }
 
+/* Collapse disabled chevrons so tabs do not jump right after mount */
+.saas-settings-nav-tabs .MuiTabScrollButton-root.Mui-disabled {
+  opacity: 0 !important;
+  flex: 0 0 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
 /* Configuration module tabs — single-line labels, horizontal scroll */
 .configuration-module-tabs.MuiTabs-root {
-  width: 100%;
-  max-width: 100%;
+  display: flex !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 .configuration-module-tabs .MuiTabs-scroller {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
   overflow-x: auto !important;
   overflow-y: hidden !important;
   scrollbar-width: none;
@@ -714,9 +739,10 @@ body.enterprise-ui .saas-settings-table-footer .grid-entry-count {
 
 .configuration-module-tabs .MuiTabs-flexContainer {
   flex-wrap: nowrap !important;
-  width: max-content;
-  min-width: 100%;
+  width: max-content !important;
+  min-width: 100% !important;
   max-width: none !important;
+  box-sizing: border-box !important;
 }
 
 .configuration-module-tabs .MuiTab-root {
@@ -1260,7 +1286,7 @@ body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft .MuiDrawer-paper {
   box-sizing: border-box !important;
   padding-right: 0 !important;
   margin-right: 0 !important;
-  background: #025b64 !important;
+  background: var(--erp-primary, #025b64) !important;
   border-right: none !important;
   box-shadow: none !important;
   transition: width 225ms cubic-bezier(0.4, 0, 0.6, 1) !important;

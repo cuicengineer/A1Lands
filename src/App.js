@@ -13,14 +13,14 @@ Coded by www.creative-tim.com
 * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo } from "react";
 import PropTypes from "prop-types";
 
 // react-router components
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 // @mui material components
-import { ThemeProvider } from "@mui/material/styles";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import Icon from "@mui/material/Icon";
 
@@ -33,12 +33,14 @@ import Sidenav from "examples/Sidenav";
 import Configurator from "examples/Configurator";
 
 // Material Dashboard 2 React themes
-import theme from "assets/theme";
-import themeRTL from "assets/theme/theme-rtl";
+import themeBase from "assets/theme";
+import themeRTLBase from "assets/theme/theme-rtl";
 
 // Material Dashboard 2 React Dark Mode themes
-import themeDark from "assets/theme-dark";
-import themeDarkRTL from "assets/theme-dark/theme-rtl";
+import themeDarkBase from "assets/theme-dark";
+import themeDarkRTLBase from "assets/theme-dark/theme-rtl";
+
+import { applySidenavColorTheme, getSidenavMuiThemeOverrides } from "utils/sidenavColorTheme";
 
 // RTL plugins
 import rtlPlugin from "stylis-plugin-rtl";
@@ -176,6 +178,27 @@ export default function App() {
   const showDashboardChrome =
     hasStoredAccessToken() && layout === "dashboard" && !isPublicAuthRoute(pathname);
   const useContractsAlertSkin = pathname === "/contracts" || pathname.startsWith("/contracts/");
+
+  useLayoutEffect(() => {
+    applySidenavColorTheme(sidenavColor);
+  }, [sidenavColor]);
+
+  const theme = useMemo(
+    () => createTheme(themeBase, getSidenavMuiThemeOverrides(sidenavColor)),
+    [sidenavColor]
+  );
+  const themeRTL = useMemo(
+    () => createTheme(themeRTLBase, getSidenavMuiThemeOverrides(sidenavColor)),
+    [sidenavColor]
+  );
+  const themeDark = useMemo(
+    () => createTheme(themeDarkBase, getSidenavMuiThemeOverrides(sidenavColor)),
+    [sidenavColor]
+  );
+  const themeDarkRTL = useMemo(
+    () => createTheme(themeDarkRTLBase, getSidenavMuiThemeOverrides(sidenavColor)),
+    [sidenavColor]
+  );
 
   // Enterprise visual theme is applied to every dashboard page but never to
   // the login / public auth screens, which keep their original design.

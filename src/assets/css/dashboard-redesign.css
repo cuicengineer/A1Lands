@@ -1,7 +1,7 @@
 /* ERP Dashboard v1.0 — scoped under .dashboard-redesign-page */
 
 .dashboard-redesign-page.saas-workspace-page {
-  --dash-chart-primary: #025b64;
+  --dash-chart-primary: var(--erp-primary, #025b64);
   --dash-chart-secondary: #00d47e;
   --ent-border: #dce6e7;
   --ent-card-border: #dce6e7;
@@ -110,8 +110,8 @@
 
 .erp-kpi-card--primary,
 .dashboard-redesign-page .erp-kpi-card--primary.MuiBox-root {
-  background: #025b64 !important;
-  background-color: #025b64 !important;
+  background: var(--erp-primary, #025b64) !important;
+  background-color: var(--erp-primary, #025b64) !important;
   border: none !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   color: #ffffff !important;
@@ -158,7 +158,7 @@
   font-size: 18px !important;
   width: 18px !important;
   height: 18px !important;
-  color: #025b64 !important;
+  color: var(--erp-primary, #025b64) !important;
 }
 
 .erp-kpi-card--primary .erp-kpi-card__icon,
@@ -459,4 +459,45 @@
 .dashboard-redesign-page .MuiCard-root.erp-dashboard-tabs-card,
 .dashboard-redesign-page > .MuiGrid-root > .MuiGrid-item > .MuiCard-root {
   border: 1px solid #dce6e7 !important;
+}
+
+/* KPI Overview — tab panels must not stretch inside the workspace flex host */
+.dashboard-redesign-page .saas-workspace-grid-host > .erp-kpi-tab-panel {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  align-self: flex-start !important;
+  width: 100% !important;
+}
+
+/* Fiscal analytics card must size to content when collapsed */
+.dashboard-redesign-page .erp-fiscal-kpi-grid-card {
+  height: auto !important;
+  min-height: 0 !important;
+  flex: 0 0 auto !important;
+  flex-grow: 0 !important;
+  align-self: flex-start !important;
+}
+
+/* Fiscal KPI grid — restore table header layout (theme sets thead to display:block) */
+.dashboard-redesign-page .erp-fiscal-kpi-table,
+body.enterprise-ui .erp-fiscal-kpi-table {
+  width: 100% !important;
+}
+
+.dashboard-redesign-page .erp-fiscal-kpi-table .MuiTableHead-root,
+body.enterprise-ui .erp-fiscal-kpi-table .MuiTableHead-root {
+  display: table-header-group !important;
+  padding: 0 !important;
+  width: 100% !important;
+}
+
+.dashboard-redesign-page .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableRow-root,
+body.enterprise-ui .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableRow-root {
+  display: table-row !important;
+  width: 100% !important;
+}
+
+.dashboard-redesign-page .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableCell-root,
+body.enterprise-ui .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableCell-root {
+  display: table-cell !important;
 }

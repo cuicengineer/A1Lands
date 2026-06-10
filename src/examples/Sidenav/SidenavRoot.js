@@ -17,11 +17,11 @@ Coded by www.creative-tim.com
 import Drawer from "@mui/material/Drawer";
 import { styled } from "@mui/material/styles";
 
-const SIDENAV_BACKGROUNDS = {
-  default: "#025B64",
-  grey: "#4B5563",
-  blue: "#2563EB",
-};
+import { SIDENAV_COLOR_PALETTES } from "utils/sidenavColorTheme";
+
+const SIDENAV_BACKGROUNDS = Object.fromEntries(
+  Object.entries(SIDENAV_COLOR_PALETTES).map(([key, palette]) => [key, palette.main])
+);
 
 export default styled(Drawer)(({ theme, ownerState }) => {
   const { palette, boxShadows, transitions, breakpoints, functions } = theme;

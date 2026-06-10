@@ -83,7 +83,7 @@ function aggregateAllPropertySummary(propertyRows) {
   return { count, worth, areaLine: formatAreasByUomLine(areasByUom), areasByUom };
 }
 
-function buildExtraPropertyClassCards(propertyRows, shareRows, knownClassIds) {
+function buildExtraPropertyClassCards(propertyRows, shareRows, knownClassIds, contractRows = []) {
   const labelByClassId = new Map();
 
   for (const r of propertyRows) {
@@ -118,7 +118,7 @@ function buildExtraPropertyClassCards(propertyRows, shareRows, knownClassIds) {
         count: agg.count,
         worth: agg.worth,
         areaLine: agg.areaLine,
-        mil: buildMilForCategory(shareRows, propertyRows, [classId]),
+        mil: buildMilForCategory(shareRows, propertyRows, [classId], contractRows),
         isExtraClass: true,
       };
     })
@@ -178,31 +178,45 @@ export function formatAreasByUomLine(areasByUom) {
   return parts.length ? parts.join(", ") : "—";
 }
 
+function normalizeDataSetName(name) {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 function isDataSetRow(row, dataSetName) {
   if (!row || typeof row !== "object") return false;
   const n = row.DataSetName ?? row.dataSetName;
-  return String(n) === dataSetName;
+  if (n == null || n === "") return false;
+  return normalizeDataSetName(n) === normalizeDataSetName(dataSetName);
 }
 
 function extractRowsByDataSet(payload, dataSetName, isRow) {
   if (payload == null || typeof payload !== "object") return [];
   const root = payload.data ?? payload.Data ?? payload.result ?? payload.Result ?? payload;
   const resultSets = root.resultSets ?? root.ResultSets ?? payload.resultSets ?? payload.ResultSets;
+  const collected = [];
+
   if (Array.isArray(resultSets)) {
     for (const inner of resultSets) {
-      if (!Array.isArray(inner) || inner.length === 0) continue;
-      const first = inner[0];
-      if (first && typeof first === "object" && isRow(first)) {
-        return inner.filter(isRow);
+      if (!Array.isArray(inner)) continue;
+      for (const row of inner) {
+        if (row && typeof row === "object" && isRow(row)) {
+          collected.push(row);
+        }
       }
     }
   }
+
+  if (collected.length > 0) return collected;
+
   if (dataSetName === DATA_SET_PROPERTY_SUMMARY) {
     const ps = root.PropertySummary ?? root.propertySummary;
-    if (Array.isArray(ps))
+    if (Array.isArray(ps)) {
       return ps.filter(
         (r) => isRow(r) || readNumber(r, ["PropertyCount", "propertyCount"]) != null
       );
+    }
   }
   return [];
 }
@@ -220,9 +234,100 @@ export function extractContractsSummaryRows(payload) {
 }
 
 export function extractGovtPafShareRows(payload) {
-  return extractRowsByDataSet(payload, DATA_SET_GOVT_PAF_SHARE, (r) =>
-    isDataSetRow(r, DATA_SET_GOVT_PAF_SHARE)
+  const tagged = extractRowsByDataSet(payload, DATA_SET_GOVT_PAF_SHARE, (r) =>
+    isGovtPafShareDataRow(r)
   );
+  if (tagged.length > 0) return tagged;
+  return extractUntaggedGovtPafShareRows(payload);
+}
+
+const KPI_CMD_ID_KEYS = [
+  "CmdId",
+  "cmdId",
+  "RAC",
+  "rac",
+  "RacId",
+  "racId",
+  "CommandId",
+  "commandId",
+];
+const KPI_BASE_ID_KEYS = ["BaseId", "baseId", "FormationId", "formationId"];
+
+function readKpiRowId(row, keys) {
+  if (!row || typeof row !== "object") return "";
+  for (const key of keys) {
+    const raw = row[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    return String(raw).trim();
+  }
+  return "";
+}
+
+function rowHasTaggedDataSet(row) {
+  const n = row?.DataSetName ?? row?.dataSetName;
+  return n != null && String(n).trim() !== "";
+}
+
+function rowHasShareMetricFields(row) {
+  if (!row || typeof row !== "object") return false;
+  const groups = [
+    ["GovtShare", "govtShare", "GovtShare_Million", "govtShare_Million"],
+    ["PAFShare", "pafShare", "PAFShare_Million", "pafShare_Million"],
+    ["AHQShare", "ahqShare", "AHQShare_Million", "ahqShare_Million"],
+    ["RACShare", "racShare", "RACShare_Million", "racShare_Million"],
+    ["BaseShare", "baseShare", "BaseShare_Million", "baseShare_Million"],
+    ["IncomePA_Million", "incomePA_Million", "IncomePA", "incomePA"],
+  ];
+  return groups.some((keys) => readNumber(row, keys) != null);
+}
+
+function isUntaggedGovtPafShareRow(row) {
+  if (!row || typeof row !== "object") return false;
+  if (rowHasTaggedDataSet(row)) return false;
+  if (isDataSetRow(row, DATA_SET_PROPERTY_SUMMARY)) return false;
+  if (isDataSetRow(row, DATA_SET_CONTRACTS_SUMMARY)) return false;
+  return rowHasShareMetricFields(row);
+}
+
+export function isGovtPafShareDataRow(row) {
+  return isDataSetRow(row, DATA_SET_GOVT_PAF_SHARE) || isUntaggedGovtPafShareRow(row);
+}
+
+function extractUntaggedGovtPafShareRows(payload) {
+  if (payload == null || typeof payload !== "object") return [];
+  const root = payload.data ?? payload.Data ?? payload.result ?? payload.Result ?? payload;
+  const resultSets = root.resultSets ?? root.ResultSets ?? payload.resultSets ?? payload.ResultSets;
+  if (!Array.isArray(resultSets)) return [];
+
+  for (const inner of resultSets) {
+    if (!Array.isArray(inner) || inner.length === 0) continue;
+    const shareLike = inner.filter(isUntaggedGovtPafShareRow);
+    if (shareLike.length > 0) return shareLike;
+  }
+  return [];
+}
+
+/** GovtPAFShare rows are class-scoped; keep them when RAC/Base filters only apply to Cmd/Base-scoped datasets. */
+export function filterKpiRowsByRacBase(rows, racIds, baseIds) {
+  const racSet = new Set((racIds || []).map(String));
+  const baseSet = new Set((baseIds || []).map(String));
+  const hasRacFilter = racSet.size > 0;
+  const hasBaseFilter = baseSet.size > 0;
+  if (!hasRacFilter && !hasBaseFilter) return rows || [];
+
+  return (rows || []).filter((row) => {
+    if (isGovtPafShareDataRow(row)) {
+      const rowCmdId = readKpiRowId(row, KPI_CMD_ID_KEYS);
+      const rowBaseId = readKpiRowId(row, KPI_BASE_ID_KEYS);
+      if (!rowCmdId && !rowBaseId) return true;
+    }
+
+    const rowCmdId = readKpiRowId(row, KPI_CMD_ID_KEYS);
+    const rowBaseId = readKpiRowId(row, KPI_BASE_ID_KEYS);
+    if (hasRacFilter && (!rowCmdId || !racSet.has(rowCmdId))) return false;
+    if (hasBaseFilter && (!rowBaseId || !baseSet.has(rowBaseId))) return false;
+    return true;
+  });
 }
 
 function aggregateByClassIds(rows, classIds) {
@@ -270,16 +375,307 @@ const MIL_FIELDS = {
     "PAIncome",
     "paIncome",
   ],
-  govt: ["GovtShare", "govtShare"],
-  paf: ["PAFShare", "pafShare"],
-  ahq: ["AHQShare", "ahqShare"],
-  rac: ["RACShare", "racShare"],
-  base: ["BaseShare", "baseShare"],
+  govt: ["GovtShare", "govtShare", "GovtShare_Million", "govtShare_Million"],
+  paf: ["PAFShare", "pafShare", "PAFShare_Million", "pafShare_Million"],
+  ahq: [
+    "AHQShare",
+    "ahqShare",
+    "AHQShare_Million",
+    "ahqShare_Million",
+    "AhqShare",
+    "AHQRaw",
+    "ahqRaw",
+    "AHQRaw_Million",
+    "ahqRaw_Million",
+  ],
+  rac: [
+    "RACShare",
+    "racShare",
+    "RACShare_Million",
+    "racShare_Million",
+    "RacShare",
+    "RACRaw",
+    "racRaw",
+    "RACRaw_Million",
+    "racRaw_Million",
+  ],
+  base: [
+    "BaseShare",
+    "baseShare",
+    "BaseShare_Million",
+    "baseShare_Million",
+    "BaseRaw",
+    "baseRaw",
+    "BaseRaw_Million",
+    "baseRaw_Million",
+  ],
 };
+
+const SHARE_SPLIT_RATE_FIELDS = {
+  ahq: ["AHQRate", "ahqRate", "AHQ_Share_Rate", "ahqShareRate"],
+  rac: ["RACRate", "racRate", "RAC_Share_Rate", "racShareRate"],
+  base: ["BaseRate", "baseRate", "Base_Share_Rate", "baseShareRate"],
+};
+
+const SHARE_CLASS_ID_KEYS = ["ClassId", "classId", "ClassID", "PropertyClassId", "propertyClassId"];
+
+/** Property-summary class ids → GovtPAFShare class ids (summary dashboard uses 1–5). */
+const PROPERTY_CLASS_TO_SHARE_CLASS = {
+  1: 1,
+  2: 1,
+  3: 2,
+  4: 3,
+  9: 4,
+  6: 5,
+};
+
+/** GovtPAFShare class ids → property-summary class ids used on category cards. */
+const SHARE_CLASS_TO_PROPERTY_CLASSES = {
+  1: [1, 2],
+  2: [3],
+  3: [4],
+  4: [9],
+  5: [6],
+};
+
+function expandShareClassIds(classIds) {
+  const expanded = new Set();
+  for (const raw of classIds || []) {
+    const cid = Number(raw);
+    if (!Number.isFinite(cid)) continue;
+    expanded.add(cid);
+    const shareClass = PROPERTY_CLASS_TO_SHARE_CLASS[cid];
+    if (shareClass != null) expanded.add(shareClass);
+    const propertyClasses = SHARE_CLASS_TO_PROPERTY_CLASSES[cid];
+    if (propertyClasses) propertyClasses.forEach((id) => expanded.add(id));
+  }
+  return [...expanded];
+}
+
+function readShareMilValue(row, directKeys, rateKeys, pafMil) {
+  const direct = readNumber(row, directKeys);
+  if (Number.isFinite(direct) && direct !== 0) return direct;
+  const rate = readNumber(row, rateKeys);
+  if (Number.isFinite(pafMil) && Number.isFinite(rate)) {
+    return (pafMil * rate) / 100;
+  }
+  return 0;
+}
+
+function readShareMilFromRow(row, shareKey) {
+  const pafMil = readNumber(row, MIL_FIELDS.paf) || 0;
+  if (shareKey === "ahq") {
+    return readShareMilValue(row, MIL_FIELDS.ahq, SHARE_SPLIT_RATE_FIELDS.ahq, pafMil);
+  }
+  if (shareKey === "rac") {
+    return readShareMilValue(row, MIL_FIELDS.rac, SHARE_SPLIT_RATE_FIELDS.rac, pafMil);
+  }
+  if (shareKey === "base") {
+    const direct = readShareMilValue(row, MIL_FIELDS.base, SHARE_SPLIT_RATE_FIELDS.base, pafMil);
+    if (direct > 0) return direct;
+    const ahq = readShareMilValue(row, MIL_FIELDS.ahq, SHARE_SPLIT_RATE_FIELDS.ahq, pafMil);
+    const rac = readShareMilValue(row, MIL_FIELDS.rac, SHARE_SPLIT_RATE_FIELDS.rac, pafMil);
+    if (pafMil > 0 && ahq + rac < pafMil) return pafMil - ahq - rac;
+    return direct;
+  }
+  return readNumber(row, MIL_FIELDS[shareKey]) || 0;
+}
+
+function readShareClassId(row) {
+  for (const key of SHARE_CLASS_ID_KEYS) {
+    const raw = row?.[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function shareRowMatchesClassIds(row, classIds) {
+  const cid = readShareClassId(row);
+  if (!Number.isFinite(cid)) return false;
+  const expanded = expandShareClassIds(classIds);
+  return expanded.includes(cid);
+}
+
+const KPI_CMD_NAME_KEYS = [
+  "CmdName",
+  "cmdName",
+  "RACName",
+  "racName",
+  "CommandName",
+  "commandName",
+];
+const KPI_BASE_NAME_KEYS = ["BaseName", "baseName", "FormationName", "formationName"];
+const KPI_PROPERTY_RENT_FIELDS = [
+  ...MIL_FIELDS.incomePAProperty,
+  "ClassRevenue_Million",
+  "classRevenue_Million",
+];
+
+function getKpiOptionName(option) {
+  return String(
+    option?.name ??
+      option?.Name ??
+      option?.cmdName ??
+      option?.CmdName ??
+      option?.baseName ??
+      option?.BaseName ??
+      ""
+  ).trim();
+}
+
+function buildKpiOptionLookups(options) {
+  const idToLabel = new Map();
+  const nameToId = new Map();
+  for (const option of options || []) {
+    const id = String(option?.id ?? option?.Id ?? "").trim();
+    const label = getKpiOptionName(option) || id;
+    const nameKey = label.toLowerCase();
+    if (id) idToLabel.set(id, label);
+    if (nameKey && id) nameToId.set(nameKey, id);
+  }
+  return { idToLabel, nameToId };
+}
+
+function resolveKpiRowGroupKey(row, groupByBase, nameToId) {
+  const idKeys = groupByBase ? KPI_BASE_ID_KEYS : KPI_CMD_ID_KEYS;
+  const nameKeys = groupByBase ? KPI_BASE_NAME_KEYS : KPI_CMD_NAME_KEYS;
+  const rawId = readKpiRowId(row, idKeys);
+
+  if (rawId) {
+    if (/^\d+$/.test(rawId)) return rawId;
+    const mapped = nameToId.get(rawId.toLowerCase());
+    if (mapped) return mapped;
+  }
+
+  const rowName = readString(row, nameKeys);
+  if (rowName) {
+    const mapped = nameToId.get(rowName.toLowerCase());
+    if (mapped) return mapped;
+  }
+
+  return rawId && /^\d+$/.test(rawId) ? rawId : "";
+}
+
+function accumulateKpiGroupTotals(rows, dataSetName, fieldKeys, groupByBase, nameToId, totalsById) {
+  for (const row of rows || []) {
+    if (dataSetName === DATA_SET_GOVT_PAF_SHARE && !isGovtPafShareDataRow(row)) continue;
+    if (dataSetName && dataSetName !== DATA_SET_GOVT_PAF_SHARE && !isDataSetRow(row, dataSetName))
+      continue;
+    const groupKey = resolveKpiRowGroupKey(row, groupByBase, nameToId);
+    if (!groupKey) continue;
+    const value = readNumber(row, fieldKeys);
+    if (!Number.isFinite(value)) continue;
+    totalsById.set(groupKey, (totalsById.get(groupKey) || 0) + value);
+  }
+}
+
+function mergeShareAndPropertyTotals(shareTotals, propertyTotals) {
+  const merged = new Map(shareTotals);
+  for (const [key, propertyValue] of propertyTotals.entries()) {
+    const shareValue = shareTotals.get(key) || 0;
+    merged.set(key, shareValue > 0 ? shareValue : propertyValue);
+  }
+  return merged;
+}
+
+/**
+ * Command- or base-wise bar chart for Financials (PAF Annual Rent, Govt Share, etc.).
+ * Aggregates GovtPAFShare rows by CmdId; falls back to PropertySummary revenue per command.
+ */
+export function buildKpiCommandFinancialBarChart({
+  shareRows = [],
+  propertyRows = [],
+  racOptions = [],
+  baseOptions = [],
+  racIds = [],
+  baseIds = [],
+  shareFieldKeys = MIL_FIELDS.incomePAShare,
+  propertyFieldKeys = KPI_PROPERTY_RENT_FIELDS,
+  usePropertyFallback = true,
+}) {
+  const groupByBase = (racIds || []).length > 0 || (baseIds || []).length > 0;
+  const selectedBaseSet = new Set((baseIds || []).map(String));
+  const selectedRacSet = new Set((racIds || []).map(String));
+  const sourceOptions = groupByBase
+    ? (baseOptions || []).filter(
+        (option) =>
+          selectedBaseSet.size === 0 || selectedBaseSet.has(String(option.id ?? option.Id))
+      )
+    : (racOptions || []).filter(
+        (option) => selectedRacSet.size === 0 || selectedRacSet.has(String(option.id ?? option.Id))
+      );
+
+  const { idToLabel, nameToId } = buildKpiOptionLookups(sourceOptions);
+  const shareTotals = new Map();
+  const propertyTotals = new Map();
+
+  accumulateKpiGroupTotals(
+    shareRows,
+    DATA_SET_GOVT_PAF_SHARE,
+    shareFieldKeys,
+    groupByBase,
+    nameToId,
+    shareTotals
+  );
+
+  if (usePropertyFallback) {
+    accumulateKpiGroupTotals(
+      propertyRows,
+      DATA_SET_PROPERTY_SUMMARY,
+      propertyFieldKeys,
+      groupByBase,
+      nameToId,
+      propertyTotals
+    );
+  }
+
+  const totalsById = usePropertyFallback
+    ? mergeShareAndPropertyTotals(shareTotals, propertyTotals)
+    : shareTotals;
+
+  if (sourceOptions.length > 0) {
+    return {
+      labels: sourceOptions.map(
+        (option) => getKpiOptionName(option) || String(option.id ?? option.Id ?? "")
+      ),
+      data: sourceOptions.map((option) => {
+        const optionId = String(option.id ?? option.Id ?? "");
+        return totalsById.get(optionId) || 0;
+      }),
+    };
+  }
+
+  if (totalsById.size > 0) {
+    const entries = [...totalsById.entries()].sort((a, b) =>
+      (idToLabel.get(a[0]) || a[0]).localeCompare(idToLabel.get(b[0]) || b[0])
+    );
+    return {
+      labels: entries.map(([id]) => idToLabel.get(id) || id),
+      data: entries.map(([, value]) => value),
+    };
+  }
+
+  const allShare = (shareRows || []).reduce((sum, row) => {
+    if (!isGovtPafShareDataRow(row)) return sum;
+    return sum + (readNumber(row, shareFieldKeys) || 0);
+  }, 0);
+  const allProperty = usePropertyFallback
+    ? (propertyRows || []).reduce((sum, row) => {
+        if (!isDataSetRow(row, DATA_SET_PROPERTY_SUMMARY)) return sum;
+        return sum + (readNumber(row, propertyFieldKeys) || 0);
+      }, 0)
+    : 0;
+
+  return {
+    labels: ["All"],
+    data: [allShare > 0 ? allShare : allProperty],
+  };
+}
 
 /** Sum Income PA / share amounts (Mil) from GovtPAFShare rows for given ClassIds. */
 function aggregateShareMilByClassIds(shareRows, classIds) {
-  const idSet = new Set(classIds.map(Number));
   const out = {
     incomePA: 0,
     govt: 0,
@@ -289,15 +685,14 @@ function aggregateShareMilByClassIds(shareRows, classIds) {
     base: 0,
   };
   for (const r of shareRows) {
-    if (!isDataSetRow(r, DATA_SET_GOVT_PAF_SHARE)) continue;
-    const cid = Number(r.ClassId ?? r.classId);
-    if (!idSet.has(cid)) continue;
+    if (!isGovtPafShareDataRow(r)) continue;
+    if (!shareRowMatchesClassIds(r, classIds)) continue;
     out.incomePA += readNumber(r, MIL_FIELDS.incomePAShare) || 0;
     out.govt += readNumber(r, MIL_FIELDS.govt) || 0;
     out.paf += readNumber(r, MIL_FIELDS.paf) || 0;
-    out.ahq += readNumber(r, MIL_FIELDS.ahq) || 0;
-    out.rac += readNumber(r, MIL_FIELDS.rac) || 0;
-    out.base += readNumber(r, MIL_FIELDS.base) || 0;
+    out.ahq += readShareMilFromRow(r, "ahq");
+    out.rac += readShareMilFromRow(r, "rac");
+    out.base += readShareMilFromRow(r, "base");
   }
   return out;
 }
@@ -315,8 +710,30 @@ function aggregateIncomePAFromPropertyRows(propertyRows, classIds) {
   return sum;
 }
 
-function buildMilForCategory(shareRows, propertyRows, classIds) {
+function mergeContractShareFallback(out, contractRows, classIds) {
+  if (!contractRows?.length) return;
+  const needsAhqRacBase = out.ahq === 0 && out.rac === 0 && out.base === 0;
+  const needsGovtPaf = out.govt === 0 && out.paf === 0;
+  if (!needsAhqRacBase && !needsGovtPaf) return;
+
+  for (const r of contractRows) {
+    if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
+    if (!shareRowMatchesClassIds(r, classIds)) continue;
+    if (needsAhqRacBase) {
+      out.ahq += readShareMilFromRow(r, "ahq");
+      out.rac += readShareMilFromRow(r, "rac");
+      out.base += readShareMilFromRow(r, "base");
+    }
+    if (needsGovtPaf) {
+      out.govt += readNumber(r, MIL_FIELDS.govt) || 0;
+      out.paf += readNumber(r, MIL_FIELDS.paf) || 0;
+    }
+  }
+}
+
+function buildMilForCategory(shareRows, propertyRows, classIds, contractRows = []) {
   const fromShare = aggregateShareMilByClassIds(shareRows, classIds);
+  mergeContractShareFallback(fromShare, contractRows, classIds);
   if (!fromShare.incomePA) {
     fromShare.incomePA = aggregateIncomePAFromPropertyRows(propertyRows, classIds);
   }
@@ -353,13 +770,13 @@ function buildLandsAggregate(propertyRows, categorizedSum) {
   };
 }
 
-export function buildAssetCards(propertyRows, shareRows = []) {
+export function buildAssetCards(propertyRows, shareRows = [], contractRows = []) {
   const cardsByKey = {};
 
   for (const [key, meta] of Object.entries(PROPERTY_CLASS_STICKERS)) {
     if (key === "lands") continue;
     const agg = aggregateByClassIds(propertyRows, meta.classIds);
-    const mil = buildMilForCategory(shareRows, propertyRows, meta.classIds);
+    const mil = buildMilForCategory(shareRows, propertyRows, meta.classIds, contractRows);
     cardsByKey[key] = {
       key,
       label: meta.label,
@@ -378,7 +795,7 @@ export function buildAssetCards(propertyRows, shareRows = []) {
     count: totalAgg.count,
     worth: totalAgg.worth,
     areaLine: totalAgg.areaLine,
-    mil: buildMilForCategory(shareRows, propertyRows, allClassIds),
+    mil: buildMilForCategory(shareRows, propertyRows, allClassIds, contractRows),
     chartInclude: false,
   };
 
@@ -386,7 +803,8 @@ export function buildAssetCards(propertyRows, shareRows = []) {
   const extraCards = buildExtraPropertyClassCards(
     propertyRows,
     shareRows,
-    getKnownPropertyClassIds()
+    getKnownPropertyClassIds(),
+    contractRows
   );
 
   return [...fixedCards, ...extraCards];
@@ -424,8 +842,8 @@ export function buildExecutiveKpis(propertyRows, contractRows, shareRows) {
 
   let totalPafShare = 0;
   for (const r of shareRows) {
-    if (!isDataSetRow(r, DATA_SET_GOVT_PAF_SHARE)) continue;
-    const p = readNumber(r, ["PAFShare", "pafShare"]);
+    if (!isGovtPafShareDataRow(r)) continue;
+    const p = readNumber(r, MIL_FIELDS.paf);
     if (Number.isFinite(p)) totalPafShare += p;
   }
 
@@ -789,13 +1207,13 @@ export function buildAhqApproval(contractRows) {
   return { approved, pending };
 }
 
-export function buildFinancialShares(shareRows, classIdFilter = "all") {
+export function buildFinancialShares(shareRows, classIdFilter = "all", contractRows = []) {
   const keys = [
-    { id: "govt", label: "Govt Share", fields: ["GovtShare", "govtShare"] },
-    { id: "paf", label: "PAF Share", fields: ["PAFShare", "pafShare"] },
-    { id: "ahq", label: "AHQ Share", fields: ["AHQShare", "ahqShare"] },
-    { id: "rac", label: "RAC Share", fields: ["RACShare", "racShare"] },
-    { id: "base", label: "Base Share", fields: ["BaseShare", "baseShare"] },
+    { id: "govt", label: "Govt Share", fields: MIL_FIELDS.govt },
+    { id: "paf", label: "PAF Share", fields: MIL_FIELDS.paf },
+    { id: "ahq", label: "AHQ Share", fields: MIL_FIELDS.ahq },
+    { id: "rac", label: "RAC Share", fields: MIL_FIELDS.rac },
+    { id: "base", label: "Base Share", fields: MIL_FIELDS.base },
   ];
 
   const totals = {};
@@ -803,9 +1221,7 @@ export function buildFinancialShares(shareRows, classIdFilter = "all") {
     totals[k.id] = 0;
   });
 
-  let rows = Array.isArray(shareRows)
-    ? shareRows.filter((r) => isDataSetRow(r, DATA_SET_GOVT_PAF_SHARE))
-    : [];
+  let rows = Array.isArray(shareRows) ? shareRows.filter((r) => isGovtPafShareDataRow(r)) : [];
   if (
     classIdFilter != null &&
     classIdFilter !== "" &&
@@ -813,12 +1229,39 @@ export function buildFinancialShares(shareRows, classIdFilter = "all") {
   ) {
     const cid = Number(classIdFilter);
     if (Number.isFinite(cid)) {
-      rows = rows.filter((r) => Number(r.ClassId ?? r.classId) === cid);
+      rows = rows.filter((r) => shareRowMatchesClassIds(r, [cid]));
     }
   }
 
   for (const r of rows) {
     keys.forEach((k) => {
+      let v;
+      if (k.id === "ahq" || k.id === "rac" || k.id === "base") {
+        v = readShareMilFromRow(r, k.id);
+      } else {
+        v = readNumber(r, k.fields);
+      }
+      if (Number.isFinite(v)) totals[k.id] += v;
+    });
+  }
+
+  const contractScoped =
+    classIdFilter != null && classIdFilter !== "" && String(classIdFilter).toLowerCase() !== "all"
+      ? [Number(classIdFilter)]
+      : null;
+
+  for (const r of contractRows || []) {
+    if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
+    if (contractScoped && !shareRowMatchesClassIds(r, contractScoped)) continue;
+    keys.forEach((k) => {
+      const shareTotal = totals[k.id] || 0;
+      if (k.id === "ahq" || k.id === "rac" || k.id === "base") {
+        if (shareTotal !== 0) return;
+        const v = readShareMilFromRow(r, k.id);
+        if (Number.isFinite(v)) totals[k.id] += v;
+        return;
+      }
+      if (shareTotal !== 0) return;
       const v = readNumber(r, k.fields);
       if (Number.isFinite(v)) totals[k.id] += v;
     });
@@ -876,7 +1319,7 @@ function sumIncomePAFromAllShareRows(shareRows) {
   if (!Array.isArray(shareRows)) return 0;
   let sum = 0;
   for (const r of shareRows) {
-    if (!isDataSetRow(r, DATA_SET_GOVT_PAF_SHARE)) continue;
+    if (!isGovtPafShareDataRow(r)) continue;
     sum += readNumber(r, MIL_FIELDS.incomePAShare) || 0;
   }
   return sum;

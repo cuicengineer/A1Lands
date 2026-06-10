@@ -213,7 +213,14 @@ ChartZoomSurface.propTypes = {
   darkMode: PropTypes.bool.isRequired,
 };
 
-function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayout }) {
+function KpiCharts({
+  shareRows,
+  contractRows,
+  assetCards,
+  loading,
+  chartZoomOnClick,
+  chartLayout,
+}) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [shareClassFilter, setShareClassFilter] = useState("all");
@@ -222,8 +229,8 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
   const closeZoom = useCallback(() => setZoomChart(null), []);
 
   const donutShares = useMemo(
-    () => buildFinancialShares(shareRows || [], shareClassFilter),
-    [shareRows, shareClassFilter]
+    () => buildFinancialShares(shareRows || [], shareClassFilter, contractRows || []),
+    [shareRows, shareClassFilter, contractRows]
   );
 
   const cards = (assetCards || []).filter((c) => c.chartInclude !== false && c.key !== "total");
@@ -585,6 +592,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
 
 KpiCharts.propTypes = {
   shareRows: PropTypes.arrayOf(PropTypes.object),
+  contractRows: PropTypes.arrayOf(PropTypes.object),
   assetCards: PropTypes.arrayOf(
     PropTypes.shape({
       label: PropTypes.string,
@@ -605,6 +613,7 @@ KpiCharts.propTypes = {
 
 KpiCharts.defaultProps = {
   shareRows: [],
+  contractRows: [],
   assetCards: [],
   loading: false,
   chartZoomOnClick: false,

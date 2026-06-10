@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
 import { Bar } from "react-chartjs-2";
 import {
@@ -10,7 +10,6 @@ import {
   Legend,
 } from "chart.js";
 import Card from "@mui/material/Card";
-import Collapse from "@mui/material/Collapse";
 import IconButton from "@mui/material/IconButton";
 import Icon from "@mui/material/Icon";
 import Table from "@mui/material/Table";
@@ -32,42 +31,28 @@ import { formatKpiMoneyLabel } from "../kpiDataUtils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
-/** Draws each segment’s value (Mil) on stacked fiscal share bars. */
-const fiscalShareStackLabelsPlugin = {
-  id: "fiscalShareStackLabels",
-  afterDatasetsDraw(chart) {
-    const cfg = chart.options.plugins?.fiscalShareStackLabels;
-    if (cfg?.enabled === false) return;
-    const { ctx } = chart;
-    const minPx = cfg?.minSegmentPx ?? 14;
-    chart.data.datasets.forEach((dataset, datasetIndex) => {
-      const meta = chart.getDatasetMeta(datasetIndex);
-      if (meta.hidden === true) return;
-      meta.data.forEach((element, index) => {
-        const raw = dataset.data[index];
-        const value = Number(raw);
-        if (!Number.isFinite(value) || value <= 0) return;
-        const { x, y, base } = element.getProps(["x", "y", "base"], true);
-        if (x == null || y == null || base == null) return;
-        const h = Math.abs(base - y);
-        if (h < minPx) return;
-        const midY = (y + base) / 2;
-        const text = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-        ctx.save();
-        ctx.font = cfg?.font ?? "bold 11px system-ui,-apple-system,sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = cfg?.color ?? "rgba(255,255,255,0.96)";
-        ctx.shadowColor = "rgba(0,0,0,0.45)";
-        ctx.shadowBlur = 3;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 1;
-        ctx.fillText(text, x, midY);
-        ctx.restore();
-      });
-    });
-  },
-};
+const FISCAL_CHART_COLORS = [
+  "#025B64",
+  "#00D47E",
+  "#F5A524",
+  "#1976d2",
+  "#ed6c02",
+  "#2e7d32",
+  "#3B82F6",
+  "#6B7280",
+];
+
+/** Row ids whose table values are in millions (vs integer receipts/payments). */
+const FISCAL_MIL_ROW_IDS = new Set([
+  "fiscal-income",
+  "fiscal-govt",
+  "fiscal-paf",
+  "fiscal-ahq",
+  "fiscal-rac",
+  "fiscal-base",
+]);
+
+const FISCAL_CHART_TITLE = "KPI Analytics by fiscal year";
 
 function formatFiscalCell(value) {
   if (value === "—" || value === null || value === undefined) return "—";
@@ -88,11 +73,28 @@ function fiscalRowMil(row, fieldKey) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function formatFiscalChartValue(value, rowId) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  if (FISCAL_MIL_ROW_IDS.has(rowId)) return formatKpiMoneyLabel(n);
+  return n.toLocaleString();
+}
+
+function rowHasNumericFiscalData(row, periods) {
+  return periods.some((p) => isNumericFiscalValue(row[p.fieldKey]));
+}
+
 function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loading }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const cardRef = useRef(null);
 
   const periods = fiscalPeriods || [];
+
+  const fiscalCardSx = useMemo(() => {
+    const { height: _height, ...rest } = getEnterpriseCardSx();
+    return rest;
+  }, []);
 
   const handleExport = useCallback(() => {
     const exportRows = rows.map((r) => {
@@ -108,28 +110,39 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
     XLSX.writeFile(wb, `Fiscal-KPIs-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }, [rows, periods]);
 
-  const cardSx = getEnterpriseCardSx();
   const headerBg = darkMode ? "rgba(255,255,255,0.06)" : "#f4f6f8";
   const stickyBg = darkMode ? "#1e1e1e" : "#ffffff";
   const rowBorder = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const tableShellBorder = darkMode ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
 
-  /** Fixed widths so `table-layout: fixed` keeps header and body cells aligned. */
-  const kpiColWidthPx = 212;
-  const fiscalPeriodColWidthPx = 96;
-  const tableWidthPx = kpiColWidthPx + periods.length * fiscalPeriodColWidthPx;
+  /** Min widths for horizontal scroll; % widths stretch the grid to fill the card. */
+  const kpiColMinPx = 212;
+  const fiscalPeriodColMinPx = 96;
+  const tableMinWidthPx = kpiColMinPx + periods.length * fiscalPeriodColMinPx;
+  const kpiColWidthPct = tableMinWidthPx > 0 ? (kpiColMinPx / tableMinWidthPx) * 100 : 100;
+  const fiscalColWidthPct =
+    periods.length > 0 && tableMinWidthPx > 0 ? (fiscalPeriodColMinPx / tableMinWidthPx) * 100 : 0;
 
   const kpiColWidthSx = {
-    width: kpiColWidthPx,
-    minWidth: kpiColWidthPx,
-    maxWidth: kpiColWidthPx,
+    width: `${kpiColWidthPct}%`,
+    minWidth: kpiColMinPx,
     overflow: "hidden",
   };
 
   const fiscalPeriodColSx = {
-    width: fiscalPeriodColWidthPx,
-    minWidth: fiscalPeriodColWidthPx,
-    maxWidth: fiscalPeriodColWidthPx,
+    width: `${fiscalColWidthPct}%`,
+    minWidth: fiscalPeriodColMinPx,
+    overflow: "hidden",
+  };
+
+  /** Header cells follow colgroup % only — minWidth on th breaks full-width stretch. */
+  const kpiHeaderColSx = {
+    width: `${kpiColWidthPct}%`,
+    overflow: "hidden",
+  };
+
+  const fiscalHeaderColSx = {
+    width: `${fiscalColWidthPct}%`,
     overflow: "hidden",
   };
 
@@ -143,10 +156,13 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
   };
 
   const stickyHeaderSx = {
-    ...stickyCellSx,
+    position: "sticky",
+    left: 0,
     zIndex: 4,
     backgroundColor: headerBg,
     fontWeight: 700,
+    ...kpiHeaderColSx,
+    borderRight: darkMode ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
   };
 
   /** Compact padding — shared by header and body so columns stay aligned. */
@@ -178,37 +194,26 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
   const textColor = darkMode ? "#e8e8e8" : "#344767";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
 
-  const shareStackChartData = useMemo(() => {
-    const ahq = rows.find((r) => r.id === "fiscal-ahq");
-    const rac = rows.find((r) => r.id === "fiscal-rac");
-    const base = rows.find((r) => r.id === "fiscal-base");
+  const fiscalTableChartData = useMemo(() => {
+    const chartRows = rows.filter((row) => rowHasNumericFiscalData(row, periods));
     return {
       labels: periods.map((p) => p.headerLabel),
-      datasets: [
-        {
-          label: "AHQ Share",
-          data: periods.map((p) => fiscalRowMil(ahq, p.fieldKey)),
-          backgroundColor: "#1976d2",
-          borderRadius: 2,
-        },
-        {
-          label: "RAC Share",
-          data: periods.map((p) => fiscalRowMil(rac, p.fieldKey)),
-          backgroundColor: "#ed6c02",
-          borderRadius: 2,
-        },
-        {
-          label: "Base Share",
-          data: periods.map((p) => fiscalRowMil(base, p.fieldKey)),
-          backgroundColor: "#2e7d32",
-          borderRadius: 2,
-        },
-      ],
+      datasets: chartRows.map((row, idx) => ({
+        label: row.kpiName,
+        fiscalRowId: row.id,
+        data: periods.map((p) => fiscalRowMil(row, p.fieldKey)),
+        backgroundColor: FISCAL_CHART_COLORS[idx % FISCAL_CHART_COLORS.length],
+        borderRadius: 2,
+        yAxisID: FISCAL_MIL_ROW_IDS.has(row.id) ? "y" : "y1",
+      })),
     };
   }, [rows, periods]);
 
-  const shareStackChartOptions = useMemo(
-    () => ({
+  const fiscalTableChartOptions = useMemo(() => {
+    const hasMilSeries = fiscalTableChartData.datasets.some((d) => d.yAxisID === "y");
+    const hasCountSeries = fiscalTableChartData.datasets.some((d) => d.yAxisID === "y1");
+
+    return {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: "x",
@@ -222,23 +227,14 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           mode: "index",
           intersect: false,
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: ${formatKpiMoneyLabel(Number(ctx.raw) || 0)}`,
-            footer: (items) => {
-              const sum = items.reduce((a, it) => a + (Number(it.raw) || 0), 0);
-              return `Total: ${formatKpiMoneyLabel(sum)}`;
-            },
+            label: (ctx) =>
+              `${ctx.dataset.label}: ${formatFiscalChartValue(ctx.raw, ctx.dataset.fiscalRowId)}`,
           },
-        },
-        fiscalShareStackLabels: {
-          enabled: true,
-          minSegmentPx: 14,
-          color: darkMode ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.98)",
-          font: "bold 11px system-ui,-apple-system,sans-serif",
         },
       },
       scales: {
         x: {
-          stacked: true,
+          stacked: false,
           grid: { color: gridColor },
           ticks: { color: textColor, maxRotation: 45, minRotation: 0 },
           title: {
@@ -249,171 +245,161 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           },
         },
         y: {
-          stacked: true,
+          display: hasMilSeries,
+          stacked: false,
           beginAtZero: true,
+          position: "left",
           grid: { color: gridColor },
           ticks: { color: textColor },
           title: {
-            display: true,
+            display: hasMilSeries,
             text: "Amount (M. / B.)",
             color: textColor,
             font: { size: 12, weight: "600" },
           },
         },
+        y1: {
+          display: hasCountSeries,
+          stacked: false,
+          beginAtZero: true,
+          position: "right",
+          grid: { drawOnChartArea: false, color: gridColor },
+          ticks: { color: textColor },
+          title: {
+            display: hasCountSeries,
+            text: "Receipts / Payments",
+            color: textColor,
+            font: { size: 12, weight: "600" },
+          },
+        },
       },
-    }),
-    [darkMode, gridColor, textColor]
-  );
+    };
+  }, [darkMode, fiscalTableChartData.datasets, gridColor, textColor]);
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+
+    if (!expanded) {
+      const scrollHost = card.closest(".saas-workspace-grid-host");
+      if (scrollHost) {
+        const cardTop = card.offsetTop;
+        if (scrollHost.scrollTop > cardTop) {
+          scrollHost.scrollTop = Math.max(0, cardTop - 8);
+        }
+      }
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded]);
 
   return (
-    <Card sx={{ ...cardSx, overflow: "hidden" }}>
+    <Card
+      ref={cardRef}
+      className="erp-fiscal-kpi-grid-card"
+      sx={{
+        ...fiscalCardSx,
+        overflow: "hidden",
+        height: "auto",
+        minHeight: 0,
+        flex: "0 0 auto",
+        flexGrow: 0,
+        alignSelf: "flex-start",
+        justifyContent: "flex-start",
+        width: "100%",
+      }}
+    >
       <MDBox
         display="flex"
         alignItems="center"
         justifyContent="space-between"
+        gap={1}
         px={2}
         py={1.5}
-        sx={{ cursor: "pointer" }}
-        onClick={onToggleExpanded}
       >
         <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
           KPI Analytics — Fiscal Years
         </MDTypography>
-        <IconButton size="small" aria-label="toggle analytics grid">
-          <Icon>{expanded ? "expand_less" : "expand_more"}</Icon>
-        </IconButton>
-      </MDBox>
-      <Collapse in={expanded}>
-        <MDBox px={2} pb={1} display="flex" justifyContent="flex-end">
-          <MDButton variant="outlined" color="info" size="small" onClick={handleExport}>
+        {expanded ? (
+          <MDButton
+            variant="outlined"
+            color="info"
+            size="small"
+            onClick={handleExport}
+            sx={{ flexShrink: 0 }}
+          >
             <Icon sx={{ mr: 0.5, fontSize: "1rem !important" }}>download</Icon>
             Export Excel
           </MDButton>
-        </MDBox>
-        <TableContainer
-          sx={{
-            mx: 2,
-            mb: 2,
-            maxHeight: 400,
-            overflow: "auto",
-            borderRadius: 1.5,
-            border: `1px solid ${tableShellBorder}`,
-            bgcolor: darkMode ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.015)",
-          }}
-        >
-          {loading ? (
-            <MDBox display="flex" justifyContent="center" py={6}>
-              <CurrencyLoading size={40} />
-            </MDBox>
-          ) : (
-            <Table
-              stickyHeader
-              size="small"
-              sx={{
-                tableLayout: "fixed",
-                width: tableWidthPx,
-                minWidth: tableWidthPx,
-                "& .MuiTableCell-root": {
-                  boxSizing: "border-box",
-                  borderBottom: "none",
-                },
-                "& .MuiTableBody-root .MuiTableRow-root:last-child .MuiTableCell-root": {
-                  borderBottom: "none",
-                },
-              }}
-            >
-              <colgroup>
-                <col style={{ width: kpiColWidthPx }} />
-                {periods.map((p) => (
-                  <col key={p.fieldKey} style={{ width: fiscalPeriodColWidthPx }} />
-                ))}
-              </colgroup>
-              <TableHead>
-                <TableRow>
-                  <TableCell
-                    sx={{
-                      ...stickyHeaderSx,
-                      ...kpiColPad,
-                      verticalAlign: "middle",
-                      textAlign: "left",
-                      borderBottom: `1px solid ${rowBorder}`,
-                    }}
-                  >
-                    <MDTypography
-                      component="span"
-                      variant="caption"
-                      fontWeight="bold"
-                      color={darkMode ? "white" : "dark"}
-                      sx={{
-                        display: "block",
-                        fontSize: "0.75rem",
-                        lineHeight: 1.2,
-                        letterSpacing: "0.02em",
-                        textTransform: "uppercase",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      KPI
-                    </MDTypography>
-                  </TableCell>
+        ) : null}
+      </MDBox>
+      {expanded ? (
+        <>
+          <TableContainer
+            className="erp-fiscal-kpi-table-shell"
+            sx={{
+              mx: 2,
+              mb: 2,
+              width: "calc(100% - 32px)",
+              maxHeight: 400,
+              overflow: "auto",
+              borderRadius: 1.5,
+              border: `1px solid ${tableShellBorder}`,
+              bgcolor: darkMode ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.015)",
+            }}
+          >
+            {loading ? (
+              <MDBox display="flex" justifyContent="center" py={6}>
+                <CurrencyLoading size={40} />
+              </MDBox>
+            ) : (
+              <Table
+                stickyHeader
+                size="small"
+                className="erp-fiscal-kpi-table"
+                sx={{
+                  tableLayout: "fixed",
+                  width: "100%",
+                  minWidth: tableMinWidthPx,
+                  "& .MuiTableHead-root": {
+                    display: "table-header-group",
+                    padding: 0,
+                    width: "100%",
+                  },
+                  "& .MuiTableHead-root .MuiTableRow-root": {
+                    display: "table-row",
+                    width: "100%",
+                  },
+                  "& .MuiTableHead-root .MuiTableCell-root": {
+                    display: "table-cell",
+                  },
+                  "& .MuiTableBody-root": {
+                    display: "table-row-group",
+                    width: "100%",
+                  },
+                  "& .MuiTableCell-root": {
+                    boxSizing: "border-box",
+                    borderBottom: "none",
+                  },
+                  "& .MuiTableBody-root .MuiTableRow-root:last-child .MuiTableCell-root": {
+                    borderBottom: "none",
+                  },
+                }}
+              >
+                <colgroup>
+                  <col style={{ width: `${kpiColWidthPct}%` }} />
                   {periods.map((p) => (
-                    <TableCell
-                      key={p.fieldKey}
-                      sx={{ ...fiscalNumericHeaderSx, ...fiscalPeriodColSx }}
-                    >
-                      <MDTypography
-                        component="span"
-                        variant="caption"
-                        fontWeight="bold"
-                        color={darkMode ? "white" : "dark"}
-                        sx={{
-                          display: "block",
-                          width: "100%",
-                          m: 0,
-                          textAlign: "right",
-                          fontSize: "0.75rem",
-                          lineHeight: 1.2,
-                          fontVariantNumeric: "tabular-nums",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {p.headerLabel}
-                      </MDTypography>
-                    </TableCell>
+                    <col key={p.fieldKey} style={{ width: `${fiscalColWidthPct}%` }} />
                   ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    hover
-                    sx={{
-                      "&:nth-of-type(even) td": {
-                        backgroundColor: darkMode ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.02)",
-                      },
-                      "&:nth-of-type(even) td:first-of-type": {
-                        backgroundColor: darkMode ? "#1e1e1e" : "#fafbfc",
-                      },
-                      "&:hover td": {
-                        backgroundColor: darkMode
-                          ? "rgba(25,118,210,0.12)"
-                          : "rgba(25,118,210,0.06)",
-                      },
-                      "&:hover td:first-of-type": {
-                        backgroundColor: darkMode
-                          ? "rgba(25,118,210,0.12)"
-                          : "rgba(25,118,210,0.06)",
-                      },
-                    }}
-                  >
+                </colgroup>
+                <TableHead>
+                  <TableRow>
                     <TableCell
                       sx={{
-                        ...stickyCellSx,
+                        ...stickyHeaderSx,
                         ...kpiColPad,
                         verticalAlign: "middle",
                         textAlign: "left",
@@ -423,94 +409,173 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
                       <MDTypography
                         component="span"
                         variant="caption"
-                        fontWeight="medium"
+                        fontWeight="bold"
                         color={darkMode ? "white" : "dark"}
                         sx={{
                           display: "block",
-                          m: 0,
-                          fontSize: "0.8125rem",
+                          fontSize: "0.75rem",
                           lineHeight: 1.2,
+                          letterSpacing: "0.02em",
+                          textTransform: "uppercase",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {row.kpiName}
+                        KPI
                       </MDTypography>
                     </TableCell>
-                    {periods.map((p) => {
-                      const raw = row[p.fieldKey];
-                      const numeric = isNumericFiscalValue(raw);
-                      const display = formatFiscalCell(raw);
-                      return (
-                        <TableCell
-                          key={p.fieldKey}
-                          sx={{ ...fiscalNumericBodySx, ...fiscalPeriodColSx }}
+                    {periods.map((p) => (
+                      <TableCell
+                        key={p.fieldKey}
+                        sx={{ ...fiscalNumericHeaderSx, ...fiscalHeaderColSx }}
+                      >
+                        <MDTypography
+                          component="span"
+                          variant="caption"
+                          fontWeight="bold"
+                          color={darkMode ? "white" : "dark"}
+                          sx={{
+                            display: "block",
+                            width: "100%",
+                            m: 0,
+                            textAlign: "right",
+                            fontSize: "0.75rem",
+                            lineHeight: 1.2,
+                            fontVariantNumeric: "tabular-nums",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
                         >
-                          <MDTypography
-                            component="span"
-                            variant="caption"
-                            fontWeight={numeric ? "bold" : "regular"}
-                            color={numeric ? (darkMode ? "white" : "dark") : "text"}
-                            sx={{
-                              display: "block",
-                              width: "100%",
-                              m: 0,
-                              textAlign: "right",
-                              fontSize: "0.8125rem",
-                              lineHeight: 1.2,
-                              fontVariantNumeric: "tabular-nums",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {display}
-                          </MDTypography>
-                        </TableCell>
-                      );
-                    })}
+                          {p.headerLabel}
+                        </MDTypography>
+                      </TableCell>
+                    ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      hover
+                      sx={{
+                        "&:nth-of-type(even) td": {
+                          backgroundColor: darkMode ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.02)",
+                        },
+                        "&:nth-of-type(even) td:first-of-type": {
+                          backgroundColor: darkMode ? "#1e1e1e" : "#fafbfc",
+                        },
+                        "&:hover td": {
+                          backgroundColor: darkMode
+                            ? "rgba(25,118,210,0.12)"
+                            : "rgba(25,118,210,0.06)",
+                        },
+                        "&:hover td:first-of-type": {
+                          backgroundColor: darkMode
+                            ? "rgba(25,118,210,0.12)"
+                            : "rgba(25,118,210,0.06)",
+                        },
+                      }}
+                    >
+                      <TableCell
+                        sx={{
+                          ...stickyCellSx,
+                          ...kpiColPad,
+                          verticalAlign: "middle",
+                          textAlign: "left",
+                          borderBottom: `1px solid ${rowBorder}`,
+                        }}
+                      >
+                        <MDTypography
+                          component="span"
+                          variant="caption"
+                          fontWeight="medium"
+                          color={darkMode ? "white" : "dark"}
+                          sx={{
+                            display: "block",
+                            m: 0,
+                            fontSize: "0.8125rem",
+                            lineHeight: 1.2,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.kpiName}
+                        </MDTypography>
+                      </TableCell>
+                      {periods.map((p) => {
+                        const raw = row[p.fieldKey];
+                        const numeric = isNumericFiscalValue(raw);
+                        const display = formatFiscalCell(raw);
+                        return (
+                          <TableCell
+                            key={p.fieldKey}
+                            sx={{ ...fiscalNumericBodySx, ...fiscalPeriodColSx }}
+                          >
+                            <MDTypography
+                              component="span"
+                              variant="caption"
+                              fontWeight={numeric ? "bold" : "regular"}
+                              color={numeric ? (darkMode ? "white" : "dark") : "text"}
+                              sx={{
+                                display: "block",
+                                width: "100%",
+                                m: 0,
+                                textAlign: "right",
+                                fontSize: "0.8125rem",
+                                lineHeight: 1.2,
+                                fontVariantNumeric: "tabular-nums",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {display}
+                            </MDTypography>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </TableContainer>
+          {!loading && periods.length > 0 && (
+            <MDBox
+              px={2}
+              pb={2}
+              pt={2.5}
+              mt={3}
+              sx={{
+                borderTop: `1px solid ${tableShellBorder}`,
+              }}
+            >
+              <MDBox display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                <MDTypography
+                  variant="button"
+                  fontWeight="bold"
+                  color={darkMode ? "white" : "dark"}
+                >
+                  {FISCAL_CHART_TITLE}
+                </MDTypography>
+                <ChartExportButton
+                  disabled={loading}
+                  ariaLabel="Export fiscal KPI chart to Excel"
+                  onExport={() =>
+                    exportGroupedBarChartDataToExcel(FISCAL_CHART_TITLE, fiscalTableChartData)
+                  }
+                />
+              </MDBox>
+              <MDBox height={280} sx={{ position: "relative" }}>
+                <Bar data={fiscalTableChartData} options={fiscalTableChartOptions} />
+              </MDBox>
+            </MDBox>
           )}
-        </TableContainer>
-        {!loading && periods.length > 0 && (
-          <MDBox
-            px={2}
-            pb={2}
-            pt={2.5}
-            mt={3}
-            sx={{
-              borderTop: `1px solid ${tableShellBorder}`,
-            }}
-          >
-            <MDBox display="flex" alignItems="center" justifyContent="space-between" mb={1}>
-              <MDTypography variant="button" fontWeight="bold" color={darkMode ? "white" : "dark"}>
-                AHQ / RAC / Base share by fiscal year (M.)
-              </MDTypography>
-              <ChartExportButton
-                disabled={loading}
-                ariaLabel="Export fiscal share chart to Excel"
-                onExport={() =>
-                  exportGroupedBarChartDataToExcel(
-                    "AHQ RAC Base share by fiscal year",
-                    shareStackChartData
-                  )
-                }
-              />
-            </MDBox>
-            <MDBox height={280} sx={{ position: "relative" }}>
-              <Bar
-                data={shareStackChartData}
-                options={shareStackChartOptions}
-                plugins={[fiscalShareStackLabelsPlugin]}
-              />
-            </MDBox>
-          </MDBox>
-        )}
-      </Collapse>
+        </>
+      ) : null}
     </Card>
   );
 }

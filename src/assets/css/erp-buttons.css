@@ -33,7 +33,7 @@ body.enterprise-ui .MuiButton-root.Mui-focusVisible {
 }
 
 body.enterprise-ui .MuiButton-root.Mui-disabled {
-  background-color: rgba(2, 91, 100, 0.4) !important;
+  background-color: var(--erp-btn-bg-disabled, rgba(2, 91, 100, 0.4)) !important;
   color: rgba(255, 255, 255, 0.7) !important;
   border-color: transparent !important;
   box-shadow: none !important;
