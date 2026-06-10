@@ -51,13 +51,13 @@ const SLIDES = [
   },
   {
     icon: "bi-building",
-    title: "Tower Asset<br>Management",
+    title: "BTS Tower<br>Management",
     desc: "Monitor tower assets and infrastructure revenue.",
   },
   {
     icon: "bi-map",
-    title: "Vacant Plot<br>Management",
-    desc: "Track vacant plots, ownership and development plans.",
+    title: "Shops<br>Management",
+    desc: "Shops and Stores Rental Management.",
   },
 ];
 
@@ -244,6 +244,7 @@ function A1Login() {
       ).trim();
       const routeByMenu = {
         Configuration: "/configuration/class",
+        "Sales Agreements": "/contracts/tenants",
         "Contracts Mgmt": "/contracts/tenants",
         Accounts: "/accounts/bank-account",
       };
@@ -400,7 +401,9 @@ function A1Login() {
               </button>
             </form>
 
-            <div className="company">Dte. of CNPF / Audit & Accounts Sub Branch</div>
+            <div className="company">
+              Directorate of Central Non Public Fund / Audit & Accounts Sub Branch
+            </div>
           </div>
         </div>
       </div>

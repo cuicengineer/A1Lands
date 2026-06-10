@@ -2,6 +2,8 @@
  * Executive / flat Chart.js configs for ERP dashboard (Stripe / Linear style).
  */
 
+import { nullIfZeroChartBarValue } from "utils/chartBarDataUtils";
+
 const GRID_COLOR = "rgba(0, 0, 0, 0.06)";
 const TICK_COLOR = "#6b7280";
 export const CHART_PRIMARY = "#025B64";
@@ -17,6 +19,7 @@ function hexToRgba(hex, alpha) {
 }
 
 const tickFont = { size: 11, family: "Inter, Helvetica, Arial, sans-serif" };
+const xAxisTickFont = { ...tickFont, weight: "bold" };
 
 function formatAxisValue(value) {
   if (value >= 1000000) {
@@ -35,7 +38,7 @@ export function executiveBarConfigs(labels, datasets, { color = CHART_PRIMARY } 
       datasets: [
         {
           label: datasets.label,
-          data: datasets.data,
+          data: (datasets.data || []).map((value) => nullIfZeroChartBarValue(value)),
           backgroundColor,
           borderRadius: 6,
           borderSkipped: false,
@@ -63,7 +66,7 @@ export function executiveBarConfigs(labels, datasets, { color = CHART_PRIMARY } 
         },
         x: {
           grid: { display: false, drawBorder: false },
-          ticks: { color: TICK_COLOR, font: tickFont, padding: 8 },
+          ticks: { color: TICK_COLOR, font: xAxisTickFont, padding: 8 },
         },
       },
     },

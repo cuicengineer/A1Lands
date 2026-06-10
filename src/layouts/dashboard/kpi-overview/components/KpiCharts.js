@@ -31,6 +31,11 @@ import {
   SHARE_DISTRIBUTION_CLASS_OPTIONS,
 } from "../kpiDataUtils";
 import ChartExportButton from "./ChartExportButton";
+import { coerceChartDataValue, nullIfZeroChartBarValue } from "utils/chartBarDataUtils";
+import {
+  applyKpiZoomBarChartEnhancements,
+  applyKpiZoomDonutChartEnhancements,
+} from "./kpiZoomChartEnhancements";
 import {
   exportDonutChartDataToExcel,
   exportGroupedBarChartDataToExcel,
@@ -96,10 +101,28 @@ function buildGroupedBarData(cards, series) {
     labels: cards.map((a) => a.label),
     datasets: series.map((s) => ({
       label: s.label,
-      data: cards.map((a) => Number(a.mil?.[s.milKey]) || 0),
+      data: cards.map((a) => nullIfZeroChartBarValue(a.mil?.[s.milKey])),
       backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
       borderRadius: 6,
       maxBarThickness: 16,
+    })),
+  };
+}
+
+/** One bar per category with Govt + PAF as stacked shaded segments. */
+function buildGovtPafStackedBarData(cards) {
+  const base = buildGroupedBarData(cards, GOVT_PAF_SERIES);
+  const lastIdx = base.datasets.length - 1;
+  return {
+    labels: base.labels,
+    datasets: base.datasets.map((ds, idx) => ({
+      ...ds,
+      maxBarThickness: 36,
+      borderSkipped: false,
+      borderRadius:
+        idx === lastIdx
+          ? { topLeft: 6, topRight: 6, bottomLeft: 0, bottomRight: 0 }
+          : { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 },
     })),
   };
 }
@@ -146,7 +169,7 @@ function buildShareDonutChart(shareItems, shareIds, darkMode) {
   };
 }
 
-function ChartZoomSurface({ enabled, onZoom, children, darkMode }) {
+export function ChartZoomSurface({ enabled, onZoom, children, darkMode }) {
   if (!enabled) {
     return children;
   }
@@ -237,7 +260,7 @@ function KpiCharts({
 
   const groupedBarData = useMemo(() => buildGroupedBarData(cards, CATEGORY_SERIES), [cards]);
 
-  const govtPafBarData = useMemo(() => buildGroupedBarData(cards, GOVT_PAF_SERIES), [cards]);
+  const govtPafBarData = useMemo(() => buildGovtPafStackedBarData(cards), [cards]);
   const ahqRacBaseBarData = useMemo(() => buildGroupedBarData(cards, AHQ_RAC_BASE_SERIES), [cards]);
 
   const textColor = darkMode ? "#e8e8e8" : "#344767";
@@ -268,7 +291,12 @@ function KpiCharts({
       x: {
         stacked: false,
         grid: { color: gridColor },
-        ticks: { color: textColor, maxRotation: 40, minRotation: 0 },
+        ticks: {
+          color: textColor,
+          maxRotation: 40,
+          minRotation: 0,
+          font: { size: 11, weight: "bold" },
+        },
       },
       y: {
         stacked: false,
@@ -286,48 +314,114 @@ function KpiCharts({
         mode: "index",
         intersect: false,
         callbacks: {
-          label: (ctx) => `${ctx.dataset.label}: ${formatKpiMoneyLabel(Number(ctx.raw) || 0)}`,
+          label: (ctx) => {
+            const n = coerceChartDataValue(ctx.raw);
+            if (n == null || n === 0) return null;
+            return `${ctx.dataset.label}: ${formatKpiMoneyLabel(n)}`;
+          },
         },
       },
     },
   };
 
+  const stackedBarOptions = useMemo(
+    () => ({
+      ...groupedBarOptions,
+      scales: {
+        x: { ...groupedBarOptions.scales.x, stacked: true },
+        y: { ...groupedBarOptions.scales.y, stacked: true },
+      },
+    }),
+    [textColor, gridColor]
+  );
+
   const cardSx = getEnterpriseCardSx();
   const zoomEnabled = Boolean(chartZoomOnClick) && !loading;
 
   const zoomedBarOptions = useMemo(
-    () => ({
-      ...groupedBarOptions,
-      plugins: {
-        ...groupedBarOptions.plugins,
-        legend: {
-          ...groupedBarOptions.plugins.legend,
-          labels: {
-            ...groupedBarOptions.plugins.legend.labels,
-            font: { size: 13 },
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...groupedBarOptions,
+          plugins: {
+            ...groupedBarOptions.plugins,
+            legend: {
+              ...groupedBarOptions.plugins.legend,
+              labels: {
+                ...groupedBarOptions.plugins.legend.labels,
+                font: { size: 13, weight: "600" },
+              },
+            },
           },
         },
-      },
-    }),
-    [groupedBarOptions]
+        {
+          darkMode,
+          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
+          fontSize: 13,
+        }
+      ),
+    [groupedBarOptions, darkMode]
+  );
+
+  const zoomedGovtPafBarOptions = useMemo(
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...stackedBarOptions,
+          plugins: {
+            ...stackedBarOptions.plugins,
+            legend: {
+              ...stackedBarOptions.plugins.legend,
+              labels: {
+                ...stackedBarOptions.plugins.legend.labels,
+                font: { size: 13, weight: "600" },
+              },
+            },
+          },
+        },
+        {
+          darkMode,
+          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          tooltipCallbacks: stackedBarOptions.plugins.tooltip.callbacks,
+          fontSize: 13,
+        }
+      ),
+    [stackedBarOptions, darkMode]
   );
 
   const makeZoomedDonutOptions = useCallback(
-    (donut) => ({
-      ...donut.options,
-      plugins: {
-        ...donut.options.plugins,
-        legend: {
-          ...donut.options.plugins.legend,
-          labels: {
-            ...donut.options.plugins.legend.labels,
-            font: { size: 13 },
-            padding: 14,
+    (donut) => {
+      const values = donut.data?.datasets?.[0]?.data || [];
+      const sumTotal = values.reduce((a, b) => a + (coerceChartDataValue(b) ?? 0), 0) || 1;
+      return applyKpiZoomDonutChartEnhancements(
+        {
+          ...donut.options,
+          plugins: {
+            ...donut.options.plugins,
+            legend: {
+              ...donut.options.plugins.legend,
+              labels: {
+                ...donut.options.plugins.legend.labels,
+                font: { size: 13, weight: "600" },
+                padding: 14,
+              },
+            },
           },
         },
-      },
-    }),
-    []
+        {
+          darkMode,
+          formatValue: (value) => {
+            const n = coerceChartDataValue(value) ?? 0;
+            const pct = ((n / sumTotal) * 100).toFixed(1);
+            return `${formatKpiMoneyLabel(n)}\n${pct}%`;
+          },
+          tooltipCallbacks: donut.options.plugins?.tooltip?.callbacks,
+          fontSize: 12,
+        }
+      );
+    },
+    [darkMode]
   );
 
   const zoomDialogConfig = useMemo(() => {
@@ -348,7 +442,7 @@ function KpiCharts({
         title: "Govt & PAF share by category (M)",
         type: "bar",
         data: govtPafBarData,
-        options: zoomedBarOptions,
+        options: zoomedGovtPafBarOptions,
       },
       [ZOOM_CHART.govtPafDonut]: {
         title: "Govt & PAF share distribution",
@@ -379,6 +473,7 @@ function KpiCharts({
     ahqRacBaseBarData,
     ahqRacBaseDonutChart,
     zoomedBarOptions,
+    zoomedGovtPafBarOptions,
     makeZoomedDonutOptions,
   ]);
 
@@ -403,7 +498,7 @@ function KpiCharts({
     </FormControl>
   );
 
-  const renderBarCard = (title, barData, zoomKey) => (
+  const renderBarCard = (title, barData, zoomKey, barOptions = groupedBarOptions) => (
     <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
       <MDBox display="flex" alignItems="center" justifyContent="space-between" gap={0.5} mb={1}>
         <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
@@ -421,7 +516,7 @@ function KpiCharts({
           darkMode={darkMode}
           onZoom={() => setZoomChart(zoomKey)}
         >
-          <Bar data={barData} options={groupedBarOptions} />
+          <Bar data={barData} options={barOptions} />
         </ChartZoomSurface>
       </MDBox>
     </Card>
@@ -475,7 +570,8 @@ function KpiCharts({
               {renderBarCard(
                 "Govt & PAF share by category (M)",
                 govtPafBarData,
-                ZOOM_CHART.govtPafBar
+                ZOOM_CHART.govtPafBar,
+                stackedBarOptions
               )}
             </Grid>
             <Grid item xs={12} md={6}>

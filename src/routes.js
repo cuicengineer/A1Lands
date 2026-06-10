@@ -61,6 +61,8 @@ import PropertyType from "layouts/configuration/property-type/property-type";
 import BanksList from "layouts/configuration/banks-list/banks-list";
 import LockDateConfig from "layouts/configuration/lock-date/lock-date";
 import AccountingSysConfig from "layouts/configuration/accounting-sys/accounting-sys";
+import ChartOfAccounts from "layouts/configuration/chart-of-accounts/chart-of-accounts";
+import IncomeStatement from "layouts/configuration/income-statement/income-statement";
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
@@ -245,6 +247,22 @@ const routes = [
         route: "/configuration/accounting-sys",
         component: <AccountingSysConfig />,
       },
+      {
+        type: "collapse",
+        name: "Chart of Accounts",
+        key: "configuration-chart-of-accounts",
+        icon: <Icon fontSize="small">account_tree</Icon>,
+        route: "/configuration/chart-of-accounts",
+        component: <ChartOfAccounts />,
+      },
+      {
+        type: "collapse",
+        name: "Income Statement",
+        key: "configuration-income-statement",
+        icon: <Icon fontSize="small">trending_up</Icon>,
+        route: "/configuration/income-statement",
+        component: <IncomeStatement />,
+      },
       // {
       //   type: "collapse",
       //   name: "Profit Sharing",
@@ -263,7 +281,7 @@ const routes = [
   },
   {
     type: "collapse",
-    name: "Contracts Mgmt",
+    name: "Sales Agreements",
     key: "contracts-mgmt",
     icon: <Icon fontSize="small">description</Icon>,
     collapse: [

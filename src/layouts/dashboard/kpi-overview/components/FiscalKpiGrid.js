@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { Bar } from "react-chartjs-2";
 import {
@@ -10,6 +10,9 @@ import {
   Legend,
 } from "chart.js";
 import Card from "@mui/material/Card";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
 import IconButton from "@mui/material/IconButton";
 import Icon from "@mui/material/Icon";
 import Table from "@mui/material/Table";
@@ -24,12 +27,42 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import { useMaterialUIController } from "context";
-import { getEnterpriseCardSx } from "./KpiCharts";
+import { ChartZoomSurface, getEnterpriseCardSx } from "./KpiCharts";
 import ChartExportButton from "./ChartExportButton";
+import {
+  coerceChartDataValue,
+  nullIfZeroChartBarValue,
+  withCompactGroupedBarDatasets,
+  COMPACT_GROUPED_BAR_OPTIONS,
+} from "utils/chartBarDataUtils";
+import { applyKpiZoomBarChartEnhancements } from "./kpiZoomChartEnhancements";
 import { exportGroupedBarChartDataToExcel } from "utils/kpiChartExcelExport";
 import { formatKpiMoneyLabel } from "../kpiDataUtils";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+/** Ensures null/zero grouped bars never reserve width (legend-uncheck style layout). */
+const fiscalGroupedBarCompactPlugin = {
+  id: "fiscalGroupedBarCompact",
+  beforeUpdate(chart) {
+    const barDefaults = chart.options?.datasets?.bar || {};
+    chart.data.datasets.forEach((dataset) => {
+      dataset.skipNull = true;
+      dataset.grouped = true;
+      if (dataset.barThickness == null) dataset.barThickness = "flex";
+      if (dataset.maxBarThickness == null) {
+        dataset.maxBarThickness = barDefaults.maxBarThickness ?? 20;
+      }
+    });
+  },
+};
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+  Legend,
+  fiscalGroupedBarCompactPlugin
+);
 
 const FISCAL_CHART_COLORS = [
   "#025B64",
@@ -74,8 +107,8 @@ function fiscalRowMil(row, fieldKey) {
 }
 
 function formatFiscalChartValue(value, rowId) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  const n = coerceChartDataValue(value);
+  if (n == null) return "—";
   if (FISCAL_MIL_ROW_IDS.has(rowId)) return formatKpiMoneyLabel(n);
   return n.toLocaleString();
 }
@@ -84,10 +117,34 @@ function rowHasNumericFiscalData(row, periods) {
   return periods.some((p) => isNumericFiscalValue(row[p.fieldKey]));
 }
 
-function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loading }) {
+function fiscalPeriodHasNonZeroChartValue(chartRows, period) {
+  return chartRows.some((row) => {
+    const n = coerceChartDataValue(fiscalRowMil(row, period.fieldKey));
+    return n != null && n !== 0;
+  });
+}
+
+function fiscalRowHasNonZeroInPeriods(row, activePeriods) {
+  return activePeriods.some((period) => {
+    const n = coerceChartDataValue(fiscalRowMil(row, period.fieldKey));
+    return n != null && n !== 0;
+  });
+}
+
+function FiscalKpiGrid({
+  rows,
+  fiscalPeriods,
+  expanded,
+  onToggleExpanded,
+  loading,
+  chartZoomOnClick = true,
+}) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const cardRef = useRef(null);
+  const [chartZoomOpen, setChartZoomOpen] = useState(false);
+
+  const closeChartZoom = useCallback(() => setChartZoomOpen(false), []);
 
   const periods = fiscalPeriods || [];
 
@@ -196,28 +253,35 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
 
   const fiscalTableChartData = useMemo(() => {
     const chartRows = rows.filter((row) => rowHasNumericFiscalData(row, periods));
+    const activePeriods = periods.filter((p) => fiscalPeriodHasNonZeroChartValue(chartRows, p));
+    const activeChartRows = chartRows.filter((row) =>
+      fiscalRowHasNonZeroInPeriods(row, activePeriods)
+    );
+
     return {
-      labels: periods.map((p) => p.headerLabel),
-      datasets: chartRows.map((row, idx) => ({
-        label: row.kpiName,
-        fiscalRowId: row.id,
-        data: periods.map((p) => fiscalRowMil(row, p.fieldKey)),
-        backgroundColor: FISCAL_CHART_COLORS[idx % FISCAL_CHART_COLORS.length],
-        borderRadius: 2,
-        yAxisID: FISCAL_MIL_ROW_IDS.has(row.id) ? "y" : "y1",
-      })),
+      labels: activePeriods.map((p) => p.headerLabel),
+      datasets: withCompactGroupedBarDatasets(
+        activeChartRows.map((row, idx) => ({
+          label: row.kpiName,
+          fiscalRowId: row.id,
+          data: activePeriods.map((p) => nullIfZeroChartBarValue(fiscalRowMil(row, p.fieldKey))),
+          backgroundColor: FISCAL_CHART_COLORS[idx % FISCAL_CHART_COLORS.length],
+          borderRadius: 2,
+          yAxisID: "y",
+        }))
+      ),
     };
   }, [rows, periods]);
 
   const fiscalTableChartOptions = useMemo(() => {
-    const hasMilSeries = fiscalTableChartData.datasets.some((d) => d.yAxisID === "y");
-    const hasCountSeries = fiscalTableChartData.datasets.some((d) => d.yAxisID === "y1");
+    const hasChartData = fiscalTableChartData.datasets.length > 0;
 
     return {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: "x",
       interaction: { mode: "index", intersect: false },
+      ...COMPACT_GROUPED_BAR_OPTIONS,
       plugins: {
         legend: {
           position: "bottom",
@@ -227,8 +291,11 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           mode: "index",
           intersect: false,
           callbacks: {
-            label: (ctx) =>
-              `${ctx.dataset.label}: ${formatFiscalChartValue(ctx.raw, ctx.dataset.fiscalRowId)}`,
+            label: (ctx) => {
+              const n = coerceChartDataValue(ctx.raw);
+              if (n == null || n === 0) return null;
+              return `${ctx.dataset.label}: ${formatFiscalChartValue(n, ctx.dataset.fiscalRowId)}`;
+            },
           },
         },
       },
@@ -236,7 +303,12 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
         x: {
           stacked: false,
           grid: { color: gridColor },
-          ticks: { color: textColor, maxRotation: 45, minRotation: 0 },
+          ticks: {
+            color: textColor,
+            maxRotation: 45,
+            minRotation: 0,
+            font: { size: 11, weight: "bold" },
+          },
           title: {
             display: true,
             text: "Fiscal year",
@@ -245,29 +317,15 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
           },
         },
         y: {
-          display: hasMilSeries,
+          display: hasChartData,
           stacked: false,
           beginAtZero: true,
           position: "left",
           grid: { color: gridColor },
           ticks: { color: textColor },
           title: {
-            display: hasMilSeries,
+            display: hasChartData,
             text: "Amount (M. / B.)",
-            color: textColor,
-            font: { size: 12, weight: "600" },
-          },
-        },
-        y1: {
-          display: hasCountSeries,
-          stacked: false,
-          beginAtZero: true,
-          position: "right",
-          grid: { drawOnChartArea: false, color: gridColor },
-          ticks: { color: textColor },
-          title: {
-            display: hasCountSeries,
-            text: "Receipts / Payments",
             color: textColor,
             font: { size: 12, weight: "600" },
           },
@@ -275,6 +333,39 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
       },
     };
   }, [darkMode, fiscalTableChartData.datasets, gridColor, textColor]);
+
+  const fiscalZoomedChartOptions = useMemo(
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...fiscalTableChartOptions,
+          plugins: {
+            ...fiscalTableChartOptions.plugins,
+            legend: {
+              ...fiscalTableChartOptions.plugins.legend,
+              labels: {
+                ...fiscalTableChartOptions.plugins.legend.labels,
+                font: { size: 13, weight: "600" },
+              },
+            },
+          },
+        },
+        {
+          darkMode,
+          formatValue: (value, ctx) =>
+            formatFiscalChartValue(value, ctx?.dataset?.fiscalRowId || ""),
+          tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
+          fontSize: 13,
+        }
+      ),
+    [fiscalTableChartOptions, darkMode]
+  );
+
+  const chartZoomEnabled =
+    Boolean(chartZoomOnClick) &&
+    !loading &&
+    periods.length > 0 &&
+    fiscalTableChartData.datasets.length > 0;
 
   useLayoutEffect(() => {
     const card = cardRef.current;
@@ -570,12 +661,76 @@ function FiscalKpiGrid({ rows, fiscalPeriods, expanded, onToggleExpanded, loadin
                 />
               </MDBox>
               <MDBox height={280} sx={{ position: "relative" }}>
-                <Bar data={fiscalTableChartData} options={fiscalTableChartOptions} />
+                <ChartZoomSurface
+                  enabled={chartZoomEnabled}
+                  darkMode={darkMode}
+                  onZoom={() => setChartZoomOpen(true)}
+                >
+                  <Bar data={fiscalTableChartData} options={fiscalTableChartOptions} />
+                </ChartZoomSurface>
               </MDBox>
             </MDBox>
           )}
         </>
       ) : null}
+
+      <Dialog
+        fullScreen
+        open={chartZoomOpen}
+        onClose={closeChartZoom}
+        PaperProps={{
+          sx: {
+            display: "flex",
+            flexDirection: "column",
+            m: 0,
+            height: "100%",
+            maxHeight: "100%",
+            borderRadius: 0,
+            bgcolor: darkMode ? "background.default" : "background.paper",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            pr: 1,
+            flexShrink: 0,
+          }}
+        >
+          <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+            {FISCAL_CHART_TITLE}
+          </MDTypography>
+          <MDBox display="flex" alignItems="center" gap={0.5}>
+            <ChartExportButton
+              disabled={loading}
+              ariaLabel={`Export ${FISCAL_CHART_TITLE} to Excel`}
+              onExport={() =>
+                exportGroupedBarChartDataToExcel(FISCAL_CHART_TITLE, fiscalTableChartData)
+              }
+            />
+            <IconButton onClick={closeChartZoom} size="small" aria-label="Close enlarged chart">
+              <Icon>close</Icon>
+            </IconButton>
+          </MDBox>
+        </DialogTitle>
+        <DialogContent
+          dividers
+          sx={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            overflow: "hidden",
+            p: { xs: 1.5, sm: 2 },
+          }}
+        >
+          <MDBox sx={{ flex: 1, minHeight: 0, width: "100%", position: "relative" }}>
+            <Bar data={fiscalTableChartData} options={fiscalZoomedChartOptions} />
+          </MDBox>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -592,10 +747,12 @@ FiscalKpiGrid.propTypes = {
   expanded: PropTypes.bool.isRequired,
   onToggleExpanded: PropTypes.func.isRequired,
   loading: PropTypes.bool,
+  chartZoomOnClick: PropTypes.bool,
 };
 
 FiscalKpiGrid.defaultProps = {
   loading: false,
+  chartZoomOnClick: true,
 };
 
 export default FiscalKpiGrid;

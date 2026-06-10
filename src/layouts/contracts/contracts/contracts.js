@@ -43,8 +43,11 @@ import api, {
   canCreateCurrentMenu,
   canEditCurrentMenu,
   canDeleteCurrentMenu,
+  canAddContractAnnotations,
   getActionBy,
+  getLoggedInUsername,
   getUserIPAddress,
+  isSuperuserUser,
   contractsApprovalActionsBypassUser,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
@@ -5444,6 +5447,19 @@ ContractInvoiceFinalizeGrid.defaultProps = {
   onInvoiceNoClick: undefined,
 };
 
+const ANNOTATION_REMARKS_MAX = 500;
+
+function formatAnnotationDateTime(value) {
+  if (!value) return "-";
+  try {
+    const d = typeof value === "string" ? parseISO(value) : new Date(value);
+    if (!isValid(d)) return String(value);
+    return format(d, "dd-MMM-yyyy HH:mm:ss");
+  } catch (_) {
+    return String(value);
+  }
+}
+
 export default function Contracts() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -5473,6 +5489,15 @@ export default function Contracts() {
   const [currentViewingRecord, setCurrentViewingRecord] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [annotationDialogOpen, setAnnotationDialogOpen] = useState(false);
+  const [annotationList, setAnnotationList] = useState([]);
+  const [annotationLoading, setAnnotationLoading] = useState(false);
+  const [annotationContract, setAnnotationContract] = useState(null);
+  const [annotationDraft, setAnnotationDraft] = useState("");
+  const [annotationSaving, setAnnotationSaving] = useState(false);
+  const [annotationDeletingId, setAnnotationDeletingId] = useState(null);
+  const canAddAnnotations = canAddContractAnnotations();
+  const canDeleteAnnotations = isSuperuserUser();
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const CONTRACTS_GROUP_BY_CACHE_KEY = "contracts_groupByColumns";
   const [groupByColumns, setGroupByColumns] = useState(() => {
@@ -6772,6 +6797,93 @@ export default function Contracts() {
     setSelectedFiles([]);
   };
 
+  const normalizeAnnotationRows = (response) => {
+    const items = Array.isArray(response)
+      ? response
+      : Array.isArray(response?.data)
+      ? response.data
+      : [];
+    return items.map((item) => ({
+      id: item?.id ?? item?.Id,
+      contractId: item?.contractId ?? item?.ContractId,
+      remarks: item?.remarks ?? item?.Remarks ?? "",
+      remarksBy: item?.remarksBy ?? item?.RemarksBy ?? "",
+      actionDate: item?.actionDate ?? item?.ActionDate,
+    }));
+  };
+
+  const handleOpenAnnotations = async (record) => {
+    const contractId = record?.id ?? record?.Id;
+    if (!contractId || record?.IsGroupRow) return;
+    setAnnotationContract(record);
+    setAnnotationDraft("");
+    setAnnotationDialogOpen(true);
+    setAnnotationLoading(true);
+    try {
+      const response = await contractApi.getContractAnnotationsByContractId(contractId);
+      setAnnotationList(normalizeAnnotationRows(response));
+    } catch (error) {
+      console.error("Error loading annotations:", error);
+      setAnnotationList([]);
+      alert("Unable to load annotations.");
+    } finally {
+      setAnnotationLoading(false);
+    }
+  };
+
+  const handleCloseAnnotations = () => {
+    setAnnotationDialogOpen(false);
+    setAnnotationList([]);
+    setAnnotationContract(null);
+    setAnnotationDraft("");
+  };
+
+  const handleSaveAnnotation = async () => {
+    const contractId = annotationContract?.id ?? annotationContract?.Id;
+    const remarks = String(annotationDraft || "")
+      .trim()
+      .slice(0, ANNOTATION_REMARKS_MAX);
+    if (!contractId || !remarks) {
+      alert("Please enter remarks.");
+      return;
+    }
+    setAnnotationSaving(true);
+    try {
+      await contractApi.createContractAnnotation({
+        contractId,
+        remarks,
+        remarksBy: getLoggedInUsername(),
+      });
+      setAnnotationDraft("");
+      const response = await contractApi.getContractAnnotationsByContractId(contractId);
+      setAnnotationList(normalizeAnnotationRows(response));
+    } catch (error) {
+      console.error("Error saving annotation:", error);
+      alert("Unable to save annotation.");
+    } finally {
+      setAnnotationSaving(false);
+    }
+  };
+
+  const handleDeleteAnnotation = async (annotationId) => {
+    if (!annotationId || !canDeleteAnnotations) return;
+    if (!window.confirm("Delete this remark?")) return;
+    const contractId = annotationContract?.id ?? annotationContract?.Id;
+    setAnnotationDeletingId(annotationId);
+    try {
+      await contractApi.deleteContractAnnotation(annotationId);
+      if (contractId) {
+        const response = await contractApi.getContractAnnotationsByContractId(contractId);
+        setAnnotationList(normalizeAnnotationRows(response));
+      }
+    } catch (error) {
+      console.error("Error deleting annotation:", error);
+      alert("Unable to delete annotation.");
+    } finally {
+      setAnnotationDeletingId(null);
+    }
+  };
+
   const handleFileSelect = (event) => {
     const files = Array.from(event.target.files);
     const totalExisting = attachmentList.length;
@@ -7701,6 +7813,52 @@ export default function Contracts() {
         );
       },
     },
+    {
+      Header: "Annotation",
+      id: "contractAnnotations",
+      accessor: "contractAnnotations",
+      align: "center",
+      width: "60px",
+      showInTable: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        // eslint-disable-next-line react/prop-types
+        const rowData = row?.original || {};
+        if (rowData?.IsGroupRow) return "";
+        const contractKey = rowData?.id ?? rowData?.Id;
+        return (
+          <MDBox
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            width="100%"
+            sx={{ m: 0, p: 0, minHeight: 28 }}
+          >
+            {contractKey ? (
+              <IconButton
+                size="small"
+                color="secondary"
+                // eslint-disable-next-line react/prop-types
+                onClick={() => handleOpenAnnotations(rowData)}
+                title="Annotations"
+                sx={{
+                  p: "2px",
+                  m: 0,
+                  minWidth: 0,
+                  "&:hover": { backgroundColor: "action.hover" },
+                }}
+              >
+                <Icon sx={{ fontSize: "1.05rem" }}>comment</Icon>
+              </IconButton>
+            ) : (
+              <MDTypography component="span" variant="caption" sx={{ lineHeight: 1, m: 0, p: 0 }}>
+                -
+              </MDTypography>
+            )}
+          </MDBox>
+        );
+      },
+    },
   ];
 
   const isContractGridBlank = (value) =>
@@ -8236,6 +8394,7 @@ export default function Contracts() {
       Cell: ({ value }) => <ContractGridLongTextCell value={value} />,
     },
     { ...findContractColumn("contractAttachments"), Header: "Attach" },
+    { ...findContractColumn("contractAnnotations"), Header: "Annotation" },
   ];
 
   const groupingColumnOptions = [
@@ -9219,6 +9378,7 @@ export default function Contracts() {
         col.accessor !== "actions" &&
         col.accessor !== "attachments" &&
         col.accessor !== "contractAttachments" &&
+        col.accessor !== "contractAnnotations" &&
         typeof col.Header === "string"
     );
 
@@ -9735,6 +9895,70 @@ export default function Contracts() {
     </MDBox>
   );
 
+  const annotationGridColumns = useMemo(() => {
+    const cols = [
+      {
+        id: "remarks",
+        Header: "Remarks",
+        accessor: "remarks",
+        align: "left",
+        // eslint-disable-next-line react/prop-types
+        Cell: ({ value }) => <ContractGridLongTextCell value={value} matchGridPlainText />,
+      },
+      {
+        id: "dateTimeDisplay",
+        Header: "Date and Time",
+        accessor: "dateTimeDisplay",
+        align: "left",
+      },
+      {
+        id: "remarksBy",
+        Header: "Remarks by",
+        accessor: "remarksBy",
+        align: "left",
+      },
+    ];
+    if (canDeleteAnnotations) {
+      cols.push({
+        id: "annotationActions",
+        Header: "Action",
+        accessor: "annotationActions",
+        align: "center",
+        disableSortBy: true,
+        // eslint-disable-next-line react/prop-types
+        Cell: ({ row }) => {
+          // eslint-disable-next-line react/prop-types
+          const annotationId = row?.original?.id;
+          return (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteAnnotation(annotationId)}
+              disabled={!annotationId || annotationDeletingId === annotationId}
+              title="Delete remark"
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+          );
+        },
+      });
+    }
+    return cols;
+  }, [canDeleteAnnotations, annotationDeletingId]);
+
+  const annotationGridRows = useMemo(
+    () =>
+      (annotationList || []).map((item) => ({
+        ...item,
+        dateTimeDisplay: formatAnnotationDateTime(item.actionDate),
+        remarksBy:
+          item.remarksBy != null && String(item.remarksBy).trim() !== ""
+            ? String(item.remarksBy).trim()
+            : "-",
+      })),
+    [annotationList]
+  );
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
@@ -9912,6 +10136,89 @@ export default function Contracts() {
         natures={natures}
         onPropertyGroupsRefresh={fetchPropertyGroups}
       />
+      <Dialog open={annotationDialogOpen} onClose={handleCloseAnnotations} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ pb: 1 }}>
+          <MDBox display="flex" alignItems="center" justifyContent="space-between" gap={1} mb={1}>
+            <MDTypography variant="h6" fontWeight="bold">
+              Annotations
+            </MDTypography>
+            {canAddAnnotations && (
+              <Tooltip title="Add new remark">
+                <span>
+                  <IconButton
+                    size="small"
+                    color="info"
+                    onClick={handleSaveAnnotation}
+                    disabled={annotationSaving || !String(annotationDraft || "").trim()}
+                  >
+                    <Icon>add_comment</Icon>
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+          </MDBox>
+          {annotationContract && (
+            <AgreementProvContractBasicInfoStrip
+              form={buildAgreementProvContractBasicInfoForm(annotationContract)}
+            />
+          )}
+        </DialogTitle>
+        <DialogContent dividers>
+          {canAddAnnotations && (
+            <MDBox mb={2}>
+              <MDInput
+                multiline
+                rows={3}
+                fullWidth
+                label="New remarks"
+                value={annotationDraft}
+                onChange={(e) =>
+                  setAnnotationDraft(String(e.target.value || "").slice(0, ANNOTATION_REMARKS_MAX))
+                }
+                disabled={annotationSaving}
+                inputProps={{ maxLength: ANNOTATION_REMARKS_MAX }}
+              />
+              <MDBox mt={0.5} display="flex" justifyContent="space-between" alignItems="center">
+                <MDTypography variant="caption" color="text">
+                  {annotationDraft.length}/{ANNOTATION_REMARKS_MAX} characters
+                </MDTypography>
+                <MDButton
+                  variant="gradient"
+                  color="info"
+                  onClick={handleSaveAnnotation}
+                  disabled={annotationSaving || !String(annotationDraft || "").trim()}
+                >
+                  <Icon>save</Icon>&nbsp;{annotationSaving ? "Saving..." : "Add Remark"}
+                </MDButton>
+              </MDBox>
+            </MDBox>
+          )}
+          {annotationLoading ? (
+            <MDBox display="flex" justifyContent="center" py={3}>
+              <CurrencyLoading size={40} />
+            </MDBox>
+          ) : annotationList.length === 0 ? (
+            <MDTypography variant="body2" color="text">
+              No remarks recorded for this contract.
+            </MDTypography>
+          ) : (
+            <DataTable
+              table={{ columns: annotationGridColumns, rows: annotationGridRows }}
+              entriesPerPage={false}
+              showTotalEntries={false}
+              pagination={false}
+              canSearch={false}
+              isSorted={false}
+              noEndBorder
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseAnnotations}>
+            Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
       <Dialog
         open={attachmentDialogOpen}
         onClose={handleCloseAttachmentDialog}
@@ -10324,7 +10631,8 @@ export default function Contracts() {
                     (col) =>
                       col.accessor !== "actions" &&
                       col.accessor !== "attachments" &&
-                      col.accessor !== "contractAttachments"
+                      col.accessor !== "contractAttachments" &&
+                      col.accessor !== "contractAnnotations"
                   )
                   .map((col) => {
                     const accessor = col.accessor;

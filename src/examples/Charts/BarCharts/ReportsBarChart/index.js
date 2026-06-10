@@ -45,8 +45,21 @@ import { useMaterialUIController } from "context";
 // ReportsBarChart configurations
 import configs from "examples/Charts/BarCharts/ReportsBarChart/configs";
 import { executiveBarConfigs, CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
+import { coerceChartDataValue } from "utils/chartBarDataUtils";
+import { applyKpiZoomBarChartEnhancements } from "layouts/dashboard/kpi-overview/components/kpiZoomChartEnhancements";
+import { formatKpiMoneyLabel } from "layouts/dashboard/kpi-overview/kpiDataUtils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+
+function formatExecutiveBarValue(value) {
+  const n = coerceChartDataValue(value);
+  if (n == null) return "";
+  if (Math.abs(n) >= 1000000) {
+    const millions = n / 1000000;
+    return `${millions.toFixed(millions >= 1 ? 1 : 2)}M`;
+  }
+  return n.toLocaleString();
+}
 
 function ReportsBarChart({
   color,
@@ -57,6 +70,7 @@ function ReportsBarChart({
   chartHeight,
   flat,
   seriesColor,
+  zoomEnhanced,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -74,7 +88,17 @@ function ReportsBarChart({
     return configs(labels, datasets);
   }, [flat, chart, barColor]);
 
-  const { data, options } = chartConfig;
+  const { data, options: baseOptions } = chartConfig;
+
+  const options = useMemo(() => {
+    if (!zoomEnhanced) return baseOptions;
+    return applyKpiZoomBarChartEnhancements(baseOptions, {
+      darkMode,
+      formatValue: (value) =>
+        formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0) || formatExecutiveBarValue(value),
+      fontSize: 13,
+    });
+  }, [baseOptions, zoomEnhanced, darkMode]);
 
   if (flat) {
     return (
@@ -142,6 +166,7 @@ ReportsBarChart.defaultProps = {
   chartHeight: "12.5rem",
   flat: false,
   seriesColor: null,
+  zoomEnhanced: false,
 };
 
 // Typechecking props for the ReportsBarChart
@@ -154,6 +179,7 @@ ReportsBarChart.propTypes = {
   chartHeight: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   flat: PropTypes.bool,
   seriesColor: PropTypes.string,
+  zoomEnhanced: PropTypes.bool,
 };
 
 export default ReportsBarChart;

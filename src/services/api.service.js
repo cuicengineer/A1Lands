@@ -349,12 +349,24 @@ function isOperatorUser() {
 const MENU_ROUTE_PREFIXES = [
   { menuName: "Dashboard", prefix: "/dashboard" },
   { menuName: "Configuration", prefix: "/configuration" },
-  { menuName: "Contracts Mgmt", prefix: "/contracts" },
+  { menuName: "Sales Agreements", prefix: "/contracts" },
   { menuName: "Accounts", prefix: "/accounts" },
   { menuName: "Payments", prefix: "/payments" },
   { menuName: "Receipts", prefix: "/receipts" },
   { menuName: "Supplier", prefix: "/supplier" },
 ];
+
+/** Menus that must have an Assign Rights row; otherwise navbar, routes, and actions stay hidden. */
+function menuRequiresExplicitPermission(menuName) {
+  const normalized = normalizeMenuName(menuName);
+  return (
+    normalized === "accounts" ||
+    normalized === "account" ||
+    normalized === "payments" ||
+    normalized === "receipts" ||
+    normalized === "supplier"
+  );
+}
 
 function toBooleanFlag(value) {
   if (value === true || value === 1 || value === "1") return true;
@@ -480,6 +492,9 @@ function getPermissionByMenuName(menuName) {
   if (normalized === "accounts" || normalized === "account") {
     return find("accounts") || find("account");
   }
+  if (normalized === "sales agreements" || normalized === "contracts mgmt") {
+    return find("sales agreements") || find("contracts mgmt");
+  }
   return null;
 }
 
@@ -497,31 +512,33 @@ function getCurrentMainMenuName(pathnameArg) {
 }
 
 function canViewMenu(menuName) {
+  if (isSuperuserUser()) return true;
   const p = getPermissionByMenuName(menuName);
   if (!p) {
-    // Require an explicit permissions row for Accounts; otherwise the Sidenav shows it
-    // even when Assign Rights has not granted Account (getStoredPermissions has no match).
-    if (normalizeMenuName(menuName) === "accounts") return false;
+    if (menuRequiresExplicitPermission(menuName)) return false;
     return true;
   }
   return toBooleanFlag(p?.canView ?? p?.CanView ?? p?.view ?? p?.View);
 }
 
 function canCreateInMenu(menuName) {
+  if (isSuperuserUser()) return true;
   const p = getPermissionByMenuName(menuName);
-  if (!p) return true;
+  if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canCreate ?? p?.CanCreate ?? p?.create ?? p?.Create);
 }
 
 function canEditInMenu(menuName) {
+  if (isSuperuserUser()) return true;
   const p = getPermissionByMenuName(menuName);
-  if (!p) return true;
+  if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canEdit ?? p?.CanEdit ?? p?.edit ?? p?.Edit);
 }
 
 function canDeleteInMenu(menuName) {
+  if (isSuperuserUser()) return true;
   const p = getPermissionByMenuName(menuName);
-  if (!p) return true;
+  if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canDelete ?? p?.CanDelete ?? p?.delete ?? p?.Delete);
 }
 
@@ -590,6 +607,18 @@ function loggedInUserHasCategoryToken(token) {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean)
     .includes(want);
+}
+
+/** True when user may add contract annotation remarks (superuser or supervisor category). */
+function canAddContractAnnotations() {
+  if (isSuperuserUser()) return true;
+  if (loggedInUserHasCategoryToken("category supervisor")) return true;
+  const raw = getLoggedInUserCategoryRaw();
+  if (!raw) return false;
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .some((token) => token.includes("supervisor"));
 }
 
 /** True when Contracts grid should ignore ApprovalStatus for Edit/Delete visibility (superuser OR Category Supervisor with AHQ RAC/base). */
@@ -994,6 +1023,7 @@ const api = {
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  canAddContractAnnotations,
   contractsApprovalActionsBypassUser,
 };
 export default api;
@@ -1017,6 +1047,7 @@ export {
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  canAddContractAnnotations,
   contractsApprovalActionsBypassUser,
   logoutEverywhere,
   handleAuthStorageEvent,

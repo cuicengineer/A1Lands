@@ -714,15 +714,15 @@ function RentalPropertyForm({
               <MDBox
                 sx={{
                   p: 2,
-                  bgcolor: "info.light",
+                  bgcolor: "info.main",
                   borderRadius: 1,
                   border: "1px solid",
-                  borderColor: "info.main",
+                  borderColor: "info.dark",
                 }}
               >
                 <MDBox display="flex" alignItems="center">
-                  <Icon sx={{ color: "info.main", mr: 1, fontSize: "1.5rem" }}>info</Icon>
-                  <MDTypography variant="body2" color="info.dark" sx={{ fontSize: "1rem" }}>
+                  <Icon sx={{ color: "#ffffff", mr: 1, fontSize: "1.5rem" }}>info</Icon>
+                  <MDTypography variant="body2" sx={{ fontSize: "1rem", color: "#ffffff" }}>
                     <strong>Note:</strong> Attachment files will be uploaded after saving this form.
                   </MDTypography>
                 </MDBox>

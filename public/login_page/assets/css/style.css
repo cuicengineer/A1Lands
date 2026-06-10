@@ -300,8 +300,7 @@ hr{
 
 .company{
     margin-top:40px;
-    color:#666;
-    font-size: 13px;
+    font-weight:700;
 }
 
 @media(max-width:992px){

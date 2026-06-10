@@ -23,6 +23,8 @@ export const CONFIGURATION_MODULE_TABS = [
   { label: "Tenants", route: "/configuration/tenants" },
   { label: "Lock Date", route: "/configuration/lock-date" },
   { label: "Accounting Sys.", route: "/configuration/accounting-sys" },
+  { label: "Chart of Accounts", route: "/configuration/chart-of-accounts" },
+  { label: "Income Statement", route: "/configuration/income-statement" },
 ];
 
 function resolveConfigurationTabIndex(pathname) {

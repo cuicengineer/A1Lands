@@ -572,10 +572,17 @@ function UserMgmt() {
       return acc;
     }, {});
 
+    const resolveExistingRights = (menuName) => {
+      const key = normalizeMenuKey(menuName);
+      if (rightsLookup[key]) return rightsLookup[key];
+      if (key === "sales agreements") return rightsLookup["contracts mgmt"] || {};
+      return {};
+    };
+
     setRightsRowMetaByMenu(rightsLookup);
     setRightsDraftRows(
       menus.map((menuName) => {
-        const existing = rightsLookup[normalizeMenuKey(menuName)] || {};
+        const existing = resolveExistingRights(menuName);
         const isDashboardRow = isDashboardRightsMenu(menuName);
         return {
           menuName,
@@ -629,13 +636,13 @@ function UserMgmt() {
     try {
       await Promise.all(
         rightsDraftRows.map((row) => {
+          const menuKey = String(row.menuName || "")
+            .trim()
+            .toLowerCase();
           const existingRow =
             rightsRowMetaByMenu[row.menuName] ||
-            rightsRowMetaByMenu[
-              String(row.menuName || "")
-                .trim()
-                .toLowerCase()
-            ] ||
+            rightsRowMetaByMenu[menuKey] ||
+            (menuKey === "sales agreements" ? rightsRowMetaByMenu["contracts mgmt"] : undefined) ||
             {};
           const {
             id,

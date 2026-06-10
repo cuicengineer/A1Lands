@@ -328,6 +328,36 @@ async function deleteContractRiseTerm(riseTermId) {
   return api.request("DELETE", `/api/ContractRiseTerms/${riseTermId}`, payload);
 }
 
+function getContractAnnotationsByContractId(contractId) {
+  return api.request("GET", `/api/ContractAnnotations/ByContract/${contractId}`);
+}
+
+async function createContractAnnotation({ contractId, remarks, remarksBy }) {
+  const actionBy = await getActionBy();
+  const payload = {
+    contractId,
+    remarks: String(remarks || "")
+      .trim()
+      .slice(0, 500),
+    remarksBy: String(remarksBy || "").trim(),
+    Action: "Create",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: false,
+  };
+  return api.request("POST", "/api/ContractAnnotations", payload);
+}
+
+async function deleteContractAnnotation(annotationId) {
+  const actionBy = await getActionBy();
+  const payload = {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  };
+  return api.request("DELETE", `/api/ContractAnnotations/${annotationId}`, payload);
+}
+
 const contractApi = {
   getAll,
   getAllRecords,
@@ -348,5 +378,8 @@ const contractApi = {
   remove,
   getContractRiseTermsByContractId,
   deleteContractRiseTerm,
+  getContractAnnotationsByContractId,
+  createContractAnnotation,
+  deleteContractAnnotation,
 };
 export default contractApi;

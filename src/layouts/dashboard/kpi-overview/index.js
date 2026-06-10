@@ -409,6 +409,7 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick }) {
               label={a.label}
               count={a.count}
               areaLine={a.areaLine}
+              showArea={a.key !== "total"}
               mil={a.mil}
               cardSx={cardSx}
               primary={cardIndex === 0}
@@ -441,7 +442,7 @@ AssetCardsScroller.propTypes = {
   onCardClick: PropTypes.func,
 };
 
-function AssetCard({ label, count, areaLine, mil, cardSx, primary, onClick }) {
+function AssetCard({ label, count, areaLine, showArea = true, mil, cardSx, primary, onClick }) {
   const m = mil && typeof mil === "object" ? { ...DEFAULT_MIL, ...mil } : DEFAULT_MIL;
 
   return (
@@ -466,7 +467,7 @@ function AssetCard({ label, count, areaLine, mil, cardSx, primary, onClick }) {
     >
       <p className="erp-kpi-card__label">{label}</p>
       <div className="erp-kpi-card__metric">{count.toLocaleString()}</div>
-      <p className="erp-kpi-card__trend">Area: {areaLine}</p>
+      {showArea && <p className="erp-kpi-card__trend">Area: {areaLine}</p>}
       <div className="erp-kpi-card__details">
         <MDBox
           className="erp-kpi-card__stat-row"
@@ -521,6 +522,7 @@ AssetCard.propTypes = {
   label: PropTypes.string.isRequired,
   count: PropTypes.number.isRequired,
   areaLine: PropTypes.string.isRequired,
+  showArea: PropTypes.bool,
   mil: PropTypes.shape({
     incomePA: PropTypes.number,
     govt: PropTypes.number,
@@ -1115,6 +1117,7 @@ function KpiOverview() {
       expanded={analyticsExpanded}
       onToggleExpanded={() => setAnalyticsExpanded((e) => !e)}
       loading={loading}
+      chartZoomOnClick
     />
   );
 
@@ -1428,6 +1431,7 @@ function KpiOverview() {
             >
               <ReportsBarChart
                 flat
+                zoomEnhanced
                 seriesColor={financialZoomConfig.color === "dark" ? CHART_SECONDARY : CHART_PRIMARY}
                 title={financialZoomConfig.title}
                 description={financialZoomConfig.description}
