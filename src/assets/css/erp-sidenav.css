@@ -1,8 +1,20 @@
-/* ERP v1.0 sidebar — brand teal background, white navigation */
+/* ERP v1.0 sidebar — white navigation; background set by color variant */
+
+body.enterprise-ui .enterprise-sidenav--color-default.MuiDrawer-anchorLeft .MuiDrawer-paper {
+  background: #025b64 !important;
+}
+
+body.enterprise-ui .enterprise-sidenav--color-grey.MuiDrawer-anchorLeft .MuiDrawer-paper {
+  background: #4b5563 !important;
+}
+
+body.enterprise-ui .enterprise-sidenav--color-blue.MuiDrawer-anchorLeft .MuiDrawer-paper {
+  background: #2563eb !important;
+}
 
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft.MuiDrawer-docked {
-  width: 280px !important;
-  max-width: 280px !important;
+  width: 252px !important;
+  max-width: 252px !important;
 }
 
 body.enterprise-ui .enterprise-sidenav--mini.MuiDrawer-anchorLeft.MuiDrawer-docked {
@@ -11,8 +23,8 @@ body.enterprise-ui .enterprise-sidenav--mini.MuiDrawer-anchorLeft.MuiDrawer-dock
 }
 
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft .MuiDrawer-paper {
-  width: 280px !important;
-  max-width: 280px !important;
+  width: 252px !important;
+  max-width: 252px !important;
   background: #025b64 !important;
   background-image: none !important;
   border-right: none !important;

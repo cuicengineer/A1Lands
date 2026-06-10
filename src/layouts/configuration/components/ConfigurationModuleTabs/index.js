@@ -22,6 +22,7 @@ export const CONFIGURATION_MODULE_TABS = [
   { label: "Sharing Formula", route: "/configuration/sharing-formula" },
   { label: "Tenants", route: "/configuration/tenants" },
   { label: "Lock Date", route: "/configuration/lock-date" },
+  { label: "Accounting Sys.", route: "/configuration/accounting-sys" },
 ];
 
 function resolveConfigurationTabIndex(pathname) {
@@ -40,6 +41,30 @@ function resolveConfigurationTabIndex(pathname) {
   return false;
 }
 
+const CONFIGURATION_TAB_SX = {
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+  minWidth: "auto",
+};
+
+const CONFIGURATION_TABS_SX = {
+  width: "100%",
+  maxWidth: "100%",
+  "& .MuiTabs-scroller": {
+    overflowX: "auto",
+    scrollbarWidth: "none",
+    msOverflowStyle: "none",
+    "&::-webkit-scrollbar": {
+      display: "none",
+      width: 0,
+      height: 0,
+    },
+  },
+  "& .MuiTabs-flexContainer": {
+    flexWrap: "nowrap",
+  },
+};
+
 function ConfigurationModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -57,16 +82,18 @@ function ConfigurationModuleTabs({ tabs }) {
   return (
     <ModuleTabsBrandRow>
       <Tabs
-        className="saas-settings-nav-tabs"
+        className="saas-settings-nav-tabs configuration-module-tabs"
         value={activeIndex === false ? false : activeIndex}
         onChange={handleChange}
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile
+        wrapped={false}
         aria-label="Configuration module navigation"
+        sx={CONFIGURATION_TABS_SX}
       >
         {items.map((tab) => (
-          <Tab key={tab.route} label={tab.label} />
+          <Tab key={tab.route} label={tab.label} sx={CONFIGURATION_TAB_SX} />
         ))}
       </Tabs>
     </ModuleTabsBrandRow>

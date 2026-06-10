@@ -42,6 +42,19 @@ async function getAllRecords() {
   });
 }
 
+function appendIsFinalizedQueryParam(params, isFinalized) {
+  if (isFinalized === true || isFinalized === 1 || isFinalized === "1" || isFinalized === "true") {
+    params.set("isFinalized", "true");
+  } else if (
+    isFinalized === false ||
+    isFinalized === 0 ||
+    isFinalized === "0" ||
+    isFinalized === "false"
+  ) {
+    params.set("isFinalized", "false");
+  }
+}
+
 function getInvoiceSchedulePage(pageNumber = 1, pageSize = 1000, filters = {}) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
@@ -59,6 +72,10 @@ function getInvoiceSchedulePage(pageNumber = 1, pageSize = 1000, filters = {}) {
   }
   if (filters.baseId != null && filters.baseId !== "") {
     params.set("baseId", String(filters.baseId));
+  }
+  appendIsFinalizedQueryParam(params, filters.isFinalized);
+  if (filters.invoiceNo != null && String(filters.invoiceNo).trim() !== "") {
+    params.set("invoiceNo", String(filters.invoiceNo).trim());
   }
   const qs = params.toString();
   return requestWithPagination("GET", `/api/ContractInvoiceSchedule?${qs}`);
@@ -93,8 +110,47 @@ function getInvoiceSchedule(filters = {}) {
   if (filters.baseId != null && filters.baseId !== "") {
     params.set("baseId", String(filters.baseId));
   }
+  appendIsFinalizedQueryParam(params, filters.isFinalized);
+  if (filters.invoiceNo != null && String(filters.invoiceNo).trim() !== "") {
+    params.set("invoiceNo", String(filters.invoiceNo).trim());
+  }
   const qs = params.toString();
   return requestWithPagination("GET", `/api/ContractInvoiceSchedule${qs ? `?${qs}` : ""}`);
+}
+
+function appendAgreementProvInvoiceScheduleQueryParams(params, filters = {}) {
+  const contractNo = filters.contractNo != null ? String(filters.contractNo).trim() : "";
+  if (contractNo) params.set("contractNo", contractNo);
+  if (filters.fromDate) params.set("fromDate", filters.fromDate);
+  if (filters.toDate) params.set("toDate", filters.toDate);
+  if (filters.cmdId != null && filters.cmdId !== "") {
+    params.set("cmdId", String(filters.cmdId));
+  }
+  if (filters.classId != null && filters.classId !== "") {
+    params.set("classId", String(filters.classId));
+  }
+  if (filters.baseId != null && filters.baseId !== "") {
+    params.set("baseId", String(filters.baseId));
+  }
+  if (filters.invoiceNo != null && String(filters.invoiceNo).trim() !== "") {
+    params.set("invoiceNo", String(filters.invoiceNo).trim());
+  }
+  appendIsFinalizedQueryParam(params, filters.isFinalized);
+}
+
+/** Agreement-prov-invoice initial load: GET /api/ContractInvoiceSchedule?isFinalized=true */
+async function getAgreementProvFinalizedInvoiceScheduleRecords() {
+  return getInvoiceSchedule({ isFinalized: true });
+}
+
+/**
+ * Agreement-prov-invoice search: GET /api/ContractInvoiceSchedule with filter query params only (no pagination).
+ */
+async function searchAgreementProvFinalizedInvoiceSchedule(filters = {}) {
+  return getInvoiceSchedule({
+    ...filters,
+    isFinalized: filters.isFinalized === false || filters.isFinalized === 0 ? false : true,
+  });
 }
 
 /**
@@ -276,6 +332,8 @@ const contractApi = {
   getAll,
   getAllRecords,
   getAllInvoiceScheduleRecords,
+  getAgreementProvFinalizedInvoiceScheduleRecords,
+  searchAgreementProvFinalizedInvoiceSchedule,
   getInvoiceSchedule,
   getInvoiceScheduleByInvoiceNo,
   createInvoiceSchedule,

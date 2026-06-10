@@ -26,6 +26,7 @@ import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import { compactActionSnoColumnsSx } from "utils/compactActionSnoColumnsSx";
+import { configurationWorkspaceBodySx } from "utils/configurationWorkspaceBodySx";
 
 import api, {
   canCreateCurrentMenu,
@@ -413,67 +414,7 @@ function NatureConfig() {
             </MDButton>
           ) : null
         }
-        bodySx={{
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative",
-          flex: "1 1 0",
-          minHeight: 0,
-          "& .MuiTableContainer-root": {
-            flex: "1 1 0",
-            minHeight: 0,
-            overflow: "hidden",
-          },
-          "& .MuiTable-root": {
-            tableLayout: "auto",
-            width: "auto",
-            minWidth: "100%",
-          },
-          "& .MuiTableCell-root": {
-            whiteSpace: "normal !important",
-            wordBreak: "break-word !important",
-            overflowWrap: "anywhere !important",
-            lineHeight: 1.4,
-            maxWidth: "100%",
-            verticalAlign: "top",
-          },
-          "& .MuiTableCell-root *": {
-            whiteSpace: "normal !important",
-            wordBreak: "break-word !important",
-            overflowWrap: "anywhere !important",
-            maxWidth: "100%",
-          },
-          "& .MuiTable-root th": {
-            fontSize: "1rem !important",
-            fontWeight: "700 !important",
-            padding: "8px 6px !important",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "break-word",
-            borderBottom: "1px solid #d0d0d0",
-          },
-          "& .MuiTable-root td": {
-            padding: "8px 6px !important",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-            hyphens: "auto",
-            maxWidth: "100%",
-            borderBottom: "1px solid #e0e0e0",
-          },
-          "& .MuiTable-root td > div": {
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-          },
-          "& .MuiTable-root td *": {
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-          },
-          ...compactActionSnoColumnsSx,
-        }}
+        bodySx={{ ...configurationWorkspaceBodySx, ...compactActionSnoColumnsSx }}
       >
         <DataTable
           table={tableData}

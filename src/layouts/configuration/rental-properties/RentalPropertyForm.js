@@ -21,11 +21,10 @@ import api from "../../../../src/services/api.service";
 import uploadApi from "services/api.upload.service";
 import CurrencyLoading from "components/CurrencyLoading";
 
-const UOM_OPTIONS = [
-  { key: "Marla", value: "Marla" },
-  { key: "Sq Ft", value: "Sq Ft" },
-  { key: "Acre", value: "Acre" },
-];
+function getClassUoM(classRow) {
+  if (!classRow) return "";
+  return String(classRow.uoM ?? classRow.UoM ?? classRow.uom ?? "").trim();
+}
 
 function RentalPropertyForm({
   open,
@@ -64,6 +63,15 @@ function RentalPropertyForm({
   const inputSx = {
     "& .MuiInputBase-input": { fontSize: "1rem" },
     "& .MuiInputLabel-root": { fontSize: "1rem" },
+  };
+  const dialogFooterButtonSx = {
+    color: "#ffffff !important",
+    "& .MuiSvgIcon-root": {
+      color: "#ffffff !important",
+    },
+    "& *": {
+      color: "#ffffff !important",
+    },
   };
 
   const [form, setForm] = useState({
@@ -138,10 +146,11 @@ function RentalPropertyForm({
   useEffect(() => {
     setErrors({});
     if (initialData) {
+      const classId = initialData.classId || "";
       const newForm = {
         cmdId: initialData.cmdId || "",
         baseId: initialData.baseId || "",
-        classId: initialData.classId || "",
+        classId,
         pId: initialData.pId || "",
         uoM: initialData.uoM || "",
         area: initialData.area || 0,
@@ -166,6 +175,10 @@ function RentalPropertyForm({
         !currentFilteredBases.some((base) => Number(base.id) === Number(newForm.baseId))
       ) {
         newForm.baseId = ""; // Reset if not found in filtered bases
+      }
+      if (classId && classes.length > 0) {
+        const classUoM = getClassUoM(classes.find((c) => Number(c.id) === Number(classId)));
+        if (classUoM) newForm.uoM = classUoM;
       }
       setForm(newForm);
     } else if (lockedBaseId != null) {
@@ -225,7 +238,7 @@ function RentalPropertyForm({
       setExistingFiles([]);
       setSelectedFiles([]);
     }
-  }, [initialData, allBases, open, lockedBaseId]);
+  }, [initialData, allBases, classes, open, lockedBaseId]);
 
   const fetchExistingFiles = async (id) => {
     setLoadingExistingFiles(true);
@@ -257,6 +270,19 @@ function RentalPropertyForm({
     }
   };
 
+  const resolveUoMForClassId = (classId) => {
+    const selectedClass = classes.find((c) => Number(c.id) === Number(classId));
+    return getClassUoM(selectedClass);
+  };
+
+  useEffect(() => {
+    if (!form.classId || classes.length === 0) return;
+    const classUoM = resolveUoMForClassId(form.classId);
+    if (classUoM && (form.uoM || "") !== classUoM) {
+      setForm((prev) => ({ ...prev, uoM: classUoM }));
+    }
+  }, [form.classId, classes]);
+
   const handleChange = (field, value) => {
     const normalizedValue =
       field === "status"
@@ -266,9 +292,14 @@ function RentalPropertyForm({
     setForm((prevForm) => ({
       ...prevForm,
       [field]: field === "area" ? Number(normalizedValue) : normalizedValue,
-      ...(field === "cmdId" && lockedBaseId == null && { baseId: "" }), // Reset baseId when cmdId changes (not when Base is fixed)
+      ...(field === "cmdId" && lockedBaseId == null && { baseId: "", classId: "", uoM: "" }),
+      ...(field === "baseId" && { classId: "", uoM: "" }),
+      ...(field === "classId" && { uoM: resolveUoMForClassId(normalizedValue) }),
     }));
     if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
+    if (field === "classId" && errors?.uoM) {
+      setErrors((prev) => ({ ...prev, uoM: undefined }));
+    }
   };
 
   const isAddMode = !initialData;
@@ -422,7 +453,7 @@ function RentalPropertyForm({
     { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
     { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
     { label: "Property ID", key: "pId", mandatory: isAddMode },
-    { label: "UoM", key: "uoM", type: "select", options: UOM_OPTIONS, mandatory: isAddMode },
+    { label: "UoM", key: "uoM", type: "readonly", mandatory: isAddMode },
     { label: "Area", key: "area", type: "number", mandatory: isAddMode },
     { label: "Location", key: "location", grid: { xs: 12, sm: 8 }, mandatory: isAddMode },
     { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 }, mandatory: isAddMode },
@@ -516,6 +547,19 @@ function RentalPropertyForm({
                     {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
                   </FormControl>
                 )
+              ) : f.type === "readonly" ? (
+                <MDInput
+                  label={f.label}
+                  type="text"
+                  value={form[f.key] || ""}
+                  fullWidth
+                  size="small"
+                  required={Boolean(f.mandatory)}
+                  error={Boolean(errors[f.key])}
+                  helperText={errors[f.key]}
+                  InputProps={{ readOnly: true }}
+                  sx={inputSx}
+                />
               ) : (
                 <MDInput
                   label={f.label}
@@ -688,13 +732,23 @@ function RentalPropertyForm({
         </Grid>
       </DialogContent>
       <DialogActions>
-        <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={isUploading}>
-          <Icon>close</Icon>
-          <MDBox ml={1}>Cancel</MDBox>
+        <MDButton
+          variant="gradient"
+          color="secondary"
+          onClick={onClose}
+          disabled={isUploading}
+          sx={dialogFooterButtonSx}
+        >
+          <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        <MDButton variant="gradient" color="info" onClick={handleSave} disabled={isUploading}>
-          <Icon>save</Icon>
-          <MDBox ml={1}>{isUploading ? "Uploading..." : "Save"}</MDBox>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleSave}
+          disabled={isUploading}
+          sx={dialogFooterButtonSx}
+        >
+          <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
       </DialogActions>
     </Dialog>

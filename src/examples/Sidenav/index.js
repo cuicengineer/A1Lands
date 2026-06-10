@@ -57,6 +57,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     transparentSidenav,
     whiteSidenav,
     darkMode,
+    sidenavColor,
     hasUserManuallyToggledSidenav,
     openConfigurator,
   } = controller;
@@ -334,12 +335,24 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         return null;
       });
 
+  const resolvedSidenavColor = ["default", "grey", "blue"].includes(sidenavColor)
+    ? sidenavColor
+    : "default";
+
   return (
     <SidenavRoot
       {...rest}
       variant="permanent"
-      className={`enterprise-sidenav${miniSidenav ? " enterprise-sidenav--mini" : ""}`}
-      ownerState={{ transparentSidenav, whiteSidenav, miniSidenav, darkMode }}
+      className={`enterprise-sidenav enterprise-sidenav--color-${resolvedSidenavColor}${
+        miniSidenav ? " enterprise-sidenav--mini" : ""
+      }`}
+      ownerState={{
+        transparentSidenav,
+        whiteSidenav,
+        miniSidenav,
+        darkMode,
+        sidenavColor: resolvedSidenavColor,
+      }}
     >
       <MDBox
         display="flex"

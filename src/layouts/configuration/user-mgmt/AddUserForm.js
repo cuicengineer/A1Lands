@@ -1,10 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
+import IconButton from "@mui/material/IconButton";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemText from "@mui/material/ListItemText";
+import FormHelperText from "@mui/material/FormHelperText";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import MDBox from "components/MDBox";
@@ -13,6 +18,12 @@ import Icon from "@mui/material/Icon";
 import InputAdornment from "@mui/material/InputAdornment";
 import MDTypography from "components/MDTypography";
 import api from "services/api.service";
+import {
+  USER_APPOINT_ENTITY,
+  buildAppointNameOptions,
+  mapUserAppointRows,
+} from "./userAppointUtils";
+import { isSuperuserUsername } from "./userMgmtUtils";
 
 function normalizeCategoryArr(value) {
   if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
@@ -74,6 +85,8 @@ function AddUserForm({
   handleAddSave,
   errors,
   setErrors,
+  appointOptions = [],
+  onAppointOptionsChange,
 }) {
   const LEVEL_OPTIONS = [
     { id: 1, label: "AHQ" },
@@ -83,6 +96,11 @@ function AddUserForm({
 
   const [showPassword, setShowPassword] = useState(false);
   const [getInfoLoading, setGetInfoLoading] = useState(false);
+  const [appointManageOpen, setAppointManageOpen] = useState(false);
+  const [appointAddName, setAppointAddName] = useState("");
+  const [appointManageError, setAppointManageError] = useState("");
+  const [appointManageSubmitting, setAppointManageSubmitting] = useState(false);
+  const [appointRemovingId, setAppointRemovingId] = useState(null);
 
   const PASSWORD_POLICY_TEXT =
     "Password must be 6-12 characters long and contain at least 1 special character.";
@@ -98,8 +116,79 @@ function AddUserForm({
   useEffect(() => {
     if (!open) {
       setShowPassword(false);
+      setAppointManageOpen(false);
+      setAppointAddName("");
+      setAppointManageError("");
     }
   }, [open]);
+
+  const appointSelectOptions = useMemo(
+    () => buildAppointNameOptions(appointOptions, newRowDraft?.appoint),
+    [appointOptions, newRowDraft?.appoint]
+  );
+
+  const refreshAppointOptions = async () => {
+    const raw = await api.list(USER_APPOINT_ENTITY);
+    const next = mapUserAppointRows(raw);
+    if (onAppointOptionsChange) onAppointOptionsChange(next);
+    return next;
+  };
+
+  const handleOpenAppointManage = () => {
+    setAppointAddName("");
+    setAppointManageError("");
+    setAppointManageOpen(true);
+  };
+
+  const handleCloseAppointManage = () => {
+    if (appointManageSubmitting || appointRemovingId) return;
+    setAppointManageOpen(false);
+    setAppointAddName("");
+    setAppointManageError("");
+  };
+
+  const handleAddAppointOption = async () => {
+    const name = String(appointAddName || "").trim();
+    if (!name) {
+      setAppointManageError("Appointment name is required");
+      return;
+    }
+    setAppointManageSubmitting(true);
+    setAppointManageError("");
+    try {
+      await api.create(USER_APPOINT_ENTITY, { Name: name, Status: 1 });
+      await refreshAppointOptions();
+      setNewRowDraft((prev) => ({ ...prev, appoint: name }));
+      setAppointAddName("");
+    } catch (e) {
+      setAppointManageError(e?.message || "Failed to add appointment");
+    } finally {
+      setAppointManageSubmitting(false);
+    }
+  };
+
+  const handleRemoveAppointOption = async (option) => {
+    if (!option?.id) return;
+    const confirmed = window.confirm(`Remove "${option.name}" from the appointment list?`);
+    if (!confirmed) return;
+    setAppointRemovingId(option.id);
+    setAppointManageError("");
+    try {
+      await api.remove(USER_APPOINT_ENTITY, option.id);
+      const next = await refreshAppointOptions();
+      const selected = String(newRowDraft?.appoint || "").trim();
+      if (selected && selected.toLowerCase() === String(option.name).toLowerCase()) {
+        setNewRowDraft((prev) => ({ ...prev, appoint: "" }));
+      }
+      if (!next.length) {
+        setNewRowDraft((prev) => ({ ...prev, appoint: "" }));
+      }
+    } catch (e) {
+      setAppointManageError(e?.message || "Failed to remove appointment");
+    } finally {
+      setAppointRemovingId(null);
+    }
+  };
 
   const isAhqCommand = (cmdId) => {
     const command = (commandOptions || []).find((c) => Number(c.id) === Number(cmdId));
@@ -160,7 +249,11 @@ function AddUserForm({
     });
 
     if (field === "username") {
-      const msg = nextValue && String(nextValue).trim() ? null : "Username is required";
+      const trimmed = String(nextValue || "").trim();
+      let msg = null;
+      if (!trimmed) msg = "Username is required";
+      else if (isSuperuserUsername(trimmed))
+        msg = 'Username "superuser" is reserved and cannot be used';
       setErrors((prev) => ({ ...prev, username: msg }));
     }
     if (field === "name") {
@@ -395,6 +488,49 @@ function AddUserForm({
     );
   };
 
+  const renderAppointSelect = (field, value) => (
+    <MDBox display="flex" alignItems="flex-start" gap={0.5}>
+      <MDInput
+        select
+        value={value || ""}
+        onChange={(e) => handleChange(field, e.target.value)}
+        size="small"
+        fullWidth
+        error={Boolean(errors[field])}
+        helperText={errors[field]}
+        sx={{
+          flex: 1,
+          "& .MuiInputBase-root": { minHeight: "45px" },
+          "& .MuiSelect-select": {
+            minHeight: "45px",
+            display: "flex",
+            alignItems: "center",
+            paddingTop: 0,
+            paddingBottom: 0,
+          },
+        }}
+      >
+        <MenuItem value="">
+          <em>None</em>
+        </MenuItem>
+        {appointSelectOptions.map((name) => (
+          <MenuItem key={name} value={name}>
+            {name}
+          </MenuItem>
+        ))}
+      </MDInput>
+      <IconButton
+        size="small"
+        title="Manage Appointments"
+        aria-label="Manage Appointments"
+        onClick={handleOpenAppointManage}
+        sx={{ mt: 0.5 }}
+      >
+        <Icon fontSize="small">add</Icon>
+      </IconButton>
+    </MDBox>
+  );
+
   const renderLevelReadOnly = (value) => (
     <MDInput
       value={value || ""}
@@ -495,7 +631,7 @@ function AddUserForm({
             <MDTypography variant="caption" fontWeight="bold">
               Appoint
             </MDTypography>
-            {renderInput("appoint", newRowDraft?.appoint, false)}
+            {renderAppointSelect("appoint", newRowDraft?.appoint)}
           </MDBox>
         </MDBox>
       </DialogContent>
@@ -518,6 +654,88 @@ function AddUserForm({
           Save
         </MDButton>
       </DialogActions>
+
+      <Dialog
+        open={appointManageOpen}
+        onClose={handleCloseAppointManage}
+        fullWidth
+        maxWidth="sm"
+        scroll="paper"
+      >
+        <DialogTitle sx={{ fontSize: "1.1rem", fontWeight: 600 }}>Manage Appointments</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="caption" color="text" sx={{ display: "block", mb: 1 }}>
+            Add or remove appointment values used in the Add New User dropdown.
+          </MDTypography>
+          <MDBox display="flex" alignItems="flex-start" gap={1} mb={2}>
+            <MDInput
+              label="New appointment"
+              value={appointAddName}
+              onChange={(e) => {
+                setAppointAddName(e.target.value);
+                if (appointManageError) setAppointManageError("");
+              }}
+              size="small"
+              fullWidth
+              disabled={appointManageSubmitting || Boolean(appointRemovingId)}
+            />
+            <MDButton
+              variant="gradient"
+              color="info"
+              size="small"
+              onClick={handleAddAppointOption}
+              disabled={appointManageSubmitting || Boolean(appointRemovingId)}
+              sx={{ mt: 0.25, whiteSpace: "nowrap" }}
+            >
+              {appointManageSubmitting ? "Adding…" : "Add"}
+            </MDButton>
+          </MDBox>
+          {appointManageError ? (
+            <FormHelperText error sx={{ mx: 0, mb: 1 }}>
+              {appointManageError}
+            </FormHelperText>
+          ) : null}
+          <List dense disablePadding>
+            {(appointOptions || []).length === 0 ? (
+              <MDTypography variant="body2" color="text">
+                No appointments yet. Add one above.
+              </MDTypography>
+            ) : (
+              appointOptions.map((option) => (
+                <ListItem
+                  key={option.id}
+                  disableGutters
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      color="error"
+                      aria-label={`Remove ${option.name}`}
+                      title="Remove"
+                      disabled={appointManageSubmitting || appointRemovingId === option.id}
+                      onClick={() => handleRemoveAppointOption(option)}
+                    >
+                      <Icon fontSize="small">delete</Icon>
+                    </IconButton>
+                  }
+                >
+                  <ListItemText primary={option.name} />
+                </ListItem>
+              ))
+            )}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            onClick={handleCloseAppointManage}
+            disabled={appointManageSubmitting || Boolean(appointRemovingId)}
+          >
+            Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }
@@ -533,6 +751,8 @@ AddUserForm.propTypes = {
   handleAddSave: PropTypes.func.isRequired,
   errors: PropTypes.object.isRequired,
   setErrors: PropTypes.func.isRequired,
+  appointOptions: PropTypes.array,
+  onAppointOptionsChange: PropTypes.func,
 };
 
 export default AddUserForm;

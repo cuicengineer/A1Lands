@@ -16,6 +16,7 @@ import DataTable from "examples/Tables/DataTable";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
 import { withGridValueChip } from "utils/gridValueChipCell";
 import CurrencyLoading from "components/CurrencyLoading";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import { ServerGridPagination } from "components/CompactGridPagination";
 import BankAccountForm from "layouts/accounts/bank-account/BankAccountForm";
 import bankAccountApi, {
@@ -833,6 +834,7 @@ export default function BankAccounts() {
   const [bankList, setBankList] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [paginationHost, setPaginationHost] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1587,32 +1589,27 @@ export default function BankAccounts() {
             flexDirection: "column",
             flex: 1,
             minHeight: 0,
+            position: "relative",
           }}
         >
-          {loading && (
-            <MDBox
-              position="absolute"
-              top={0}
-              left={0}
-              right={0}
-              bottom={0}
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              zIndex={10}
-              sx={{
-                backgroundColor: "rgba(255, 255, 255, 0.8)",
-                backdropFilter: "blur(2px)",
-              }}
-            >
-              <CurrencyLoading size={50} />
-            </MDBox>
-          )}
-
           <BankAccountsTableTopScrollRail
             gridHostRef={bankAccountsGridHostRef}
             syncKey={`${loading}-${tableRows.length}-${pageNumber}-${pageSize}-${totalCount}`}
             darkMode={Boolean(darkMode)}
+          />
+
+          <MDBox
+            ref={setPaginationHost}
+            className="saas-settings-table-pagination-top"
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              flexShrink: 0,
+              minHeight: 28,
+              maxHeight: 32,
+              width: "100%",
+            }}
           />
 
           <DataTable
@@ -1646,7 +1643,9 @@ export default function BankAccounts() {
             contentFitTable
             disableHeaderMetrics
             paginationFooter={serverPaginationFooter}
+            paginationHost={paginationHost}
           />
+          <WorkspaceLoadingOverlay active={loading} />
         </MDBox>
       </EnterpriseWorkspace>
 

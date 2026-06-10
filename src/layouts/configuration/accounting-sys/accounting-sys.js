@@ -3,7 +3,6 @@ import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
-import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -12,12 +11,11 @@ import ConfigurationModuleTabs from "layouts/configuration/components/Configurat
 import DataTable from "examples/Tables/DataTable";
 import { configurationWorkspaceBodySx } from "utils/configurationWorkspaceBodySx";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
-import lockDateApi from "services/api.lockdate.service";
+import accountingSysApi from "services/api.accountingsys.service";
 import { canCreateCurrentMenu, canEditCurrentMenu } from "services/api.service";
 import { useMaterialUIController } from "context";
-import { format, parseISO, isValid } from "date-fns";
 
-function unwrapLockDateList(response) {
+function unwrapAccountingSysList(response) {
   if (!response) return [];
   if (Array.isArray(response)) return response;
   if (Array.isArray(response?.data)) return response.data;
@@ -32,50 +30,32 @@ function unwrapLockDateList(response) {
   return [];
 }
 
-function pickLockDateValue(row) {
-  const raw =
-    row?.LockingDate ??
-    row?.lockingDate ??
-    row?.lockingdate ??
-    row?.LockDate ??
-    row?.lockDate ??
-    "";
-  if (raw === null || raw === undefined || String(raw).trim() === "") return "";
-  const s = String(raw).trim();
-  const datePart = s.includes("T") ? s.split("T")[0] : s;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart;
-  try {
-    const parsed = parseISO(s);
-    if (isValid(parsed)) return format(parsed, "yyyy-MM-dd");
-  } catch {
-    // ignore invalid parseISO
-  }
-  const ts = Date.parse(s);
-  if (!Number.isNaN(ts)) return format(new Date(ts), "yyyy-MM-dd");
-  return s;
-}
-
-function pickLockDateId(row) {
+function normalizeAccountingSysRow(row) {
   const id = row?.Id ?? row?.id;
-  if (id === null || id === undefined || String(id).trim() === "") return null;
-  return id;
+  return {
+    ...row,
+    id: id != null && String(id).trim() !== "" ? Number(id) : null,
+    particularName: String(row?.ParticularName ?? row?.particularName ?? "").trim(),
+    address: String(row?.Address ?? row?.address ?? "").trim(),
+    telNo: String(row?.TelNo ?? row?.telNo ?? "").trim(),
+  };
 }
 
-function formatLockDateDisplay(value) {
-  if (!value) return "-";
-  const raw = String(value).trim();
-  if (!raw) return "-";
-  try {
-    const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-    const parsed = parseISO(datePart);
-    if (isValid(parsed)) return format(parsed, "dd-MMM-yyyy");
-  } catch {
-    // ignore invalid parseISO
-  }
-  return raw;
+function buildApiPayload(draft) {
+  const particularName = String(draft?.particularName ?? "").trim();
+  const address = String(draft?.address ?? "").trim();
+  const telNo = String(draft?.telNo ?? "").trim();
+  return {
+    ParticularName: particularName,
+    particularName,
+    Address: address,
+    address,
+    TelNo: telNo,
+    telNo,
+  };
 }
 
-function LockDateConfig() {
+function AccountingSysConfig() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const canCreate = canCreateCurrentMenu();
@@ -87,110 +67,110 @@ function LockDateConfig() {
   const [editDraft, setEditDraft] = useState(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(20);
-  const [newErrors, setNewErrors] = useState({});
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(true);
 
   const hasExistingRow = tableRows.length > 0;
 
   useEffect(() => {
-    fetchLockDates();
+    fetchAccountingSys();
   }, []);
 
-  const fetchLockDates = async () => {
+  const fetchAccountingSys = async () => {
     setLoading(true);
     try {
-      const response = await lockDateApi.getAll();
-      const rows = unwrapLockDateList(response)
-        .map((row) => {
-          const lockDate = pickLockDateValue(row);
-          return {
-            ...row,
-            id: pickLockDateId(row) ?? 1,
-            lockDate,
-            lockingDate: lockDate,
-          };
-        })
+      const response = await accountingSysApi.getAll();
+      const rows = unwrapAccountingSysList(response)
+        .map(normalizeAccountingSysRow)
+        .filter((row) => row.id != null)
         .slice(0, 1);
       setTableRows(rows);
     } catch (error) {
-      console.error("Error fetching lock dates:", error);
+      console.error("Error fetching accounting system config:", error);
       setTableRows([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddLockDate = () => {
+  const handleAdd = () => {
     if (!canCreate) return;
     if (hasExistingRow || editingRowId) return;
     setEditingRowId("__new__");
-    setNewErrors({});
+    setErrors({});
     setNewRowDraft({
-      id: 1,
-      lockDate: "",
+      particularName: "",
+      address: "",
+      telNo: "",
     });
   };
 
-  const handleEditLockDate = (id) => {
+  const handleEdit = (id) => {
     if (!canEdit) return;
     if (editingRowId) return;
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
     setEditingRowId(id);
-    setEditDraft({ ...row, lockDate: pickLockDateValue(row) });
+    setEditDraft({
+      particularName: row.particularName,
+      address: row.address,
+      telNo: row.telNo,
+    });
+    setErrors({});
   };
 
-  const handleChange = (value) => {
+  const handleChange = (field, value) => {
     if (editingRowId === "__new__") {
-      setNewRowDraft((draft) => ({ ...draft, lockDate: value }));
-      if (newErrors.lockDate) setNewErrors((prev) => ({ ...prev, lockDate: undefined }));
+      setNewRowDraft((draft) => ({ ...draft, [field]: value }));
     } else if (editingRowId) {
-      setEditDraft((draft) => ({ ...draft, lockDate: value }));
+      setEditDraft((draft) => ({ ...draft, [field]: value }));
+    }
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
   };
 
-  const validateLockDate = (draft) => {
-    const lockDate = draft?.lockDate;
-    if (!lockDate || String(lockDate).trim() === "") {
-      setNewErrors({ lockDate: "Lock Date is required" });
-      return false;
+  const validateDraft = (draft) => {
+    const next = {};
+    if (!String(draft?.particularName ?? "").trim()) {
+      next.particularName = "Particular Name is required";
     }
-    setNewErrors({});
-    return true;
+    if (!String(draft?.address ?? "").trim()) {
+      next.address = "Address is required";
+    }
+    if (!String(draft?.telNo ?? "").trim()) {
+      next.telNo = "Tel No. is required";
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
   };
-
-  const buildPutPayload = (lockDate) => ({
-    LockingDate: lockDate,
-    lockingDate: lockDate,
-  });
 
   const handleSave = async () => {
     if (editingRowId === "__new__" && newRowDraft) {
       if (!canCreate) return;
-      if (!validateLockDate(newRowDraft)) return;
+      if (!validateDraft(newRowDraft)) return;
       try {
-        const id = newRowDraft.id ?? 1;
-        await lockDateApi.update(id, buildPutPayload(newRowDraft.lockDate));
-        await fetchLockDates();
+        await accountingSysApi.create(buildApiPayload(newRowDraft));
+        await fetchAccountingSys();
         setEditingRowId(null);
         setNewRowDraft(null);
-        setNewErrors({});
+        setErrors({});
       } catch (error) {
-        console.error("Error saving lock date:", error);
-        alert("Failed to save lock date. Please try again.");
+        console.error("Error saving accounting system config:", error);
+        alert(error?.message || "Failed to save. Please try again.");
       }
     } else if (editingRowId && editDraft) {
       if (!canEdit) return;
-      if (!validateLockDate(editDraft)) return;
+      if (!validateDraft(editDraft)) return;
       try {
-        await lockDateApi.update(editingRowId, buildPutPayload(editDraft.lockDate));
-        await fetchLockDates();
+        await accountingSysApi.update(editingRowId, buildApiPayload(editDraft));
+        await fetchAccountingSys();
         setEditingRowId(null);
         setEditDraft(null);
-        setNewErrors({});
+        setErrors({});
       } catch (error) {
-        console.error("Error updating lock date:", error);
-        alert("Failed to update lock date. Please try again.");
+        console.error("Error updating accounting system config:", error);
+        alert(error?.message || "Failed to update. Please try again.");
       }
     }
   };
@@ -199,39 +179,52 @@ function LockDateConfig() {
     setEditingRowId(null);
     setNewRowDraft(null);
     setEditDraft(null);
-    setNewErrors({});
+    setErrors({});
   };
 
-  const renderDateInput = (value, mandatory = false) => (
+  const inputSx = darkMode
+    ? {
+        "& .MuiInputBase-input": { color: "#000000 !important" },
+        "& .MuiFormHelperText-root": { color: "#000000 !important" },
+      }
+    : {};
+
+  const renderTextInput = (field, value, label) => (
     <MDInput
       value={value || ""}
-      onChange={(e) => handleChange(e.target.value)}
+      onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
-      type="date"
-      required={mandatory}
-      InputLabelProps={{ shrink: true }}
-      error={Boolean(newErrors.lockDate)}
-      helperText={newErrors.lockDate}
-      sx={
-        darkMode
-          ? {
-              "& .MuiInputBase-input": { color: "#000000 !important" },
-              "& .MuiFormHelperText-root": { color: "#000000 !important" },
-            }
-          : {}
-      }
+      label={label}
+      required
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
+      sx={inputSx}
     />
   );
 
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "60px" },
     {
-      Header: "Lock Date",
-      id: "lockingDate",
-      accessor: "lockingDate",
+      Header: "Particular Name",
+      id: "particularName",
+      accessor: "particularName",
       align: "left",
-      minWidth: "160px",
+      minWidth: "180px",
+    },
+    {
+      Header: "Address",
+      id: "address",
+      accessor: "address",
+      align: "left",
+      minWidth: "220px",
+    },
+    {
+      Header: "Tel No.",
+      id: "telNo",
+      accessor: "telNo",
+      align: "left",
+      minWidth: "140px",
     },
   ];
 
@@ -240,8 +233,14 @@ function LockDateConfig() {
 
     if (editingRowId === "__new__" && newRowDraft) {
       rows.push({
-        id: newRowDraft.id,
-        lockingDate: renderDateInput(newRowDraft.lockDate, true),
+        id: "__new__",
+        particularName: renderTextInput(
+          "particularName",
+          newRowDraft.particularName,
+          "Particular Name"
+        ),
+        address: renderTextInput("address", newRowDraft.address, "Address"),
+        telNo: renderTextInput("telNo", newRowDraft.telNo, "Tel No."),
         actions: (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">
@@ -260,9 +259,13 @@ function LockDateConfig() {
       const draft = isEditing ? editDraft : r;
       rows.push({
         id: r.id,
-        lockingDate: isEditing
-          ? renderDateInput(draft.lockDate, true)
-          : formatLockDateDisplay(r.lockingDate || r.lockDate || pickLockDateValue(r)),
+        particularName: isEditing
+          ? renderTextInput("particularName", draft.particularName, "Particular Name")
+          : r.particularName || "-",
+        address: isEditing
+          ? renderTextInput("address", draft.address, "Address")
+          : r.address || "-",
+        telNo: isEditing ? renderTextInput("telNo", draft.telNo, "Tel No.") : r.telNo || "-",
         actions: isEditing ? (
           <MDBox display="flex" gap={1}>
             <IconButton size="small" color="success" onClick={handleSave} title="Save">
@@ -287,7 +290,7 @@ function LockDateConfig() {
               <IconButton
                 size="small"
                 color="info"
-                onClick={() => handleEditLockDate(r.id)}
+                onClick={() => handleEdit(r.id)}
                 title="Edit"
                 sx={{ padding: "1px" }}
               >
@@ -300,12 +303,12 @@ function LockDateConfig() {
     });
 
     return rows;
-  }, [tableRows, editingRowId, editDraft, newRowDraft, newErrors, darkMode, canEdit]);
+  }, [tableRows, editingRowId, editDraft, newRowDraft, errors, darkMode, canEdit]);
 
   const tableData = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
 
   const tableKey = useMemo(
-    () => `lock-date-table-${tableRows.length}-${tableRows.map((r) => r.id).join("-")}`,
+    () => `accounting-sys-table-${tableRows.length}-${tableRows.map((r) => r.id).join("-")}`,
     [tableRows]
   );
 
@@ -313,9 +316,16 @@ function LockDateConfig() {
     <DashboardLayout>
       <DashboardNavbar />
       <EnterpriseWorkspace
-        title="Lock Date"
-        subtitle="Manage lock date configuration"
+        title="Accounting Sys."
+        subtitle="Manage accounting system particulars"
         tabs={<ConfigurationModuleTabs />}
+        actions={
+          canCreate && !hasExistingRow && !editingRowId ? (
+            <MDButton variant="outlined" color="dark" onClick={handleAdd}>
+              Add Accounting Sys.
+            </MDButton>
+          ) : null
+        }
         bodySx={configurationWorkspaceBodySx}
       >
         <DataTable
@@ -336,7 +346,7 @@ function LockDateConfig() {
             setPageIndex(0);
           }}
           showTotalEntries
-          exportFileName="Lock-Date"
+          exportFileName="Accounting-Sys"
           noEndBorder
         />
         <WorkspaceLoadingOverlay active={loading} />
@@ -345,4 +355,4 @@ function LockDateConfig() {
   );
 }
 
-export default LockDateConfig;
+export default AccountingSysConfig;

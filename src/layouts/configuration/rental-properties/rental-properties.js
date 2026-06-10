@@ -961,8 +961,6 @@ function RentalProperties() {
     setGridPageSize(Number(value));
   }, []);
 
-  const showGrid = !loading || tableRows.length > 0;
-
   useEffect(() => {
     perfLog("rental-properties.render", {
       pass: renderCountRef.current,
@@ -1030,25 +1028,23 @@ function RentalProperties() {
           },
         }}
       >
-        {showGrid ? (
-          <DataTable
-            table={tableConfig}
-            isSorted={false}
-            stickyToolbarAndHeader
-            entriesPerPage={{
-              defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
-              entries: [10, 25, 50, 100],
-            }}
-            pageSize={gridPageSize}
-            onEntriesPerPageChange={handleGridPageSizeChange}
-            autoResetFilters={false}
-            showTotalEntries={false}
-            noEndBorder
-            canSearch
-            exportFileName="Rental-Properties"
-            contentFitTable
-          />
-        ) : null}
+        <DataTable
+          table={tableConfig}
+          isSorted={false}
+          stickyToolbarAndHeader
+          entriesPerPage={{
+            defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+            entries: [10, 25, 50, 100],
+          }}
+          pageSize={gridPageSize}
+          onEntriesPerPageChange={handleGridPageSizeChange}
+          autoResetFilters={false}
+          showTotalEntries={false}
+          noEndBorder
+          canSearch
+          exportFileName="Rental-Properties"
+          contentFitTable
+        />
         <WorkspaceLoadingOverlay active={loading} />
       </EnterpriseWorkspace>
 

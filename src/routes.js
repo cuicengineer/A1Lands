@@ -60,6 +60,7 @@ import RentalProperties from "layouts/configuration/rental-properties/rental-pro
 import PropertyType from "layouts/configuration/property-type/property-type";
 import BanksList from "layouts/configuration/banks-list/banks-list";
 import LockDateConfig from "layouts/configuration/lock-date/lock-date";
+import AccountingSysConfig from "layouts/configuration/accounting-sys/accounting-sys";
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
@@ -72,6 +73,9 @@ import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
 import KpiOverview from "layouts/dashboard/kpi-overview";
 import BankAccounts from "layouts/accounts/bank-account/bank-account";
+import Payments from "layouts/accounts/receipts/payments";
+import Receipts from "layouts/receipts/receipts";
+import Supplier from "layouts/supplier/supplier";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -233,6 +237,14 @@ const routes = [
         route: "/configuration/lock-date",
         component: <LockDateConfig />,
       },
+      {
+        type: "collapse",
+        name: "Accounting Sys.",
+        key: "configuration-accounting-sys",
+        icon: <Icon fontSize="small">account_balance_wallet</Icon>,
+        route: "/configuration/accounting-sys",
+        component: <AccountingSysConfig />,
+      },
       // {
       //   type: "collapse",
       //   name: "Profit Sharing",
@@ -320,6 +332,30 @@ const routes = [
         component: <BankAccounts />,
       },
     ],
+  },
+  {
+    type: "collapse",
+    name: "Payments",
+    key: "payments",
+    icon: <Icon fontSize="small">payments</Icon>,
+    route: "/payments",
+    component: <Payments />,
+  },
+  {
+    type: "collapse",
+    name: "Receipts",
+    key: "receipts",
+    icon: <Icon fontSize="small">receipt_long</Icon>,
+    route: "/receipts",
+    component: <Receipts />,
+  },
+  {
+    type: "collapse",
+    name: "Supplier",
+    key: "supplier",
+    icon: <Icon fontSize="small">local_shipping</Icon>,
+    route: "/supplier",
+    component: <Supplier />,
   },
 ];
 

@@ -49,6 +49,10 @@ const getStorageKey = () => {
   return userId ? `ui_preferences_${userId}` : "ui_preferences_guest";
 };
 
+const VALID_SIDENAV_COLORS = ["default", "grey", "blue"];
+
+const normalizeSidenavColor = (color) => (VALID_SIDENAV_COLORS.includes(color) ? color : "default");
+
 // Helper function to load preferences from localStorage
 const loadPreferencesFromStorage = (defaultState) => {
   try {
@@ -56,6 +60,9 @@ const loadPreferencesFromStorage = (defaultState) => {
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (parsed.sidenavColor) {
+        parsed.sidenavColor = normalizeSidenavColor(parsed.sidenavColor);
+      }
       // Merge saved preferences with defaults (saved takes precedence)
       return { ...defaultState, ...parsed };
     }
@@ -69,11 +76,7 @@ const loadPreferencesFromStorage = (defaultState) => {
 const savePreferencesToStorage = (state) => {
   try {
     const storageKey = getStorageKey();
-    const userId = getUserId();
-    // Only save if user is logged in
-    if (userId) {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-    }
+    localStorage.setItem(storageKey, JSON.stringify(state));
   } catch (e) {
     // ignore storage errors
   }
@@ -96,7 +99,7 @@ function reducer(state, action) {
       break;
     }
     case "SIDENAV_COLOR": {
-      newState = { ...state, sidenavColor: action.value };
+      newState = { ...state, sidenavColor: normalizeSidenavColor(action.value) };
       break;
     }
     case "TRANSPARENT_NAVBAR": {
@@ -151,7 +154,7 @@ function MaterialUIControllerProvider({ children }) {
     miniSidenav: false,
     transparentSidenav: false,
     whiteSidenav: false,
-    sidenavColor: "info",
+    sidenavColor: "default",
     transparentNavbar: true,
     fixedNavbar: true,
     openConfigurator: false,

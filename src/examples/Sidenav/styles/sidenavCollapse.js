@@ -22,9 +22,11 @@ function collapseItem(theme, ownerState) {
   const { borderRadius } = borders;
   const { pxToRem, rgba, linearGradient } = functions;
 
+  const gradientKey = gradients[sidenavColor] ? sidenavColor : "info";
+
   return {
     background: active
-      ? linearGradient(gradients[sidenavColor].main, gradients[sidenavColor].state)
+      ? linearGradient(gradients[gradientKey].main, gradients[gradientKey].state)
       : transparent.main,
     color:
       (transparentSidenav && !darkMode && !active) || (whiteSidenav && !active)

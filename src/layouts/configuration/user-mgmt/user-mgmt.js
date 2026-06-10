@@ -36,6 +36,12 @@ import api, {
 import PropTypes from "prop-types";
 import AddUserForm from "./AddUserForm";
 import { useMaterialUIController } from "context";
+import {
+  USER_APPOINT_ENTITY,
+  buildAppointNameOptions,
+  mapUserAppointRows,
+} from "./userAppointUtils";
+import { isSuperuserUsername } from "./userMgmtUtils";
 
 /** Dashboard menu row: View is always granted and cannot be unchecked in Assign Rights. */
 function isDashboardRightsMenu(menuName) {
@@ -59,6 +65,7 @@ function UserMgmt() {
   const [commandOptions, setCommandOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
   const [roleOptions, setRoleOptions] = useState([]);
+  const [appointOptions, setAppointOptions] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const [editingRowId, setEditingRowId] = useState(null);
@@ -94,11 +101,12 @@ function UserMgmt() {
     (async () => {
       setLoading(true);
       try {
-        const [userData, commandData, baseData, roleData] = await Promise.all([
+        const [userData, commandData, baseData, roleData, appointData] = await Promise.all([
           api.list("User"),
           api.list("Command"),
           api.list("Base"),
           api.list("Role"),
+          api.list(USER_APPOINT_ENTITY).catch(() => []),
         ]);
         if (!mounted) return;
 
@@ -141,6 +149,7 @@ function UserMgmt() {
             }))
             .filter((r) => r.value)
         );
+        setAppointOptions(mapUserAppointRows(appointData));
       } catch (e) {
         console.error("Failed to load data", e);
       } finally {
@@ -180,9 +189,10 @@ function UserMgmt() {
   const handleEditUser = (id) => {
     if (!canEdit) return;
     if (editingRowId) return;
-    const row = tableRows.find((r) => r.id === id);
+    const row = tableRows.find((r) => Number(r.id) === Number(id));
     if (!row) return;
-    setEditingRowId(id);
+    if (isSuperuserUsername(row.username)) return;
+    setEditingRowId(Number(id));
     // Store original row data - preserve all existing values including password placeholder
     setEditDraft({
       ...row,
@@ -225,6 +235,8 @@ function UserMgmt() {
     // Validate all required fields
     if (!draft?.username || !String(draft.username).trim()) {
       errs.username = "Username is required";
+    } else if (mode === "add" && isSuperuserUsername(draft.username)) {
+      errs.username = 'Username "superuser" is reserved and cannot be used';
     } else {
       // Duplicate username not allowed (case-insensitive)
       const usernameLower = String(draft.username).trim().toLowerCase();
@@ -233,7 +245,7 @@ function UserMgmt() {
           String(row.username || "")
             .trim()
             .toLowerCase() === usernameLower &&
-          (mode !== "edit" || row.id !== editingRowId)
+          (mode !== "edit" || Number(row.id) !== Number(editingRowId))
       );
       if (existing) {
         errs.username = "Username already exists";
@@ -272,14 +284,7 @@ function UserMgmt() {
     if (draft?.cmdId === "" || draft?.cmdId === null || draft?.cmdId === undefined) {
       errs.cmdId = "Command is required";
     }
-    const ahqSelected = isAhqCommand(draft?.cmdId);
-    if (
-      mode !== "add" &&
-      !ahqSelected &&
-      (draft?.baseId === "" || draft?.baseId === null || draft?.baseId === undefined)
-    ) {
-      errs.baseId = "Base is required";
-    }
+    // Base is optional for non-AHQ (same as Add User form).
     if (draft?.levelId === "" || draft?.levelId === null || draft?.levelId === undefined) {
       errs.levelId = "Level ID is required";
     }
@@ -295,9 +300,11 @@ function UserMgmt() {
       return same ? prev : errs;
     });
 
-    if (showAlert && errs.password) {
-      // Requirement: show policy as alert when password is not valid
-      alert(PASSWORD_POLICY_TEXT);
+    if (showAlert && Object.keys(errs).length > 0) {
+      const messages = Object.values(errs).filter(Boolean);
+      if (messages.length > 0) {
+        alert(messages.join("\n"));
+      }
     }
     return Object.keys(errs).length === 0;
   };
@@ -400,81 +407,84 @@ function UserMgmt() {
     setErrors({});
   };
 
-  const handleEditSave = async () => {
+  const handleEditSave = async (e) => {
+    e?.stopPropagation?.();
     if (!canEdit) return;
+    if (!editDraft) {
+      alert("Unable to save: edit data is missing.");
+      return;
+    }
     if (!validateForm(editDraft, true, "edit")) return;
 
     setErrors({});
 
     try {
-      if (editingRowId && editDraft) {
-        const ahqSelected = isAhqCommand(editDraft.cmdId);
+      const ahqSelected = isAhqCommand(editDraft.cmdId);
 
-        // Build payload - include all required fields
-        const payload = {
-          id: editDraft.id,
-          username: String(editDraft.username || "").trim(),
-          pakNo: String(editDraft.pakNo || "").trim(),
-          name: String(editDraft.name || "").trim(),
-          rank: String(editDraft.rank || "").trim(),
-          appoint: String(editDraft.appoint ?? editDraft.Appoint ?? "").trim(),
-          category: (Array.isArray(editDraft.category)
-            ? editDraft.category
-            : String(editDraft.category || "")
-                .split(",")
-                .map((v) => v.trim())
-                .filter(Boolean)
-          ).join(","),
-          status: Number(editDraft.status) === 1 ? 1 : 0, // Ensure status is 1 or 0
-          cmdId: Number(editDraft.cmdId),
-          baseId: editDraft.baseId ? Number(editDraft.baseId) : null,
-          unitId:
-            editDraft.unitId !== "" && editDraft.unitId !== null && editDraft.unitId !== undefined
-              ? Number(editDraft.unitId)
-              : null,
-          levelId: ahqSelected ? 1 : editDraft.levelId ? Number(editDraft.levelId) : null,
-        };
+      // Build payload - include all required fields
+      const payload = {
+        id: editDraft.id,
+        username: String(editDraft.username || "").trim(),
+        pakNo: String(editDraft.pakNo || "").trim(),
+        name: String(editDraft.name || "").trim(),
+        rank: String(editDraft.rank || "").trim(),
+        appoint: String(editDraft.appoint ?? editDraft.Appoint ?? "").trim(),
+        category: (Array.isArray(editDraft.category)
+          ? editDraft.category
+          : String(editDraft.category || "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+        ).join(","),
+        status: Number(editDraft.status) === 1 ? 1 : 0, // Ensure status is 1 or 0
+        cmdId: Number(editDraft.cmdId),
+        baseId: editDraft.baseId ? Number(editDraft.baseId) : null,
+        unitId:
+          editDraft.unitId !== "" && editDraft.unitId !== null && editDraft.unitId !== undefined
+            ? Number(editDraft.unitId)
+            : null,
+        levelId: ahqSelected ? 1 : editDraft.levelId ? Number(editDraft.levelId) : null,
+      };
 
-        // Only include password if user actually entered a new one (not the placeholder)
-        const passwordValue = String(editDraft.password || "").trim();
-        if (passwordValue && passwordValue !== "********" && passwordValue.length > 0) {
-          payload.password = passwordValue;
-        }
-
-        const updated = await api.update("User", editingRowId, payload);
-        setTableRows((prev) =>
-          prev.map((r) => {
-            if (r.id === editingRowId) {
-              const updatedRow = updated || editDraft;
-              // Use the payload status value (which we know is correct: 0 or 1)
-              // Normalize API response status if it's in a different format
-              const normalizedStatus =
-                payload.status !== undefined
-                  ? payload.status
-                  : updatedRow.status === 1 ||
-                    updatedRow.status === "1" ||
-                    updatedRow.status === true
-                  ? 1
-                  : 0;
-              return {
-                ...updatedRow,
-                id: updatedRow.id,
-                status: normalizedStatus,
-              };
-            }
-            return r;
-          })
-        );
+      // Only include password if user actually entered a new one (not the placeholder)
+      const passwordValue = String(editDraft.password || "").trim();
+      if (passwordValue && passwordValue !== "********" && passwordValue.length > 0) {
+        payload.password = passwordValue;
       }
-    } catch (e) {
-      console.error("Save failed", e);
+
+      const updated = await api.update("User", editingRowId, payload);
+      setTableRows((prev) =>
+        prev.map((r) => {
+          if (Number(r.id) === Number(editingRowId)) {
+            const updatedRow = updated || editDraft;
+            // Use the payload status value (which we know is correct: 0 or 1)
+            // Normalize API response status if it's in a different format
+            const normalizedStatus =
+              payload.status !== undefined
+                ? payload.status
+                : updatedRow.status === 1 || updatedRow.status === "1" || updatedRow.status === true
+                ? 1
+                : 0;
+            return {
+              ...updatedRow,
+              id: updatedRow.id,
+              status: normalizedStatus,
+            };
+          }
+          return r;
+        })
+      );
+      setEditingRowId(null);
+      setEditDraft(null);
+      setErrors({});
+    } catch (err) {
+      console.error("Save failed", err);
+      alert(err?.message || "Failed to save user. Please try again.");
     }
-    setEditingRowId(null);
-    setEditDraft(null);
-    setErrors({});
   };
 
-  const handleCancel = () => {
+  const handleCancel = (e) => {
+    e?.stopPropagation?.();
     setEditingRowId(null);
     setNewRowDraft(null);
     setEditDraft(null);
@@ -484,6 +494,8 @@ function UserMgmt() {
 
   const handleDeleteUser = async (id) => {
     if (!canDelete) return;
+    const row = tableRows.find((r) => Number(r.id) === Number(id));
+    if (row && isSuperuserUsername(row.username)) return;
     if (window.confirm(`Are you sure you want to delete user with Id ${id}?`)) {
       try {
         await api.remove("User", id);
@@ -596,6 +608,7 @@ function UserMgmt() {
   };
 
   const handleRightsToggle = (menuName, field) => {
+    if (isSuperuserUsername(rightsUserName)) return;
     if (field === "view" && isDashboardRightsMenu(menuName)) return;
     setRightsDraftRows((prev) =>
       prev.map((row) =>
@@ -611,6 +624,7 @@ function UserMgmt() {
 
   const handleRightsSave = async () => {
     if (!rightsUserId) return;
+    if (isSuperuserUsername(rightsUserName)) return;
     setIsRightsSaving(true);
     try {
       await Promise.all(
@@ -680,7 +694,7 @@ function UserMgmt() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = editingRowId === row.original.id;
+        const isEditing = Number(editingRowId) === Number(row.original.id);
         const draft = isEditing ? editDraft : row.original;
         if (isEditing) {
           return renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false);
@@ -695,7 +709,7 @@ function UserMgmt() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = editingRowId === row.original.id;
+        const isEditing = Number(editingRowId) === Number(row.original.id);
         const draft = isEditing ? editDraft : row.original;
         if (isEditing) {
           return renderBaseSelect(
@@ -715,7 +729,7 @@ function UserMgmt() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = editingRowId === row.original.id;
+        const isEditing = Number(editingRowId) === Number(row.original.id);
         const draft = isEditing ? editDraft : row.original;
         const ahqSelected = isAhqCommand(draft?.cmdId);
         return isEditing
@@ -733,7 +747,7 @@ function UserMgmt() {
       align: "center",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = editingRowId === row.original.id;
+        const isEditing = Number(editingRowId) === Number(row.original.id);
         const draft = isEditing ? editDraft : row.original;
         if (isEditing) {
           return renderStatusSelect("status", draft.status);
@@ -924,6 +938,8 @@ function UserMgmt() {
       size="small"
       fullWidth
       disabled={disabled}
+      error={Boolean(errors[field])}
+      helperText={errors[field]}
       sx={{
         "& .MuiInputBase-root": { minHeight: "45px" },
         "& .MuiSelect-select": {
@@ -964,6 +980,8 @@ function UserMgmt() {
         size="small"
         fullWidth
         disabled={disabled}
+        error={Boolean(errors[field])}
+        helperText={errors[field]}
         SelectProps={{
           displayEmpty: true,
         }}
@@ -992,6 +1010,50 @@ function UserMgmt() {
         {filteredBases.map((opt) => (
           <MenuItem key={opt.id} value={opt.id}>
             {opt.name}
+          </MenuItem>
+        ))}
+      </MDInput>
+    );
+  };
+
+  const renderAppointSelect = (field, value) => {
+    const options = buildAppointNameOptions(appointOptions, value);
+    return (
+      <MDInput
+        select
+        value={value || ""}
+        onChange={(e) => handleChange(field, e.target.value)}
+        size="small"
+        fullWidth
+        error={Boolean(errors[field])}
+        helperText={errors[field]}
+        sx={{
+          "& .MuiInputBase-root": { minHeight: "45px" },
+          "& .MuiSelect-select": {
+            display: "flex",
+            alignItems: "center",
+            paddingTop: 0,
+            paddingBottom: 0,
+            ...(darkMode ? { color: "#000000 !important" } : {}),
+          },
+          ...(darkMode
+            ? {
+                "& .MuiInputLabel-root": {
+                  color: "#000000 !important",
+                },
+                "& .MuiSvgIcon-root": {
+                  color: "#000000 !important",
+                },
+              }
+            : {}),
+        }}
+      >
+        <MenuItem value="">
+          <em>None</em>
+        </MenuItem>
+        {options.map((name) => (
+          <MenuItem key={name} value={name}>
+            {name}
           </MenuItem>
         ))}
       </MDInput>
@@ -1044,10 +1106,11 @@ function UserMgmt() {
     const rows = [];
 
     tableRows.forEach((r) => {
-      const isEditing = editingRowId === r.id;
+      const isEditing = Number(editingRowId) === Number(r.id);
       const draft = isEditing ? editDraft : r;
+      const isProtectedSuperuser = isSuperuserUsername(r.username);
       rows.push({
-        __disabledRow: false,
+        __disabledRow: isProtectedSuperuser,
         id: r.id,
         username: isEditing ? renderInput("username", draft.username, true, false) : r.username,
         password: isEditing
@@ -1057,7 +1120,7 @@ function UserMgmt() {
         name: isEditing ? renderInput("name", draft.name, false, false) : r.name,
         rank: isEditing ? renderInput("rank", draft.rank, false, false) : r.rank,
         appoint: isEditing
-          ? renderInput("appoint", draft.appoint ?? draft.Appoint ?? "", false, false)
+          ? renderAppointSelect("appoint", draft.appoint ?? draft.Appoint ?? "")
           : r.appoint ?? r.Appoint ?? "" ?? "",
         category: isEditing ? renderCategorySelect("category", draft.category, false) : r.category,
         cmdId: isEditing
@@ -1091,10 +1154,22 @@ function UserMgmt() {
             gap="2px"
             sx={{ whiteSpace: "nowrap" }}
           >
-            <IconButton size="small" color="success" onClick={handleEditSave} title="Save">
+            <IconButton
+              size="small"
+              color="success"
+              onClick={handleEditSave}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Save"
+            >
               <Icon>check</Icon>
             </IconButton>
-            <IconButton size="small" color="error" onClick={handleCancel} title="Cancel">
+            <IconButton
+              size="small"
+              color="error"
+              onClick={handleCancel}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Cancel"
+            >
               <Icon>close</Icon>
             </IconButton>
           </MDBox>
@@ -1113,7 +1188,7 @@ function UserMgmt() {
               whiteSpace: "nowrap",
             }}
           >
-            {canEdit && (
+            {canEdit && !isProtectedSuperuser && (
               <IconButton
                 size="small"
                 color="info"
@@ -1124,7 +1199,7 @@ function UserMgmt() {
                 <Icon>edit</Icon>
               </IconButton>
             )}
-            {canDelete && (
+            {canDelete && !isProtectedSuperuser && (
               <IconButton
                 size="small"
                 color="error"
@@ -1157,9 +1232,12 @@ function UserMgmt() {
     commandOptions,
     baseOptions,
     roleOptions,
+    appointOptions,
     errors,
     darkMode,
   ]);
+
+  const isRightsReadOnly = isSuperuserUsername(rightsUserName);
 
   return (
     <DashboardLayout>
@@ -1270,7 +1348,7 @@ function UserMgmt() {
                         checked={row.view}
                         onChange={() => handleRightsToggle(row.menuName, "view")}
                         size="small"
-                        disabled={isDashboardRightsMenu(row.menuName)}
+                        disabled={isRightsReadOnly || isDashboardRightsMenu(row.menuName)}
                       />
                     </TableCell>
                     <TableCell align="center">
@@ -1278,6 +1356,7 @@ function UserMgmt() {
                         checked={row.create}
                         onChange={() => handleRightsToggle(row.menuName, "create")}
                         size="small"
+                        disabled={isRightsReadOnly}
                       />
                     </TableCell>
                     <TableCell align="center">
@@ -1285,6 +1364,7 @@ function UserMgmt() {
                         checked={row.edit}
                         onChange={() => handleRightsToggle(row.menuName, "edit")}
                         size="small"
+                        disabled={isRightsReadOnly}
                       />
                     </TableCell>
                     <TableCell align="center">
@@ -1292,6 +1372,7 @@ function UserMgmt() {
                         checked={row.delete}
                         onChange={() => handleRightsToggle(row.menuName, "delete")}
                         size="small"
+                        disabled={isRightsReadOnly}
                       />
                     </TableCell>
                   </TableRow>
@@ -1302,11 +1383,13 @@ function UserMgmt() {
         </DialogContent>
         <DialogActions>
           <MDButton color="secondary" onClick={handleCloseRightsModal} disabled={isRightsSaving}>
-            Cancel
+            {isRightsReadOnly ? "Close" : "Cancel"}
           </MDButton>
-          <MDButton color="info" onClick={handleRightsSave} disabled={isRightsSaving}>
-            {isRightsSaving ? "Saving..." : "Save"}
-          </MDButton>
+          {!isRightsReadOnly && (
+            <MDButton color="info" onClick={handleRightsSave} disabled={isRightsSaving}>
+              {isRightsSaving ? "Saving..." : "Save"}
+            </MDButton>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1321,6 +1404,8 @@ function UserMgmt() {
         handleAddSave={handleAddSave}
         errors={errors}
         setErrors={setErrors}
+        appointOptions={appointOptions}
+        onAppointOptionsChange={setAppointOptions}
       />
     </DashboardLayout>
   );

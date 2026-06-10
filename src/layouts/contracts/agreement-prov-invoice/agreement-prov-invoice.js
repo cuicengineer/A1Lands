@@ -32,6 +32,7 @@ import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import api from "services/api.service";
 import contractApi from "services/api.contract.service";
+import accountingSysApi from "services/api.accountingsys.service";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
 import { format, parseISO, isValid, addDays, addMonths, addYears } from "date-fns";
@@ -377,8 +378,8 @@ function getAgreementProvDefaultDateTo() {
   return format(addYears(new Date(), 1), "yyyy-MM-dd");
 }
 
-function scheduleRowDueDate(row) {
-  const raw = pickScheduleRowField(row, "DueDate", "dueDate");
+function scheduleRowContractStartDate(row) {
+  const raw = pickScheduleRowField(row, "ContractStartDate", "contractStartDate");
   if (!raw) return null;
   try {
     const text = String(raw).trim().split("T")[0];
@@ -389,14 +390,13 @@ function scheduleRowDueDate(row) {
   }
 }
 
-/** Earliest DueDate among finalized schedule rows (yyyy-MM-dd for date inputs). */
-function getOldestFinalizedInvoiceDueDateInput(scheduleRows) {
+/** Earliest ContractStartDate among schedule rows (yyyy-MM-dd for date inputs). */
+function getOldestContractStartDateInput(scheduleRows) {
   let oldest = null;
   (scheduleRows || []).forEach((row) => {
-    if (!pickScheduleRowIsFinalized(row)) return;
-    const due = scheduleRowDueDate(row);
-    if (!due) return;
-    if (!oldest || due < oldest) oldest = due;
+    const contractStart = scheduleRowContractStartDate(row);
+    if (!contractStart) return;
+    if (!oldest || contractStart < oldest) oldest = contractStart;
   });
   return oldest ? format(oldest, "yyyy-MM-dd") : "";
 }
@@ -410,6 +410,22 @@ function buildInitialAgreementProvFilters() {
 
 function scheduleRowContractNo(row) {
   return String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+}
+
+/** Unique contract numbers from loaded schedule/grid rows (no separate contracts API). */
+function buildAgreementProvContractNoFilterOptions(scheduleRows) {
+  const byContractNo = new Map();
+  (scheduleRows || []).forEach((row) => {
+    if (row?.isGroupRow || row?.IsGroupRow) return;
+    const contractNo = scheduleRowContractNo(row);
+    if (!contractNo) return;
+    const key = contractNo.toLowerCase();
+    if (byContractNo.has(key)) return;
+    byContractNo.set(key, { ContractNo: contractNo, contractNo });
+  });
+  return Array.from(byContractNo.values()).sort((a, b) =>
+    a.contractNo.localeCompare(b.contractNo, undefined, { sensitivity: "base" })
+  );
 }
 
 function scheduleRowFilterDate(row) {
@@ -431,39 +447,67 @@ function scheduleRowFilterDate(row) {
   }
 }
 
-function filterAgreementProvScheduleRows(scheduleData, filters, units) {
+function buildAgreementProvSearchApiFilters(filters, extra = {}) {
+  const contractNoRaw = filters?.contractNo;
+  const contractNo = contractNoRaw
+    ? String(contractNoRaw.contractNo || contractNoRaw.ContractNo || contractNoRaw).trim()
+    : "";
+  const invoiceNo = String(extra?.invoiceNo || "").trim();
+  return {
+    ...(contractNo ? { contractNo } : {}),
+    ...(filters?.dateFrom ? { fromDate: filters.dateFrom } : {}),
+    ...(filters?.dateTo ? { toDate: filters.dateTo } : {}),
+    ...(filters?.command !== "" && filters?.command != null
+      ? { cmdId: Number(filters.command) }
+      : {}),
+    ...(filters?.base !== "" && filters?.base != null ? { baseId: Number(filters.base) } : {}),
+    ...(invoiceNo ? { invoiceNo } : {}),
+    isFinalized: true,
+  };
+}
+
+function filterAgreementProvScheduleRows(
+  scheduleData,
+  filters,
+  units,
+  { skipFinalized = false, skipServerFilters = false } = {}
+) {
   let data = Array.isArray(scheduleData) ? scheduleData : [];
-  data = data.filter((row) => pickScheduleRowIsFinalized(row));
-  if (filters.command) {
-    data = data.filter((row) => Number(row.cmdId ?? row.CmdId) === Number(filters.command));
+  if (!skipFinalized) {
+    data = data.filter((row) => pickScheduleRowIsFinalized(row));
   }
-  if (filters.base) {
-    data = data.filter((row) => Number(row.baseId ?? row.BaseId) === Number(filters.base));
-  }
-  if (filters.dateFrom) {
-    const from = parseISO(String(filters.dateFrom).trim());
-    if (isValid(from)) {
-      data = data.filter((row) => {
-        const d = scheduleRowFilterDate(row);
-        return !d || d >= from;
-      });
+  if (!skipServerFilters) {
+    if (filters.command) {
+      data = data.filter((row) => Number(row.cmdId ?? row.CmdId) === Number(filters.command));
     }
-  }
-  if (filters.dateTo) {
-    const to = parseISO(String(filters.dateTo).trim());
-    if (isValid(to)) {
-      data = data.filter((row) => {
-        const d = scheduleRowFilterDate(row);
-        return !d || d <= to;
-      });
+    if (filters.base) {
+      data = data.filter((row) => Number(row.baseId ?? row.BaseId) === Number(filters.base));
     }
-  }
-  if (filters.contractNo) {
-    const cn = String(
-      filters.contractNo.contractNo || filters.contractNo.ContractNo || filters.contractNo
-    ).trim();
-    if (cn) {
-      data = data.filter((row) => scheduleRowContractNo(row) === cn);
+    if (filters.dateFrom) {
+      const from = parseISO(String(filters.dateFrom).trim());
+      if (isValid(from)) {
+        data = data.filter((row) => {
+          const d = scheduleRowFilterDate(row);
+          return !d || d >= from;
+        });
+      }
+    }
+    if (filters.dateTo) {
+      const to = parseISO(String(filters.dateTo).trim());
+      if (isValid(to)) {
+        data = data.filter((row) => {
+          const d = scheduleRowFilterDate(row);
+          return !d || d <= to;
+        });
+      }
+    }
+    if (filters.contractNo) {
+      const cn = String(
+        filters.contractNo.contractNo || filters.contractNo.ContractNo || filters.contractNo
+      ).trim();
+      if (cn) {
+        data = data.filter((row) => scheduleRowContractNo(row) === cn);
+      }
     }
   }
   if (filters.unit) {
@@ -700,44 +744,6 @@ function getAgreementProvInvoiceActionKey(rowData) {
 function isAgreementProvInvoiceItemRecordRow(lineRow) {
   const sub = pickInvoiceLineSubInvoiceNo(lineRow);
   return sub !== "" && sub !== "0";
-}
-
-async function buildAgreementProvInvoiceItemRecordIndex(scheduleRows) {
-  const keysWithItems = new Set();
-  const invoiceNoToContractNo = new Map();
-
-  (scheduleRows || []).forEach((row) => {
-    if (isAgreementProvContractBasicInfoRow(row)) return;
-    if (row?.isGroupRow || row?.IsGroupRow) return;
-    const invoiceNo = String(pickScheduleRowField(row, "InvoiceNo", "invoiceNo") || "").trim();
-    const contractNo = String(pickScheduleRowField(row, "ContractNo", "contractNo") || "").trim();
-    if (!invoiceNo || !contractNo) return;
-    invoiceNoToContractNo.set(invoiceNo, contractNo);
-  });
-
-  const uniqueInvoiceNos = [...invoiceNoToContractNo.keys()];
-  await Promise.all(
-    uniqueInvoiceNos.map(async (invoiceNo) => {
-      try {
-        const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
-        const lines = unwrapContractInvoiceScheduleList(response);
-        const itemRows = (lines || []).filter(isAgreementProvInvoiceItemRecordRow);
-        if (itemRows.length > 0) {
-          const contractNo =
-            String(
-              pickScheduleRowField(itemRows[0], "ContractNo", "contractNo") ||
-                invoiceNoToContractNo.get(invoiceNo) ||
-                ""
-            ).trim() || invoiceNoToContractNo.get(invoiceNo);
-          if (contractNo) keysWithItems.add(`${contractNo}|${invoiceNo}`);
-        }
-      } catch (error) {
-        console.error(`Error loading invoice item records for ${invoiceNo}:`, error);
-      }
-    })
-  );
-
-  return keysWithItems;
 }
 
 /** React row key — SubInvoiceNo only (never shared schedule Id). */
@@ -1873,12 +1879,11 @@ function formatPrefixNoDisplay(row) {
   const tenantNo = String(
     pickScheduleRowField(row, "TenantNo", "tenantNo") ||
       pickScheduleRowField(row, "PrefixNo", "prefixNo") ||
+      pickScheduleRowField(row, "Prefix", "prefix") ||
       ""
   ).trim();
-  if (tenantNo) return tenantNo;
-  const prefix = String(pickScheduleRowField(row, "Prefix", "prefix") || "").trim();
   const ownerName = String(pickScheduleRowField(row, "OwnerName", "ownerName") || "").trim();
-  return [prefix, ownerName].filter(Boolean).join(" ").trim();
+  return [tenantNo, ownerName].filter(Boolean).join(" ").trim();
 }
 
 function normalizeAgreementProvInvoiceStatusKey(raw) {
@@ -2069,6 +2074,153 @@ function computeInvoiceRecordLineTotal(months, ratePM, discountPercent) {
   const d = Number(discountPercent);
   const raw = !Number.isFinite(d) || d <= 0 ? gross : gross - (gross * d) / 100;
   return Math.round(raw);
+}
+
+const AGREEMENT_PROV_PDF_MARGIN_LEFT_IN = 1.3;
+const AGREEMENT_PROV_PDF_MARGIN_OTHER_IN = 0.5;
+const AGREEMENT_PROV_PDF_MARGIN_LEFT_MM = AGREEMENT_PROV_PDF_MARGIN_LEFT_IN * 25.4;
+const AGREEMENT_PROV_PDF_MARGIN_OTHER_MM = AGREEMENT_PROV_PDF_MARGIN_OTHER_IN * 25.4;
+const AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY = "agreement-prov-invoice-pdf-margins";
+const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
+  topIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
+  bottomIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
+  leftIn: AGREEMENT_PROV_PDF_MARGIN_LEFT_IN,
+  rightIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
+};
+const AGREEMENT_PROV_PDF_FONT_TITLE = 18;
+const AGREEMENT_PROV_PDF_FONT_BODY = 10;
+const AGREEMENT_PROV_PDF_LINE_HEIGHT_MM = 5;
+
+function agreementProvInchesToMm(inches) {
+  const n = Number(inches);
+  return Number.isFinite(n) ? n * 25.4 : 0;
+}
+
+function agreementProvPdfMarginsInchesToMm(marginsIn) {
+  return {
+    marginTop: agreementProvInchesToMm(marginsIn.topIn),
+    marginBottom: agreementProvInchesToMm(marginsIn.bottomIn),
+    marginLeft: agreementProvInchesToMm(marginsIn.leftIn),
+    marginRight: agreementProvInchesToMm(marginsIn.rightIn),
+  };
+}
+
+function loadAgreementProvPdfMargins() {
+  try {
+    const raw = localStorage.getItem(AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY);
+    if (!raw) return { ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS };
+    const parsed = JSON.parse(raw);
+    return {
+      topIn: Number(parsed?.topIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.topIn,
+      bottomIn: Number(parsed?.bottomIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.bottomIn,
+      leftIn: Number(parsed?.leftIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.leftIn,
+      rightIn: Number(parsed?.rightIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.rightIn,
+    };
+  } catch {
+    return { ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS };
+  }
+}
+
+function saveAgreementProvPdfMargins(margins) {
+  try {
+    localStorage.setItem(AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY, JSON.stringify(margins));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function formatPdfContractDateShort(dateString) {
+  const formatted = formatDateDDMMMYYYY(dateString);
+  if (formatted === "—") return "";
+  const parts = formatted.split("-");
+  if (parts.length !== 3) return formatted;
+  return `${parts[0]} ${parts[1]} ${parts[2].slice(-2)}`;
+}
+
+function formatPdfInvoiceDate(dateString) {
+  const formatted = formatDateDDMMMYYYY(dateString);
+  return formatted === "—" ? "" : formatted;
+}
+
+function formatPdfCurrency(value) {
+  if (value === null || value === undefined || value === "") return "0";
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString("en-US") : String(value);
+}
+
+function unwrapAccountingSysList(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (Array.isArray(response?.items)) return response.items;
+  if (Array.isArray(response?.Items)) return response.Items;
+  if (Array.isArray(response?.result)) return response.result;
+  if (response?.data && typeof response.data === "object" && !Array.isArray(response.data)) {
+    return [response.data];
+  }
+  if (response && typeof response === "object") return [response];
+  return [];
+}
+
+function splitAccountingSysAddressForPdf(address) {
+  const trimmed = String(address ?? "").trim();
+  if (!trimmed) return { line1: "—", line2: "" };
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex === -1) return { line1: trimmed, line2: "" };
+  return {
+    line1: trimmed.slice(0, commaIndex).trim() || "—",
+    line2: trimmed.slice(commaIndex + 1).trim(),
+  };
+}
+
+function pickInvoiceLineTotalNumeric(lineRow) {
+  const raw = pickScheduleRowField(lineRow, "Total", "total");
+  if (raw !== "" && raw != null) {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  const totalRent = pickScheduleRowField(lineRow, "TotalRent", "totalRent");
+  if (totalRent !== "" && totalRent != null) {
+    const n = Number(totalRent);
+    if (Number.isFinite(n)) return n;
+  }
+  const months = pickScheduleRowField(lineRow, "Months", "months");
+  const ratePM = pickScheduleRowField(lineRow, "CalculatedRentPM", "calculatedRentPM");
+  const discount =
+    pickScheduleRowField(lineRow, "Discount", "discount") ||
+    pickScheduleRowField(lineRow, "DiscountPercent", "discountPercent");
+  const computed = computeInvoiceRecordLineTotal(months, ratePM, discount);
+  return computed != null ? computed : 0;
+}
+
+function loadPafLogoIntoPdf(doc, x, y, widthMm = 18) {
+  return new Promise((resolve) => {
+    const logoPath = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const logoHeight = (img.height / img.width) * widthMm;
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const imgData = canvas.toDataURL("image/png");
+        doc.addImage(imgData, "PNG", x, y, widthMm, logoHeight);
+        resolve(logoHeight);
+      } catch (error) {
+        console.error("Error adding logo to PDF:", error);
+        resolve(0);
+      }
+    };
+    img.onerror = () => {
+      console.error("Error loading logo image");
+      resolve(0);
+    };
+    img.src = logoPath;
+  });
 }
 
 function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
@@ -2657,6 +2809,7 @@ function AgreementProvInvoiceEditDialog({
   onSave,
   saving,
   registerReloadInvoiceLines,
+  onInvoiceLinesLoaded,
   viewMode,
   createMode,
 }) {
@@ -2745,6 +2898,9 @@ function AgreementProvInvoiceEditDialog({
         );
         return next;
       });
+      if (!viewMode) {
+        onInvoiceLinesLoaded?.(sorted, rowData);
+      }
       return lines;
     } catch (error) {
       console.error("Error loading invoice records by invoice no:", error);
@@ -2755,7 +2911,7 @@ function AgreementProvInvoiceEditDialog({
     } finally {
       setInvoiceLinesLoading(false);
     }
-  }, [rowData, syncOriginalServerSubs]);
+  }, [rowData, syncOriginalServerSubs, viewMode, onInvoiceLinesLoaded]);
 
   useEffect(() => {
     if (!open || !rowData) {
@@ -2795,6 +2951,19 @@ function AgreementProvInvoiceEditDialog({
       return undefined;
     }
 
+    if (viewMode) {
+      setForm(buildAgreementProvEditForm(rowData));
+      setInvoiceLinesRows([]);
+      setInvoiceLinesError("");
+      setInvoiceLinesLoading(false);
+      setNewLineDrafts([]);
+      setEditingLineDraft(null);
+      setPendingDeleteSubs([]);
+      originalServerSubsRef.current = new Set();
+      originalLinePayloadSnapshotsRef.current = new Map();
+      return undefined;
+    }
+
     let cancelled = false;
     const load = async () => {
       if (!cancelled) await reloadInvoiceLines();
@@ -2803,7 +2972,7 @@ function AgreementProvInvoiceEditDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, rowData, isCreateMode, reloadInvoiceLines]);
+  }, [open, rowData, isCreateMode, viewMode, reloadInvoiceLines]);
 
   useEffect(() => {
     if (!registerReloadInvoiceLines || isCreateMode) return undefined;
@@ -3222,42 +3391,52 @@ function AgreementProvInvoiceEditDialog({
                 gap={1}
                 mt={0.5}
                 mb={0.75}
-                sx={{ flexShrink: 0 }}
+                sx={{ flexShrink: 0, flexWrap: "nowrap" }}
               >
-                <MDTypography variant="button" fontWeight="bold">
+                <MDTypography variant="button" fontWeight="bold" sx={{ whiteSpace: "nowrap" }}>
                   Invoice Item records
                 </MDTypography>
-                {!viewMode && (
-                  <Tooltip
-                    title={
-                      hasIncompleteNewLineDrafts
-                        ? "Complete all fields in the current row(s) before adding another"
-                        : "Add invoice record"
-                    }
-                  >
-                    <span>
-                      <IconButton
-                        color="info"
-                        size="small"
-                        disabled={
-                          saving ||
-                          !canAddRecord ||
-                          Boolean(editingLineDraft) ||
-                          hasIncompleteNewLineDrafts
-                        }
-                        onClick={handleStartAddRecord}
-                        sx={{
-                          p: 0.35,
-                          border: "1px solid",
-                          borderColor: "info.main",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Icon sx={{ fontSize: "1rem !important" }}>add</Icon>
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                )}
+                <MDBox
+                  display="flex"
+                  alignItems="center"
+                  gap={1}
+                  sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
+                >
+                  <MDTypography variant="button" fontWeight="medium">
+                    Total Amount: {formatScheduleGridNumber(form.amountReceivable)}
+                  </MDTypography>
+                  {!viewMode && (
+                    <Tooltip
+                      title={
+                        hasIncompleteNewLineDrafts
+                          ? "Complete all fields in the current row(s) before adding another"
+                          : "Add invoice record"
+                      }
+                    >
+                      <span>
+                        <IconButton
+                          color="info"
+                          size="small"
+                          disabled={
+                            saving ||
+                            !canAddRecord ||
+                            Boolean(editingLineDraft) ||
+                            hasIncompleteNewLineDrafts
+                          }
+                          onClick={handleStartAddRecord}
+                          sx={{
+                            p: 0.35,
+                            border: "1px solid",
+                            borderColor: "info.main",
+                            borderRadius: 1,
+                          }}
+                        >
+                          <Icon sx={{ fontSize: "1rem !important" }}>add</Icon>
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  )}
+                </MDBox>
               </MDBox>
               <MDBox sx={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}>
                 <AgreementProvInvoiceLinesGrid
@@ -3313,6 +3492,7 @@ AgreementProvInvoiceEditDialog.propTypes = {
   saving: PropTypes.bool,
   rowData: PropTypes.object,
   registerReloadInvoiceLines: PropTypes.func,
+  onInvoiceLinesLoaded: PropTypes.func,
   viewMode: PropTypes.bool,
   createMode: PropTypes.bool,
 };
@@ -3398,9 +3578,9 @@ export default function AgreementProvInvoice() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [units, setUnits] = useState([]);
-  const [contracts, setContracts] = useState([]);
   const [filteredBases, setFilteredBases] = useState([]);
   const [allScheduleRows, setAllScheduleRows] = useState([]);
+  const [searchResultRows, setSearchResultRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -3409,6 +3589,14 @@ export default function AgreementProvInvoice() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [invoiceKeysWithItemRecords, setInvoiceKeysWithItemRecords] = useState(() => new Set());
   const [invoiceLockSavingKey, setInvoiceLockSavingKey] = useState("");
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [pdfPreviewRowData, setPdfPreviewRowData] = useState(null);
+  const [pdfPreviewMarginsIn, setPdfPreviewMarginsIn] = useState(() =>
+    loadAgreementProvPdfMargins()
+  );
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const pdfPreviewUrlRef = useRef(null);
   const reloadInvoiceLinesRef = useRef(null);
   const urlDeepLink = useMemo(() => readAgreementProvInvoiceUrlParams(), []);
   const urlDeepLinkAppliedRef = useRef(false);
@@ -3461,12 +3649,20 @@ export default function AgreementProvInvoice() {
   }, []);
 
   const reloadAllScheduleRows = useCallback(async () => {
-    const response = await contractApi.getAllInvoiceScheduleRecords();
+    const response = await contractApi.getAgreementProvFinalizedInvoiceScheduleRecords();
     const scheduleData = unwrapContractInvoiceScheduleList(response).map(
       normalizeAgreementProvInvoiceRow
     );
     setAllScheduleRows(scheduleData);
     return scheduleData;
+  }, []);
+
+  const executeFinalizedInvoiceSearch = useCallback(async (filterSnapshot, extra = {}) => {
+    const apiFilters = buildAgreementProvSearchApiFilters(filterSnapshot, extra);
+    const response = await contractApi.searchAgreementProvFinalizedInvoiceSchedule(apiFilters);
+    const rows = unwrapContractInvoiceScheduleList(response).map(normalizeAgreementProvInvoiceRow);
+    setSearchResultRows(rows);
+    return rows;
   }, []);
 
   useEffect(() => {
@@ -3489,37 +3685,20 @@ export default function AgreementProvInvoice() {
 
   useEffect(() => {
     if (!allScheduleRows.length) return;
-    const oldestDueDate = getOldestFinalizedInvoiceDueDateInput(allScheduleRows);
+    const oldestContractStartDate = getOldestContractStartDateInput(allScheduleRows);
     setFilters((prev) => {
-      const dateFrom = prev.dateFrom || oldestDueDate;
+      const dateFrom = prev.dateFrom || oldestContractStartDate;
       const dateTo = prev.dateTo || getAgreementProvDefaultDateTo();
       if (dateFrom === prev.dateFrom && dateTo === prev.dateTo) return prev;
       return { ...prev, dateFrom, dateTo };
     });
   }, [allScheduleRows]);
 
-  useEffect(() => {
-    const fetchActiveContracts = async () => {
-      try {
-        const response = await contractApi.getAllRecords();
-        const contractsData = response?.data ?? (Array.isArray(response) ? response : []);
-        const activeContracts = (Array.isArray(contractsData) ? contractsData : []).filter(
-          (contract) =>
-            contract.Status === true ||
-            contract.Status === 1 ||
-            contract.status === true ||
-            contract.status === 1 ||
-            contract.status === "Active" ||
-            contract.Status === "Active"
-        );
-        setContracts(activeContracts);
-      } catch (error) {
-        console.error("Error fetching contracts:", error);
-        setContracts([]);
-      }
-    };
-    fetchActiveContracts();
-  }, []);
+  const contractNoFilterOptions = useMemo(() => {
+    const rowSource =
+      searchApplied && searchResultRows.length > 0 ? searchResultRows : allScheduleRows;
+    return buildAgreementProvContractNoFilterOptions(rowSource);
+  }, [allScheduleRows, searchResultRows, searchApplied]);
 
   useEffect(() => {
     if (urlDeepLinkAppliedRef.current || !urlDeepLink.contractNo) return;
@@ -3533,8 +3712,8 @@ export default function AgreementProvInvoice() {
   }, [urlDeepLink.contractNo]);
 
   useEffect(() => {
-    if (!urlDeepLink.contractNo || !contracts.length) return;
-    const matchedContract = contracts.find(
+    if (!urlDeepLink.contractNo || !contractNoFilterOptions.length) return;
+    const matchedContract = contractNoFilterOptions.find(
       (c) =>
         String(c.ContractNo || c.contractNo || "")
           .trim()
@@ -3550,7 +3729,7 @@ export default function AgreementProvInvoice() {
       if (prev.contractNo === matchedContract) return prev;
       return { ...prev, contractNo: matchedContract };
     });
-  }, [contracts, urlDeepLink.contractNo]);
+  }, [contractNoFilterOptions, urlDeepLink.contractNo]);
 
   // Filter bases based on selected command
   useEffect(() => {
@@ -3574,54 +3753,51 @@ export default function AgreementProvInvoice() {
   };
 
   const displayScheduleRows = useMemo(() => {
-    if (!searchApplied) return [];
-    return filterAgreementProvScheduleRows(allScheduleRows, appliedFilters, units);
-  }, [allScheduleRows, appliedFilters, units, searchApplied]);
-
-  useEffect(() => {
-    if (!searchApplied || displayScheduleRows.length === 0) {
-      setInvoiceKeysWithItemRecords(new Set());
-      return undefined;
+    if (!searchApplied) {
+      return Array.isArray(allScheduleRows) ? allScheduleRows : [];
     }
-
-    let cancelled = false;
-    buildAgreementProvInvoiceItemRecordIndex(displayScheduleRows).then((keys) => {
-      if (!cancelled) setInvoiceKeysWithItemRecords(keys);
+    return filterAgreementProvScheduleRows(searchResultRows, appliedFilters, units, {
+      skipFinalized: true,
+      skipServerFilters: true,
     });
+  }, [allScheduleRows, searchResultRows, appliedFilters, units, searchApplied]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [displayScheduleRows, searchApplied]);
-
-  const refreshInvoiceItemRecordKey = useCallback(async (rowData, form) => {
-    const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form || {});
-    if (!contractNo || !invoiceNo) return;
-    const key = `${contractNo}|${invoiceNo}`;
-    try {
-      const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
-      const lines = unwrapContractInvoiceScheduleList(response);
-      const hasItems = (lines || []).some(isAgreementProvInvoiceItemRecordRow);
-      setInvoiceKeysWithItemRecords((prev) => {
-        const next = new Set(prev);
-        if (hasItems) next.add(key);
-        else next.delete(key);
-        return next;
-      });
-    } catch (error) {
-      console.error("Error refreshing invoice item record index:", error);
-    }
+  const syncInvoiceItemRecordKeyFromLines = useCallback((rowData, lines) => {
+    const key = getAgreementProvInvoiceActionKey(rowData);
+    if (!key) return;
+    const hasItems = (lines || []).some(isAgreementProvInvoiceItemRecordRow);
+    setInvoiceKeysWithItemRecords((prev) => {
+      const next = new Set(prev);
+      if (hasItems) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   }, []);
 
-  const handleSearch = () => {
-    setAppliedFilters({ ...filters, contractNo: filters.contractNo });
-    setSearchApplied(true);
+  const handleSearch = async () => {
+    const snapshot = { ...filters, contractNo: filters.contractNo };
+    setAppliedFilters(snapshot);
+    setInvoiceKeysWithItemRecords(new Set());
+    setLoading(true);
+    try {
+      await executeFinalizedInvoiceSearch(snapshot, { invoiceNo: urlDeepLink.invoiceNo });
+      setSearchApplied(true);
+    } catch (error) {
+      console.error("Error searching finalized invoices:", error);
+      setSearchResultRows([]);
+      alert("Failed to search finalized invoices. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const refreshScheduleGrid = async () => {
     setLoading(true);
     try {
       await reloadAllScheduleRows();
+      if (searchApplied) {
+        await executeFinalizedInvoiceSearch(appliedFilters, { invoiceNo: urlDeepLink.invoiceNo });
+      }
     } catch (error) {
       console.error("Error refreshing contract invoice schedule:", error);
       alert("Failed to refresh invoice schedule. Please try again.");
@@ -3656,259 +3832,307 @@ export default function AgreementProvInvoice() {
     }
   };
 
-  // Generate PDF for a contract row
-  const generatePDF = (rowData) => {
+  const generatePDF = async (rowData, marginsInParam = null, { openNewTab = true } = {}) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 15;
-    let yPos = margin;
+    const { marginLeft, marginRight, marginTop, marginBottom } = agreementProvPdfMarginsInchesToMm(
+      marginsInParam ?? loadAgreementProvPdfMargins()
+    );
+    const contentRight = pageWidth - marginRight;
+    const contentWidth = contentRight - marginLeft;
+    const lineHeight = AGREEMENT_PROV_PDF_LINE_HEIGHT_MM;
+    const bodyFont = AGREEMENT_PROV_PDF_FONT_BODY;
 
-    // Helper function to format date as dd-MMM-yyyy
-    const formatDate = (dateString) => {
-      if (!dateString) return "";
-      try {
-        const raw = String(dateString).trim();
-        if (!raw) return "";
-        const datePart = raw.includes("T") ? raw.split("T")[0] : raw;
-        const monthShort = [
-          "Jan",
-          "Feb",
-          "Mar",
-          "Apr",
-          "May",
-          "Jun",
-          "Jul",
-          "Aug",
-          "Sep",
-          "Oct",
-          "Nov",
-          "Dec",
-        ];
-        let day = "";
-        let month = "";
-        let year = "";
-        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-          [year, month, day] = datePart.split("-");
-        } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
-          [day, month, year] = datePart.split("-");
-        } else {
-          const date = new Date(dateString);
-          if (!Number.isFinite(date.getTime())) return dateString;
-          day = String(date.getDate()).padStart(2, "0");
-          month = String(date.getMonth() + 1).padStart(2, "0");
-          year = String(date.getFullYear());
-        }
-        const monthText = monthShort[Number(month) - 1] || month;
-        return `${String(day).padStart(2, "0")}-${monthText}-${year}`;
-      } catch (e) {
-        return dateString;
+    const contractNo = String(pickScheduleRowField(rowData, "ContractNo", "contractNo") || "");
+    const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "");
+    const contractStartDate = pickScheduleRowField(
+      rowData,
+      "ContractStartDate",
+      "contractStartDate"
+    );
+    const contractEndDate = pickScheduleRowField(rowData, "ContractEndDate", "contractEndDate");
+    const initialRentPM = pickScheduleRowField(rowData, "InitialRentPM", "initialRentPM") || 0;
+    const paymentTermMonths =
+      pickScheduleRowField(rowData, "PaymentTermMonths", "paymentTermMonths") || 12;
+    const tenantNo = String(pickScheduleRowField(rowData, "TenantNo", "tenantNo") || "").trim();
+    const customerDisplay = formatPrefixNoDisplay(rowData) || tenantNo || "—";
+    const descriptionText = pickAgreementProvHeaderDescription(rowData) || "Sales Invoice";
+    const invoiceDateDisplay = formatPdfInvoiceDate(pickScheduleInvoiceDate(rowData));
+    const dueDateDisplay = formatPdfInvoiceDate(
+      pickScheduleRowField(rowData, "DueDate", "dueDate")
+    );
+    const contractPeriodStart = formatPdfContractDateShort(contractStartDate);
+    const contractPeriodEnd = formatPdfContractDateShort(contractEndDate);
+    const contractDisplay =
+      contractPeriodStart && contractPeriodEnd
+        ? `${contractNo} (${contractPeriodStart} To ${contractPeriodEnd})`
+        : contractNo || "—";
+
+    let particularName = "—";
+    let accountingAddressLine1 = "—";
+    let accountingAddressLine2 = "";
+    let accountingTelNo = "";
+
+    try {
+      const accountingResponse = await accountingSysApi.getAll();
+      const accountingConfig = unwrapAccountingSysList(accountingResponse)[0];
+      if (accountingConfig) {
+        particularName =
+          String(
+            accountingConfig?.ParticularName ?? accountingConfig?.particularName ?? ""
+          ).trim() || "—";
+        const addressParts = splitAccountingSysAddressForPdf(
+          accountingConfig?.Address ?? accountingConfig?.address
+        );
+        accountingAddressLine1 = addressParts.line1;
+        accountingAddressLine2 = addressParts.line2;
+        accountingTelNo = String(accountingConfig?.TelNo ?? accountingConfig?.telNo ?? "").trim();
       }
+    } catch (error) {
+      console.error("Error fetching accounting system config for PDF:", error);
+    }
+
+    let invoiceLineRows = [];
+    if (invoiceNo) {
+      try {
+        const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+        const lines = unwrapContractInvoiceScheduleList(response);
+        invoiceLineRows = sortInvoiceLinesByOrder(
+          (lines || []).filter((lineRow) => !isMainInvoiceScheduleRow(lineRow))
+        );
+      } catch (error) {
+        console.error("Error loading invoice item records for PDF:", error);
+      }
+    }
+
+    const LOGO_WIDTH_MM = 18;
+    const LOGO_GAP_MM = 3;
+    const textStartX = marginLeft + LOGO_WIDTH_MM + LOGO_GAP_MM;
+    const INVOICE_BOX_WIDTH_MM = 54;
+    const INVOICE_LABEL_COL_MM = 24;
+    const invoiceBoxLeft = contentRight - INVOICE_BOX_WIDTH_MM;
+    const invoiceSepX = invoiceBoxLeft + INVOICE_LABEL_COL_MM;
+    const invoiceValueX = invoiceSepX + 2;
+    const customerValueX = textStartX;
+
+    await loadPafLogoIntoPdf(doc, marginLeft, marginTop, LOGO_WIDTH_MM);
+
+    const drawBodyText = (text, x, y, options = {}) => {
+      doc.setFont("helvetica", options.bold ? "bold" : "normal");
+      doc.setFontSize(options.fontSize || bodyFont);
+      doc.text(String(text ?? ""), x, y, options.textOptions);
     };
 
-    // Helper function to format currency
-    const formatCurrency = (value) => {
-      if (!value) return "0";
-      return Number(value).toLocaleString("en-US");
+    const ensurePageSpace = (y, needed = lineHeight) => {
+      if (y + needed <= pageHeight - marginBottom - 20) return y;
+      doc.addPage();
+      return marginTop;
     };
 
-    // Load and add PAF Logo below Sales Invoice on left side
-    const addLogoToPDF = () => {
-      return new Promise((resolve) => {
-        const logoPath = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          try {
-            // Logo dimensions and position
-            const logoWidth = 18; // Reduced size for better fit
-            const logoHeight = (img.height / img.width) * logoWidth; // Maintain aspect ratio
-            const logoX = margin; // Left aligned
-            const logoY = margin + 4; // Move up to avoid text collision
+    doc.setLineWidth(0.15);
 
-            // Convert image to base64 and add to PDF
-            const canvas = document.createElement("canvas");
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0);
-            const imgData = canvas.toDataURL("image/png");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(AGREEMENT_PROV_PDF_FONT_TITLE);
+    doc.text("Sales Invoice", textStartX, marginTop + 5);
 
-            doc.addImage(imgData, "PNG", logoX, logoY, logoWidth, logoHeight);
-            resolve();
-          } catch (error) {
-            console.error("Error adding logo to PDF:", error);
-            resolve(); // Continue even if logo fails
+    let headerY = marginTop + 11;
+    drawBodyText(particularName, textStartX, headerY, { bold: true });
+    headerY += lineHeight;
+    drawBodyText(accountingAddressLine1, textStartX, headerY);
+    headerY += lineHeight;
+    drawBodyText(accountingAddressLine2 || " ", textStartX, headerY);
+    headerY += lineHeight;
+    drawBodyText(accountingTelNo ? `Tel No ${accountingTelNo}` : "Tel No", textStartX, headerY);
+
+    let invoiceMetaY = marginTop + 5 + lineHeight;
+    const invoiceMetaRows = [
+      ["Invoice No", invoiceNo || "—"],
+      ["Invoice Date", invoiceDateDisplay || "—"],
+      ["Due Date", dueDateDisplay || "—"],
+    ];
+    invoiceMetaRows.forEach(([label, value]) => {
+      drawBodyText(label, invoiceBoxLeft + 2, invoiceMetaY, { bold: true });
+      drawBodyText(value, invoiceValueX, invoiceMetaY);
+      invoiceMetaY += lineHeight;
+    });
+
+    let yPos = Math.max(headerY, invoiceMetaY) + lineHeight + 3;
+
+    const drawUnderlinedCustomerRow = (label, value, withColon = true) => {
+      const rowTop = yPos;
+      const labelText = withColon ? `${label} :` : label;
+      drawBodyText(labelText, marginLeft + 1, rowTop, { bold: true });
+      const valueLines = doc.splitTextToSize(String(value || "—"), contentRight - textStartX - 1);
+      valueLines.forEach((line, index) => {
+        drawBodyText(line, customerValueX, rowTop + index * lineHeight);
+      });
+      const rowHeight = Math.max(lineHeight, valueLines.length * lineHeight);
+      const underlineY = rowTop + rowHeight - 0.5;
+      doc.line(customerValueX, underlineY, contentRight, underlineY);
+      yPos = rowTop + rowHeight + 3;
+      return rowHeight + 3;
+    };
+
+    drawUnderlinedCustomerRow("Customer", customerDisplay, true);
+    drawUnderlinedCustomerRow("Contract", contractDisplay, true);
+    drawUnderlinedCustomerRow("Description", descriptionText, false);
+
+    yPos += lineHeight;
+
+    const pdfBodyColQtyX = marginLeft + contentWidth * 0.58;
+    const pdfBodyColUnitPriceX = marginLeft + contentWidth * 0.72;
+    const pdfBodyDescWidth = pdfBodyColQtyX - marginLeft - 2;
+
+    const drawBodyTableHeader = () => {
+      const rowTop = yPos;
+      drawBodyText("Description", marginLeft, rowTop, { bold: true });
+      drawBodyText("Qty", pdfBodyColQtyX, rowTop, { bold: true });
+      drawBodyText("Unit price", pdfBodyColUnitPriceX, rowTop, { bold: true });
+      drawBodyText("Total", contentRight, rowTop, { bold: true, textOptions: { align: "right" } });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(bodyFont);
+      const headerTextHeight = doc.getTextDimensions("Description").h;
+      const underlineY = rowTop + headerTextHeight * 0.28 + 0.4;
+      doc.line(marginLeft, underlineY, contentRight, underlineY);
+      yPos = underlineY + lineHeight;
+    };
+
+    const drawBodyTableRow = (description, qty, unitPrice, total) => {
+      yPos = ensurePageSpace(yPos, lineHeight + 2);
+      if (yPos === marginTop) {
+        drawBodyTableHeader();
+      }
+
+      const descLines = doc.splitTextToSize(String(description || "—"), pdfBodyDescWidth);
+      descLines.forEach((line, index) => {
+        if (index > 0) {
+          yPos = ensurePageSpace(yPos, lineHeight);
+          if (yPos === marginTop) {
+            drawBodyTableHeader();
           }
-        };
-        img.onerror = () => {
-          console.error("Error loading logo image");
-          resolve(); // Continue even if logo fails
-        };
-        img.src = logoPath;
+        }
+        drawBodyText(line, marginLeft, yPos);
+        if (index === 0) {
+          drawBodyText(String(qty ?? "—"), pdfBodyColQtyX, yPos);
+          drawBodyText(formatPdfCurrency(unitPrice), pdfBodyColUnitPriceX, yPos);
+          drawBodyText(formatPdfCurrency(total), contentRight, yPos, {
+            textOptions: { align: "right" },
+          });
+        }
+        yPos += lineHeight;
       });
     };
 
-    // Get contract data (handle both PascalCase and camelCase)
-    const contractNo = rowData.ContractNo || rowData.contractNo || "";
-    const businessName = rowData.BusinessName || rowData.businessName || "";
-    const tenantNo = rowData.TenantNo || rowData.tenantNo || "";
-    const contractStartDate = rowData.ContractStartDate || rowData.contractStartDate || "";
-    const contractEndDate = rowData.ContractEndDate || rowData.contractEndDate || "";
-    const commercialOpDate =
-      rowData.CommercialOperationDate || rowData.commercialOperationDate || "";
-    const tenantAddress = rowData.Address || rowData.address || "";
-    const initialRentPM = rowData.InitialRentPM || rowData.initialRentPM || 0;
-    const initialRentPA = rowData.InitialRentPA || rowData.initialRentPA || 0;
-    const natureOfBusiness = rowData.NatureOfBusiness || rowData.natureOfBusiness || "";
-    const cmdName = rowData.CmdName || rowData.cmdName || "";
-    const baseName = rowData.BaseName || rowData.baseName || "";
-    const className = rowData.ClassName || rowData.className || "";
-    const term = rowData.Term || rowData.term || "";
-    const paymentTermMonths = rowData.PaymentTermMonths || rowData.paymentTermMonths || "";
-    const uoM = rowData.UoM || rowData.uoM || rowData.UnitName || rowData.unitName || "";
-    const increaseIntervalMonths =
-      rowData.IncreaseIntervalMonths || rowData.increaseIntervalMonths || "";
-    const riseDate = rowData.RiseDate || rowData.riseDate || "";
+    let calculatedTotal = 0;
 
-    // Build PDF content function
-    const buildPDFContent = (resolvedTenantAddress = "") => {
-      // Top Left Section - Title "Sales Invoice"
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text("Sales Invoice", margin, margin + 2);
+    drawBodyTableHeader();
 
-      let yPos = margin + 11;
-
-      // Top Right Section - Invoice Details (dates and number)
-      // Position text to the left of the logo (logo is 18mm wide + gap to prevent collision)
-      const logoWidth = 18;
-      const logoGap = 5; // Gap between logo and page edge
-      const textLogoGap = 10; // Gap between text and logo to prevent collision
-      const rightX = pageWidth - margin - logoWidth - logoGap - textLogoGap - 40; // Leave sufficient space for logo
-      const invoiceInfoX = pageWidth / 2 - 12; // Keep invoice meta in center area
-      const invoiceBlockStartY = margin + 2; // Start slightly below top to align with text baseline
-      yPos = invoiceBlockStartY;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const formatPdfScheduleDate = (raw) => {
-        const formatted = formatDateDDMMMYYYY(raw);
-        return formatted === "-" ? "" : formatted;
-      };
-      const invoiceDateDisplay = formatPdfScheduleDate(pickScheduleInvoiceDate(rowData));
-      const dueDateDisplay = formatPdfScheduleDate(
-        pickScheduleRowField(rowData, "DueDate", "dueDate")
-      );
-      doc.text("Invoice date:", invoiceInfoX, yPos);
-      yPos += 5;
-      doc.text(`${invoiceDateDisplay}`, invoiceInfoX, yPos);
-      yPos += 7;
-      doc.text("Due date:", invoiceInfoX, yPos);
-      yPos += 5;
-      doc.text(`${dueDateDisplay}`, invoiceInfoX, yPos);
-      yPos += 7;
-      doc.text("Invoice number:", invoiceInfoX, yPos);
-      yPos += 5;
-      doc.text(`${contractNo}`, invoiceInfoX, yPos);
-
-      // Top Right Section - Sender/Billing Entity Information (below invoice details)
-      yPos = invoiceBlockStartY;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.text("General Admin Fund - Air HQs", rightX, yPos);
-      yPos += 5;
-      doc.setFont("helvetica", "normal");
-      doc.text("Directorate of CNPF", rightX, yPos);
-      yPos += 5;
-      doc.text("Air Headquarters, Islamabad, Pakistan", rightX, yPos);
-      yPos += 5;
-      doc.text("Contact No: 051-9505187 Ext 5187, 5183, 5193, 5197", rightX, yPos);
-
-      // Top Right Section - Bank Account Details (below sender info)
-      yPos += 8;
-      doc.setLineWidth(0.1);
-      doc.line(rightX, yPos, rightX + 60, yPos);
-      yPos += 5;
-      doc.text("Title of Account = General Admin Fund", rightX, yPos);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      const clientInfo = `${contractNo}-${businessName}`;
-      doc.text(clientInfo, margin, yPos + 1.5);
-      yPos += 5;
-      doc.text("IBAN = XXXXXXXXXXXXXXXXXXXXXXXX", rightX, yPos);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      const tenantInfo = tenantNo ? `Tenant: ${tenantNo}` : "";
-      if (tenantInfo) {
-        doc.text(tenantInfo, margin, yPos + 2);
-      }
-      yPos += 5;
-      const tenantAddressInfo = resolvedTenantAddress ? `Address: ${resolvedTenantAddress}` : "";
-      if (tenantAddressInfo) {
-        doc.text(tenantAddressInfo, margin, yPos);
-      }
-      yPos += 5;
-      doc.text("Bank = Allied Bank E-9, PAF Complex Islamabad", rightX, yPos);
-
-      // Bottom Section - Itemized Charges Table (move up to remove blank space)
-      yPos += 10;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.text("Item", margin, yPos);
-      doc.text("PM", margin + 40, yPos);
-      doc.text("Unit price", margin + 70, yPos);
-      doc.text("Total", margin + 120, yPos);
-
-      yPos += 8;
-      doc.setLineWidth(0.1);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-
-      yPos += 6;
-      doc.setFont("helvetica", "normal");
-      doc.text("MR Monthly Rent", margin, yPos);
+    if (invoiceLineRows.length > 0) {
+      invoiceLineRows.forEach((lineRow) => {
+        const desc =
+          pickScheduleRowField(lineRow, "Description", "description") ||
+          pickScheduleRowField(lineRow, "Desc", "desc") ||
+          pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
+          pickScheduleRowField(lineRow, "ItemCode", "itemCode") ||
+          "—";
+        const qty = pickScheduleRowField(lineRow, "Months", "months") || "—";
+        const unitPrice = pickScheduleRowField(lineRow, "CalculatedRentPM", "calculatedRentPM");
+        const lineTotal = pickInvoiceLineTotalNumeric(lineRow);
+        calculatedTotal += lineTotal;
+        drawBodyTableRow(desc, qty, unitPrice, lineTotal);
+      });
+    } else {
       const pmMonths = paymentTermMonths || 12;
-      doc.text(String(pmMonths), margin + 40, yPos);
-      doc.text(formatCurrency(initialRentPM), margin + 70, yPos);
-      const totalRent = Number(initialRentPM) * Number(pmMonths);
-      doc.text(formatCurrency(totalRent), margin + 120, yPos);
+      const fallbackTotal = Number(initialRentPM) * Number(pmMonths);
+      calculatedTotal = Number.isFinite(fallbackTotal) ? fallbackTotal : 0;
+      drawBodyTableRow("MR Monthly Rent", pmMonths, initialRentPM, calculatedTotal);
+    }
 
-      // Summary calculations - align to right
-      yPos += 15;
-      doc.setFont("helvetica", "bold");
-      const totalX = pageWidth - margin - 50; // Right align
-      doc.text(`Total: ${formatCurrency(totalRent)}`, totalX, yPos);
-    };
+    const amountReceivable = Number(
+      pickScheduleRowField(rowData, "AmountReceivable", "amountReceivable") || 0
+    );
+    const displayTotal =
+      calculatedTotal > 0
+        ? calculatedTotal
+        : Number.isFinite(amountReceivable) && amountReceivable > 0
+        ? amountReceivable
+        : Number(pickScheduleRowField(rowData, "TotalRent", "totalRent") || 0);
 
-    const resolveTenantAddress = async () => {
-      const existingAddress = String(tenantAddress || "").trim();
-      if (existingAddress) return existingAddress;
-      const normalizedTenantNo = String(tenantNo || "").trim();
-      if (!normalizedTenantNo) return "";
-      try {
-        const tenantsResponse = await api.list("tenant");
-        const tenants = Array.isArray(tenantsResponse) ? tenantsResponse : [];
-        const tenant = tenants.find(
-          (t) => String(t?.tenantNo || t?.TenantNo || "").trim() === normalizedTenantNo
-        );
-        return String(tenant?.address || tenant?.Address || "").trim();
-      } catch (error) {
-        console.error("Error fetching tenant address:", error);
-        return "";
-      }
-    };
+    yPos = ensurePageSpace(yPos + 4, lineHeight * 3);
+    yPos += 4;
 
-    // Load logo first, then fetch tenant address, build content and open PDF
-    addLogoToPDF().then(async () => {
-      const resolvedTenantAddress = await resolveTenantAddress();
-      buildPDFContent(resolvedTenantAddress);
-      const pdfBlob = doc.output("blob");
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-
-      setTimeout(() => {
-        URL.revokeObjectURL(pdfUrl);
-      }, 60000);
+    const totalText = `Total: ${formatPdfCurrency(displayTotal)}`;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(bodyFont);
+    const totalDims = doc.getTextDimensions(totalText);
+    const totalRowY = yPos;
+    const totalOverlineY = totalRowY - totalDims.h * 0.75 - 0.5;
+    doc.line(marginLeft, totalOverlineY, contentRight, totalOverlineY);
+    drawBodyText(totalText, contentRight, totalRowY, {
+      bold: true,
+      textOptions: { align: "right" },
     });
+
+    yPos += lineHeight + 8;
+    if (yPos > pageHeight - marginBottom - 20) {
+      doc.addPage();
+      yPos = marginTop;
+    }
+    const signatureY = Math.max(yPos + 10, pageHeight - marginBottom - 18);
+    doc.line(marginLeft, signatureY, contentRight, signatureY);
+
+    const pdfBlob = doc.output("blob");
+    if (!openNewTab) return pdfBlob;
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    window.open(pdfUrl, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
+  };
+
+  const revokePdfPreviewObjectUrl = () => {
+    if (pdfPreviewUrlRef.current) {
+      URL.revokeObjectURL(pdfPreviewUrlRef.current);
+      pdfPreviewUrlRef.current = null;
+    }
+    setPdfPreviewUrl(null);
+  };
+
+  const handleClosePdfPreview = () => {
+    setPdfPreviewOpen(false);
+    setPdfPreviewRowData(null);
+    setPdfPreviewLoading(false);
+    revokePdfPreviewObjectUrl();
+  };
+
+  const regeneratePdfPreview = async (rowData, marginsIn) => {
+    if (!rowData) return;
+    setPdfPreviewLoading(true);
+    try {
+      saveAgreementProvPdfMargins(marginsIn);
+      const pdfBlob = await generatePDF(rowData, marginsIn, { openNewTab: false });
+      revokePdfPreviewObjectUrl();
+      const nextUrl = URL.createObjectURL(pdfBlob);
+      pdfPreviewUrlRef.current = nextUrl;
+      setPdfPreviewUrl(nextUrl);
+    } catch (error) {
+      console.error("Error generating PDF preview:", error);
+      alert(error?.message || "Failed to generate PDF preview.");
+    } finally {
+      setPdfPreviewLoading(false);
+    }
+  };
+
+  const handleOpenPdfPreview = async (rowData) => {
+    const marginsIn = loadAgreementProvPdfMargins();
+    setPdfPreviewRowData(rowData);
+    setPdfPreviewMarginsIn(marginsIn);
+    setPdfPreviewOpen(true);
+    await regeneratePdfPreview(rowData, marginsIn);
+  };
+
+  const handleApplyPdfMargins = async () => {
+    await regeneratePdfPreview(pdfPreviewRowData, pdfPreviewMarginsIn);
   };
 
   const AGREEMENT_PROV_DATE_COLUMN_IDS = new Set([
@@ -4074,9 +4298,10 @@ export default function AgreementProvInvoice() {
         originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
         originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
       });
+      const savedLines = lineSaveContext.invoiceLines ?? [];
+      syncInvoiceItemRecordKeyFromLines(rowData, savedLines);
       handleCloseEditRow();
       await refreshScheduleGrid();
-      await refreshInvoiceItemRecordKey(rowData, form);
     } catch (error) {
       console.error("Error updating contract invoice schedule:", error);
       alert(getAgreementProvSaveErrorMessage(error));
@@ -4285,7 +4510,11 @@ export default function AgreementProvInvoice() {
             </IconButton>
           </Tooltip>
           <Tooltip title="Generate PDF">
-            <IconButton onClick={() => generatePDF(rowData)} size="medium" sx={viewColIconSx.pdf}>
+            <IconButton
+              onClick={() => handleOpenPdfPreview(rowData)}
+              size="medium"
+              sx={viewColIconSx.pdf}
+            >
               <Icon>picture_as_pdf</Icon>
             </IconButton>
           </Tooltip>
@@ -4568,23 +4797,10 @@ export default function AgreementProvInvoice() {
     periodColumn,
     scheduleNumberColumn("calculatedRentPM", "Rate PM", "CalculatedRentPM", "calculatedRentPM"),
     scheduleNumberColumn("months", "Months", "Months", "months"),
-    scheduleNumberColumn("totalRent", "Total Amount", "TotalRent", "totalRent", true),
+    scheduleNumberColumn("totalRent", "Receivable", "TotalRent", "totalRent", true),
     scheduleTextColumn("remarks", "Remarks", "Remarks", "remarks"),
-    scheduleNumberColumn(
-      "amountReceived",
-      "Amount Received",
-      "AmountReceived",
-      "amountReceived",
-      true
-    ),
-    scheduleNumberColumn(
-      "amountReceivable",
-      "Amount Receivable",
-      "AmountReceivable",
-      "amountReceivable",
-      true
-    ),
-    scheduleNumberColumn("amountPending", "Amount Pending", "AmountPending", "amountPending", true),
+    scheduleNumberColumn("amountReceived", "Received", "AmountReceived", "amountReceived", true),
+    scheduleNumberColumn("amountPending", "Balance", "AmountPending", "amountPending", true),
 
     descriptionColumn,
     scheduleNumberColumn("daysToDue", "Days to due", "DaysToDue", "daysToDue"),
@@ -4612,7 +4828,6 @@ export default function AgreementProvInvoice() {
     "paymentTermMonths",
     "riseRate",
     "amountReceived",
-    "amountReceivable",
     "amountPending",
   ];
 
@@ -5013,19 +5228,22 @@ export default function AgreementProvInvoice() {
 
               <MDBox sx={{ flex: "1 1 120px", minWidth: 0 }}>
                 <Autocomplete
-                  options={contracts}
+                  options={contractNoFilterOptions}
                   getOptionLabel={(option) =>
                     option.ContractNo || option.contractNo || String(option)
                   }
                   value={
                     filters.contractNo
-                      ? contracts.find(
+                      ? contractNoFilterOptions.find(
                           (c) =>
                             (c.ContractNo || c.contractNo) ===
                             (filters.contractNo.ContractNo ||
                               filters.contractNo.contractNo ||
                               filters.contractNo)
-                        ) || null
+                        ) ||
+                        (typeof filters.contractNo === "object"
+                          ? filters.contractNo
+                          : { ContractNo: filters.contractNo, contractNo: filters.contractNo })
                       : null
                   }
                   onChange={(event, newValue) => {
@@ -5296,6 +5514,146 @@ export default function AgreementProvInvoice() {
         </MDBox>
       </EnterpriseWorkspace>
 
+      <Dialog open={pdfPreviewOpen} onClose={handleClosePdfPreview} maxWidth={false} fullWidth>
+        <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700, pb: 1 }}>PDF Preview</DialogTitle>
+        <DialogContent sx={{ p: 0, height: "75vh", display: "flex" }}>
+          <MDBox
+            sx={{
+              width: 320,
+              borderRight: "1px solid #e0e0e0",
+              p: 2,
+              overflow: "auto",
+            }}
+          >
+            <MDTypography variant="h6" sx={{ mb: 1 }}>
+              Margins (in)
+            </MDTypography>
+
+            <MDBox display="flex" flexDirection="column" gap={1}>
+              <MDInput
+                size="small"
+                label="Top"
+                type="number"
+                value={pdfPreviewMarginsIn?.topIn ?? 0}
+                onChange={(e) =>
+                  setPdfPreviewMarginsIn((prev) => ({
+                    ...prev,
+                    topIn: Number(e.target.value),
+                  }))
+                }
+                inputProps={{ step: 0.1, min: 0 }}
+              />
+              <MDInput
+                size="small"
+                label="Bottom"
+                type="number"
+                value={pdfPreviewMarginsIn?.bottomIn ?? 0}
+                onChange={(e) =>
+                  setPdfPreviewMarginsIn((prev) => ({
+                    ...prev,
+                    bottomIn: Number(e.target.value),
+                  }))
+                }
+                inputProps={{ step: 0.1, min: 0 }}
+              />
+              <MDInput
+                size="small"
+                label="Left"
+                type="number"
+                value={pdfPreviewMarginsIn?.leftIn ?? 0}
+                onChange={(e) =>
+                  setPdfPreviewMarginsIn((prev) => ({
+                    ...prev,
+                    leftIn: Number(e.target.value),
+                  }))
+                }
+                inputProps={{ step: 0.1, min: 0 }}
+              />
+              <MDInput
+                size="small"
+                label="Right"
+                type="number"
+                value={pdfPreviewMarginsIn?.rightIn ?? 0}
+                onChange={(e) =>
+                  setPdfPreviewMarginsIn((prev) => ({
+                    ...prev,
+                    rightIn: Number(e.target.value),
+                  }))
+                }
+                inputProps={{ step: 0.1, min: 0 }}
+              />
+            </MDBox>
+
+            <MDBox mt={2} display="flex" gap={1} alignItems="center">
+              <MDButton
+                variant="outlined"
+                color="dark"
+                size="small"
+                onClick={() => setPdfPreviewMarginsIn({ ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS })}
+                disabled={pdfPreviewLoading}
+              >
+                Reset
+              </MDButton>
+              <MDButton
+                variant="contained"
+                color="dark"
+                size="small"
+                onClick={handleApplyPdfMargins}
+                disabled={!pdfPreviewRowData || pdfPreviewLoading}
+              >
+                Update
+              </MDButton>
+            </MDBox>
+
+            <MDTypography variant="caption" sx={{ mt: 1, color: "text.secondary" }}>
+              Values are applied when you click Update.
+            </MDTypography>
+          </MDBox>
+
+          <MDBox sx={{ flex: 1, position: "relative", backgroundColor: "#ffffff" }}>
+            {pdfPreviewLoading && (
+              <MDBox
+                position="absolute"
+                top={0}
+                left={0}
+                right={0}
+                bottom={0}
+                display="flex"
+                justifyContent="center"
+                alignItems="center"
+                zIndex={2}
+                sx={{
+                  backgroundColor: "rgba(255, 255, 255, 0.75)",
+                  backdropFilter: "blur(2px)",
+                }}
+              >
+                <CurrencyLoading size={40} />
+              </MDBox>
+            )}
+
+            {pdfPreviewUrl ? (
+              <iframe
+                title="Agreement Prov Invoice PDF"
+                src={pdfPreviewUrl}
+                style={{ width: "100%", height: "100%", border: 0 }}
+              />
+            ) : (
+              <MDBox height="100%" display="flex" justifyContent="center" alignItems="center">
+                <MDTypography variant="body2" sx={{ color: "text.secondary" }}>
+                  No preview generated yet.
+                </MDTypography>
+              </MDBox>
+            )}
+          </MDBox>
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <MDButton variant="outlined" color="dark" onClick={handleClosePdfPreview}>
+            Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
       <AgreementProvInvoiceEditDialog
         open={editDialogOpen}
         onClose={handleCloseEditRow}
@@ -5304,6 +5662,7 @@ export default function AgreementProvInvoice() {
         saving={savingEdit}
         viewMode={editDialogViewMode}
         registerReloadInvoiceLines={registerReloadInvoiceLines}
+        onInvoiceLinesLoaded={syncInvoiceItemRecordKeyFromLines}
       />
     </DashboardLayout>
   );

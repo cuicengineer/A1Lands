@@ -52,13 +52,6 @@ import {
   formatKpiMoneyLabel,
   getFiscalYearPeriods,
 } from "./kpiDataUtils";
-import {
-  buildContractsUrlFromKpi,
-  buildRentalPropertiesUrlFromKpi,
-  openKpiTargetInNewTab,
-  resolveAssetCardClassId,
-} from "./kpiOverviewNavigation";
-
 function TabPanel({ children, value, index }) {
   if (value !== index) return null;
   return (
@@ -113,50 +106,88 @@ const TENURE_OPTIONS = [
 ];
 const KPI_FILTER_ALL_VALUE = "__all__";
 
-const KPI_FILTER_CONTROL_SX = { minWidth: { xs: "100%", sm: 140 } };
-const KPI_COMPACT_FILTER_CONTROL_SX = {
-  ...KPI_FILTER_CONTROL_SX,
-  width: { xs: "100%", sm: 140 },
+const KPI_DATE_FILTER_WIDTH = "9.5rem";
+
+const KPI_HEADER_FILTER_INPUT_SX = {
+  "& .MuiInputBase-root": {
+    minHeight: 32,
+    maxHeight: 32,
+    fontSize: "0.8125rem",
+    borderRadius: "8px",
+  },
+  "& .MuiInputLabel-root": {
+    fontSize: "0.8125rem",
+  },
   "& .MuiSelect-select": {
-    fontSize: "0.875rem",
+    fontSize: "0.8125rem",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    py: 0.5,
+    display: "flex",
+    alignItems: "center",
   },
 };
+
+function estimateKpiFilterWidth(labels, { minRem = 9.5, maxRem = 18 } = {}) {
+  if (!Array.isArray(labels) || labels.length === 0) return `${minRem}rem`;
+  const longest = labels.reduce((max, label) => {
+    const text = String(label || "").trim();
+    return text.length > max.length ? text : max;
+  }, "");
+  const rem = Math.min(maxRem, Math.max(minRem, 4.25 + longest.length * 0.42));
+  return `${rem}rem`;
+}
+
+function buildKpiFilterControlSx(widthRem) {
+  return {
+    flexShrink: 0,
+    width: { xs: "100%", sm: widthRem },
+    minWidth: { xs: "100%", sm: widthRem },
+    ...KPI_HEADER_FILTER_INPUT_SX,
+  };
+}
 
 /** Above MUI AppBar (~1100); header strip and menus share this stack. */
 const KPI_HEADER_Z_INDEX = 1200;
 
-const KPI_FILTER_SELECT_MENU_PROPS = {
-  MenuProps: {
-    sx: { zIndex: KPI_HEADER_Z_INDEX + 1 },
+const KPI_FILTER_MENU_PAPER_SX = {
+  width: "max-content",
+  minWidth: KPI_DATE_FILTER_WIDTH,
+  maxWidth: "min(20rem, 92vw)",
+  "& .MuiMenuItem-root": {
+    minHeight: 32,
+    py: 0.5,
+    px: 1.25,
+    fontSize: "0.8125rem",
+    alignItems: "flex-start",
+    whiteSpace: "normal",
+  },
+  "& .MuiListItemText-primary": {
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+    lineHeight: 1.35,
   },
 };
 
-const KPI_COMPACT_MULTI_SELECT_MENU_PROPS = {
+const KPI_FILTER_SELECT_MENU_PROPS = {
   MenuProps: {
-    ...KPI_FILTER_SELECT_MENU_PROPS.MenuProps,
+    sx: { zIndex: KPI_HEADER_Z_INDEX + 1 },
     PaperProps: {
-      sx: {
-        minWidth: 140,
-        maxWidth: 220,
-        "& .MuiMenuItem-root": {
-          minHeight: 34,
-          py: 0.35,
-          px: 1,
-          fontSize: "0.875rem",
-        },
-      },
+      sx: KPI_FILTER_MENU_PAPER_SX,
     },
   },
 };
 
-const KPI_COMPACT_CHECKBOX_SX = { p: 0.35, mr: 0.5 };
+const KPI_COMPACT_MULTI_SELECT_MENU_PROPS = KPI_FILTER_SELECT_MENU_PROPS;
+
+const KPI_COMPACT_CHECKBOX_SX = { p: 0.35, mr: 0.5, mt: 0.15 };
 const KPI_COMPACT_LIST_TEXT_PROPS = {
   primaryTypographyProps: {
-    fontSize: "0.875rem",
-    noWrap: true,
+    fontSize: "0.8125rem",
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+    lineHeight: 1.35,
   },
 };
 
@@ -654,6 +685,31 @@ function KpiOverview() {
   const cardSx = useMemo(() => getEnterpriseCardSx(), []);
   const closeFinancialZoom = useCallback(() => setFinancialZoomChart(null), []);
 
+  const racFilterWidth = useMemo(
+    () => estimateKpiFilterWidth(["All", "RAC", ...racOptions.map(getKpiOptionName)]),
+    [racOptions]
+  );
+  const baseFilterWidth = useMemo(
+    () => estimateKpiFilterWidth(["All", "Base", ...baseOptions.map(getKpiOptionName)]),
+    [baseOptions]
+  );
+  const tenureFilterWidth = useMemo(
+    () => estimateKpiFilterWidth(["Tenure", ...TENURE_OPTIONS.map((option) => option.label)]),
+    []
+  );
+  const racFilterControlSx = useMemo(
+    () => buildKpiFilterControlSx(racFilterWidth),
+    [racFilterWidth]
+  );
+  const baseFilterControlSx = useMemo(
+    () => buildKpiFilterControlSx(baseFilterWidth),
+    [baseFilterWidth]
+  );
+  const tenureFilterControlSx = useMemo(
+    () => buildKpiFilterControlSx(tenureFilterWidth),
+    [tenureFilterWidth]
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -857,59 +913,6 @@ function KpiOverview() {
 
   const handleTabChange = useCallback((_, v) => setTab(v), []);
 
-  const handleAssetCardClick = useCallback(
-    (card) => {
-      const classId = resolveAssetCardClassId(card);
-      openKpiTargetInNewTab(
-        buildRentalPropertiesUrlFromKpi({
-          racId,
-          baseId,
-          classId,
-        })
-      );
-    },
-    [racId, baseId]
-  );
-
-  const handleContractHealthCardClick = useCallback(
-    (healthKey) => {
-      openKpiTargetInNewTab(
-        buildContractsUrlFromKpi({
-          racId,
-          baseId,
-          kpiContractHealth: healthKey,
-        })
-      );
-    },
-    [racId, baseId]
-  );
-
-  const handleContractStatusCardClick = useCallback(
-    (statusKey) => {
-      openKpiTargetInNewTab(
-        buildContractsUrlFromKpi({
-          racId,
-          baseId,
-          kpiContractStatus: statusKey,
-        })
-      );
-    },
-    [racId, baseId]
-  );
-
-  const handleAhqApprovalCardClick = useCallback(
-    (approvalKey) => {
-      openKpiTargetInNewTab(
-        buildContractsUrlFromKpi({
-          racId,
-          baseId,
-          kpiApproval: approvalKey,
-        })
-      );
-    },
-    [racId, baseId]
-  );
-
   const overviewContent = (
     <>
       {loading ? (
@@ -928,7 +931,6 @@ function KpiOverview() {
           loading={loading}
           darkMode={darkMode}
           cardSx={cardSx}
-          onCardClick={handleAssetCardClick}
         />
       )}
 
@@ -956,7 +958,6 @@ function KpiOverview() {
               worth={h.worth}
               cardSx={cardSx}
               primary={index === 0}
-              onClick={() => handleContractHealthCardClick(h.key)}
             />
           </Grid>
         ))}
@@ -975,7 +976,6 @@ function KpiOverview() {
               worth={s.worth}
               cardSx={cardSx}
               primary={index === 0}
-              onClick={() => handleContractStatusCardClick(s.key)}
             />
           </Grid>
         ))}
@@ -994,7 +994,6 @@ function KpiOverview() {
               worth={a.worth}
               cardSx={cardSx}
               primary={index === 0}
-              onClick={() => handleAhqApprovalCardClick(a.key)}
             />
           </Grid>
         ))}
@@ -1203,7 +1202,7 @@ function KpiOverview() {
       }}
       className="erp-dashboard-filter erp-kpi-overview-header-filters"
     >
-      <FormControl size="small" sx={KPI_COMPACT_FILTER_CONTROL_SX}>
+      <FormControl size="small" sx={racFilterControlSx}>
         <InputLabel id="kpi-filter-rac-label">RAC</InputLabel>
         <Select
           labelId="kpi-filter-rac-label"
@@ -1242,7 +1241,7 @@ function KpiOverview() {
           ))}
         </Select>
       </FormControl>
-      <FormControl size="small" sx={KPI_COMPACT_FILTER_CONTROL_SX} disabled={loadingBaseOptions}>
+      <FormControl size="small" sx={baseFilterControlSx} disabled={loadingBaseOptions}>
         <InputLabel id="kpi-filter-base-label">Base</InputLabel>
         <Select
           labelId="kpi-filter-base-label"
@@ -1280,7 +1279,10 @@ function KpiOverview() {
           ))}
         </Select>
       </FormControl>
-      <MDBox width="9.5rem" sx={{ position: "relative", flexShrink: 0 }}>
+      <MDBox
+        width={{ xs: "100%", sm: KPI_DATE_FILTER_WIDTH }}
+        sx={{ position: "relative", flexShrink: 0, ...KPI_HEADER_FILTER_INPUT_SX }}
+      >
         <input
           type="date"
           ref={asOfDateInputRef}
@@ -1320,12 +1322,9 @@ function KpiOverview() {
             ),
           }}
           fullWidth
-          sx={{
-            "& .MuiInputBase-root": { minHeight: 32, maxHeight: 32, fontSize: "0.8125rem" },
-          }}
         />
       </MDBox>
-      <FormControl size="small" sx={KPI_FILTER_CONTROL_SX}>
+      <FormControl size="small" sx={tenureFilterControlSx}>
         <InputLabel id="kpi-filter-tenure-label">Tenure</InputLabel>
         <Select
           labelId="kpi-filter-tenure-label"
@@ -1349,13 +1348,6 @@ function KpiOverview() {
       title="KPI Overview"
       subtitle="Property, contract, and financial analytics with RAC / Base filters"
       actions={kpiFilters}
-      pageClassName="dashboard-kpi-overview-page"
-      bodySx={{
-        flex: "0 0 auto",
-        height: "auto",
-        minHeight: 0,
-        overflow: "visible",
-      }}
     >
       <Card sx={{ ...cardSx, mb: 1 }}>
         <Tabs

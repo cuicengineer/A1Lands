@@ -1027,7 +1027,7 @@ function DataTable({
 
   const showAllColumns = () => setHiddenColumns([]);
 
-  const exportToExcel = async () => {
+  const exportToExcel = useCallback(async () => {
     try {
       // Find S.No column if it exists
       const snoColumn = allColumns.find((c) => {
@@ -1129,7 +1129,19 @@ function DataTable({
       console.error("Export failed", e);
       alert("Export failed. Please try again.");
     }
-  };
+  }, [
+    allColumns,
+    exportAllColumns,
+    selectableColumns,
+    hiddenColumns,
+    rows,
+    exportExcludeGroupParentsWhenExpanded,
+    prepareRow,
+    exportCellFormatter,
+    exportFileName,
+    isExportActionColumn,
+    getExportRawRowValue,
+  ]);
 
   const isFilterableColumn = useCallback((column) => {
     if (!column || column.disableFilters) return false;
@@ -1274,7 +1286,7 @@ function DataTable({
   const setEntriesPerPage = (value) => handleSetPageSize(Number(value));
 
   const paginationTotalPages = pageSize > 0 ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
-  const showClientPagination = rows.length > pageSize;
+  const showClientPagination = paginationTotalPages > 1;
 
   const clientPaginationNode = showClientPagination ? (
     <CompactGridPagination
@@ -1286,13 +1298,17 @@ function DataTable({
     />
   ) : null;
 
-  const topPaginationNode = paginationFooter ?? (settingsUI ? null : clientPaginationNode);
+  // Top-right above header: server paginationFooter and/or client-side pages.
+  const paginationTopContent = paginationFooter ?? clientPaginationNode;
+  const topPaginationNode = paginationHost ? null : paginationTopContent;
   const footerPaginationNode = paginationHost
-    ? paginationFooter ?? null
+    ? null
+    : settingsUI
+    ? null
     : paginationFooter ?? clientPaginationNode;
   const relocatedPaginationNode =
-    paginationHost && clientPaginationNode
-      ? createPortal(clientPaginationNode, paginationHost)
+    paginationHost && paginationTopContent
+      ? createPortal(paginationTopContent, paginationHost)
       : null;
 
   // Search input value state
@@ -1336,10 +1352,18 @@ function DataTable({
     entriesEnd = pageSize * (pageIndex + 1);
   }
 
+  const hideHorizontalScrollbarSx = {
+    "&::-webkit-scrollbar:horizontal": {
+      height: 0,
+      display: "none",
+    },
+  };
+
   const settingsScrollSx = {
     scrollbarWidth: "thin",
     scrollbarColor: "rgba(0,0,0,0.18) transparent",
-    "&::-webkit-scrollbar": { width: "6px", height: "6px" },
+    ...hideHorizontalScrollbarSx,
+    "&::-webkit-scrollbar": { width: "6px", height: "0px" },
     "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
     "&::-webkit-scrollbar-thumb": {
       backgroundColor: "rgba(0,0,0,0.18)",
@@ -1413,6 +1437,12 @@ function DataTable({
     },
     "& thead th": {
       backgroundColor: settingsUI ? undefined : "#fff",
+      whiteSpace: "nowrap !important",
+      wordBreak: "normal !important",
+      overflowWrap: "normal !important",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      verticalAlign: "middle",
     },
   };
 
@@ -1713,6 +1743,103 @@ function DataTable({
   const showCompactFooter =
     Boolean(footerPaginationNode) || (!settingsUI && effectiveShowTotalEntries);
 
+  const tableScrollRef = useRef(null);
+  const [headerScrollState, setHeaderScrollState] = useState({
+    active: false,
+    left: false,
+    right: false,
+  });
+
+  const updateHeaderScrollState = useCallback(() => {
+    const el = tableScrollRef.current;
+    const next = !el
+      ? { active: false, left: false, right: false }
+      : (() => {
+          const { scrollLeft, scrollWidth, clientWidth } = el;
+          const active = scrollWidth > clientWidth + 2;
+          return {
+            active,
+            left: scrollLeft > 2,
+            right: scrollLeft + clientWidth < scrollWidth - 2,
+          };
+        })();
+    setHeaderScrollState((prev) =>
+      prev.active === next.active && prev.left === next.left && prev.right === next.right
+        ? prev
+        : next
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!stickyToolbarAndHeader) return undefined;
+    updateHeaderScrollState();
+    const el = tableScrollRef.current;
+    if (!el) return undefined;
+
+    const onScroll = () => updateHeaderScrollState();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    let resizeObserver;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => updateHeaderScrollState());
+      resizeObserver.observe(el);
+    }
+    window.addEventListener("resize", updateHeaderScrollState);
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateHeaderScrollState);
+    };
+  }, [
+    stickyToolbarAndHeader,
+    updateHeaderScrollState,
+    columns,
+    data,
+    page.length,
+    pageIndex,
+    hiddenColumns,
+    state.columnOrder,
+  ]);
+
+  const scrollTableHorizontally = useCallback((direction) => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const step = Math.max(140, Math.round(el.clientWidth * 0.35));
+    el.scrollBy({ left: direction * step, behavior: "smooth" });
+  }, []);
+
+  const headerScrollControls =
+    stickyToolbarAndHeader && headerScrollState.active ? (
+      <MDBox className="saas-settings-table-header-scroll" aria-hidden={false}>
+        <Tooltip title="Scroll columns left">
+          <span>
+            <IconButton
+              size="small"
+              className="saas-settings-table-header-scroll-btn"
+              disabled={!headerScrollState.left}
+              aria-label="Scroll table header left"
+              onClick={() => scrollTableHorizontally(-1)}
+            >
+              <Icon sx={{ fontSize: "1rem !important" }}>chevron_left</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Scroll columns right">
+          <span>
+            <IconButton
+              size="small"
+              className="saas-settings-table-header-scroll-btn"
+              disabled={!headerScrollState.right}
+              aria-label="Scroll table header right"
+              onClick={() => scrollTableHorizontally(1)}
+            >
+              <Icon sx={{ fontSize: "1rem !important" }}>chevron_right</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+      </MDBox>
+    ) : null;
+
   return (
     <TableContainer
       className={`saas-settings-table${autoHeight ? " saas-settings-table--auto-height" : ""}`}
@@ -1864,136 +1991,149 @@ function DataTable({
       </Menu>
       {stickyToolbarAndHeader ? (
         <MDBox
-          className="saas-settings-table-scroll"
-          sx={
-            autoHeight
-              ? {
-                  flex: "0 0 auto",
-                  width: "100%",
-                  minHeight: 0,
-                  overflow: "visible",
-                }
-              : {
-                  flex: "1 1 0",
-                  minHeight: stickyBodyMinHeight || "300px",
-                  maxHeight: stickyBodyMaxHeight || "none",
-                  overflowX: "auto",
-                  overflowY: "auto",
-                  scrollbarGutter: "stable both-edges",
-                  ...(settingsUI
-                    ? settingsScrollSx
-                    : {
-                        scrollbarWidth: "thin",
-                        scrollbarColor: "#333333 transparent",
-                        "&::-webkit-scrollbar": { width: "8px", height: "8px" },
-                        "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
-                        "&::-webkit-scrollbar-thumb": {
-                          backgroundColor: "#333333",
-                          borderRadius: "10px",
-                          "&:hover": { backgroundColor: "#1a1a1a" },
-                        },
-                        "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
-                      }),
-                }
-          }
+          sx={{
+            position: "relative",
+            flex: autoHeight ? "0 0 auto" : "1 1 0",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
         >
-          <Table {...getTableProps()} sx={settingsTableSx}>
-            <MDBox component="thead">
-              {headerGroups.map((headerGroup, key) => (
-                <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
-                  {headerGroup.headers.map((column, idx) => (
-                    <DataTableHeadCell
-                      key={idx}
-                      {...column.getHeaderProps(column.getSortByToggleProps())}
-                      width={column.width ? column.width : "auto"}
-                      align={column.align ? column.align : "left"}
-                      sorted={setSortedValue(column)}
-                      filterNode={
-                        isFilterableColumn(column) ? (
-                          typeof column.Filter === "function" ? (
-                            <column.Filter column={column} />
-                          ) : (
-                            <ColumnValueFilter column={column} />
-                          )
-                        ) : null
+          <MDBox
+            ref={tableScrollRef}
+            className="saas-settings-table-scroll"
+            sx={
+              autoHeight
+                ? {
+                    flex: "0 0 auto",
+                    width: "100%",
+                    minHeight: 0,
+                    overflow: "visible",
+                  }
+                : {
+                    flex: "1 1 0",
+                    minHeight: stickyBodyMinHeight || "300px",
+                    maxHeight: stickyBodyMaxHeight || "none",
+                    overflowX: "auto",
+                    overflowY: "auto",
+                    scrollbarGutter: "stable",
+                    ...(settingsUI
+                      ? settingsScrollSx
+                      : {
+                          scrollbarWidth: "thin",
+                          scrollbarColor: "#333333 transparent",
+                          ...hideHorizontalScrollbarSx,
+                          "&::-webkit-scrollbar": { width: "8px", height: "0px" },
+                          "&::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+                          "&::-webkit-scrollbar-thumb": {
+                            backgroundColor: "#333333",
+                            borderRadius: "10px",
+                            "&:hover": { backgroundColor: "#1a1a1a" },
+                          },
+                          "&::-webkit-scrollbar-button": { display: "none", width: 0, height: 0 },
+                        }),
+                  }
+            }
+          >
+            <Table {...getTableProps()} sx={settingsTableSx}>
+              <MDBox component="thead">
+                {headerGroups.map((headerGroup, key) => (
+                  <TableRow key={key} {...headerGroup.getHeaderGroupProps()}>
+                    {headerGroup.headers.map((column, idx) => (
+                      <DataTableHeadCell
+                        key={idx}
+                        {...column.getHeaderProps(column.getSortByToggleProps())}
+                        width={column.width ? column.width : "auto"}
+                        align={column.align ? column.align : "left"}
+                        sorted={setSortedValue(column)}
+                        filterNode={
+                          isFilterableColumn(column) ? (
+                            typeof column.Filter === "function" ? (
+                              <column.Filter column={column} />
+                            ) : (
+                              <ColumnValueFilter column={column} />
+                            )
+                          ) : null
+                        }
+                        draggable
+                        onDragStart={() => {
+                          dragColumnIdRef.current = column.id;
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          moveColumn(dragColumnIdRef.current, column.id);
+                          dragColumnIdRef.current = null;
+                        }}
+                      >
+                        {typeof column.Header === "string" && column.Header === "Actions"
+                          ? "Action"
+                          : column.render("Header")}
+                      </DataTableHeadCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </MDBox>
+              <TableBody {...getTableBodyProps()}>
+                {page.map((rtBodyRow, key) => {
+                  prepareRow(rtBodyRow);
+                  const rowOriginal = rtBodyRow.original;
+                  const customRowStyle = rowOriginal?.__rowStyle || {};
+                  const customRowClassName = rowOriginal?.__rowClassName || "";
+                  const { defaultBgColor, stripeSx, inheritRowBackground, rowHighlight } =
+                    groupedRowBodyStyle(darkMode, key, rowOriginal);
+                  const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
+
+                  return (
+                    <TableRow
+                      key={key}
+                      // eslint-disable-next-line react/prop-types
+                      {...rtBodyRow.getRowProps()}
+                      className={customRowClassName}
+                      data-settings-row={
+                        rowHighlight === "expanded"
+                          ? "expanded"
+                          : rowHighlight === "nestedExpanded"
+                          ? "nested"
+                          : rowHighlight === "rateSubgroup"
+                          ? "subgroup"
+                          : undefined
                       }
-                      draggable
-                      onDragStart={() => {
-                        dragColumnIdRef.current = column.id;
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        moveColumn(dragColumnIdRef.current, column.id);
-                        dragColumnIdRef.current = null;
+                      sx={{
+                        backgroundColor:
+                          settingsUI && !inheritRowBackground ? "transparent" : rowBgColor,
+                        ...stripeSx,
+                        ...customRowStyle,
                       }}
                     >
-                      {typeof column.Header === "string" && column.Header === "Actions"
-                        ? "Action"
-                        : column.render("Header")}
-                    </DataTableHeadCell>
-                  ))}
-                </TableRow>
-              ))}
-            </MDBox>
-            <TableBody {...getTableBodyProps()}>
-              {page.map((rtBodyRow, key) => {
-                prepareRow(rtBodyRow);
-                const rowOriginal = rtBodyRow.original;
-                const customRowStyle = rowOriginal?.__rowStyle || {};
-                const customRowClassName = rowOriginal?.__rowClassName || "";
-                const { defaultBgColor, stripeSx, inheritRowBackground, rowHighlight } =
-                  groupedRowBodyStyle(darkMode, key, rowOriginal);
-                const rowBgColor = customRowStyle.backgroundColor || defaultBgColor;
-
-                return (
-                  <TableRow
-                    key={key}
-                    // eslint-disable-next-line react/prop-types
-                    {...rtBodyRow.getRowProps()}
-                    className={customRowClassName}
-                    data-settings-row={
-                      rowHighlight === "expanded"
-                        ? "expanded"
-                        : rowHighlight === "nestedExpanded"
-                        ? "nested"
-                        : rowHighlight === "rateSubgroup"
-                        ? "subgroup"
-                        : undefined
-                    }
-                    sx={{
-                      backgroundColor:
-                        settingsUI && !inheritRowBackground ? "transparent" : rowBgColor,
-                      ...stripeSx,
-                      ...customRowStyle,
-                    }}
-                  >
-                    {/* eslint-disable-next-line react/prop-types */}
-                    {rtBodyRow.cells.map((cell, idx) => {
-                      const isEvenRow = key % 2 === 0;
-                      const isDisabledRow = Boolean(rowOriginal?.__disabledRow);
-                      return (
-                        <DataTableBodyCell
-                          {...cell.getCellProps()}
-                          key={idx}
-                          noBorder={noEndBorder && rows.length - 1 === key}
-                          align={cell.column.align ? cell.column.align : "left"}
-                          isEvenRow={isEvenRow}
-                          disabledRow={isDisabledRow}
-                          tintBackground={inheritRowBackground ? rowBgColor : ""}
-                          rowHighlight={rowHighlight ?? undefined}
-                        >
-                          {cell.render("Cell")}
-                        </DataTableBodyCell>
-                      );
-                    })}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      {/* eslint-disable-next-line react/prop-types */}
+                      {rtBodyRow.cells.map((cell, idx) => {
+                        const isEvenRow = key % 2 === 0;
+                        const isDisabledRow = Boolean(rowOriginal?.__disabledRow);
+                        return (
+                          <DataTableBodyCell
+                            {...cell.getCellProps()}
+                            key={idx}
+                            noBorder={noEndBorder && rows.length - 1 === key}
+                            align={cell.column.align ? cell.column.align : "left"}
+                            isEvenRow={isEvenRow}
+                            disabledRow={isDisabledRow}
+                            tintBackground={inheritRowBackground ? rowBgColor : ""}
+                            rowHighlight={rowHighlight ?? undefined}
+                          >
+                            {cell.render("Cell")}
+                          </DataTableBodyCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </MDBox>
+          {headerScrollControls}
         </MDBox>
       ) : (
         <Table {...getTableProps()} sx={settingsTableSx}>

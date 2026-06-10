@@ -13,7 +13,20 @@ export function WorkspaceGridToolbarProvider({ primaryAction, children }) {
   const [toolbar, setToolbarState] = useState(null);
 
   const registerToolbar = useCallback((next) => {
-    setToolbarState(next);
+    setToolbarState((prev) => {
+      if (prev === next) return prev;
+      if (!prev || !next) return next;
+      if (
+        prev.canSearch === next.canSearch &&
+        prev.search === next.search &&
+        prev.showColumns === next.showColumns &&
+        prev.showExport === next.showExport &&
+        prev.toolbarStart === next.toolbarStart
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, []);
 
   const stateValue = useMemo(

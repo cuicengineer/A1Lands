@@ -17,21 +17,30 @@ Coded by www.creative-tim.com
 import Drawer from "@mui/material/Drawer";
 import { styled } from "@mui/material/styles";
 
+const SIDENAV_BACKGROUNDS = {
+  default: "#025B64",
+  grey: "#4B5563",
+  blue: "#2563EB",
+};
+
 export default styled(Drawer)(({ theme, ownerState }) => {
   const { palette, boxShadows, transitions, breakpoints, functions } = theme;
-  const { transparentSidenav, whiteSidenav, miniSidenav, darkMode } = ownerState;
+  const { transparentSidenav, whiteSidenav, miniSidenav, darkMode, sidenavColor } = ownerState;
 
-  const sidebarWidth = 280;
-  const { transparent, gradients, white, background } = palette;
+  const sidebarWidth = 252;
+  const { transparent, white, background } = palette;
   const { xxl } = boxShadows;
-  const { pxToRem, linearGradient } = functions;
+  const { pxToRem } = functions;
 
-  let backgroundValue = darkMode ? background.sidenav : "#f9fafb";
+  const resolvedSidenavColor = SIDENAV_BACKGROUNDS[sidenavColor] ? sidenavColor : "default";
+  let backgroundValue = SIDENAV_BACKGROUNDS[resolvedSidenavColor];
 
   if (transparentSidenav) {
     backgroundValue = transparent.main;
   } else if (whiteSidenav) {
-    backgroundValue = "#025B64";
+    backgroundValue = white.main;
+  } else if (darkMode) {
+    backgroundValue = SIDENAV_BACKGROUNDS[resolvedSidenavColor];
   }
 
   // styles for the sidenav when miniSidenav={false}

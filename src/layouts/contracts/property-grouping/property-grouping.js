@@ -64,9 +64,111 @@ import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 
 let revenueRatesCatalogPromise = null;
+let govtShareRatesCatalogPromise = null;
 
 function resetRevenueRatesCatalogCache() {
   revenueRatesCatalogPromise = null;
+}
+
+function resetGovtShareRatesCatalogCache() {
+  govtShareRatesCatalogPromise = null;
+}
+
+/** Full govt-share-rate catalog (type=2) via getAllRecords. */
+async function fetchGovtShareRatesCatalog() {
+  if (!govtShareRatesCatalogPromise) {
+    govtShareRatesCatalogPromise = govtShareRateApi.getAllRecords().then((response) => {
+      const data = response?.data ?? (Array.isArray(response) ? response : []);
+      return Array.isArray(data) ? data : [];
+    });
+  }
+  return govtShareRatesCatalogPromise;
+}
+
+function isGovtShareRowActiveAndNotDeleted(row) {
+  const isActive =
+    row?.Status === undefined ||
+    row?.Status === null ||
+    row?.Status === true ||
+    row?.Status === 1 ||
+    row?.Status === "1";
+  const isNotDeleted = !(row?.IsDeleted === true || row?.IsDeleted === 1 || row?.IsDeleted === "1");
+  return isActive && isNotDeleted;
+}
+
+function isAnnualRentGovtShareFactor(config) {
+  return (
+    String(config ?? "")
+      .trim()
+      .toLowerCase() === "annual rent"
+  );
+}
+
+/** Latest govt-share row for RAC/Base/Class with applicable date on or before today. */
+function getLatestGovtShareRateForScope(rows, cmdId, baseId, classId) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const scoped = (rows || []).filter((row) => {
+    if (!isGovtShareRowActiveAndNotDeleted(row)) return false;
+    const rowCmdId = row.CmdId ?? row.cmdId;
+    const rowBaseId = row.BaseId ?? row.baseId;
+    const rowClassId = row.ClassId ?? row.classId;
+    if (Number(rowCmdId) !== Number(cmdId)) return false;
+    if (Number(rowBaseId) !== Number(baseId)) return false;
+    if (Number(rowClassId) !== Number(classId)) return false;
+
+    const applicableDate =
+      row.ApplicableDate ?? row.applicableDate ?? row.ApplicationDate ?? row.applicationDate;
+    if (!applicableDate) return false;
+
+    const date = new Date(applicableDate);
+    if (!Number.isFinite(date.getTime())) return false;
+    date.setHours(0, 0, 0, 0);
+    if (date > today) return false;
+
+    const deactiveDate = row.DeactiveDate ?? row.deactiveDate ?? null;
+    if (deactiveDate) {
+      const deact = new Date(deactiveDate);
+      if (Number.isFinite(deact.getTime())) {
+        deact.setHours(0, 0, 0, 0);
+        if (deact <= today) return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (scoped.length === 0) return null;
+
+  scoped.sort((a, b) => {
+    const dateA = new Date(
+      a.ApplicableDate ?? a.applicableDate ?? a.ApplicationDate ?? a.applicationDate ?? 0
+    );
+    const dateB = new Date(
+      b.ApplicableDate ?? b.applicableDate ?? b.ApplicationDate ?? b.applicationDate ?? 0
+    );
+    return dateB - dateA;
+  });
+
+  return scoped[0];
+}
+
+function latestGovtShareScopeIsAnnualRent(rows, cmdId, baseId, classId) {
+  const latest = getLatestGovtShareRateForScope(rows, cmdId, baseId, classId);
+  if (!latest) return false;
+  return isAnnualRentGovtShareFactor(latest.Config ?? latest.config);
+}
+
+function getClassUoM(classRow) {
+  if (!classRow) return "";
+  return String(classRow.uoM ?? classRow.UoM ?? classRow.uom ?? "").trim();
+}
+
+function getClassUoMById(classId, classesList) {
+  if (!classId || !Array.isArray(classesList)) return "";
+  const match = classesList.find((c) => Number(c.id ?? c.Id) === Number(classId));
+  return getClassUoM(match);
 }
 
 /** Full revenue-rates catalog via getAllRecords (never pageSize=1). */
@@ -701,6 +803,7 @@ function PropertyGroupingForm({
   const [notGroupedProperties, setNotGroupedProperties] = useState([]);
   const [propertyRevenueRates, setPropertyRevenueRates] = useState(new Map()); // Cache revenue rates by property ID
   const [govtShareAnnualRentScopes, setGovtShareAnnualRentScopes] = useState(new Map());
+  const [isAnnualRentGovtShareScope, setIsAnnualRentGovtShareScope] = useState(false);
   const [linkedPropertiesForEdit, setLinkedPropertiesForEdit] = useState([]); // Linked properties for edit mode
   /** Add mode: full async group average; shown beside "Current Revenue Rate" and drives Rate when ready */
   const [revenueGroupAverage, setRevenueGroupAverage] = useState(null);
@@ -803,46 +906,17 @@ function PropertyGroupingForm({
   const getGovtShareScopeKey = (cmdId, baseId, classId) =>
     `${cmdId || ""}|${baseId || ""}|${classId || ""}`;
 
-  const canDefaultMissingRevenueRateToZero = async () => {
-    const scopeKey = getGovtShareScopeKey(form.cmdid, form.baseid, form.classid);
+  const resolveAnnualRentGovtShareForScope = async (cmdId, baseId, classId) => {
+    if (!cmdId || !baseId || !classId) return false;
+
+    const scopeKey = getGovtShareScopeKey(cmdId, baseId, classId);
     if (govtShareAnnualRentScopes.has(scopeKey)) {
       return govtShareAnnualRentScopes.get(scopeKey);
     }
 
     try {
-      const response = await govtShareRateApi.getAll(1, 10000);
-      const rows = response?.pagination
-        ? response.data || []
-        : Array.isArray(response)
-        ? response
-        : [];
-      const hasAnnualRent = rows.some((row) => {
-        const rowCmdId = row.CmdId ?? row.cmdId;
-        const rowBaseId = row.BaseId ?? row.baseId;
-        const rowClassId = row.ClassId ?? row.classId;
-        const isActive =
-          row.Status === undefined ||
-          row.Status === null ||
-          row.Status === true ||
-          row.Status === 1 ||
-          row.Status === "1";
-        const isNotDeleted = !(
-          row.IsDeleted === true ||
-          row.IsDeleted === 1 ||
-          row.IsDeleted === "1"
-        );
-        const factor = String(row.Config ?? row.config ?? "")
-          .trim()
-          .toLowerCase();
-        return (
-          isActive &&
-          isNotDeleted &&
-          Number(rowCmdId) === Number(form.cmdid) &&
-          Number(rowBaseId) === Number(form.baseid) &&
-          Number(rowClassId) === Number(form.classid) &&
-          factor === "annual rent"
-        );
-      });
+      const rows = await fetchGovtShareRatesCatalog();
+      const hasAnnualRent = latestGovtShareScopeIsAnnualRent(rows, cmdId, baseId, classId);
       setGovtShareAnnualRentScopes((prev) => new Map(prev).set(scopeKey, hasAnnualRent));
       return hasAnnualRent;
     } catch (error) {
@@ -992,10 +1066,39 @@ function PropertyGroupingForm({
 
   const computeAverageRateForPropertySelection = async (propertyIds) => {
     if (!propertyIds || propertyIds.length === 0) return 0;
+    if (form.cmdid && form.baseid && form.classid) {
+      const annualRent = await resolveAnnualRentGovtShareForScope(
+        form.cmdid,
+        form.baseid,
+        form.classid
+      );
+      if (annualRent) return 0;
+    }
     const values = await Promise.all(propertyIds.map((id) => getEffectivePropertyRateForId(id)));
     const sum = values.reduce((a, b) => a + b, 0);
     return propertyIds.length ? sum / propertyIds.length : 0;
   };
+
+  useEffect(() => {
+    if (!open || !form.cmdid || !form.baseid || !form.classid) {
+      setIsAnnualRentGovtShareScope(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const annualRent = await resolveAnnualRentGovtShareForScope(
+        form.cmdid,
+        form.baseid,
+        form.classid
+      );
+      if (!cancelled) setIsAnnualRentGovtShareScope(annualRent);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.cmdid, form.baseid, form.classid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1183,16 +1286,18 @@ function PropertyGroupingForm({
       const status = initialData.Status !== undefined ? initialData.Status : true;
       const isDeleted = initialData.IsDeleted !== undefined ? initialData.IsDeleted : false;
 
+      const resolvedClassId = classId ? Number(classId) : "";
+      const classUoM = getClassUoMById(resolvedClassId, classes);
       const newForm = {
         cmdid: cmdId ? Number(cmdId) : "",
         baseid: baseId ? Number(baseId) : "",
-        classid: classId ? Number(classId) : "",
+        classid: resolvedClassId,
         propertyType:
           propertyTypeRaw !== "" && propertyTypeRaw != null ? Number(propertyTypeRaw) : "",
         property: normalizedPropertyIds,
         gId: gId,
         rate: Number(rate) || 0,
-        uoM: uoM,
+        uoM: classUoM || uoM,
         location: location,
         area: area ? (typeof area === "number" ? area : Number(area) || "") : "",
         remarks: remarks,
@@ -1235,7 +1340,7 @@ function PropertyGroupingForm({
       setLinkedPropertyNameById({});
       setLinkedPropertiesForEdit([]);
     }
-  }, [initialData, allBases, open]);
+  }, [initialData, allBases, classes, open]);
 
   // Fetch linked properties when in edit mode
   useEffect(() => {
@@ -1299,18 +1404,7 @@ function PropertyGroupingForm({
         ? averageRateForPropertyIds(form.property, getPropertyById, getPropertyRateNumber)
         : 0;
 
-      // Get unique UoMs from selected properties (API returns PascalCase)
-      const uniqueUoMs = Array.from(
-        new Set(
-          form.property
-            .map((propertyId) => {
-              const property = getPropertyById(propertyId);
-              return property?.UoM || property?.uoM || "";
-            })
-            .filter((value) => String(value || "").trim().length > 0)
-        )
-      );
-      const uoMText = uniqueUoMs.join(", ");
+      const uoMText = getClassUoMById(form.classid, classes);
 
       // Calculate location from selected properties (concatenate unique locations)
       const locations = form.property
@@ -1350,24 +1444,35 @@ function PropertyGroupingForm({
       form.property &&
       form.property.length === 0 &&
       !isEditMode && // Only clear in create mode
-      (form.area !== "" || form.uoM !== "" || form.location !== "" || Number(form.rate || 0) !== 0)
+      (form.area !== "" || form.location !== "" || Number(form.rate || 0) !== 0)
     ) {
+      const classUoM = getClassUoMById(form.classid, classes);
       setForm((prevForm) => ({
         ...prevForm,
         rate: 0,
         area: "",
-        uoM: "",
+        uoM: classUoM,
         location: "",
       }));
     }
   }, [
     form.property,
+    form.classid,
+    classes,
     rentalProperties,
     selectableRentalProperties,
     isEditMode,
     initialData,
     propertyRevenueRates,
   ]);
+
+  useEffect(() => {
+    if (!form.classid || !classes?.length) return;
+    const classUoM = getClassUoMById(form.classid, classes);
+    if (classUoM && (form.uoM || "") !== classUoM) {
+      setForm((prev) => ({ ...prev, uoM: classUoM }));
+    }
+  }, [form.classid, classes]);
 
   // Add mode: async group average — updates read-only "Avg" beside Current Revenue Rate then Rate field
   // (not while pending). Edit mode keeps sync rate from the auto-calculate effect above.
@@ -1402,6 +1507,10 @@ function PropertyGroupingForm({
   }, [form.property, isEditMode]);
 
   const handleChange = (f, v) => {
+    if (f === "cmdid" || f === "baseid" || f === "classid") {
+      setGovtShareAnnualRentScopes(new Map());
+      setIsAnnualRentGovtShareScope(false);
+    }
     setForm((p) => ({
       ...p,
       [f]:
@@ -1414,9 +1523,12 @@ function PropertyGroupingForm({
           : f === "status" || f === "isDeleted"
           ? Boolean(v)
           : v,
-      ...(f === "cmdid" && { baseid: "", classid: "", property: [] }),
-      ...(f === "baseid" && { classid: "", property: [] }),
-      ...(f === "classid" && { property: [] }),
+      ...(f === "cmdid" && { baseid: "", classid: "", property: [], uoM: "" }),
+      ...(f === "baseid" && { classid: "", property: [], uoM: "" }),
+      ...(f === "classid" && {
+        property: [],
+        uoM: getClassUoMById(v, classes),
+      }),
     }));
     // clear field-level error on change
     if (errors?.[f]) setErrors((prev) => ({ ...prev, [f]: undefined }));
@@ -1649,8 +1761,11 @@ function PropertyGroupingForm({
           // Property rate is 0, fetch from revenue rates
           const rateInfo = await getPropertyRateWithRevenueRate(property, id);
 
-          const allowZeroRateFromAnnualRentFactor =
-            rateInfo.rate === 0 ? await canDefaultMissingRevenueRateToZero() : false;
+          const allowZeroRateFromAnnualRentFactor = await resolveAnnualRentGovtShareForScope(
+            form.cmdid,
+            form.baseid,
+            form.classid
+          );
 
           if (rateInfo.rate === 0 && !isHBClassSelected && !allowZeroRateFromAnnualRentFactor) {
             // No rate found in property or revenue rates
@@ -1756,18 +1871,7 @@ function PropertyGroupingForm({
       const totalRate = isEditMode
         ? averageRateForPropertyIds(selectedProperties, getPropertyById, getPropertyRateNumber)
         : 0;
-      // Get UoM from selected properties (API returns PascalCase)
-      const uniqueUoMs = Array.from(
-        new Set(
-          selectedProperties
-            .map((propertyId) => {
-              const property = getPropertyById(propertyId);
-              return property?.UoM || property?.uoM || "";
-            })
-            .filter((value) => String(value || "").trim().length > 0)
-        )
-      );
-      const uoMText = uniqueUoMs.length > 0 ? uniqueUoMs[0] : ""; // Should only be one UoM after validation
+      const uoMText = getClassUoMById(prevForm.classid, classes);
 
       // Auto-populate location from selected properties (comma-separated) (API returns PascalCase)
       const locations = selectedProperties
@@ -1798,18 +1902,7 @@ function PropertyGroupingForm({
     const totalRate = isEditMode
       ? averageRateForPropertyIds(updatedProperties, getPropertyById, getPropertyRateNumber)
       : 0;
-    // Get UoM from remaining properties (API returns PascalCase)
-    const uniqueUoMs = Array.from(
-      new Set(
-        updatedProperties
-          .map((propertyId) => {
-            const property = getPropertyById(propertyId);
-            return property?.UoM || property?.uoM || "";
-          })
-          .filter((value) => String(value || "").trim().length > 0)
-      )
-    );
-    const uoMText = uniqueUoMs.length > 0 ? uniqueUoMs[0] : ""; // Should only be one UoM
+    const uoMText = getClassUoMById(form.classid, classes);
 
     setForm((prevForm) => ({
       ...prevForm,
@@ -2415,7 +2508,9 @@ function PropertyGroupingForm({
                       const property = getPropertyById(propertyId);
                       if (!property) return null;
                       const propertyName = getPropertyLabel(propertyId);
-                      const displayRate = getPropertyRateNumber(property, propertyId);
+                      const displayRate = isAnnualRentGovtShareScope
+                        ? 0
+                        : getPropertyRateNumber(property, propertyId);
                       const rawDate =
                         property?.ApplicableDate ??
                         property?.applicableDate ??

@@ -338,7 +338,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
         options: makeZoomedDonutOptions(donutChart),
       },
       [ZOOM_CHART.govtPafBar]: {
-        title: "Govt & PAF share by category (M.)",
+        title: "Govt & PAF share by category (M)",
         type: "bar",
         data: govtPafBarData,
         options: zoomedBarOptions,
@@ -350,7 +350,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
         options: makeZoomedDonutOptions(govtPafDonutChart),
       },
       [ZOOM_CHART.ahqRacBaseBar]: {
-        title: "AHQ, RAC & Base share by category (M.)",
+        title: "AHQ, RAC & Base share by category (M)",
         type: "bar",
         data: ahqRacBaseBarData,
         options: zoomedBarOptions,
@@ -466,7 +466,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               {renderBarCard(
-                "Govt & PAF share by category (M.)",
+                "Govt & PAF share by category (M)",
                 govtPafBarData,
                 ZOOM_CHART.govtPafBar
               )}
@@ -483,7 +483,7 @@ function KpiCharts({ shareRows, assetCards, loading, chartZoomOnClick, chartLayo
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid item xs={12} md={6}>
               {renderBarCard(
-                "AHQ, RAC & Base share by category (M.)",
+                "AHQ, RAC & Base share by category (M)",
                 ahqRacBaseBarData,
                 ZOOM_CHART.ahqRacBaseBar
               )}

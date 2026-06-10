@@ -24,6 +24,10 @@ import api, {
 } from "../../../services/api.service";
 import { useMaterialUIController } from "context";
 
+const UOM_OPTIONS = ["Marla", "Sq Ft", "Acre"];
+
+const getRowUoM = (row) => row?.uoM ?? row?.UoM ?? row?.uom ?? "";
+
 function ClassConfig() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -64,6 +68,7 @@ function ClassConfig() {
       code: "",
       name: "",
       description: "",
+      uoM: "",
       status: 0,
     });
     setErrors({});
@@ -75,7 +80,7 @@ function ClassConfig() {
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
     setEditingRowId(id);
-    setEditDraft({ ...row });
+    setEditDraft({ ...row, uoM: getRowUoM(row) });
   };
 
   const handleChange = (field, value) => {
@@ -91,15 +96,26 @@ function ClassConfig() {
         const msg = nextValue && String(nextValue).trim() ? null : "Name is required";
         setErrors((prev) => ({ ...prev, name: msg }));
       }
+      if (field === "uoM") {
+        const msg = nextValue && String(nextValue).trim() ? null : "UoM is required";
+        setErrors((prev) => ({ ...prev, uoM: msg }));
+      }
     } else if (editingRowId) {
       setEditDraft((draft) => ({ ...draft, [field]: nextValue }));
+      if (field === "uoM") {
+        const msg = nextValue && String(nextValue).trim() ? null : "UoM is required";
+        setErrors((prev) => ({ ...prev, uoM: msg }));
+      }
     }
   };
 
-  const validateNew = () => {
+  const validateDraft = (draft) => {
     const errs = {};
-    if (!newRowDraft?.name || !newRowDraft.name.trim()) {
+    if (!draft?.name || !draft.name.trim()) {
       errs.name = "Name is required";
+    }
+    if (!draft?.uoM || !String(draft.uoM).trim()) {
+      errs.uoM = "UoM is required";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -109,7 +125,7 @@ function ClassConfig() {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
         if (!canCreate) return;
-        if (!validateNew()) return;
+        if (!validateDraft(newRowDraft)) return;
         const payload = {
           id: newRowDraft.id,
           code: String(newRowDraft.code || "")
@@ -117,6 +133,7 @@ function ClassConfig() {
             .toUpperCase(),
           name: newRowDraft.name,
           description: newRowDraft.description,
+          uoM: newRowDraft.uoM,
           status:
             typeof newRowDraft.status === "string"
               ? Number(newRowDraft.status)
@@ -128,6 +145,7 @@ function ClassConfig() {
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
         if (!canEdit) return;
+        if (!validateDraft(editDraft)) return;
         const payload = {
           id: editDraft.id,
           code: String(editDraft.code || "")
@@ -135,6 +153,7 @@ function ClassConfig() {
             .toUpperCase(),
           name: editDraft.name,
           description: editDraft.description,
+          uoM: editDraft.uoM,
           status:
             typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
         };
@@ -176,7 +195,8 @@ function ClassConfig() {
     { Header: "Id", accessor: "id", align: "left", width: "6%" },
     { Header: "Code", accessor: "code", align: "left", width: "8%" },
     { Header: "Class Name", accessor: "name", align: "left", width: "18%" },
-    { Header: "Description", accessor: "description", align: "left", width: "26%" },
+    { Header: "Description", accessor: "description", align: "left", width: "22%" },
+    { Header: "UoM", accessor: "uoM", align: "left", width: "10%" },
     { Header: "Status", accessor: "status", align: "center", width: "10%" },
   ];
 
@@ -231,6 +251,45 @@ function ClassConfig() {
     />
   );
 
+  const renderUoMSelect = (field, value) => (
+    <MDInput
+      select
+      value={value ?? ""}
+      onChange={(e) => handleChange(field, e.target.value)}
+      size="small"
+      fullWidth
+      required
+      error={Boolean(errors?.[field])}
+      helperText={errors?.[field]}
+      displayEmpty
+      SelectProps={{ displayEmpty: true }}
+      sx={
+        darkMode
+          ? {
+              "& .MuiSelect-select": {
+                color: "#000000 !important",
+              },
+              "& .MuiSvgIcon-root": {
+                color: "#000000 !important",
+              },
+              "& .MuiFormHelperText-root": {
+                color: "#000000 !important",
+              },
+            }
+          : {}
+      }
+    >
+      <MenuItem value="">
+        <em>Select UoM</em>
+      </MenuItem>
+      {UOM_OPTIONS.map((option) => (
+        <MenuItem key={option} value={option}>
+          {option}
+        </MenuItem>
+      ))}
+    </MDInput>
+  );
+
   const renderStatusSelect = (field, value) => (
     <MDInput
       select
@@ -265,6 +324,7 @@ function ClassConfig() {
         code: renderInput("code", newRowDraft.code),
         name: renderInput("name", newRowDraft.name),
         description: renderInput("description", newRowDraft.description),
+        uoM: renderUoMSelect("uoM", newRowDraft.uoM),
         status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
@@ -322,6 +382,13 @@ function ClassConfig() {
             }}
           >
             {row.description}
+          </MDBox>
+        ),
+        uoM: isEditing ? (
+          renderUoMSelect("uoM", currentRow.uoM ?? getRowUoM(currentRow))
+        ) : (
+          <MDBox component="span" sx={{ fontWeight: "medium" }}>
+            {getRowUoM(row) || "—"}
           </MDBox>
         ),
         status: isEditing
@@ -464,7 +531,7 @@ function ClassConfig() {
             overflowWrap: "anywhere !important",
             maxWidth: "100%",
           },
-          "& .MuiTable-root th:nth-of-type(6), & .MuiTable-root td:nth-of-type(6)": {
+          "& .MuiTable-root th:nth-of-type(7), & .MuiTable-root td:nth-of-type(7)": {
             maxWidth: "240px",
             width: "20%",
             whiteSpace: "normal !important",

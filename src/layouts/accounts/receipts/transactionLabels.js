@@ -1,0 +1,33 @@
+export const PAYMENTS_LABELS = {
+  paidFrom: "Paid from",
+  paidFromRequired: "Paid from is required",
+  payeeSection: "Payee",
+  payeeRequired: "Payee is required",
+  payeePlaceholder: "Payee name",
+  gridPaidFrom: "Paid From",
+  gridPayee: "Payee",
+  pageTitle: "Payments",
+  pageSubtitle: "Record and manage payment transactions",
+  exportFileName: "Payments",
+  addFormTitle: "Add New Payment",
+  editFormTitle: "Edit Payment",
+  deleteConfirm: "Are you sure you want to delete this payment?",
+  noAttachments: "No attachments for this payment.",
+};
+
+export const RECEIPTS_LABELS = {
+  paidFrom: "Paid By",
+  paidFromRequired: "Paid By is required",
+  payeeSection: "Received In",
+  payeeRequired: "Received In is required",
+  payeePlaceholder: "Received In name",
+  gridPaidFrom: "Paid By",
+  gridPayee: "Received In",
+  pageTitle: "Receipts",
+  pageSubtitle: "Record and manage receipt transactions",
+  exportFileName: "Receipts",
+  addFormTitle: "Add New Receipt",
+  editFormTitle: "Edit Receipt",
+  deleteConfirm: "Are you sure you want to delete this receipt?",
+  noAttachments: "No attachments for this receipt.",
+};

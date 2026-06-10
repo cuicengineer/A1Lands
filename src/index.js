@@ -48,7 +48,7 @@ import "assets/css/saas-polish.css";
 // ERP Dashboard v1.0 layout & KPI/chart panels
 import "assets/css/dashboard-redesign.css";
 
-// ERP v1.0 sidebar (280px, teal active nav, branding)
+// ERP v1.0 sidebar (252px, teal active nav, branding)
 import "assets/css/erp-sidenav.css";
 
 // ERP v1.0 global buttons (#025B64 / white text)

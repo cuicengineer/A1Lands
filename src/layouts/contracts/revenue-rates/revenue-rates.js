@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, startTransition } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import Grid from "@mui/material/Grid";
 import Icon from "@mui/material/Icon";
@@ -34,6 +34,7 @@ import api, {
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
 import CurrencyLoading from "components/CurrencyLoading";
+import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
@@ -49,7 +50,6 @@ import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import { format, parseISO, isValid } from "date-fns";
-import { perfEnd, perfLog, perfMark } from "utils/pagePerfTrace";
 
 const REVENUE_RATES_GRID_DATE_FALLBACK_KEYS = {
   applicableDate: ["applicableDate", "ApplicableDate", "applicationDate", "ApplicationDate"],
@@ -859,6 +859,7 @@ function RevenueRatesForm({
   };
 
   useEffect(() => {
+    if (!open) return;
     if (initialData) {
       const propId = initialData.propertyId ?? initialData.PropertyId ?? null;
       const isPropertyDash =
@@ -1162,10 +1163,11 @@ function RevenueRatesForm({
         setIsUploading(false);
       }
     }
+    onClose();
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" disableRestoreFocus>
       <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
         {initialData ? "Edit Revenue Rate" : "New Revenue Rate"}
       </DialogTitle>
@@ -1654,8 +1656,7 @@ RevenueRatesForm.propTypes = {
 };
 
 export default function RevenueRates() {
-  const renderCountRef = useRef(0);
-  renderCountRef.current += 1;
+  const fetchInFlightRef = useRef(false);
 
   const [openForm, setOpenForm] = useState(false);
   const [currentRevenueRate, setCurrentRevenueRate] = useState(null);
@@ -1666,7 +1667,7 @@ export default function RevenueRates() {
   const [classOptions, setClassOptions] = useState([]);
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   // Search is handled by shared DataTable (canSearch)
   const [successSB, setSuccessSB] = useState(false);
   const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
@@ -1685,29 +1686,25 @@ export default function RevenueRates() {
   const openSuccessSB = () => setSuccessSB(true);
   const closeSuccessSB = () => setSuccessSB(false);
 
-  const fetchRevenueRates = useCallback(async () => {
-    perfMark("revenue-rates.api");
-    setLoading(true);
+  const fetchRevenueRates = useCallback(async ({ silent = false } = {}) => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+    if (!silent) setLoading(true);
     try {
-      const networkStart = performance.now();
       const response = await revenueRatesApi.getAllRecords();
-      perfLog("revenue-rates.api.network", `${(performance.now() - networkStart).toFixed(1)}ms`);
-      const stateStart = performance.now();
       const data = response?.data ?? (Array.isArray(response) ? response : []);
       const arr = Array.isArray(data) ? data : [];
-
-      startTransition(() => {
-        setTableRows(arr);
-        setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
-      });
-      perfLog("revenue-rates.api.state", `${(performance.now() - stateStart).toFixed(1)}ms`);
+      setTableRows(arr);
+      setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
     } catch (error) {
       console.error("Error fetching revenue rates:", error);
-      setTableRows([]);
-      setTotalCount(0);
+      if (!silent) {
+        setTableRows([]);
+        setTotalCount(0);
+      }
     } finally {
-      setLoading(false);
-      perfEnd("revenue-rates.api");
+      if (!silent) setLoading(false);
+      fetchInFlightRef.current = false;
     }
   }, []);
 
@@ -1779,7 +1776,10 @@ export default function RevenueRates() {
     setOpenForm(true);
   };
 
-  const handleCloseForm = () => setOpenForm(false);
+  const handleCloseForm = () => {
+    setOpenForm(false);
+    setCurrentRevenueRate(null);
+  };
 
   const handleEditRevenueRate = (id) => {
     // Handle both camelCase and PascalCase for id lookup
@@ -1827,9 +1827,9 @@ export default function RevenueRates() {
 
     try {
       await revenueRatesApi.remove(recordToDelete);
-      fetchRevenueRates();
       setDeleteDialogOpen(false);
       setRecordToDelete(null);
+      await fetchRevenueRates({ silent: true });
     } catch (error) {
       console.error("Error deleting revenue rate:", error);
       alert("Failed to delete revenue rate. Please try again.");
@@ -1991,8 +1991,8 @@ export default function RevenueRates() {
       } else {
         await revenueRatesApi.create(formattedData);
       }
-      fetchRevenueRates();
-      handleCloseForm();
+      setOpenForm(false);
+      await fetchRevenueRates({ silent: true });
     } catch (error) {
       console.error("Error saving revenue rate:", error);
       throw error;
@@ -2125,8 +2125,7 @@ export default function RevenueRates() {
   );
 
   const computedRows = useMemo(() => {
-    perfMark("revenue-rates.transform");
-    const result = tableRows.map((row) => {
+    return tableRows.map((row) => {
       const normalizedId = row?.id ?? row?.Id;
       const propertyId = row.propertyId ?? row.PropertyId;
       const prop = rentalPropertyById.get(Number(propertyId));
@@ -2211,8 +2210,6 @@ export default function RevenueRates() {
         className: resolvedClassName,
       };
     });
-    perfEnd("revenue-rates.transform");
-    return result;
   }, [tableRows, rentalPropertyById, commandById, commandOptions, baseOptions, classOptions]);
 
   const workspaceMetadata = useMemo(
@@ -2228,16 +2225,6 @@ export default function RevenueRates() {
   const handleGridPageSizeChange = useCallback((value) => {
     setGridPageSize(Number(value));
   }, []);
-
-  const showGrid = !loading || tableRows.length > 0;
-
-  useEffect(() => {
-    perfLog("revenue-rates.render", {
-      pass: renderCountRef.current,
-      rows: tableRows.length,
-      loading,
-    });
-  });
 
   return (
     <DashboardLayout>
@@ -2302,47 +2289,26 @@ export default function RevenueRates() {
             },
           }}
         >
-          {loading && (
-            <MDBox
-              position="absolute"
-              top={0}
-              left={0}
-              right={0}
-              bottom={0}
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              zIndex={10}
-              sx={{
-                backgroundColor: "rgba(255, 255, 255, 0.8)",
-                backdropFilter: "blur(2px)",
-              }}
-            >
-              <CurrencyLoading size={50} />
-            </MDBox>
-          )}
-
-          {showGrid ? (
-            <DataTable
-              table={tableConfig}
-              isSorted={false}
-              stickyToolbarAndHeader
-              entriesPerPage={{
-                defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
-                entries: [10, 25, 50, 100],
-              }}
-              pageSize={gridPageSize}
-              onEntriesPerPageChange={handleGridPageSizeChange}
-              showTotalEntries={false}
-              noEndBorder
-              canSearch
-              autoResetFilters={false}
-              exportFileName="Revenue-Rates"
-              exportCellFormatter={exportCellFormatter}
-              extraFilterTypes={REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES}
-              contentFitTable
-            />
-          ) : null}
+          <DataTable
+            table={tableConfig}
+            isSorted={false}
+            stickyToolbarAndHeader
+            entriesPerPage={{
+              defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+              entries: [10, 25, 50, 100],
+            }}
+            pageSize={gridPageSize}
+            onEntriesPerPageChange={handleGridPageSizeChange}
+            showTotalEntries={false}
+            noEndBorder
+            canSearch
+            autoResetFilters={false}
+            exportFileName="Revenue-Rates"
+            exportCellFormatter={exportCellFormatter}
+            extraFilterTypes={REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES}
+            contentFitTable
+          />
+          <WorkspaceLoadingOverlay active={loading} />
         </MDBox>
       </EnterpriseWorkspace>
       <RevenueRatesForm
@@ -2430,7 +2396,7 @@ export default function RevenueRates() {
         close={closeSuccessSB}
         bgWhite
       />
-      <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
+      <Dialog open={deleteDialogOpen} onClose={handleCancelDelete} disableRestoreFocus>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>
           <MDTypography variant="body1" sx={{ fontSize: "1.1rem" }}>

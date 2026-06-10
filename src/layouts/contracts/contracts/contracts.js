@@ -5494,7 +5494,7 @@ export default function Contracts() {
   const [baseFilterIds, setBaseFilterIds] = useState([]);
   const [classFilterIds, setClassFilterIds] = useState([]);
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [contractsArchiveFilter, setContractsArchiveFilter] = useState("all");
+  const [contractsArchiveFilter, setContractsArchiveFilter] = useState("valid");
   const [contractsApprovalFilter, setContractsApprovalFilter] = useState("all");
   const [kpiContractHealthFilter, setKpiContractHealthFilter] = useState("");
   const [kpiContractStatusFilter, setKpiContractStatusFilter] = useState("");
@@ -7866,7 +7866,12 @@ export default function Contracts() {
   const renderContractGridApproval = (value) => {
     if (isContractGridBlank(value)) return "";
     const isApproved = value === true || value === 1 || value === "1";
-    return <GridStatusChip value={isApproved ? "approved" : "pending"} />;
+    return (
+      <GridStatusChip
+        value={isApproved ? "approved" : "pending"}
+        label={isApproved ? "Approved" : "Pending"}
+      />
+    );
   };
 
   const contractGridColumns = [
@@ -9716,13 +9721,14 @@ export default function Contracts() {
         exclusive
         value={contractsApprovalFilter}
         onChange={(_, v) => {
-          setContractsApprovalFilter(v ?? "all");
+          if (v !== null) setContractsApprovalFilter(v);
         }}
         size="small"
         color="info"
         aria-label="Filter contracts table by approval status"
         className="contracts-context-segmented contracts-context-toggle"
       >
+        <ToggleButton value="all">ALL</ToggleButton>
         <ToggleButton value="approved">APPROVED</ToggleButton>
         <ToggleButton value="pending">PENDING</ToggleButton>
       </ToggleButtonGroup>

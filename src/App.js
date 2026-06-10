@@ -221,13 +221,6 @@ export default function App() {
     }
   }, [pathname]);
 
-  // Fetch user context (including IP) from backend when authenticated - no external IP APIs
-  useEffect(() => {
-    if (isAuthenticated && pathname && !isPublicAuthRoute(pathname)) {
-      api.fetchAndUpdateUserContext().catch(() => {});
-    }
-  }, [pathname, isAuthenticated]);
-
   // Logout only on inactivity of 5 minutes.
   useEffect(() => {
     let inactivityTimer;

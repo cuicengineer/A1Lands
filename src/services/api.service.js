@@ -351,6 +351,9 @@ const MENU_ROUTE_PREFIXES = [
   { menuName: "Configuration", prefix: "/configuration" },
   { menuName: "Contracts Mgmt", prefix: "/contracts" },
   { menuName: "Accounts", prefix: "/accounts" },
+  { menuName: "Payments", prefix: "/payments" },
+  { menuName: "Receipts", prefix: "/receipts" },
+  { menuName: "Supplier", prefix: "/supplier" },
 ];
 
 function toBooleanFlag(value) {
@@ -639,7 +642,7 @@ function getLoggedInUserBaseId() {
 }
 
 // Get user's IP address from session (auth stored in localStorage).
-// No external API calls - IP is provided by backend at login/refresh and stored in user session.
+// No extra API calls — IP is provided by backend at login/refresh and stored in user session.
 function getUserIPAddress() {
   try {
     const raw = localStorage.getItem("auth");
@@ -879,30 +882,6 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
   return res;
 }
 
-// Fetch user context (including IP) from our backend - no external IP APIs (ipapi.co, etc.).
-// Backend sees client IP from the request and returns it. Call on app load when authenticated.
-async function fetchAndUpdateUserContext() {
-  const token = getStoredAccessToken();
-  if (!token) return;
-  try {
-    const res = await fetch(`${API_BASE}/api/Login/me`, {
-      method: "GET",
-      headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
-      credentials: "include",
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data === "object") {
-        const existing = JSON.parse(localStorage.getItem("auth") || "{}");
-        const merged = { ...existing, ...data };
-        localStorage.setItem("auth", JSON.stringify(merged));
-      }
-    }
-  } catch (e) {
-    // Endpoint may not exist; rely on login/refresh to provide IP
-  }
-}
-
 async function requestRaw(method, path, body, headers = {}, requestOptions = {}) {
   const res = await fetchWithAuth(method, path, body, headers, requestOptions);
   if (!res.ok) {
@@ -991,7 +970,6 @@ const api = {
   requestRaw,
   refreshAccessToken,
   getAccessTokenExpiryMs,
-  fetchAndUpdateUserContext,
   logoutEverywhere,
   handleAuthStorageEvent,
   hasStoredAccessToken,
@@ -1040,7 +1018,6 @@ export {
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
   contractsApprovalActionsBypassUser,
-  fetchAndUpdateUserContext,
   logoutEverywhere,
   handleAuthStorageEvent,
   hasStoredAccessToken,

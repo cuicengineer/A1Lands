@@ -14,11 +14,12 @@ body.enterprise-ui {
 body.enterprise-ui #app {
   height: 100vh;
   overflow: hidden;
+  width:100%!important;
+  padding:5px;
 }
 
 /* ---- Navigation rail ---- */
 body.enterprise-ui .enterprise-sidenav .MuiDrawer-paper {
-  background: #025b64 !important;
   background-image: none !important;
   border-right: none !important;
   box-shadow: none !important;

@@ -51,8 +51,8 @@ function DashboardLayout({ children }) {
         boxSizing: "border-box",
 
         [breakpoints.up("xl")]: {
-          marginLeft: miniSidenav ? pxToRem(72) : pxToRem(280),
-          width: `calc(100% - ${miniSidenav ? pxToRem(72) : pxToRem(280)})`,
+          marginLeft: miniSidenav ? pxToRem(72) : pxToRem(252),
+          width: `calc(100% - ${miniSidenav ? pxToRem(72) : pxToRem(252)})`,
           transition: transitions.create(["margin-left", "margin-right", "width"], {
             easing: transitions.easing.easeInOut,
             duration: transitions.duration.standard,

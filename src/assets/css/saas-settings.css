@@ -527,6 +527,13 @@ body.enterprise-ui .dashboard-layout-root {
   flex-shrink: 0 !important;
   min-height: 28px !important;
   max-height: 32px !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  width: 100% !important;
+  padding-right: 8px !important;
+  border-bottom: 1px solid var(--layer-controls-border) !important;
+  background: var(--layer-controls) !important;
 }
 
 .saas-settings-table-pagination-top .compact-grid-pagination {
@@ -686,6 +693,53 @@ body.enterprise-ui .saas-settings-table-footer .grid-entry-count {
   background: rgba(255, 255, 255, 0.65) !important;
 }
 
+/* Configuration module tabs — single-line labels, horizontal scroll */
+.configuration-module-tabs.MuiTabs-root {
+  width: 100%;
+  max-width: 100%;
+}
+
+.configuration-module-tabs .MuiTabs-scroller {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.configuration-module-tabs .MuiTabs-scroller::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.configuration-module-tabs .MuiTabs-flexContainer {
+  flex-wrap: nowrap !important;
+  width: max-content;
+  min-width: 100%;
+  max-width: none !important;
+}
+
+.configuration-module-tabs .MuiTab-root {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  min-width: auto !important;
+  max-width: none !important;
+}
+
+.saas-module-tabs-bar__tabs:has(.configuration-module-tabs) {
+  overflow: hidden;
+}
+
+/* Grid header/body scroll — vertical scrollbar only; horizontal via chevron controls */
+body.enterprise-ui .saas-settings-table-scroll {
+  scrollbar-gutter: stable;
+}
+
+body.enterprise-ui .saas-settings-table-scroll::-webkit-scrollbar:horizontal {
+  height: 0 !important;
+  display: none !important;
+}
+
 /* Legacy tabs wrapper — merged into module tabs band above */
 
 /* ---- Settings list tables (not spreadsheets) ---- */
@@ -755,7 +809,8 @@ body.enterprise-ui .saas-settings-table .MuiIconButton-root .MuiIcon-root {
 body.enterprise-ui .saas-settings-table thead th,
 body.enterprise-ui .saas-settings-table .MuiTableContainer-root thead th,
 body.enterprise-ui .saas-workspace-card thead th,
-body.enterprise-ui .saas-settings-table-scroll thead th {
+body.enterprise-ui .saas-settings-table-scroll thead th,
+body.enterprise-ui .enterprise-workspace-grid-host thead th {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky-thead);
@@ -771,14 +826,75 @@ body.enterprise-ui .saas-settings-table-scroll thead th {
   text-transform: none !important;
   letter-spacing: 0.01em !important;
   padding: 6px 8px !important;
-  white-space: nowrap;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 body.enterprise-ui .saas-settings-table thead th *,
 body.enterprise-ui .saas-workspace-card thead th *,
-body.enterprise-ui .saas-settings-table-scroll thead th * {
+body.enterprise-ui .saas-settings-table-scroll thead th *,
+body.enterprise-ui .enterprise-workspace-grid-host thead th * {
   color: #4b5563 !important;
   font-weight: 600 !important;
+}
+
+/* Configuration grids — keep every header cell on one line (overrides page bodySx). */
+body.enterprise-ui .enterprise-workspace-grid-host .MuiTable-root thead th,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiTable-root thead th:nth-of-type(n) {
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+/* Horizontal scroll controls when header row overflows */
+body.enterprise-ui .saas-settings-table-header-scroll {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  z-index: calc(var(--z-sticky-thead) + 2);
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  height: 32px;
+  padding-left: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(246, 248, 251, 0) 0%,
+    var(--layer-grid-header) 38%,
+    var(--layer-grid-header) 100%
+  );
+  pointer-events: none;
+}
+
+body.enterprise-ui .saas-settings-table-header-scroll-btn {
+  pointer-events: auto;
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  padding: 0 !important;
+  border: 1px solid var(--layer-controls-border) !important;
+  border-radius: 4px !important;
+  background: #ffffff !important;
+  color: #4b5563 !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+body.enterprise-ui .saas-settings-table-header-scroll-btn:hover:not(:disabled) {
+  background: var(--settings-row-hover) !important;
+  color: var(--settings-text) !important;
+  transform: none !important;
+}
+
+body.enterprise-ui .saas-settings-table-header-scroll-btn:disabled {
+  opacity: 0.35 !important;
 }
 
 /* Header filter icons — compact, subordinate to column label text */
@@ -1123,8 +1239,8 @@ body.enterprise-ui *::-webkit-scrollbar-thumb:hover {
 
 /* ---- Sidebar — narrower, Linear-style; width tracks collapse state ---- */
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft.MuiDrawer-docked {
-  width: 280px !important;
-  max-width: 280px !important;
+  width: 252px !important;
+  max-width: 252px !important;
   flex-shrink: 0 !important;
   white-space: normal !important;
   transition: width 225ms cubic-bezier(0.4, 0, 0.6, 1) !important;
@@ -1136,8 +1252,8 @@ body.enterprise-ui .enterprise-sidenav--mini.MuiDrawer-anchorLeft.MuiDrawer-dock
 }
 
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft .MuiDrawer-paper {
-  width: 280px !important;
-  max-width: 280px !important;
+  width: 252px !important;
+  max-width: 252px !important;
   margin: 0 !important;
   border-radius: 0 !important;
   height: 100vh !important;

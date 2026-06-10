@@ -20,7 +20,7 @@ function SidenavBrand({ mini }) {
   return (
     <MDBox className="erp-sidenav-brand" aria-label="AI Land Management System">
       <span className="erp-sidenav-brand__ai">AI</span>
-      <span className="erp-sidenav-brand__subtitle">Land Management System</span>
+      <span className="erp-sidenav-brand__subtitle">Land Activities Mgmt. System</span>
     </MDBox>
   );
 }

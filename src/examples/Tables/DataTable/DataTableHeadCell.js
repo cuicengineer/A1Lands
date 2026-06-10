@@ -35,11 +35,11 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
       sx={({ palette: { light }, borders: { borderWidth }, functions: { rgba } }) => ({
         borderBottom: settingsUI ? "1px solid #e5e5e5" : `${borderWidth[1]} solid ${light.main}`,
         backgroundColor: settingsUI ? "transparent" : rgba(light.main, 0.2),
-        // Allow multi-line headers and prevent overflow into adjacent columns
-        whiteSpace: "normal",
-        overflowWrap: "anywhere",
-        wordBreak: "break-word",
-        verticalAlign: "top",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        wordBreak: "normal",
+        overflowWrap: "normal",
+        verticalAlign: "middle",
         color: headerTextColor,
         "& *": {
           color: headerTextColor,
@@ -62,10 +62,12 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
             cursor: "grabbing",
           },
           display: "flex",
-          alignItems: "flex-start",
+          alignItems: "center",
           justifyContent:
             align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start",
           gap: "4px",
+          minWidth: 0,
+          width: "100%",
           color: headerTextColor,
         })}
       >
@@ -73,6 +75,10 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
           sx={{
             display: "inline-block",
             whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+            flex: "1 1 auto",
             color: headerTextColor,
           }}
         >
@@ -82,12 +88,12 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
           <MDBox
             sx={{
               display: "inline-flex",
-              flexDirection: "column",
+              flexDirection: "row",
               alignItems: "center",
-              justifyContent: "flex-start",
+              justifyContent: "center",
               flexShrink: 0,
               marginLeft: "2px",
-              minWidth: "16px",
+              gap: "2px",
             }}
           >
             {sorted && (
@@ -98,7 +104,7 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
                   alignItems: "center",
                   justifyContent: "center",
                   lineHeight: 0.7,
-                  transform: "translateY(1px)",
+                  flexShrink: 0,
                 }}
               >
                 <Icon
@@ -131,7 +137,7 @@ function DataTableHeadCell({ width, children, sorted, align, filterNode, ...rest
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  marginTop: sorted ? "-2px" : "2px",
+                  flexShrink: 0,
                 }}
               >
                 {filterNode}

@@ -6,9 +6,22 @@
   --ent-border: #dce6e7;
   --ent-card-border: #dce6e7;
   background-color: #ffffff !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.dashboard-redesign-page .saas-workspace-card {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
 }
 
 .dashboard-redesign-page .saas-workspace-grid-host {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
   overflow: auto !important;
   padding: 12px 16px;
   background-color: #ffffff !important;
@@ -400,62 +413,32 @@
   border-radius: 10px;
 }
 
-/* KPI Overview — flat white page header (no grey box / border) */
-.dashboard-kpi-overview-page .saas-workspace-page-header {
-  background: #ffffff !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  padding: 8px 16px 4px !important;
-}
-
-.dashboard-kpi-overview-page .saas-workspace-page-header::after {
-  display: none !important;
-}
-
-/* KPI Overview — content-sized body; page scrolls when content is tall */
-.dashboard-kpi-overview-page.saas-workspace-page {
-  overflow: auto !important;
-  flex: 1 1 0;
-  min-height: 0;
-  background: #ffffff !important;
-}
-
-.dashboard-kpi-overview-page .saas-workspace-card {
-  flex: 0 0 auto !important;
-  height: auto !important;
-  min-height: 0 !important;
-  overflow: visible !important;
-  background: #ffffff !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-
-.dashboard-kpi-overview-page .saas-workspace-grid-host {
-  flex: 0 0 auto !important;
-  height: auto !important;
-  min-height: 0 !important;
-  overflow: visible !important;
-  background: #ffffff !important;
-}
-
-.dashboard-kpi-overview-page .erp-kpi-tab-panel {
-  flex: 0 0 auto;
-  min-height: 0;
-  height: auto;
-}
-
 /* KPI Overview — filters inline with page title (header toolbar) */
 .dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters {
   position: relative;
   z-index: 31;
   pointer-events: auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters .MuiOutlinedInput-root {
   min-height: 32px;
+  max-height: 32px;
   border-radius: 8px;
+  font-size: 0.8125rem;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters .MuiFormControl-root {
+  margin: 0;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters .MuiInputLabel-root {
+  font-size: 0.8125rem;
+}
+
+.dashboard-redesign-page .saas-workspace-page-header .erp-kpi-overview-header-filters .MuiInputLabel-shrink {
+  transform: translate(14px, -7px) scale(0.75);
 }
 
 .dashboard-redesign-page .saas-workspace-page-header .saas-workspace-header-toolbar {
