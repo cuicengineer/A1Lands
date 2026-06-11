@@ -20,6 +20,12 @@ import Chip from "@mui/material/Chip";
 import api from "../../../../src/services/api.service";
 import uploadApi from "services/api.upload.service";
 import CurrencyLoading from "components/CurrencyLoading";
+import {
+  buildRentalPropertyPId,
+  isValidPropertyNumber,
+  parsePropertyNumberFromPId,
+  sanitizePropertyNumberInput,
+} from "./rentalPropertyId";
 
 function getClassUoM(classRow) {
   if (!classRow) return "";
@@ -34,6 +40,8 @@ function RentalPropertyForm({
   onUploadSuccess,
   lockedBaseId,
 }) {
+  const isAddMode = !initialData;
+
   // Match "New Property Grouping" form styling (compact, simple, consistent)
   const MENU_PROPS = {
     PaperProps: {
@@ -78,6 +86,7 @@ function RentalPropertyForm({
     cmdId: "",
     baseId: "",
     classId: "",
+    propertyNumber: "",
     pId: "",
     uoM: "",
     area: 0,
@@ -151,6 +160,7 @@ function RentalPropertyForm({
         cmdId: initialData.cmdId || "",
         baseId: initialData.baseId || "",
         classId,
+        propertyNumber: parsePropertyNumberFromPId(initialData.pId || ""),
         pId: initialData.pId || "",
         uoM: initialData.uoM || "",
         area: initialData.area || 0,
@@ -190,6 +200,7 @@ function RentalPropertyForm({
           cmdId: base.cmd != null ? Number(base.cmd) : "",
           baseId: base.id != null ? Number(base.id) : "",
           classId: "",
+          propertyNumber: "",
           pId: "",
           uoM: "",
           area: 0,
@@ -203,6 +214,7 @@ function RentalPropertyForm({
           cmdId: "",
           baseId: "",
           classId: "",
+          propertyNumber: "",
           pId: "",
           uoM: "",
           area: 0,
@@ -217,6 +229,7 @@ function RentalPropertyForm({
         cmdId: "",
         baseId: "",
         classId: "",
+        propertyNumber: "",
         pId: "",
         uoM: "",
         area: 0,
@@ -283,6 +296,45 @@ function RentalPropertyForm({
     }
   }, [form.classId, classes]);
 
+  useEffect(() => {
+    const selectedBase = bases.find((b) => Number(b.id) === Number(form.baseId));
+    const selectedCommand = commands.find((c) => Number(c.id) === Number(form.cmdId));
+    const selectedClass = classes.find((c) => Number(c.id) === Number(form.classId));
+    const generated = buildRentalPropertyPId({
+      propertyNumber: form.propertyNumber,
+      baseRow: selectedBase,
+      commandRow: selectedCommand,
+      classRow: selectedClass,
+    });
+    setForm((prev) => {
+      if (!generated) {
+        if (isAddMode) return prev.pId === "" ? prev : { ...prev, pId: "" };
+        return prev;
+      }
+      return prev.pId === generated ? prev : { ...prev, pId: generated };
+    });
+  }, [
+    isAddMode,
+    form.propertyNumber,
+    form.baseId,
+    form.cmdId,
+    form.classId,
+    bases,
+    commands,
+    classes,
+  ]);
+
+  const handlePropertyNumberChange = (rawValue) => {
+    const nextValue = sanitizePropertyNumberInput(rawValue);
+    setForm((prevForm) => ({ ...prevForm, propertyNumber: nextValue }));
+    if (errors?.propertyNumber) {
+      setErrors((prev) => ({ ...prev, propertyNumber: undefined }));
+    }
+    if (errors?.pId) {
+      setErrors((prev) => ({ ...prev, pId: undefined }));
+    }
+  };
+
   const handleChange = (field, value) => {
     const normalizedValue =
       field === "status"
@@ -302,8 +354,6 @@ function RentalPropertyForm({
     }
   };
 
-  const isAddMode = !initialData;
-
   const isEmpty = (val) => {
     if (val === null || val === undefined) return true;
     if (Array.isArray(val)) return val.length === 0;
@@ -318,6 +368,7 @@ function RentalPropertyForm({
       { key: "cmdId", label: "Command" },
       { key: "baseId", label: "Base" },
       { key: "classId", label: "Class" },
+      { key: "propertyNumber", label: "Property No." },
       { key: "pId", label: "Property ID" },
       { key: "uoM", label: "UoM" },
       { key: "area", label: "Area" },
@@ -327,6 +378,20 @@ function RentalPropertyForm({
     ];
 
     required.forEach(({ key, label }) => {
+      if (key === "propertyNumber") {
+        if (isEmpty(form?.propertyNumber)) {
+          next.propertyNumber = `${label} is required`;
+        } else if (!isValidPropertyNumber(form.propertyNumber)) {
+          next.propertyNumber = `${label} must be a number from 1 to 999`;
+        }
+        return;
+      }
+      if (key === "pId") {
+        if (isEmpty(form?.pId)) {
+          next.pId = "Property ID could not be generated. Check RAC, Base, Class, and Property No.";
+        }
+        return;
+      }
       if (isEmpty(form?.[key])) next[key] = `${label} is required`;
     });
 
@@ -448,13 +513,13 @@ function RentalPropertyForm({
     }
   };
 
-  const fields = [
+  const topFields = [
     { label: "RAC", key: "cmdId", type: "select", options: commands, mandatory: true },
     { label: "Base", key: "baseId", type: "select", options: bases, mandatory: true },
     { label: "Class", key: "classId", type: "select", options: classes, mandatory: true },
-    { label: "Property ID", key: "pId", mandatory: isAddMode },
-    { label: "UoM", key: "uoM", type: "readonly", mandatory: isAddMode },
-    { label: "Area", key: "area", type: "number", mandatory: isAddMode },
+  ];
+
+  const bottomFields = [
     { label: "Location", key: "location", grid: { xs: 12, sm: 8 }, mandatory: isAddMode },
     { label: "Remarks", key: "remarks", grid: { xs: 12, sm: 12 }, mandatory: isAddMode },
     {
@@ -469,118 +534,180 @@ function RentalPropertyForm({
     },
   ];
 
+  const propertyRowGrid = { xs: 6, sm: 3 };
+
+  const renderField = (f) => (
+    <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
+      {f.type === "select" ? (
+        f.key === "cmdId" || f.key === "baseId" ? (
+          <Autocomplete
+            size="small"
+            fullWidth
+            disableClearable
+            disabled={lockedBaseId != null}
+            options={f.key === "cmdId" ? commands : bases}
+            getOptionLabel={(option) => option?.name ?? ""}
+            isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+            value={
+              f.key === "cmdId"
+                ? commands.find((c) => Number(c.id) === Number(form.cmdId)) ?? null
+                : bases.find((b) => Number(b.id) === Number(form.baseId)) ?? null
+            }
+            onChange={(_, newValue) => handleChange(f.key, newValue != null ? newValue.id : "")}
+            ListboxProps={{ style: { maxHeight: 300 } }}
+            sx={{
+              ...formControlSx,
+              fontSize: "1rem",
+              "& .MuiInputBase-root": { minHeight: "45px" },
+              "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
+              "& .MuiInputBase-input": {
+                fontSize: "1rem",
+                paddingTop: 0,
+                paddingBottom: 0,
+              },
+            }}
+            renderInput={(params) => (
+              <MDInput
+                {...params}
+                label={f.label}
+                required={Boolean(f.mandatory)}
+                error={Boolean(errors[f.key])}
+                helperText={errors[f.key]}
+              />
+            )}
+          />
+        ) : (
+          <FormControl
+            fullWidth
+            size="small"
+            required={Boolean(f.mandatory)}
+            error={Boolean(errors[f.key])}
+            sx={formControlSx}
+          >
+            <InputLabel sx={labelSx}>{f.label}</InputLabel>
+            <Select
+              value={form[f.key] ?? ""}
+              label={f.label}
+              onChange={(e) => handleChange(f.key, e.target.value)}
+              MenuProps={MENU_PROPS}
+              sx={selectSx}
+            >
+              {f.options.map((option) => {
+                const optionValue = option.value ?? option.id;
+                const optionLabel = option.label ?? option.name ?? String(optionValue ?? "");
+                const optionKey = option.key ?? option.id ?? option.value ?? optionLabel;
+                return (
+                  <MenuItem key={optionKey} value={optionValue} sx={menuItemSx}>
+                    {optionLabel}
+                  </MenuItem>
+                );
+              })}
+            </Select>
+            {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
+          </FormControl>
+        )
+      ) : (
+        <MDInput
+          label={f.label}
+          type={f.type || "text"}
+          value={form[f.key]}
+          onChange={(e) => handleChange(f.key, e.target.value)}
+          fullWidth
+          size="small"
+          required={Boolean(f.mandatory)}
+          error={Boolean(errors[f.key])}
+          helperText={errors[f.key]}
+          sx={inputSx}
+          {...(f.key === "location" && {
+            multiline: true,
+            rows: 3,
+            inputProps: { maxLength: 400 },
+          })}
+        />
+      )}
+    </Grid>
+  );
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle>{initialData ? "Edit Rental Property" : "Add Rental Property"}</DialogTitle>
       <DialogContent>
         <Grid container spacing={2} mt={0.5}>
-          {fields.map((f) => (
-            <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
-              {f.type === "select" ? (
-                f.key === "cmdId" || f.key === "baseId" ? (
-                  <Autocomplete
-                    size="small"
-                    fullWidth
-                    disableClearable
-                    disabled={lockedBaseId != null}
-                    options={f.key === "cmdId" ? commands : bases}
-                    getOptionLabel={(option) => option?.name ?? ""}
-                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                    value={
-                      f.key === "cmdId"
-                        ? commands.find((c) => Number(c.id) === Number(form.cmdId)) ?? null
-                        : bases.find((b) => Number(b.id) === Number(form.baseId)) ?? null
-                    }
-                    onChange={(_, newValue) =>
-                      handleChange(f.key, newValue != null ? newValue.id : "")
-                    }
-                    ListboxProps={{ style: { maxHeight: 300 } }}
-                    sx={{
-                      ...formControlSx,
-                      fontSize: "1rem",
-                      "& .MuiInputBase-root": { minHeight: "45px" },
-                      "& .MuiAutocomplete-inputRoot": { paddingTop: 0, paddingBottom: 0 },
-                      "& .MuiInputBase-input": {
-                        fontSize: "1rem",
-                        paddingTop: 0,
-                        paddingBottom: 0,
-                      },
-                    }}
-                    renderInput={(params) => (
-                      <MDInput
-                        {...params}
-                        label={f.label}
-                        required={Boolean(f.mandatory)}
-                        error={Boolean(errors[f.key])}
-                        helperText={errors[f.key]}
-                      />
-                    )}
-                  />
-                ) : (
-                  <FormControl
-                    fullWidth
-                    size="small"
-                    required={Boolean(f.mandatory)}
-                    error={Boolean(errors[f.key])}
-                    sx={formControlSx}
-                  >
-                    <InputLabel sx={labelSx}>{f.label}</InputLabel>
-                    <Select
-                      value={form[f.key] ?? ""}
-                      label={f.label}
-                      onChange={(e) => handleChange(f.key, e.target.value)}
-                      MenuProps={MENU_PROPS}
-                      sx={selectSx}
-                    >
-                      {f.options.map((option) => {
-                        const optionValue = option.value ?? option.id;
-                        const optionLabel =
-                          option.label ?? option.name ?? String(optionValue ?? "");
-                        const optionKey = option.key ?? option.id ?? option.value ?? optionLabel;
-                        return (
-                          <MenuItem key={optionKey} value={optionValue} sx={menuItemSx}>
-                            {optionLabel}
-                          </MenuItem>
-                        );
-                      })}
-                    </Select>
-                    {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
-                  </FormControl>
-                )
-              ) : f.type === "readonly" ? (
-                <MDInput
-                  label={f.label}
-                  type="text"
-                  value={form[f.key] || ""}
-                  fullWidth
-                  size="small"
-                  required={Boolean(f.mandatory)}
-                  error={Boolean(errors[f.key])}
-                  helperText={errors[f.key]}
-                  InputProps={{ readOnly: true }}
-                  sx={inputSx}
-                />
-              ) : (
-                <MDInput
-                  label={f.label}
-                  type={f.type || "text"}
-                  value={form[f.key]}
-                  onChange={(e) => handleChange(f.key, e.target.value)}
-                  fullWidth
-                  size="small"
-                  required={Boolean(f.mandatory)}
-                  error={Boolean(errors[f.key])}
-                  helperText={errors[f.key]}
-                  sx={inputSx}
-                  {...(f.key === "location" && {
-                    multiline: true,
-                    rows: 3,
-                    inputProps: { maxLength: 400 },
-                  })}
-                />
+          {topFields.map(renderField)}
+
+          <Grid item {...propertyRowGrid}>
+            <MDInput
+              label="Property No."
+              type="text"
+              value={form.propertyNumber}
+              onChange={(e) => handlePropertyNumberChange(e.target.value)}
+              fullWidth
+              size="small"
+              required={isAddMode}
+              error={Boolean(errors.propertyNumber)}
+              helperText={errors.propertyNumber}
+              inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 3 }}
+              sx={inputSx}
+            />
+          </Grid>
+
+          <Grid item {...propertyRowGrid}>
+            <MDInput
+              label="Property ID"
+              type="text"
+              value={form.pId || ""}
+              fullWidth
+              size="small"
+              required={isAddMode}
+              error={Boolean(errors.pId)}
+              helperText={errors.pId}
+              InputProps={{ readOnly: true }}
+              sx={inputSx}
+            />
+          </Grid>
+
+          <Grid item {...propertyRowGrid}>
+            <MDInput
+              label="Area"
+              type="number"
+              value={form.area}
+              onChange={(e) => handleChange("area", e.target.value)}
+              fullWidth
+              size="small"
+              required={isAddMode}
+              error={Boolean(errors.area)}
+              helperText={errors.area}
+              sx={inputSx}
+            />
+          </Grid>
+
+          <Grid item {...propertyRowGrid}>
+            <MDBox
+              display="flex"
+              flexDirection="column"
+              justifyContent="center"
+              sx={{ minHeight: "45px", pt: 0.5 }}
+            >
+              <MDTypography
+                variant="caption"
+                color="text"
+                fontWeight="medium"
+                sx={{ fontSize: "0.75rem", lineHeight: 1.2, mb: 0.25 }}
+              >
+                UoM{isAddMode ? " *" : ""}
+              </MDTypography>
+              <MDTypography variant="body2" sx={{ fontSize: "1rem", fontWeight: 500 }}>
+                {form.uoM || "—"}
+              </MDTypography>
+              {errors.uoM && (
+                <FormHelperText error sx={{ mx: 0 }}>
+                  {errors.uoM}
+                </FormHelperText>
               )}
-            </Grid>
-          ))}
+            </MDBox>
+          </Grid>
+
+          {bottomFields.map(renderField)}
 
           {/* Attachments - File Upload (when record has an ID) */}
           {initialData && initialData.id && (

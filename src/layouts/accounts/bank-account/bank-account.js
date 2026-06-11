@@ -1520,7 +1520,7 @@ export default function BankAccounts() {
     <DashboardLayout>
       <DashboardNavbar />
       <EnterpriseWorkspace
-        title="Inst. Bank Accounts"
+        title="Inst Bank Accounts"
         subtitle="Manage institutional bank account records"
         metadata={workspaceMetadata}
         actions={

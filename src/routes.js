@@ -256,10 +256,7 @@ const routes = [
         component: <ChartOfAccounts />,
       },
       {
-        type: "collapse",
-        name: "Income Statement",
-        key: "configuration-income-statement",
-        icon: <Icon fontSize="small">trending_up</Icon>,
+        key: "configuration-income-statement-redirect",
         route: "/configuration/income-statement",
         component: <IncomeStatement />,
       },
@@ -343,7 +340,7 @@ const routes = [
     collapse: [
       {
         type: "collapse",
-        name: "Inst. Bank Accts",
+        name: "Inst Bank Accts",
         key: "accounts-bank-accounts",
         icon: <Icon fontSize="small">account_balance</Icon>,
         route: "/accounts/bank-accounts",

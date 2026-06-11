@@ -27,6 +27,7 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
+import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Popover from "@mui/material/Popover";
 import Box from "@mui/material/Box";
@@ -62,6 +63,12 @@ import {
 import { gridValueChipCell } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
+import {
+  buildPropertyGroupingGId,
+  isValidGroupNumber,
+  parseGroupNumberFromGId,
+  sanitizeGroupNumberInput,
+} from "./propertyGroupingId";
 
 let revenueRatesCatalogPromise = null;
 let govtShareRatesCatalogPromise = null;
@@ -786,6 +793,7 @@ function PropertyGroupingForm({
     classid: "",
     propertyType: "",
     property: [],
+    groupNumber: "",
     gId: "",
     rate: 0,
     uoM: "",
@@ -1295,6 +1303,7 @@ function PropertyGroupingForm({
         propertyType:
           propertyTypeRaw !== "" && propertyTypeRaw != null ? Number(propertyTypeRaw) : "",
         property: normalizedPropertyIds,
+        groupNumber: parseGroupNumberFromGId(gId),
         gId: gId,
         rate: Number(rate) || 0,
         uoM: classUoM || uoM,
@@ -1327,6 +1336,7 @@ function PropertyGroupingForm({
         classid: "",
         propertyType: "",
         property: [],
+        groupNumber: "",
         gId: "",
         rate: 0,
         uoM: "",
@@ -1341,6 +1351,23 @@ function PropertyGroupingForm({
       setLinkedPropertiesForEdit([]);
     }
   }, [initialData, allBases, classes, open]);
+
+  useEffect(() => {
+    const selectedBase = allBases.find((b) => Number(b.id) === Number(form.baseid));
+    const selectedClass = classes.find((c) => Number(c.id) === Number(form.classid));
+    const generated = buildPropertyGroupingGId({
+      groupNumber: form.groupNumber,
+      baseRow: selectedBase,
+      classRow: selectedClass,
+    });
+    setForm((prev) => {
+      if (!generated) {
+        if (!isEditMode) return prev.gId === "" ? prev : { ...prev, gId: "" };
+        return prev;
+      }
+      return prev.gId === generated ? prev : { ...prev, gId: generated };
+    });
+  }, [form.groupNumber, form.baseid, form.classid, allBases, classes, isEditMode]);
 
   // Fetch linked properties when in edit mode
   useEffect(() => {
@@ -1548,11 +1575,21 @@ function PropertyGroupingForm({
       { key: "baseid", label: "Base" },
       { key: "classid", label: "Class" },
       { key: "property", label: "Property" },
-      { key: "gId", label: "GroupID" },
+      { key: "groupNumber", label: "Group ID" },
       { key: "location", label: "Address" },
       { key: "remarks", label: "Remarks" },
     ];
     required.forEach(({ key, label }) => {
+      if (key === "groupNumber") {
+        if (isEmpty(form?.groupNumber)) {
+          next.groupNumber = `${label} is required`;
+        } else if (!isValidGroupNumber(form.groupNumber)) {
+          next.groupNumber = `${label} must be a number from 1 to 999`;
+        } else if (isEmpty(form?.gId)) {
+          next.groupNumber = "Group ID could not be generated. Check Class and Base.";
+        }
+        return;
+      }
       if (isEmpty(form?.[key])) next[key] = `${label} is required`;
     });
     setErrors(next);
@@ -1595,7 +1632,7 @@ function PropertyGroupingForm({
     if (duplicate) {
       setErrors((prev) => ({
         ...prev,
-        gId: "Same group ID already active for this class and base",
+        groupNumber: "Same group ID already active for this class and base",
       }));
       return false;
     }
@@ -1720,6 +1757,17 @@ function PropertyGroupingForm({
       submitPayload = { ...form, rate: avgRate };
     }
     onSubmit(submitPayload);
+  };
+
+  const handleGroupNumberChange = (rawValue) => {
+    const nextValue = sanitizeGroupNumberInput(rawValue);
+    setForm((prevForm) => ({ ...prevForm, groupNumber: nextValue }));
+    if (errors?.groupNumber) {
+      setErrors((prev) => ({ ...prev, groupNumber: undefined }));
+    }
+    if (errors?.gId) {
+      setErrors((prev) => ({ ...prev, gId: undefined }));
+    }
   };
 
   // Handle Group ID blur (when user finishes entering) - delegates to parent
@@ -2282,16 +2330,36 @@ function PropertyGroupingForm({
               <MDInput
                 label="Group ID"
                 type="text"
-                value={form.gId}
-                onChange={(e) => handleChange("gId", e.target.value)}
+                value={form.groupNumber}
+                onChange={(e) => handleGroupNumberChange(e.target.value)}
                 onBlur={handleGroupIdBlur}
                 size="small"
                 fullWidth
                 required={!isEditMode}
-                error={!isEditMode && Boolean(errors.gId)}
-                helperText={!isEditMode ? errors.gId : ""}
+                error={Boolean(errors.groupNumber || errors.gId)}
+                helperText={errors.groupNumber || errors.gId || ""}
+                inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 3 }}
+                InputProps={{
+                  endAdornment: form.gId ? (
+                    <InputAdornment position="end">
+                      <MDTypography
+                        component="span"
+                        variant="body2"
+                        sx={{
+                          fontSize: "1rem",
+                          color: "text.secondary",
+                          whiteSpace: "nowrap",
+                          userSelect: "none",
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {form.gId}
+                      </MDTypography>
+                    </InputAdornment>
+                  ) : null,
+                }}
                 sx={{
-                  "& .MuiInputBase-input": { fontSize: "1rem" },
+                  "& .MuiInputBase-input": { fontSize: "1rem", maxWidth: "4ch" },
                   "& .MuiInputLabel-root": { fontSize: "1rem" },
                 }}
               />

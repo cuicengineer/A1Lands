@@ -86,6 +86,12 @@ import {
   getAgreementProvSaveErrorMessage,
   persistAllInvoiceScheduleLines,
 } from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
+import {
+  buildContractNo,
+  isValidContractNumber,
+  parseContractNumberFromContractNo,
+  sanitizeContractNumberInput,
+} from "./contractNoId";
 
 /** API contract payload without identity — used to open the form as “New Contract” with prefills (clone). */
 function stripContractForClone(contract) {
@@ -265,6 +271,7 @@ function ContractsForm({
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [form, setForm] = useState({
+    contractNumber: "",
     contractNo: "",
     cmdId: "",
     baseId: "",
@@ -402,7 +409,11 @@ function ContractsForm({
 
       const rawGovtShare = initialData.GovtShare ?? 0;
 
+      const isEditContractLoad = Boolean(initialData) && !isClone;
       setForm({
+        contractNumber: isEditContractLoad
+          ? ""
+          : parseContractNumberFromContractNo(initialData.ContractNo || ""),
         contractNo: initialData.ContractNo || "",
         cmdId: initialData.CmdId || "",
         baseId: initialData.BaseId || "",
@@ -527,6 +538,7 @@ function ContractsForm({
       }, 100);
     } else {
       setForm({
+        contractNumber: "",
         contractNo: "",
         cmdId: "",
         baseId: "",
@@ -568,7 +580,28 @@ function ContractsForm({
       setFormLoading(false);
     }
     setErrors({});
-  }, [initialData, open]);
+  }, [initialData, open, isClone]);
+
+  const isNewContractForm = !initialData || isClone;
+
+  useEffect(() => {
+    if (!isNewContractForm) return;
+
+    const selectedBase = bases.find((b) => Number(b.id) === Number(form.baseId));
+    const selectedClass = classes.find((c) => Number(c.id) === Number(form.classId));
+    const generated = buildContractNo({
+      contractNumber: form.contractNumber,
+      baseRow: selectedBase,
+      classRow: selectedClass,
+    });
+
+    setForm((prev) => {
+      if (!generated) {
+        return prev.contractNo === "" ? prev : { ...prev, contractNo: "" };
+      }
+      return prev.contractNo === generated ? prev : { ...prev, contractNo: generated };
+    });
+  }, [form.contractNumber, form.baseId, form.classId, bases, classes, isNewContractForm]);
 
   // Filter bases based on selected command
   useEffect(() => {
@@ -869,9 +902,30 @@ function ContractsForm({
     }
   };
 
+  const handleContractNumberChange = (rawValue) => {
+    const nextValue = sanitizeContractNumberInput(rawValue);
+    setForm((prevForm) => ({ ...prevForm, contractNumber: nextValue }));
+    if (errors?.contractNumber) {
+      setErrors((prev) => ({ ...prev, contractNumber: undefined }));
+    }
+    if (errors?.contractNo) {
+      setErrors((prev) => ({ ...prev, contractNo: undefined }));
+    }
+  };
+
   const validate = () => {
     const newErrors = {};
-    if (!form.contractNo?.trim()) newErrors.contractNo = "Contract No is required";
+    if (isNewContractForm) {
+      if (!form.contractNumber?.trim()) {
+        newErrors.contractNumber = "Contract No is required";
+      } else if (!isValidContractNumber(form.contractNumber)) {
+        newErrors.contractNumber = "Contract No must be a number from 1 to 999";
+      } else if (!form.contractNo?.trim()) {
+        newErrors.contractNumber = "Contract No could not be generated. Check Class and Base.";
+      }
+    } else if (!form.contractNo?.trim()) {
+      newErrors.contractNo = "Contract No is required";
+    }
     if (!form.cmdId) newErrors.cmdId = "Command is required";
     if (!form.baseId) newErrors.baseId = "Base is required";
     if (!form.classId) newErrors.classId = "Class is required";
@@ -898,7 +952,6 @@ function ContractsForm({
           "Commercial Operation Date must be on or before Contract End Date";
       }
     }
-    const isNewContractForm = !initialData || isClone;
     const hasRentInTermValidate = String(form.term || "")
       .toLowerCase()
       .includes("rent");
@@ -1101,7 +1154,9 @@ function ContractsForm({
   const selectedPropertyGroup = filteredPropertyGroups.find(
     (pg) => Number(pg.Id || pg.id) === Number(form.grpId)
   );
-  const isContractNoMissing = !form.contractNo?.trim();
+  const isContractNoMissing = isNewContractForm
+    ? !form.contractNumber?.trim() || !form.contractNo?.trim()
+    : !form.contractNo?.trim();
   const hasTenantSelection = Boolean(String(form.tenantNo || "").trim());
   const selectedTenant = useMemo(() => {
     if (!hasTenantSelection) return null;
@@ -1782,20 +1837,62 @@ function ContractsForm({
               {initialData && !isClone ? "Edit Contract" : "New Contract"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
-              <MDInput
-                label="Contract No"
-                type="text"
-                value={form.contractNo}
-                onChange={(e) => handleChange("contractNo", e.target.value)}
-                fullWidth
-                size="small"
-                required
-                error={!!errors.contractNo || isContractNoMissing}
-                helperText={
-                  errors.contractNo || (isContractNoMissing ? "Contract No is required" : "")
-                }
-                sx={inputSx}
-              />
+              {isEditContract ? (
+                <MDInput
+                  label="Contract No"
+                  type="text"
+                  value={form.contractNo}
+                  fullWidth
+                  size="small"
+                  required
+                  InputProps={{ readOnly: true }}
+                  error={!!errors.contractNo || isContractNoMissing}
+                  helperText={
+                    errors.contractNo || (isContractNoMissing ? "Contract No is required" : "")
+                  }
+                  sx={inputSx}
+                />
+              ) : (
+                <MDInput
+                  label="Contract No"
+                  type="text"
+                  value={form.contractNumber}
+                  onChange={(e) => handleContractNumberChange(e.target.value)}
+                  fullWidth
+                  size="small"
+                  required
+                  error={!!errors.contractNumber || !!errors.contractNo || isContractNoMissing}
+                  helperText={
+                    errors.contractNumber ||
+                    errors.contractNo ||
+                    (isContractNoMissing ? "Contract No is required" : "")
+                  }
+                  inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 3 }}
+                  InputProps={{
+                    endAdornment: form.contractNo ? (
+                      <InputAdornment position="end">
+                        <MDTypography
+                          component="span"
+                          variant="body2"
+                          sx={{
+                            fontSize: "1rem",
+                            color: "text.secondary",
+                            whiteSpace: "nowrap",
+                            userSelect: "none",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {form.contractNo}
+                        </MDTypography>
+                      </InputAdornment>
+                    ) : null,
+                  }}
+                  sx={{
+                    ...inputSx,
+                    "& .MuiInputBase-input": { fontSize: "1rem", maxWidth: "4ch" },
+                  }}
+                />
+              )}
             </MDBox>
           </MDBox>
         </DialogTitle>

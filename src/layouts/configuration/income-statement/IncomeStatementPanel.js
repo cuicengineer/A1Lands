@@ -20,17 +20,12 @@ import MDButton from "components/MDButton";
 import MDTypography from "components/MDTypography";
 import MDInput from "components/MDInput";
 import CurrencyLoading from "components/CurrencyLoading";
-import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
-import DashboardNavbar from "examples/Navbars/DashboardNavbar";
-import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
-import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
-import chartOfAccountsApi, {
-  COA_GROUP_OPTIONS,
-  COA_SECTION_TYPE,
+import incomeStatementApi, {
+  IS_GROUP_OPTIONS,
   UPLOAD_TABLE_NAME,
-} from "services/api.chartofaccounts.service";
+} from "services/api.incomestatement.service";
 import uploadApi from "services/api.upload.service";
 import {
   canCreateCurrentMenu,
@@ -38,16 +33,11 @@ import {
   canEditCurrentMenu,
 } from "services/api.service";
 import { useMaterialUIController } from "context";
-import IncomeStatementPanel from "layouts/configuration/income-statement/IncomeStatementPanel";
 import {
   DUPLICATE_ACCT_ROW_STYLE,
   getDuplicateAcctRowIds,
 } from "layouts/configuration/utils/coaDuplicateHighlight";
-import {
-  coaPanelColumnSx,
-  coaPanelTableBodySx,
-  coaSplitBodySx,
-} from "utils/coaPanelTableSx";
+import { coaPanelColumnSx, coaPanelTableBodySx } from "utils/coaPanelTableSx";
 
 const SHOW_ATTACHMENTS = false;
 const MAX_ATTACHMENT_FILES = 2;
@@ -113,7 +103,7 @@ function hasAttachmentData(row) {
   );
 }
 
-function normalizeCoaRow(row) {
+function normalizeRow(row) {
   const id = row?.Id ?? row?.id;
   return {
     id: id != null ? Number(id) : null,
@@ -121,7 +111,6 @@ function normalizeCoaRow(row) {
     acctName: pickField(row, "acctName", "AcctName"),
     groupName: pickField(row, "groupName", "GroupName"),
     subGroup: pickField(row, "subGroup", "SubGroup"),
-    controlAccount: pickField(row, "controlAccount", "ControlAccount"),
     sortOrder: Number(row?.sortOrder ?? row?.SortOrder ?? 0),
     isAttachment: hasAttachmentData(row),
   };
@@ -135,56 +124,13 @@ function normalizeSubGroupRow(row) {
   };
 }
 
-function normalizeControlAccountRow(row) {
-  return {
-    id: row?.Id ?? row?.id,
-    controlAccountName: pickField(row, "controlAccountName", "ControlAccountName"),
-  };
-}
-
 function unwrapCreatedId(response) {
   const id = response?.Id ?? response?.id ?? response?.data?.Id ?? response?.data?.id;
   return id != null ? Number(id) : null;
 }
 
-const COA_GROUP_SORT_RANK = COA_GROUP_OPTIONS.reduce((acc, name, index) => {
-  acc[name.toLowerCase()] = index;
-  return acc;
-}, {});
-
-function getCoaGroupSortRank(groupName) {
-  const key = String(groupName || "")
-    .trim()
-    .toLowerCase();
-  if (key in COA_GROUP_SORT_RANK) return COA_GROUP_SORT_RANK[key];
-  return COA_GROUP_OPTIONS.length;
-}
-
-function compareCoaRowsByGroupAndSortOrder(a, b) {
-  const groupDiff = getCoaGroupSortRank(a?.groupName) - getCoaGroupSortRank(b?.groupName);
-  if (groupDiff !== 0) return groupDiff;
-
-  const sortDiff = Number(a?.sortOrder ?? 0) - Number(b?.sortOrder ?? 0);
-  if (sortDiff !== 0) return sortDiff;
-
-  return Number(a?.id ?? 0) - Number(b?.id ?? 0);
-}
-
-function sortCoaRows(rows) {
-  return [...(rows || [])].sort(compareCoaRowsByGroupAndSortOrder);
-}
-
-function suggestNextSortOrder(rows, groupName) {
-  const groupKey = String(groupName || "")
-    .trim()
-    .toLowerCase();
-  const sameGroupRows = (rows || []).filter(
-    (row) =>
-      String(row?.groupName || "")
-        .trim()
-        .toLowerCase() === groupKey
-  );
-  const orders = sameGroupRows
+function suggestNextSortOrder(rows) {
+  const orders = (rows || [])
     .map((row) => Number(row?.sortOrder ?? 0))
     .filter((n) => Number.isFinite(n));
   if (!orders.length) return 1;
@@ -197,7 +143,6 @@ function buildEmptyForm(rows) {
     acctName: "",
     groupName: "",
     subGroup: "",
-    controlAccount: "",
     sortOrder: suggestNextSortOrder(rows),
   };
 }
@@ -208,9 +153,7 @@ function buildApiPayload(draft) {
     AcctName: String(draft?.acctName ?? "").trim(),
     GroupName: String(draft?.groupName ?? "").trim(),
     SubGroup: String(draft?.subGroup ?? "").trim() || null,
-    ControlAccount: String(draft?.controlAccount ?? "").trim() || null,
     SortOrder: Number(draft?.sortOrder ?? 0) || 0,
-    SectionType: COA_SECTION_TYPE,
   };
 }
 
@@ -219,7 +162,7 @@ function displayCell(value) {
   return text || "—";
 }
 
-export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
+function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
 
@@ -229,7 +172,6 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
 
   const [tableRows, setTableRows] = useState([]);
   const [subGroupOptions, setSubGroupOptions] = useState([]);
-  const [controlAccountOptions, setControlAccountOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [reorderingId, setReorderingId] = useState(null);
@@ -241,8 +183,6 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [addSubGroupOpen, setAddSubGroupOpen] = useState(false);
   const [addSubGroupName, setAddSubGroupName] = useState("");
-  const [addControlAccountOpen, setAddControlAccountOpen] = useState(false);
-  const [addControlAccountName, setAddControlAccountName] = useState("");
   const [formExistingFiles, setFormExistingFiles] = useState([]);
   const [formSelectedFiles, setFormSelectedFiles] = useState([]);
   const [loadingFormFiles, setLoadingFormFiles] = useState(false);
@@ -264,36 +204,24 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
 
   const fetchSubGroups = useCallback(async () => {
     try {
-      const response = await chartOfAccountsApi.getSubGroups();
-      setSubGroupOptions((chartOfAccountsApi.unwrapList(response) || []).map(normalizeSubGroupRow));
+      const response = await incomeStatementApi.getSubGroups();
+      setSubGroupOptions((incomeStatementApi.unwrapList(response) || []).map(normalizeSubGroupRow));
     } catch (error) {
-      console.error("Error fetching sub-groups:", error);
+      console.error("Error fetching income statement sub-groups:", error);
       setSubGroupOptions([]);
-    }
-  }, []);
-
-  const fetchControlAccounts = useCallback(async () => {
-    try {
-      const response = await chartOfAccountsApi.getControlAccounts();
-      setControlAccountOptions(
-        (chartOfAccountsApi.unwrapList(response) || []).map(normalizeControlAccountRow)
-      );
-    } catch (error) {
-      console.error("Error fetching control accounts:", error);
-      setControlAccountOptions([]);
     }
   }, []);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
-      const list = sortCoaRows(
-        (chartOfAccountsApi.unwrapList(response) || []).map(normalizeCoaRow)
-      );
+      const response = await incomeStatementApi.getAll();
+      const list = (incomeStatementApi.unwrapList(response) || [])
+        .map(normalizeRow)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
       setTableRows(list);
     } catch (error) {
-      console.error("Error fetching chart of accounts:", error);
+      console.error("Error fetching income statements:", error);
       setTableRows([]);
     } finally {
       setLoading(false);
@@ -330,8 +258,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   useEffect(() => {
     fetchRows();
     fetchSubGroups();
-    fetchControlAccounts();
-  }, [fetchRows, fetchSubGroups, fetchControlAccounts]);
+  }, [fetchRows, fetchSubGroups]);
 
   const resetFormDialog = () => {
     setFormDialogOpen(false);
@@ -380,8 +307,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
         acctName: row.acctName || "",
         groupName: row.groupName || "",
         subGroup: row.subGroup || "",
-        controlAccount: row.controlAccount || "",
-        sortOrder: suggestNextSortOrder(tableRows, row.groupName),
+        sortOrder: suggestNextSortOrder(tableRows),
       });
       setFormErrors({});
       setFormExistingFiles([]);
@@ -395,10 +321,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
     setFormDraft((draft) => {
       if (!draft) return draft;
       const next = { ...draft, [field]: value };
-      if (field === "groupName") {
-        next.subGroup = "";
-        next.sortOrder = suggestNextSortOrder(tableRows, value);
-      }
+      if (field === "groupName") next.subGroup = "";
       return next;
     });
     if (formErrors[field]) {
@@ -462,10 +385,10 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
       let recordId = formDraft.id;
 
       if (formMode === "create") {
-        const created = await chartOfAccountsApi.create(payload);
+        const created = await incomeStatementApi.create(payload);
         recordId = unwrapCreatedId(created);
       } else {
-        await chartOfAccountsApi.update(recordId, payload);
+        await incomeStatementApi.update(recordId, payload);
       }
 
       if (SHOW_ATTACHMENTS && recordId && formSelectedFiles.length > 0) {
@@ -475,7 +398,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
       await fetchRows();
       resetFormDialog();
     } catch (error) {
-      console.error("Error saving chart of account:", error);
+      console.error("Error saving income statement:", error);
       alert(error?.message || "Failed to save. Please try again.");
     } finally {
       setSaving(false);
@@ -491,10 +414,10 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   const handleConfirmDelete = async () => {
     if (!canDelete || !recordToDelete) return;
     try {
-      await chartOfAccountsApi.remove(recordToDelete);
+      await incomeStatementApi.remove(recordToDelete);
       await fetchRows();
     } catch (error) {
-      console.error("Error deleting chart of account:", error);
+      console.error("Error deleting income statement:", error);
       alert(error?.message || "Failed to delete. Please try again.");
     } finally {
       setDeleteDialogOpen(false);
@@ -514,30 +437,13 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
       return;
     }
     try {
-      await chartOfAccountsApi.createSubGroup(groupName, subGroupName);
+      await incomeStatementApi.createSubGroup(groupName, subGroupName);
       await fetchSubGroups();
       handleFormChange("subGroup", subGroupName);
       setAddSubGroupOpen(false);
       setAddSubGroupName("");
     } catch (error) {
       alert(error?.message || "Failed to add sub-group.");
-    }
-  };
-
-  const handleSaveControlAccount = async () => {
-    const controlAccountName = String(addControlAccountName || "").trim();
-    if (!controlAccountName) {
-      alert("Enter a control account name.");
-      return;
-    }
-    try {
-      await chartOfAccountsApi.createControlAccount(controlAccountName);
-      await fetchControlAccounts();
-      handleFormChange("controlAccount", controlAccountName);
-      setAddControlAccountOpen(false);
-      setAddControlAccountName("");
-    } catch (error) {
-      alert(error?.message || "Failed to add control account.");
     }
   };
 
@@ -585,7 +491,9 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   };
 
   const applyRowsFromApi = useCallback((response) => {
-    const list = sortCoaRows((chartOfAccountsApi.unwrapList(response) || []).map(normalizeCoaRow));
+    const list = (incomeStatementApi.unwrapList(response) || [])
+      .map(normalizeRow)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
     setTableRows(list);
   }, []);
 
@@ -593,17 +501,19 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
     async (id, direction) => {
       if (!canEdit || reorderingId != null || formDialogOpen) return;
 
-      const orderedRows = sortCoaRows(tableRows);
+      const orderedRows = [...(tableRows || [])].sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.id - b.id
+      );
       const currentIndex = orderedRows.findIndex((row) => row.id === id);
       const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
       if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedRows.length) return;
 
       setReorderingId(id);
       try {
-        const response = await chartOfAccountsApi.reorder(id, direction, COA_SECTION_TYPE);
+        const response = await incomeStatementApi.reorder(id, direction);
         applyRowsFromApi(response);
       } catch (error) {
-        console.error("Error reordering chart of account:", error);
+        console.error("Error reordering income statement row:", error);
         alert(error?.message || "Failed to update sort order. Please try again.");
       } finally {
         setReorderingId(null);
@@ -618,7 +528,10 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
 
   const totalFormFiles = formExistingFiles.length + formSelectedFiles.length;
 
-  const orderedTableRows = useMemo(() => sortCoaRows(tableRows), [tableRows]);
+  const orderedTableRows = useMemo(
+    () => [...(tableRows || [])].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id),
+    [tableRows]
+  );
 
   const duplicateAcctRowIds = useMemo(
     () => getDuplicateAcctRowIds(orderedTableRows),
@@ -628,16 +541,15 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   const columns = useMemo(
     () => [
       { Header: "Order", accessor: "sortOrderControls", align: "center", width: "9%" },
-      { Header: "Actions", accessor: "actions", align: "center", width: "12%" },
+      { Header: "Actions", accessor: "actions", align: "center", width: "13%" },
       ...(SHOW_ATTACHMENTS
         ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "6%" }]
         : []),
       { Header: "S.No", accessor: "sno", align: "center", width: "6%" },
-      { Header: "Acct ID", accessor: "acctId", align: "left", width: "10%" },
-      { Header: "Acct Name", accessor: "acctName", align: "left", width: "19%" },
-      { Header: "Group", accessor: "groupName", align: "left", width: "12%" },
-      { Header: "Sub-Group", accessor: "subGroup", align: "left", width: "15%" },
-      { Header: "Control Account", accessor: "controlAccount", align: "left", width: "17%" },
+      { Header: "Acct ID", accessor: "acctId", align: "left", width: "12%" },
+      { Header: "Acct Name", accessor: "acctName", align: "left", width: "26%" },
+      { Header: "Group", accessor: "groupName", align: "left", width: "14%" },
+      { Header: "Sub-Group", accessor: "subGroup", align: "left", width: "20%" },
     ],
     []
   );
@@ -691,7 +603,6 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
           acctName: displayCell(row.acctName),
           groupName: displayCell(row.groupName),
           subGroup: displayCell(row.subGroup),
-          controlAccount: displayCell(row.controlAccount),
           ...(SHOW_ATTACHMENTS
             ? {
                 attachments: (
@@ -795,7 +706,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
           canSearch
           entriesPerPage={{ defaultValue: 10, entries: [10, 25, 50] }}
           showTotalEntries
-          exportFileName="Chart-of-Accounts"
+          exportFileName="Income-Statement"
           noEndBorder
         />
         <WorkspaceLoadingOverlay active={loading} />
@@ -809,7 +720,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
         scroll="paper"
       >
         <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600 }}>
-          {formMode === "create" ? "New Chart of Account" : "Edit Chart of Account"}
+          {formMode === "create" ? "New Income Statement" : "Edit Income Statement"}
         </DialogTitle>
         <DialogContent dividers>
           <Grid container spacing={2}>
@@ -848,7 +759,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                   <MenuItem value="">
                     <em>Select group</em>
                   </MenuItem>
-                  {(COA_GROUP_OPTIONS || []).map((option) => (
+                  {(IS_GROUP_OPTIONS || []).map((option) => (
                     <MenuItem key={option} value={option}>
                       {option}
                     </MenuItem>
@@ -886,39 +797,6 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                   ))}
                   <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
                     + Add sub-group...
-                  </MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl size="small" fullWidth>
-                <InputLabel sx={inputSx}>Control Account</InputLabel>
-                <Select
-                  value={formDraft?.controlAccount || ""}
-                  label="Control Account"
-                  onChange={(e) => {
-                    if (e.target.value === "__add__") {
-                      setAddControlAccountName("");
-                      setAddControlAccountOpen(true);
-                      return;
-                    }
-                    handleFormChange("controlAccount", e.target.value);
-                  }}
-                  sx={inputSx}
-                >
-                  <MenuItem value="">
-                    <em>None</em>
-                  </MenuItem>
-                  {(controlAccountOptions || []).map((item) => (
-                    <MenuItem
-                      key={item.id || item.controlAccountName}
-                      value={item.controlAccountName}
-                    >
-                      {item.controlAccountName}
-                    </MenuItem>
-                  ))}
-                  <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
-                    + Add control account...
                   </MenuItem>
                 </Select>
               </FormControl>
@@ -1072,7 +950,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>
           <MDTypography variant="body2">
-            Are you sure you want to delete this chart of account record?
+            Are you sure you want to delete this income statement record?
           </MDTypography>
         </DialogContent>
         <DialogActions>
@@ -1107,33 +985,6 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
             Cancel
           </MDButton>
           <MDButton color="info" onClick={handleSaveSubGroup}>
-            Add
-          </MDButton>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={addControlAccountOpen}
-        onClose={() => setAddControlAccountOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Add Control Account</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Control Account name"
-            fullWidth
-            value={addControlAccountName}
-            onChange={(e) => setAddControlAccountName(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <MDButton color="secondary" onClick={() => setAddControlAccountOpen(false)}>
-            Cancel
-          </MDButton>
-          <MDButton color="info" onClick={handleSaveControlAccount}>
             Add
           </MDButton>
         </DialogActions>
@@ -1204,36 +1055,8 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   );
 }
 
-ChartOfAccountsPanel.propTypes = {
+IncomeStatementPanel.propTypes = {
   panelTitle: PropTypes.string,
 };
 
-function ChartOfAccounts() {
-  return (
-    <DashboardLayout>
-      <DashboardNavbar />
-      <EnterpriseWorkspace
-        title="Chart of Accounts"
-        subtitle={`${COA_SECTION_TYPE} & Income Statement`}
-        tabs={<ConfigurationModuleTabs />}
-        bodySx={coaSplitBodySx}
-      >
-        <MDBox sx={{ ...coaPanelColumnSx, pr: { xs: 0, md: 1 } }}>
-          <ChartOfAccountsPanel panelTitle="Balance Sheet" />
-        </MDBox>
-        <MDBox
-          sx={{
-            ...coaPanelColumnSx,
-            pl: { xs: 0, md: 1 },
-            borderLeft: { xs: "none", md: "1px solid #e0e0e0" },
-            pt: { xs: 2, md: 0 },
-          }}
-        >
-          <IncomeStatementPanel panelTitle="Income Statement" />
-        </MDBox>
-      </EnterpriseWorkspace>
-    </DashboardLayout>
-  );
-}
-
-export default ChartOfAccounts;
+export default IncomeStatementPanel;

@@ -58,6 +58,17 @@ async function update(id, data) {
   return api.request("PUT", `/api/IncomeStatements/${id}`, payload);
 }
 
+async function reorder(id, direction) {
+  const actionBy = await getActionBy();
+  const payload = {
+    Id: Number(id),
+    Direction: direction,
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  };
+  return api.request("POST", "/api/IncomeStatements/reorder", payload);
+}
+
 async function remove(id) {
   const actionBy = await getActionBy();
   return api.request("DELETE", `/api/IncomeStatements/${id}`, {
@@ -74,6 +85,7 @@ const incomeStatementApi = {
   create,
   update,
   remove,
+  reorder,
   unwrapList,
 };
 

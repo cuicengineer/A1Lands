@@ -66,6 +66,18 @@ async function createControlAccount(controlAccountName) {
   return api.request("POST", "/api/ChartOfAccountControlAccounts", payload);
 }
 
+async function reorder(id, direction, section = COA_SECTION_TYPE) {
+  const actionBy = await getActionBy();
+  const payload = {
+    Id: Number(id),
+    Direction: direction,
+    SectionType: section,
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  };
+  return api.request("POST", "/api/ChartOfAccounts/reorder", payload);
+}
+
 async function batchSave({ creates = [], updates = [], deleteIds = [] }) {
   const actionBy = await getActionBy();
   const payload = {
@@ -106,6 +118,7 @@ const chartOfAccountsApi = {
   create,
   update,
   remove,
+  reorder,
   batchSave,
   unwrapList,
 };
