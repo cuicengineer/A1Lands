@@ -11,7 +11,7 @@ import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -234,7 +234,7 @@ function NatureConfig() {
       <InputLabel id="nature-status-label" sx={darkMode ? { color: "#000000 !important" } : {}}>
         Status
       </InputLabel>
-      <Select
+      <SearchableSelect
         labelId="nature-status-label"
         value={value}
         label="Status"
@@ -257,7 +257,7 @@ function NatureConfig() {
             {opt.label}
           </MenuItem>
         ))}
-      </Select>
+      </SearchableSelect>
       {newErrors.status && (
         <FormHelperText sx={darkMode ? { color: "#000000 !important" } : {}}>
           {newErrors.status}

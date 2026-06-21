@@ -19,10 +19,10 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import CompactGridPagination from "components/CompactGridPagination";
+import { ServerGridPagination } from "components/CompactGridPagination";
 import MDPagination from "components/MDPagination";
 import Autocomplete from "@mui/material/Autocomplete";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -56,6 +56,7 @@ import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTab
 import DataTable from "examples/Tables/DataTable";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
 import {
+  getBaseDropdownLabel,
   resolveBaseNameById,
   resolveClassNameById,
   resolveCommandNameById,
@@ -357,6 +358,31 @@ function resolveLinkedPropertyNamesForRow(row, rentalPropertyById) {
     .join(", ");
 }
 
+function hasLinkedPropertiesForRow(row) {
+  const linkings = row?.PropertyGroupLinkings ?? row?.propertyGroupLinkings;
+  if (Array.isArray(linkings) && linkings.length > 0) return true;
+
+  const attachedCandidates = [
+    row?.attachedproperties,
+    row?.AttachedProperties,
+    row?.attachedProperties,
+    row?.Attachedproperties,
+  ];
+  for (let i = 0; i < attachedCandidates.length; i += 1) {
+    const v = attachedCandidates[i];
+    if (Array.isArray(v) && v.length > 0) return true;
+    if (v !== null && v !== undefined) {
+      const text = String(v).trim();
+      if (text && text !== "0" && text !== "[]" && text.toLowerCase() !== "null") return true;
+    }
+  }
+
+  const propText = String(row?.Property ?? row?.property ?? "").trim();
+  if (propText.length > 0) return true;
+
+  return false;
+}
+
 const PropertyGroupingActionsCell = React.memo(function PropertyGroupingActionsCell({ row }) {
   const rowData = row?.original || {};
   const normalizedId = rowData.id ?? rowData.Id;
@@ -416,14 +442,26 @@ const PropertyGroupingLinkedCell = React.memo(function PropertyGroupingLinkedCel
   const rowData = row?.original || {};
   const recordId = rowData.id || rowData.Id;
   const grpId = rowData.gId || rowData.GId || "";
+  const linkedText = String(rowData.linkedProperties ?? "").trim();
+  const hasAnyLinkedProperties =
+    Boolean(rowData.__hasLinkedProperties) ||
+    (linkedText !== "" && linkedText !== "-" && linkedText.toLowerCase() !== "none");
+  const linkedIconColor = hasAnyLinkedProperties ? "#16a34a" : "#9ca3af";
   const handlers = propertyGroupingGridHandlersRef.current;
   return (
     <IconButton
       size="small"
-      color="primary"
       onClick={() => handlers.onViewLinked?.(recordId, grpId)}
       title="View linked properties"
       disabled={!recordId}
+      sx={{
+        color: `${linkedIconColor} !important`,
+        "& .MuiIcon-root, & .material-icons, & svg": {
+          color: `${linkedIconColor} !important`,
+          fill: "currentColor",
+          opacity: "1 !important",
+        },
+      }}
     >
       <Icon>visibility</Icon>
     </IconButton>
@@ -660,7 +698,7 @@ function PropertyGroupingMoneyColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -671,7 +709,7 @@ function PropertyGroupingMoneyColumnFilter({ column }) {
               <MenuItem value="lte">Less than or equal to</MenuItem>
               <MenuItem value="eq">Equal to</MenuItem>
               <MenuItem value="between">Price range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lte" || mode === "eq") && (
             <>
@@ -749,8 +787,10 @@ function PropertyGroupingForm({
   allPropertyGroupings = [],
   onGroupIdBlur,
   propertyTypes = [],
+  boundContractRateEdit = false,
 }) {
   const isEditMode = Boolean(initialData);
+  const canSuperuserEditBoundRate = isEditMode && boundContractRateEdit && isSuperuserUser();
   const normalizePropertyIds = (data) => {
     if (!data) return [];
 
@@ -1448,7 +1488,7 @@ function PropertyGroupingForm({
       const shouldUpdate = isEditMode
         ? form.area !== totalArea ||
           (form.uoM || "") !== uoMText ||
-          Number(form.rate || 0) !== totalRate ||
+          (!canSuperuserEditBoundRate && Number(form.rate || 0) !== totalRate) ||
           (form.location || "") !== locationText
         : form.area !== totalArea ||
           (form.uoM || "") !== uoMText ||
@@ -1461,7 +1501,7 @@ function PropertyGroupingForm({
       if (shouldUpdate && (!isEditMode || hasCalculatedValues)) {
         setForm((prevForm) => ({
           ...prevForm,
-          ...(isEditMode ? { rate: totalRate } : {}),
+          ...(isEditMode && !canSuperuserEditBoundRate ? { rate: totalRate } : {}),
           area: totalArea,
           uoM: uoMText,
           location: locationText,
@@ -1489,6 +1529,7 @@ function PropertyGroupingForm({
     rentalProperties,
     selectableRentalProperties,
     isEditMode,
+    canSuperuserEditBoundRate,
     initialData,
     propertyRevenueRates,
   ]);
@@ -1933,7 +1974,7 @@ function PropertyGroupingForm({
       return {
         ...prevForm,
         property: selectedProperties,
-        ...(isEditMode ? { rate: totalRate } : {}),
+        ...(isEditMode && !canSuperuserEditBoundRate ? { rate: totalRate } : {}),
         area: totalArea,
         uoM: uoMText,
         location: autoLocation, // Auto-update location based on selected properties
@@ -1955,7 +1996,7 @@ function PropertyGroupingForm({
     setForm((prevForm) => ({
       ...prevForm,
       property: updatedProperties,
-      ...(isEditMode ? { rate: totalRate } : {}),
+      ...(isEditMode && !canSuperuserEditBoundRate ? { rate: totalRate } : {}),
       area: totalArea,
       uoM: uoMText,
     }));
@@ -2009,7 +2050,7 @@ function PropertyGroupingForm({
                 fullWidth
                 disableClearable
                 options={allBases.filter((base) => Number(base.cmd) === Number(form.cmdid))}
-                getOptionLabel={(option) => option?.name ?? ""}
+                getOptionLabel={(option) => getBaseDropdownLabel(option)}
                 isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
                 value={allBases.find((b) => Number(b.id) === Number(form.baseid)) ?? null}
                 onChange={(_, newValue) =>
@@ -2056,7 +2097,7 @@ function PropertyGroupingForm({
                 >
                   Class
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="class-label"
                   value={form.classid || ""}
                   label="Class"
@@ -2094,7 +2135,7 @@ function PropertyGroupingForm({
                       {option.name}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {!isEditMode && errors.classid && <FormHelperText>{errors.classid}</FormHelperText>}
               </FormControl>
             </Grid>
@@ -2169,7 +2210,7 @@ function PropertyGroupingForm({
                 >
                   Property
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="property-label"
                   multiple
                   value={form.property || []}
@@ -2318,7 +2359,7 @@ function PropertyGroupingForm({
                       </MenuItem>
                     );
                   })}
-                </Select>
+                </SearchableSelect>
                 {!isEditMode && errors.property && (
                   <FormHelperText>{errors.property}</FormHelperText>
                 )}
@@ -2433,11 +2474,18 @@ function PropertyGroupingForm({
                 label="Rate"
                 type="number"
                 value={!isEditMode && isRevenueGroupAveragePending ? 0 : form.rate || 0}
+                onChange={
+                  canSuperuserEditBoundRate
+                    ? (e) => handleChange("rate", e.target.value)
+                    : undefined
+                }
                 size="small"
-                InputProps={{ readOnly: true }}
+                InputProps={{ readOnly: !canSuperuserEditBoundRate }}
                 fullWidth
                 helperText={
-                  !isEditMode && isRevenueGroupAveragePending
+                  canSuperuserEditBoundRate
+                    ? "Superuser: you may update the group rate while a contract is linked."
+                    : !isEditMode && isRevenueGroupAveragePending
                     ? "Recalculating average rate…"
                     : undefined
                 }
@@ -2494,7 +2542,7 @@ function PropertyGroupingForm({
                 >
                   Status
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="status-label"
                   value={form.status !== undefined ? form.status : true}
                   label="Status"
@@ -2529,7 +2577,7 @@ function PropertyGroupingForm({
                   <MenuItem value={false} sx={{ fontSize: "1rem", padding: "8px 14px" }}>
                     Inactive
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -2636,6 +2684,7 @@ PropertyGroupingForm.propTypes = {
   allPropertyGroupings: PropTypes.array,
   onGroupIdBlur: PropTypes.func,
   propertyTypes: PropTypes.array,
+  boundContractRateEdit: PropTypes.bool,
 };
 
 export { PropertyGroupingForm };
@@ -2669,6 +2718,7 @@ export default function PropertyGrouping() {
 
   const [openForm, setOpenForm] = useState(false);
   const [currentPropertyGrouping, setCurrentPropertyGrouping] = useState(null);
+  const [boundContractRateEdit, setBoundContractRateEdit] = useState(false);
   const [rows, setRows] = useState([]);
   const [allPropertyGroupings, setAllPropertyGroupings] = useState([]);
   const [rentalProperties, setRentalProperties] = useState([]);
@@ -2695,6 +2745,9 @@ export default function PropertyGrouping() {
   const [currentGroupBaseId, setCurrentGroupBaseId] = useState(null);
 
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
+  const [gridPageNumber, setGridPageNumber] = useState(1);
+  const [paginationHost, setPaginationHost] = useState(null);
+  const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -3293,9 +3346,13 @@ export default function PropertyGrouping() {
 
   const handleOpenForm = () => {
     setCurrentPropertyGrouping(null);
+    setBoundContractRateEdit(false);
     setOpenForm(true);
   };
-  const handleCloseForm = () => setOpenForm(false);
+  const handleCloseForm = () => {
+    setOpenForm(false);
+    setBoundContractRateEdit(false);
+  };
 
   // View Active Contracts for a Group
   const handleViewActiveContractsForGroup = async (groupId) => {
@@ -3402,13 +3459,20 @@ export default function PropertyGrouping() {
     if (grpId) {
       const contractCheck = await checkActiveContractsForGroup(grpId);
       if (contractCheck.hasActiveContracts) {
-        alert(
-          `Cannot edit property group "${grpId}".\n\n` +
-            `There are ${contractCheck.count} active contract(s) associated with this group.\n` +
-            `Please deactivate or delete the active contracts first before editing this group.`
-        );
-        return;
+        if (!isSuperuserUser()) {
+          alert(
+            `Cannot edit property group "${grpId}".\n\n` +
+              `There are ${contractCheck.count} active contract(s) associated with this group.\n` +
+              `Please deactivate or delete the active contracts first before editing this group.`
+          );
+          return;
+        }
+        setBoundContractRateEdit(true);
+      } else {
+        setBoundContractRateEdit(false);
       }
+    } else {
+      setBoundContractRateEdit(false);
     }
     const normalizePropertyIds = (data) => {
       if (!data) return [];
@@ -3678,7 +3742,7 @@ export default function PropertyGrouping() {
       {
         id: "actions",
         Header: "Actions",
-        accessor: "id",
+        accessor: "actions",
         align: "center",
         Cell: PropertyGroupingActionsCell,
         disableFilters: true,
@@ -3773,9 +3837,17 @@ export default function PropertyGrouping() {
         areaDisplay,
         location: row.Location || "",
         remarks: row.Remarks || "",
-        attachedproperties: row.attachedproperties || "",
+        attachedproperties:
+          row.attachedproperties ??
+          row.AttachedProperties ??
+          row.attachedProperties ??
+          row.Attachedproperties ??
+          "",
         status: row.Status,
         linkedProperties: resolveLinkedPropertyNamesForRow(row, rentalPropertyById),
+        __hasLinkedProperties:
+          hasLinkedPropertiesForRow(row) ||
+          String(resolveLinkedPropertyNamesForRow(row, rentalPropertyById) || "").trim() !== "",
       };
     });
 
@@ -3797,6 +3869,19 @@ export default function PropertyGrouping() {
         visible: urlGrpIdFilter ? computedRows.length : null,
       }),
     [totalCount, urlGrpIdFilter, computedRows.length]
+  );
+
+  const gridPaginationTotal = visibleRowCount > 0 ? visibleRowCount : computedRows.length;
+  const serverPaginationFooter = useMemo(
+    () => (
+      <ServerGridPagination
+        page={gridPageNumber}
+        totalCount={gridPaginationTotal}
+        pageSize={gridPageSize}
+        onPageChange={setGridPageNumber}
+      />
+    ),
+    [gridPaginationTotal, gridPageNumber, gridPageSize]
   );
 
   return (
@@ -3822,69 +3907,12 @@ export default function PropertyGrouping() {
         }}
       >
         <MDBox
-          className="saas-workspace-grid-scroll-host"
           sx={{
-            position: "relative",
+            display: "flex",
+            flexDirection: "column",
             flex: "1 1 0",
             minHeight: 0,
-            overflowX: "scroll",
-            overflowY: "scroll",
-            scrollbarGutter: "stable both-edges",
-            WebkitOverflowScrolling: "touch",
-            scrollbarWidth: "thin",
-            scrollbarColor: "#6b6b6b #e8e8e8",
-            "&::-webkit-scrollbar": {
-              width: "10px",
-              height: "12px",
-            },
-            "&::-webkit-scrollbar-track": {
-              backgroundColor: "#e8e8e8",
-              borderRadius: "6px",
-            },
-            "&::-webkit-scrollbar-thumb": {
-              backgroundColor: "#6b6b6b",
-              borderRadius: "6px",
-              border: "2px solid #e8e8e8",
-              "&:hover": { backgroundColor: "#4a4a4a" },
-            },
-            "&::-webkit-scrollbar-corner": {
-              backgroundColor: "#e8e8e8",
-            },
-            "& .MuiTable-root": {
-              tableLayout: "auto",
-              width: "max-content",
-              borderCollapse: "collapse",
-            },
-            "& .MuiTable-root th": {
-              fontSize: "0.75rem !important",
-              fontWeight: "700 !important",
-              width: "auto !important",
-              minWidth: "0 !important",
-              padding: "1px 4px !important",
-              lineHeight: 1.25,
-              borderBottom: "1px solid #d0d0d0",
-              whiteSpace: "nowrap",
-            },
-            "& .MuiTable-root td": {
-              width: "auto !important",
-              minWidth: "0 !important",
-              padding: "1px 4px !important",
-              lineHeight: 1.3,
-              borderBottom: "1px solid #e8e8e8",
-              whiteSpace: "nowrap",
-            },
-            "& table td > div": {
-              maxWidth: "100% !important",
-            },
-            "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
-              whiteSpace: "normal !important",
-              wordBreak: "break-word !important",
-              overflowWrap: "break-word !important",
-            },
-            "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
-              whiteSpace: "nowrap !important",
-              textAlign: "center !important",
-            },
+            position: "relative",
           }}
         >
           {loading && (
@@ -3906,26 +3934,113 @@ export default function PropertyGrouping() {
               <CurrencyLoading size={50} />
             </MDBox>
           )}
-          <DataTable
-            table={tableConfig}
-            isSorted={false}
-            stickyToolbarAndHeader
-            autoHeight
-            entriesPerPage={{
-              defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
-              entries: [10, 25, 50, 100],
+          <MDBox
+            ref={setPaginationHost}
+            className="saas-settings-table-pagination-top"
+            sx={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              flexShrink: 0,
+              minHeight: 28,
+              maxHeight: 32,
+              width: "100%",
             }}
-            pageSize={gridPageSize}
-            onEntriesPerPageChange={(value) => setGridPageSize(Number(value))}
-            autoResetFilters={false}
-            showTotalEntries={false}
-            noEndBorder
-            canSearch
-            pagination={{ variant: "gradient", color: "info" }}
-            exportFileName="Property-Grouping"
-            extraFilterTypes={PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES}
-            contentFitTable
           />
+          <MDBox
+            className="saas-workspace-grid-scroll-host"
+            sx={{
+              flex: "1 1 0",
+              minHeight: 0,
+              overflowX: "scroll",
+              overflowY: "scroll",
+              scrollbarGutter: "stable both-edges",
+              WebkitOverflowScrolling: "touch",
+              scrollbarWidth: "thin",
+              scrollbarColor: "#6b6b6b #e8e8e8",
+              "&::-webkit-scrollbar": {
+                width: "10px",
+                height: "12px",
+              },
+              "&::-webkit-scrollbar-track": {
+                backgroundColor: "#e8e8e8",
+                borderRadius: "6px",
+              },
+              "&::-webkit-scrollbar-thumb": {
+                backgroundColor: "#6b6b6b",
+                borderRadius: "6px",
+                border: "2px solid #e8e8e8",
+                "&:hover": { backgroundColor: "#4a4a4a" },
+              },
+              "&::-webkit-scrollbar-corner": {
+                backgroundColor: "#e8e8e8",
+              },
+              "& .MuiTable-root": {
+                tableLayout: "auto",
+                width: "max-content",
+                borderCollapse: "collapse",
+              },
+              "& .MuiTable-root th": {
+                fontSize: "0.75rem !important",
+                fontWeight: "700 !important",
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
+                lineHeight: 1.25,
+                borderBottom: "1px solid #d0d0d0",
+                whiteSpace: "nowrap",
+              },
+              "& .MuiTable-root td": {
+                width: "auto !important",
+                minWidth: "0 !important",
+                padding: "1px 4px !important",
+                lineHeight: 1.3,
+                borderBottom: "1px solid #e8e8e8",
+                whiteSpace: "nowrap",
+              },
+              "& table td > div": {
+                maxWidth: "100% !important",
+              },
+              "& .MuiTable-root td:nth-of-type(10), & .MuiTable-root td:nth-of-type(11)": {
+                whiteSpace: "normal !important",
+                wordBreak: "break-word !important",
+                overflowWrap: "break-word !important",
+              },
+              "& .MuiTable-root th:nth-of-type(2), & .MuiTable-root td:nth-of-type(2)": {
+                whiteSpace: "nowrap !important",
+                textAlign: "center !important",
+              },
+            }}
+          >
+            <DataTable
+              table={tableConfig}
+              isSorted={false}
+              stickyToolbarAndHeader
+              autoHeight
+              entriesPerPage={{
+                defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
+                entries: [10, 25, 50, 100],
+              }}
+              page={gridPageNumber - 1}
+              pageSize={gridPageSize}
+              onPageChange={(newPage) => setGridPageNumber(newPage + 1)}
+              onEntriesPerPageChange={(value) => {
+                setGridPageSize(Number(value));
+                setGridPageNumber(1);
+              }}
+              onVisibleRowCountChange={setVisibleRowCount}
+              paginationFooter={serverPaginationFooter}
+              paginationHost={paginationHost}
+              autoResetFilters={false}
+              showTotalEntries={false}
+              noEndBorder
+              canSearch
+              pagination={{ variant: "gradient", color: "info" }}
+              exportFileName="Property-Grouping"
+              extraFilterTypes={PROPERTY_GROUPING_DATATABLE_EXTRA_FILTER_TYPES}
+              contentFitTable
+            />
+          </MDBox>
         </MDBox>
       </EnterpriseWorkspace>
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
@@ -3982,6 +4097,7 @@ export default function PropertyGrouping() {
         allPropertyGroupings={allPropertyGroupings}
         onGroupIdBlur={handleViewActiveContractsForGroup}
         propertyTypes={propertyTypes}
+        boundContractRateEdit={boundContractRateEdit}
       />
       {/* Linked Properties Dialog */}
       <Dialog
@@ -4062,6 +4178,19 @@ export default function PropertyGrouping() {
                 renderOption={(props, option) => {
                   const pid = option.Id || option.PropertyId;
                   const optionLabel = getRentalPropertyLabel(option) || String(pid || "");
+                  const rawArea = option?.Area ?? option?.area;
+                  const uoMCompact = option?.UoM ?? option?.uoM ?? "";
+                  const areaDisplay =
+                    rawArea !== null && rawArea !== undefined && rawArea !== ""
+                      ? `${Number(rawArea).toLocaleString(undefined, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 4,
+                        })}${uoMCompact ? ` (${uoMCompact})` : ""}`
+                      : "—";
+                  const locDisplayRaw = option?.Location ?? option?.location ?? "";
+                  const locDisplay = String(locDisplayRaw).trim()
+                    ? String(locDisplayRaw).trim()
+                    : "—";
                   const linkedNameSet = getLinkedPropertyNameSet();
                   const selectedNameSet = new Set(
                     (linkingSelection || []).map((id) => getPropertyLabelById(id))
@@ -4075,14 +4204,28 @@ export default function PropertyGrouping() {
                   return (
                     <li {...props} aria-disabled={isAlreadyLinked || isDuplicateByName}>
                       <MDBox
-                        display="flex"
-                        justifyContent="space-between"
                         width="100%"
+                        display="flex"
                         alignItems="center"
+                        justifyContent="space-between"
+                        gap={1}
                       >
-                        <span>{optionLabel}</span>
+                        <MDTypography
+                          component="span"
+                          sx={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontSize: "0.875rem",
+                            lineHeight: 1.4,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {optionLabel} · Area: {areaDisplay} · Location: {locDisplay}
+                        </MDTypography>
                         {isAlreadyLinked ? (
-                          <MDTypography variant="caption" color="secondary">
+                          <MDTypography variant="caption" color="secondary" sx={{ flexShrink: 0 }}>
                             linked
                           </MDTypography>
                         ) : null}
@@ -4182,6 +4325,34 @@ export default function PropertyGrouping() {
                     }
                   }
 
+                  const rawArea =
+                    property.Area ??
+                    property.area ??
+                    property.Property?.Area ??
+                    property.Property?.area;
+                  const uoMCompact =
+                    property.UoM ??
+                    property.uoM ??
+                    property.Property?.UoM ??
+                    property.Property?.uoM ??
+                    "";
+                  const areaDisplay =
+                    rawArea !== null && rawArea !== undefined && rawArea !== ""
+                      ? `${Number(rawArea).toLocaleString(undefined, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 4,
+                        })}${uoMCompact ? ` (${uoMCompact})` : ""}`
+                      : "—";
+                  const locDisplayRaw =
+                    property.Location ??
+                    property.location ??
+                    property.Property?.Location ??
+                    property.Property?.location ??
+                    "";
+                  const locDisplay = String(locDisplayRaw).trim()
+                    ? String(locDisplayRaw).trim()
+                    : "—";
+
                   return (
                     <MDBox key={linkingId || index}>
                       <ListItem
@@ -4193,7 +4364,18 @@ export default function PropertyGrouping() {
                           px: 0,
                         }}
                       >
-                        <ListItemText primary={propertyName} />
+                        <ListItemText
+                          primary={`${propertyName} · Area: ${areaDisplay} · Location: ${locDisplay}`}
+                          primaryTypographyProps={{
+                            sx: {
+                              fontSize: "1rem",
+                              lineHeight: 1.4,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            },
+                          }}
+                        />
                         {canDeleteCurrentMenu() && (
                           <IconButton
                             size="small"

@@ -346,14 +346,24 @@ function isOperatorUser() {
   return false;
 }
 
+const MENU_ROUTE_EXACT = [
+  { menuName: "Agreement Invoice", prefix: "/contracts/agreement-prov-invoice" },
+  { menuName: "Sales Returns", prefix: "/income-agreements/sales-returns" },
+  { menuName: "Collections", prefix: "/income-agreements/collections" },
+  { menuName: "Share Distribution", prefix: "/contracts/share-distribution" },
+];
+
 const MENU_ROUTE_PREFIXES = [
   { menuName: "Dashboard", prefix: "/dashboard" },
   { menuName: "Configuration", prefix: "/configuration" },
+  { menuName: "Income Agreements", prefix: "/contracts/agreement-prov-invoice" },
+  { menuName: "Income Agreements", prefix: "/income-agreements" },
   { menuName: "Sales Agreements", prefix: "/contracts" },
   { menuName: "Accounts", prefix: "/accounts" },
-  { menuName: "Payments", prefix: "/payments" },
-  { menuName: "Receipts", prefix: "/receipts" },
-  { menuName: "Supplier", prefix: "/supplier" },
+  { menuName: "Cash & Fund Flow", prefix: "/payments" },
+  { menuName: "Cash & Fund Flow", prefix: "/receipts" },
+  { menuName: "Purchases", prefix: "/supplier" },
+  { menuName: "Sales", prefix: "/customer" },
 ];
 
 /** Menus that must have an Assign Rights row; otherwise navbar, routes, and actions stay hidden. */
@@ -362,9 +372,14 @@ function menuRequiresExplicitPermission(menuName) {
   return (
     normalized === "accounts" ||
     normalized === "account" ||
+    normalized === "cash & fund flow" ||
+    normalized === "cash and fund flow" ||
+    normalized === "purchases" ||
+    normalized === "sales" ||
     normalized === "payments" ||
     normalized === "receipts" ||
-    normalized === "supplier"
+    normalized === "supplier" ||
+    normalized === "customer"
   );
 }
 
@@ -495,6 +510,40 @@ function getPermissionByMenuName(menuName) {
   if (normalized === "sales agreements" || normalized === "contracts mgmt") {
     return find("sales agreements") || find("contracts mgmt");
   }
+  if (normalized === "agreements") {
+    return find("agreements") || find("contracts") || find("sales agreements");
+  }
+  if (normalized === "income agreements") {
+    return find("income agreements");
+  }
+  if (normalized === "agreement invoice") {
+    return find("agreement invoice") || find("income agreements");
+  }
+  if (normalized === "sales returns") {
+    return find("sales returns") || find("income agreements");
+  }
+  if (normalized === "collections") {
+    return find("collections") || find("income agreements");
+  }
+  if (normalized === "share distributions") {
+    return find("share distributions") || find("income agreements");
+  }
+  if (normalized === "cash & fund flow" || normalized === "cash and fund flow") {
+    return (
+      find("cash & fund flow") || find("cash and fund flow") || find("payments") || find("receipts")
+    );
+  }
+  if (normalized === "payments" || normalized === "receipts") {
+    return (
+      find("cash & fund flow") || find("cash and fund flow") || find("payments") || find("receipts")
+    );
+  }
+  if (normalized === "purchases" || normalized === "supplier") {
+    return find("purchases") || find("supplier");
+  }
+  if (normalized === "sales" || normalized === "customer") {
+    return find("sales") || find("customer");
+  }
   return null;
 }
 
@@ -507,6 +556,15 @@ function getCurrentMainMenuName(pathnameArg) {
   const cleaned = String(pathname || "")
     .trim()
     .toLowerCase();
+
+  const exact = MENU_ROUTE_EXACT.find(({ prefix }) => {
+    const normalizedPrefix = String(prefix || "")
+      .trim()
+      .toLowerCase();
+    return cleaned === normalizedPrefix || cleaned.startsWith(`${normalizedPrefix}/`);
+  });
+  if (exact) return exact.menuName;
+
   const matched = MENU_ROUTE_PREFIXES.find(({ prefix }) => cleaned.startsWith(prefix));
   return matched?.menuName || "";
 }
@@ -619,6 +677,11 @@ function canAddContractAnnotations() {
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .some((token) => token.includes("supervisor"));
+}
+
+/** True for superuser or Category Supervisor assigned to AHQ command/base. */
+function isSuperuserOrAhqSupervisorUser() {
+  return contractsApprovalActionsBypassUser();
 }
 
 /** True when Contracts grid should ignore ApprovalStatus for Edit/Delete visibility (superuser OR Category Supervisor with AHQ RAC/base). */
@@ -1024,6 +1087,7 @@ const api = {
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
   canAddContractAnnotations,
+  isSuperuserOrAhqSupervisorUser,
   contractsApprovalActionsBypassUser,
 };
 export default api;
@@ -1048,6 +1112,7 @@ export {
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
   canAddContractAnnotations,
+  isSuperuserOrAhqSupervisorUser,
   contractsApprovalActionsBypassUser,
   logoutEverywhere,
   handleAuthStorageEvent,

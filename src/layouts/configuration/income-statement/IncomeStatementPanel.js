@@ -14,7 +14,7 @@ import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
 import MDTypography from "components/MDTypography";
@@ -31,6 +31,7 @@ import {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  isSuperuserOrAhqSupervisorUser,
 } from "services/api.service";
 import { useMaterialUIController } from "context";
 import {
@@ -169,6 +170,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
+  const canManageSubGroups = isSuperuserOrAhqSupervisorUser();
 
   const [tableRows, setTableRows] = useState([]);
   const [subGroupOptions, setSubGroupOptions] = useState([]);
@@ -183,6 +185,8 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [addSubGroupOpen, setAddSubGroupOpen] = useState(false);
   const [addSubGroupName, setAddSubGroupName] = useState("");
+  const [subGroupDialogMode, setSubGroupDialogMode] = useState("add");
+  const [editingSubGroup, setEditingSubGroup] = useState(null);
   const [formExistingFiles, setFormExistingFiles] = useState([]);
   const [formSelectedFiles, setFormSelectedFiles] = useState([]);
   const [loadingFormFiles, setLoadingFormFiles] = useState(false);
@@ -437,14 +441,54 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
       return;
     }
     try {
-      await incomeStatementApi.createSubGroup(groupName, subGroupName);
+      if (subGroupDialogMode === "edit" && editingSubGroup?.id) {
+        await incomeStatementApi.updateSubGroup(editingSubGroup.id, groupName, subGroupName);
+        if (formDraft?.subGroup === editingSubGroup.subGroupName) {
+          handleFormChange("subGroup", subGroupName);
+        }
+      } else {
+        await incomeStatementApi.createSubGroup(groupName, subGroupName);
+        handleFormChange("subGroup", subGroupName);
+      }
       await fetchSubGroups();
-      handleFormChange("subGroup", subGroupName);
-      setAddSubGroupOpen(false);
-      setAddSubGroupName("");
+      resetSubGroupDialog();
     } catch (error) {
-      alert(error?.message || "Failed to add sub-group.");
+      alert(error?.message || "Failed to save sub-group.");
     }
+  };
+
+  const handleEditSubGroup = (item, event) => {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    if (!canManageSubGroups || !item?.id) return;
+    setSubGroupDialogMode("edit");
+    setEditingSubGroup(item);
+    setAddSubGroupName(item.subGroupName || "");
+    setAddSubGroupOpen(true);
+  };
+
+  const handleDeleteSubGroup = async (item, event) => {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    if (!canManageSubGroups || !item?.id) return;
+    const label = item.subGroupName || "this sub-group";
+    if (!window.confirm(`Delete "${label}"? This cannot be undone from the dropdown.`)) return;
+    try {
+      await incomeStatementApi.deleteSubGroup(item.id);
+      if (formDraft?.subGroup === item.subGroupName) {
+        handleFormChange("subGroup", "");
+      }
+      await fetchSubGroups();
+    } catch (error) {
+      alert(error?.message || "Failed to delete sub-group.");
+    }
+  };
+
+  const resetSubGroupDialog = () => {
+    setAddSubGroupOpen(false);
+    setAddSubGroupName("");
+    setSubGroupDialogMode("add");
+    setEditingSubGroup(null);
   };
 
   const handleOpenAttachments = async (recordId) => {
@@ -704,8 +748,8 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
           isSorted={false}
           stickyToolbarAndHeader
           canSearch
-          entriesPerPage={{ defaultValue: 10, entries: [10, 25, 50] }}
-          showTotalEntries
+          entriesPerPage={false}
+          showTotalEntries={false}
           exportFileName="Income-Statement"
           noEndBorder
         />
@@ -750,7 +794,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
             <Grid item xs={12} sm={6}>
               <FormControl size="small" fullWidth required error={Boolean(formErrors.groupName)}>
                 <InputLabel sx={inputSx}>Group</InputLabel>
-                <Select
+                <SearchableSelect
                   value={formDraft?.groupName || ""}
                   label="Group"
                   onChange={(e) => handleFormChange("groupName", e.target.value)}
@@ -764,7 +808,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
                       {option}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {formErrors.groupName && (
                   <FormHelperText sx={inputSx}>{formErrors.groupName}</FormHelperText>
                 )}
@@ -773,7 +817,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
             <Grid item xs={12} sm={6}>
               <FormControl size="small" fullWidth>
                 <InputLabel sx={inputSx}>Sub-Group</InputLabel>
-                <Select
+                <SearchableSelect
                   value={formDraft?.subGroup || ""}
                   label="Sub-Group"
                   disabled={!formDraft?.groupName}
@@ -791,14 +835,53 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
                     <em>None</em>
                   </MenuItem>
                   {filteredSubGroups.map((item) => (
-                    <MenuItem key={item.id || item.subGroupName} value={item.subGroupName}>
-                      {item.subGroupName}
+                    <MenuItem
+                      key={item.id || item.subGroupName}
+                      value={item.subGroupName}
+                      sx={canManageSubGroups ? { pr: 1 } : undefined}
+                    >
+                      <MDBox
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        width="100%"
+                        gap={0.5}
+                      >
+                        <span>{item.subGroupName}</span>
+                        {canManageSubGroups && (
+                          <MDBox
+                            display="flex"
+                            alignItems="center"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <IconButton
+                              size="small"
+                              color="info"
+                              title="Edit sub-group"
+                              onClick={(e) => handleEditSubGroup(item, e)}
+                              sx={{ padding: "2px" }}
+                            >
+                              <Icon fontSize="small">edit</Icon>
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              title="Delete sub-group"
+                              onClick={(e) => handleDeleteSubGroup(item, e)}
+                              sx={{ padding: "2px" }}
+                            >
+                              <Icon fontSize="small">delete</Icon>
+                            </IconButton>
+                          </MDBox>
+                        )}
+                      </MDBox>
                     </MenuItem>
                   ))}
                   <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
                     + Add sub-group...
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -963,13 +1046,10 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={addSubGroupOpen}
-        onClose={() => setAddSubGroupOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Add Sub-Group</DialogTitle>
+      <Dialog open={addSubGroupOpen} onClose={resetSubGroupDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {subGroupDialogMode === "edit" ? "Edit Sub-Group" : "Add Sub-Group"}
+        </DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -981,11 +1061,11 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
           />
         </DialogContent>
         <DialogActions>
-          <MDButton color="secondary" onClick={() => setAddSubGroupOpen(false)}>
+          <MDButton color="secondary" onClick={resetSubGroupDialog}>
             Cancel
           </MDButton>
           <MDButton color="info" onClick={handleSaveSubGroup}>
-            Add
+            {subGroupDialogMode === "edit" ? "Save" : "Add"}
           </MDButton>
         </DialogActions>
       </Dialog>

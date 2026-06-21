@@ -15,6 +15,8 @@
   flex: 1 1 0 !important;
   min-height: 0 !important;
   overflow: hidden !important;
+  position: relative;
+  z-index: 0 !important;
 }
 
 .dashboard-redesign-page .saas-workspace-grid-host {
@@ -28,8 +30,42 @@
 }
 
 .dashboard-redesign-page .saas-workspace-page-header {
-  background-color: #e7eced !important;
+  background: transparent !important;
+  background-color: transparent !important;
   padding-bottom: 4px !important;
+}
+
+/* Module tabs — keep bottom borders visible when body content loads (flex must not shrink this row) */
+.dashboard-redesign-page .saas-workspace-tabs {
+  flex: 0 0 auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: var(--z-sticky-tabs) !important;
+  padding-bottom: 4px !important;
+  box-shadow: 0 1px 0 var(--layer-tabs-border);
+}
+
+.dashboard-redesign-page .saas-module-tabs-bar {
+  min-height: 34px;
+  overflow: visible;
+}
+
+.dashboard-redesign-page .saas-module-tabs-bar__tabs {
+  overflow-x: auto;
+  overflow-y: visible !important;
+}
+
+.dashboard-redesign-page .saas-settings-nav-tabs .MuiTabs-flexContainer {
+  box-sizing: border-box;
+}
+
+.dashboard-redesign-page .dashboard-module-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
 }
 
 .dashboard-redesign-page .saas-workspace-title {
@@ -79,11 +115,105 @@
   padding-left: 0 !important;
 }
 
+.dashboard-redesign-page .erp-asset-cards-scroller {
+  overflow: visible !important;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.dashboard-redesign-page .erp-asset-cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.dashboard-redesign-page .erp-asset-cards-scroller--compact {
+  flex: 0 0 auto;
+}
+
 .dashboard-redesign-page .erp-asset-cards-track {
-  padding-top: 0 !important;
-  margin-top: 0 !important;
   padding-left: 0 !important;
   scroll-padding-left: 0;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  /* Room for badges above cards without shifting card layout (margin cancels padding). */
+  padding-top: 24px !important;
+  margin-top: -24px !important;
+}
+
+.dashboard-redesign-page [data-asset-card] {
+  position: relative;
+  overflow: visible !important;
+}
+
+.dashboard-redesign-page .erp-asset-card-corner-badge {
+  z-index: 3;
+}
+
+.dashboard-redesign-page .erp-asset-card-corner-badge--keyword {
+  z-index: 3;
+}
+
+.dashboard-redesign-page .erp-asset-card-corner-badge--icon {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.dashboard-redesign-page .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact) .erp-kpi-card__label {
+  font-weight: 700;
+}
+
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact)
+  .erp-kpi-card__stat-row--income,
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact)
+  .erp-kpi-card__stat-row--after-paf {
+  border-bottom: 2px solid #9ca3af;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact).erp-kpi-card--primary
+  .erp-kpi-card__stat-row--income,
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact).erp-kpi-card--primary
+  .erp-kpi-card__stat-row--after-paf {
+  border-bottom-color: rgba(255, 255, 255, 0.45);
+}
+
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact)
+  .erp-kpi-card__stat-row--income
+  + .erp-kpi-card__stat-row,
+.dashboard-redesign-page
+  .erp-kpi-card--asset:not(.erp-kpi-card--asset-compact)
+  .erp-kpi-card__stat-row--after-paf
+  + .erp-kpi-card__stat-row {
+  border-top: none;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.dashboard-redesign-page .erp-kpi-home-section,
+.dashboard-redesign-page .erp-kpi-tab-panel,
+.dashboard-redesign-page .dashboard-module-body {
+  overflow: visible !important;
+}
+
+/* Let asset corner badges paint above the card row inside the dashboard shell */
+.dashboard-redesign-page.saas-workspace-page,
+.dashboard-redesign-page .saas-workspace-card,
+.dashboard-redesign-page .saas-workspace-grid-host {
+  overflow-x: visible !important;
+}
+
+.dashboard-redesign-page .saas-workspace-grid-host {
+  overflow-y: auto !important;
 }
 
 /* KPI cards */
@@ -256,6 +386,11 @@
 
 .erp-kpi-card--asset {
   min-height: 200px;
+}
+
+.erp-kpi-card--asset-compact {
+  min-height: unset;
+  height: auto;
 }
 
 .erp-kpi-card.erp-kpi-card--asset:not(.erp-kpi-card--primary),

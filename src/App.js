@@ -366,7 +366,7 @@ export default function App() {
         return getRoutes(route.collapse);
       }
 
-      if (route.route) {
+      if (route.route && route.component) {
         const isPublicRoute =
           route.route === "/" ||
           route.route.startsWith("/authentication/") ||
@@ -385,7 +385,7 @@ export default function App() {
           <Navigate to="/" replace />
         );
 
-        return <Route exact path={route.route} element={element} key={route.key} />;
+        return <Route path={route.route} element={element} key={route.key} />;
       }
 
       return null;

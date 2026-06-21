@@ -81,9 +81,9 @@ function getInvoiceSchedulePage(pageNumber = 1, pageSize = 1000, filters = {}) {
   return requestWithPagination("GET", `/api/ContractInvoiceSchedule?${qs}`);
 }
 
-/** Load all invoice schedule rows (no filter query) for client-side filtering. */
-async function getAllInvoiceScheduleRecords() {
-  return fetchAllPaginatedRecords((page, size) => getInvoiceSchedulePage(page, size), {
+/** Load all invoice schedule rows for client-side filtering (optional filters e.g. isFinalized). */
+async function getAllInvoiceScheduleRecords(filters = {}) {
+  return fetchAllPaginatedRecords((page, size) => getInvoiceSchedulePage(page, size, filters), {
     listEntities: ["contractinvoiceschedule", "ContractInvoiceSchedule"],
   });
 }
@@ -240,6 +240,27 @@ async function deleteInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo) {
 }
 
 /**
+ * DELETE /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}
+ * Soft delete entire invoice (header + all line items). Superuser or AHQ supervisor only.
+ */
+async function deleteInvoiceScheduleInvoice(contractNo, invoiceNo) {
+  const actionBy = await getActionBy();
+  const payload = {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+    IsDeleted: true,
+  };
+  const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
+  const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
+  return requestWithPagination(
+    "DELETE",
+    `/api/ContractInvoiceSchedule/${encodedContractNo}/${encodedInvoiceNo}`,
+    payload
+  );
+}
+
+/**
  * PUT /api/ContractInvoiceSchedule/{contractNo}/{invoiceNo}
  */
 async function updateInvoiceSchedule(contractNo, invoiceNo, data) {
@@ -369,6 +390,7 @@ const contractApi = {
   createInvoiceSchedule,
   updateInvoiceScheduleSub,
   deleteInvoiceSchedule,
+  deleteInvoiceScheduleInvoice,
   updateInvoiceSchedule,
   getActiveByAsOfDate,
   list,

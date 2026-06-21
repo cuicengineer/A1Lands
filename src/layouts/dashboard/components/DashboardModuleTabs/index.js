@@ -2,7 +2,7 @@
  * Dashboard sub-module navigation (Home, KPI Overview).
  */
 
-import { useMemo } from "react";
+import { useMemo, useTransition } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PropTypes from "prop-types";
 import Tabs from "@mui/material/Tabs";
@@ -33,14 +33,16 @@ function resolveDashboardTabIndex(pathname) {
 function DashboardModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [, startTransition] = useTransition();
 
   const items = tabs && tabs.length ? tabs : DASHBOARD_MODULE_TABS;
   const activeIndex = useMemo(() => resolveDashboardTabIndex(pathname), [pathname]);
 
   const handleChange = (_, index) => {
     const target = items[index]?.route;
-    if (target && target !== pathname.replace(/\/$/, "")) {
-      navigate(target);
+    const normalizedPath = pathname.replace(/\/$/, "") || "/";
+    if (target && target !== normalizedPath) {
+      startTransition(() => navigate(target));
     }
   };
 

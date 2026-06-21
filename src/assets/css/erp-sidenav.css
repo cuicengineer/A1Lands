@@ -1,16 +1,4 @@
-/* ERP v1.0 sidebar — white navigation; background set by color variant */
-
-body.enterprise-ui .enterprise-sidenav--color-default.MuiDrawer-anchorLeft .MuiDrawer-paper {
-  background: #025b64 !important;
-}
-
-body.enterprise-ui .enterprise-sidenav--color-grey.MuiDrawer-anchorLeft .MuiDrawer-paper {
-  background: #4b5563 !important;
-}
-
-body.enterprise-ui .enterprise-sidenav--color-blue.MuiDrawer-anchorLeft .MuiDrawer-paper {
-  background: #2563eb !important;
-}
+/* ERP v1.0 sidebar — background follows UI Setting sidenav color (--erp-primary). */
 
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft.MuiDrawer-docked {
   width: 252px !important;
@@ -25,7 +13,7 @@ body.enterprise-ui .enterprise-sidenav--mini.MuiDrawer-anchorLeft.MuiDrawer-dock
 body.enterprise-ui .enterprise-sidenav.MuiDrawer-anchorLeft .MuiDrawer-paper {
   width: 252px !important;
   max-width: 252px !important;
-  background: #025b64 !important;
+  background: var(--erp-primary, #025b64) !important;
   background-image: none !important;
   border-right: none !important;
   box-shadow: none !important;
@@ -151,6 +139,15 @@ body.enterprise-ui .enterprise-sidenav .enterprise-sidenav-nav-item .MuiListItem
   color: inherit !important;
   font-weight: inherit !important;
   font-size: 14px !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .enterprise-sidenav-nav-item--has-submenu .enterprise-sidenav-submenu-arrow {
+  color: inherit !important;
+  opacity: 0.9 !important;
+}
+
+body.enterprise-ui .enterprise-sidenav .enterprise-sidenav-nav-item .MuiListItemText-root + .enterprise-sidenav-submenu-arrow {
+  margin-left: auto !important;
 }
 
 body.enterprise-ui .enterprise-sidenav .MuiListItemIcon-root .MuiBox-root {

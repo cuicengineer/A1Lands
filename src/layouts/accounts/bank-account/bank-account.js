@@ -34,7 +34,7 @@ import { format, parseISO, isValid } from "date-fns";
 import Tooltip from "@mui/material/Tooltip";
 import Menu from "@mui/material/Menu";
 import Divider from "@mui/material/Divider";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -224,7 +224,7 @@ function BankAccountsDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={filterFormControlSx}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -234,7 +234,7 @@ function BankAccountsDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <Box sx={{ mb: 1.5 }}>

@@ -486,7 +486,8 @@ body.enterprise-ui .dashboard-layout-root {
 .saas-module-tabs-bar__tabs {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .saas-module-tabs-brand {
@@ -1445,9 +1446,11 @@ body.enterprise-ui .saas-workspace-grid-scroll-host {
 }
 
 .saas-settings-page .saas-workspace-tabs {
-  min-height: 0 !important;
+  flex: 0 0 auto !important;
+  min-height: auto !important;
   margin-top: 0 !important;
-  padding: 2px 8px !important;
+  padding: 2px 8px 4px !important;
+  overflow: visible !important;
 }
 
 /* Grid header row — 2px smaller than legacy sizes (see gridTableHeaderFontSize.js). */

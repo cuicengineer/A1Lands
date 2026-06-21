@@ -15,7 +15,7 @@ import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import { useMaterialUIController } from "context";
 
@@ -195,7 +195,7 @@ function Base() {
   );
 
   const renderCommandSelect = (value) => (
-    <Select
+    <SearchableSelect
       value={value}
       onChange={(e) => handleChange("cmd", e.target.value)}
       size="small"
@@ -218,11 +218,11 @@ function Base() {
           {opt.name}
         </MenuItem>
       ))}
-    </Select>
+    </SearchableSelect>
   );
 
   const renderStatusSelect = (field, value) => (
-    <Select
+    <SearchableSelect
       value={value}
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
@@ -242,7 +242,7 @@ function Base() {
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>
-    </Select>
+    </SearchableSelect>
   );
 
   const renderStatusBadge = (status) => {

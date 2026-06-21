@@ -510,9 +510,19 @@ function UserMgmt() {
     try {
       const routesModule = await import("routes");
       const appRoutes = routesModule?.default || [];
-      const names = appRoutes
-        .filter((route) => route?.type === "collapse" && route?.name)
-        .map((route) => route.name);
+      const names = [];
+      const walk = (items) => {
+        if (!Array.isArray(items)) return;
+        items.forEach((route) => {
+          if (route?.type === "collapse" && route?.name && !route?.excludeFromAssignRights) {
+            names.push(route.name);
+          }
+          if (Array.isArray(route?.collapse)) {
+            walk(route.collapse);
+          }
+        });
+      };
+      walk(appRoutes);
       setMainMenuNames(names);
       return names;
     } catch (e) {
@@ -576,6 +586,18 @@ function UserMgmt() {
       const key = normalizeMenuKey(menuName);
       if (rightsLookup[key]) return rightsLookup[key];
       if (key === "sales agreements") return rightsLookup["contracts mgmt"] || {};
+      if (key === "agreements") return rightsLookup.agreements || rightsLookup.contracts || {};
+      if (key === "cash & fund flow" || key === "cash and fund flow") {
+        return (
+          rightsLookup["cash & fund flow"] || rightsLookup.payments || rightsLookup.receipts || {}
+        );
+      }
+      if (key === "purchases") {
+        return rightsLookup.purchases || rightsLookup.supplier || {};
+      }
+      if (key === "sales") {
+        return rightsLookup.sales || rightsLookup.customer || {};
+      }
       return {};
     };
 
@@ -643,6 +665,7 @@ function UserMgmt() {
             rightsRowMetaByMenu[row.menuName] ||
             rightsRowMetaByMenu[menuKey] ||
             (menuKey === "sales agreements" ? rightsRowMetaByMenu["contracts mgmt"] : undefined) ||
+            (menuKey === "agreements" ? rightsRowMetaByMenu.contracts : undefined) ||
             {};
           const {
             id,

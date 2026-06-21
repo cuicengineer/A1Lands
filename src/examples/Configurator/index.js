@@ -29,11 +29,49 @@ import ConfiguratorRoot from "examples/Configurator/ConfiguratorRoot";
 import { useMaterialUIController, setOpenConfigurator, setSidenavColor } from "context";
 import { SIDENAV_COLOR_OPTIONS } from "utils/sidenavColorTheme";
 
+const SIDENAV_COLORS_PER_ROW = 7;
+
 function Configurator() {
   const [controller, dispatch] = useMaterialUIController();
   const { openConfigurator, sidenavColor, darkMode } = controller;
 
   const handleCloseConfigurator = () => setOpenConfigurator(dispatch, false);
+  const firstRowColors = SIDENAV_COLOR_OPTIONS.slice(0, SIDENAV_COLORS_PER_ROW);
+  const secondRowColors = SIDENAV_COLOR_OPTIONS.slice(SIDENAV_COLORS_PER_ROW);
+
+  const renderColorSwatch = ({ value, color }) => (
+    <IconButton
+      key={value}
+      sx={({ borders: { borderWidth }, palette: { white, dark, background }, transitions }) => ({
+        width: "24px",
+        height: "24px",
+        padding: 0,
+        border: `${borderWidth[1]} solid ${
+          sidenavColor === value
+            ? darkMode
+              ? white.main
+              : dark.main
+            : darkMode
+            ? background.sidenav
+            : white.main
+        }`,
+        transition: transitions.create("border-color", {
+          easing: transitions.easing.sharp,
+          duration: transitions.duration.shorter,
+        }),
+        backgroundColor: color,
+
+        "&:not(:last-child)": {
+          mr: 1,
+        },
+
+        "&:hover, &:focus, &:active": {
+          borderColor: darkMode ? white.main : dark.main,
+        },
+      })}
+      onClick={() => setSidenavColor(dispatch, value)}
+    />
+  );
 
   return (
     <ConfiguratorRoot variant="permanent" ownerState={{ openConfigurator }}>
@@ -73,45 +111,14 @@ function Configurator() {
         <MDBox>
           <MDTypography variant="h6">Sidenav Colors</MDTypography>
 
-          <MDBox mb={0.5}>
-            {SIDENAV_COLOR_OPTIONS.map(({ value, color }) => (
-              <IconButton
-                key={value}
-                sx={({
-                  borders: { borderWidth },
-                  palette: { white, dark, background },
-                  transitions,
-                }) => ({
-                  width: "24px",
-                  height: "24px",
-                  padding: 0,
-                  border: `${borderWidth[1]} solid ${
-                    sidenavColor === value
-                      ? darkMode
-                        ? white.main
-                        : dark.main
-                      : darkMode
-                      ? background.sidenav
-                      : white.main
-                  }`,
-                  transition: transitions.create("border-color", {
-                    easing: transitions.easing.sharp,
-                    duration: transitions.duration.shorter,
-                  }),
-                  backgroundColor: color,
-
-                  "&:not(:last-child)": {
-                    mr: 1,
-                  },
-
-                  "&:hover, &:focus, &:active": {
-                    borderColor: darkMode ? white.main : dark.main,
-                  },
-                })}
-                onClick={() => setSidenavColor(dispatch, value)}
-              />
-            ))}
+          <MDBox display="flex" flexWrap="nowrap" mb={secondRowColors.length ? 0.5 : 0}>
+            {firstRowColors.map(renderColorSwatch)}
           </MDBox>
+          {secondRowColors.length > 0 ? (
+            <MDBox display="flex" flexWrap="nowrap">
+              {secondRowColors.map(renderColorSwatch)}
+            </MDBox>
+          ) : null}
         </MDBox>
       </MDBox>
     </ConfiguratorRoot>

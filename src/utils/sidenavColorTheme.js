@@ -1,6 +1,17 @@
 /** Sidenav color presets — shared by navbar, buttons, and MUI theme. */
 
-export const VALID_SIDENAV_COLORS = ["default", "grey", "blue"];
+export const VALID_SIDENAV_COLORS = [
+  "default",
+  "grey",
+  "blue",
+  "darkBlue",
+  "navyBlue",
+  "deepNavy",
+  "yellow",
+  "orange",
+  "purple",
+  "green",
+];
 
 export const SIDENAV_COLOR_PALETTES = {
   default: {
@@ -20,6 +31,48 @@ export const SIDENAV_COLOR_PALETTES = {
     focus: "#1D4ED8",
     active: "#1E40AF",
     navActiveBg: "#eff6ff",
+  },
+  darkBlue: {
+    main: "#1E3A8A",
+    focus: "#1E40AF",
+    active: "#1D4ED8",
+    navActiveBg: "#e0e7ff",
+  },
+  navyBlue: {
+    main: "#1E293B",
+    focus: "#0F172A",
+    active: "#334155",
+    navActiveBg: "#f1f5f9",
+  },
+  deepNavy: {
+    main: "#233a5f",
+    focus: "#1c2f4d",
+    active: "#152640",
+    navActiveBg: "#eef2f7",
+  },
+  yellow: {
+    main: "#CA8A04",
+    focus: "#A16207",
+    active: "#854D0E",
+    navActiveBg: "#fefce8",
+  },
+  orange: {
+    main: "#EA580C",
+    focus: "#C2410C",
+    active: "#9A3412",
+    navActiveBg: "#fff7ed",
+  },
+  purple: {
+    main: "#7E22CE",
+    focus: "#6B21A8",
+    active: "#581C87",
+    navActiveBg: "#faf5ff",
+  },
+  green: {
+    main: "#16A34A",
+    focus: "#15803D",
+    active: "#166534",
+    navActiveBg: "#f0fdf4",
   },
 };
 
@@ -68,14 +121,22 @@ export function applySidenavColorTheme(sidenavColor) {
 /** MUI palette overrides so MDButton / contained-info pick up the sidenav color. */
 export function getSidenavMuiThemeOverrides(sidenavColor) {
   const palette = getSidenavPalette(sidenavColor);
+  const activeGradient = { main: palette.main, state: palette.focus };
+  const gradients = {
+    primary: activeGradient,
+    info: activeGradient,
+  };
+
+  VALID_SIDENAV_COLORS.forEach((key) => {
+    const entry = SIDENAV_COLOR_PALETTES[key];
+    gradients[key] = { main: entry.main, state: entry.focus };
+  });
+
   return {
     palette: {
       primary: { main: palette.main, focus: palette.focus },
       info: { main: palette.main, focus: palette.focus },
-      gradients: {
-        primary: { main: palette.main, state: palette.focus },
-        info: { main: palette.main, state: palette.focus },
-      },
+      gradients,
     },
   };
 }

@@ -16,6 +16,9 @@ export const PAYMENTS_LABELS = {
 };
 
 export const RECEIPTS_LABELS = {
+  month: "Month",
+  monthRequired: "Month is required",
+  gridMonth: "Month",
   paidFrom: "Paid By",
   paidFromRequired: "Paid By is required",
   payeeSection: "Received In",
@@ -30,4 +33,6 @@ export const RECEIPTS_LABELS = {
   editFormTitle: "Edit Receipt",
   deleteConfirm: "Are you sure you want to delete this receipt?",
   noAttachments: "No attachments for this receipt.",
+  tabPendingAhq: "Pending AHQ approval",
+  tabFinalizedAhq: "Finalized by AHQ",
 };

@@ -9,7 +9,7 @@ import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import { gridValueChipCell } from "utils/gridValueChipCell";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import StatusBadge from "components/StatusBadge";
 import { useMaterialUIController } from "context";
@@ -117,7 +117,7 @@ function LandCategories() {
   );
 
   const renderStatusSelect = (value) => (
-    <Select
+    <SearchableSelect
       value={value}
       onChange={(e) => handleChange("status", e.target.value)}
       size="small"
@@ -140,7 +140,7 @@ function LandCategories() {
           {opt}
         </MenuItem>
       ))}
-    </Select>
+    </SearchableSelect>
   );
 
   const computedRows = (() => {

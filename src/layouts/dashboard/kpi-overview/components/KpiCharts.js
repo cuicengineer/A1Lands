@@ -20,28 +20,268 @@ import Icon from "@mui/material/Icon";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import { useMaterialUIController } from "context";
 
 import {
   buildFinancialShares,
+  buildKpiCategoryRacMilMatrix,
+  buildKpiRacGovtPafCells,
   formatKpiMoneyLabel,
+  resolveKpiChartCategoryKeys,
   SHARE_DISTRIBUTION_CLASS_OPTIONS,
 } from "../kpiDataUtils";
 import ChartExportButton from "./ChartExportButton";
-import { coerceChartDataValue, nullIfZeroChartBarValue } from "utils/chartBarDataUtils";
+import {
+  coerceChartDataValue,
+  nullIfZeroChartBarValue,
+  KPI_OVERVIEW_WIDE_BAR_OPTIONS,
+  withKpiOverviewWideBarDatasets,
+} from "utils/chartBarDataUtils";
 import {
   applyKpiZoomBarChartEnhancements,
   applyKpiZoomDonutChartEnhancements,
+  buildKpiDonutLegendLabelOptions,
+  ensureKpiZoomChartPluginsRegistered,
 } from "./kpiZoomChartEnhancements";
 import {
   exportDonutChartDataToExcel,
   exportGroupedBarChartDataToExcel,
 } from "utils/kpiChartExcelExport";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
+const DONUT_LABEL_FONT = "Inter, Roboto, Helvetica, Arial, sans-serif";
+
+function measureDonutLabelWidth(ctx, text, fontSize, fontWeight) {
+  ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
+  return ctx.measureText(text).width;
+}
+
+/** Chart.js arc angles: 0 at top (12 o'clock), increasing clockwise. */
+function chartAngleToPoint(cx, cy, radius, angle) {
+  return {
+    x: cx + Math.sin(angle) * radius,
+    y: cy - Math.cos(angle) * radius,
+  };
+}
+
+/** Tangent rotation for readable curved labels; flip 180° per character on the left. */
+function chartAngleToLabelRotation(angle, x, cx) {
+  return x < cx ? angle + Math.PI : angle;
+}
+
+/** Draw label characters tangential to an arc, centered within the slice. */
+function drawTextAlongArc(ctx, text, cx, cy, radius, startAngle, endAngle, opts = {}) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return;
+
+  let fontSize = opts.fontSize ?? 10;
+  const fontWeight = opts.fontWeight ?? 700;
+  const fillStyle = opts.fillStyle ?? "#111827";
+  const shadowColor = opts.shadowColor;
+  const shadowBlur = opts.shadowBlur ?? 3;
+  const edgePadding = opts.edgePadding ?? 0.1;
+
+  const arcSpan = endAngle - startAngle;
+  let textWidth = measureDonutLabelWidth(ctx, raw, fontSize, fontWeight);
+  let angularSpan = textWidth / radius;
+  const maxAngular = Math.max(arcSpan - edgePadding * 2, 0.04);
+
+  while (angularSpan > maxAngular && fontSize > 6) {
+    fontSize -= 1;
+    textWidth = measureDonutLabelWidth(ctx, raw, fontSize, fontWeight);
+    angularSpan = textWidth / radius;
+  }
+  if (angularSpan > maxAngular) return;
+
+  ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
+  ctx.fillStyle = fillStyle;
+  ctx.shadowColor = shadowColor || "transparent";
+  ctx.shadowBlur = shadowColor ? shadowBlur : 0;
+
+  const chars = [...raw];
+  const charWidths = chars.map((ch) => ctx.measureText(ch).width);
+  const totalWidth = charWidths.reduce((sum, w) => sum + w, 0);
+  const totalAngle = totalWidth / radius;
+
+  const midAngle = (startAngle + endAngle) / 2;
+  const { x: midX } = chartAngleToPoint(cx, cy, radius, midAngle);
+  const reverseOrder = midX < cx;
+  const renderChars = reverseOrder ? [...chars].reverse() : chars;
+  const renderWidths = reverseOrder ? [...charWidths].reverse() : charWidths;
+
+  let angle = reverseOrder ? midAngle + totalAngle / 2 : midAngle - totalAngle / 2;
+
+  for (let i = 0; i < renderChars.length; i += 1) {
+    const ch = renderChars[i];
+    const w = renderWidths[i];
+    let charAngle;
+    if (reverseOrder) {
+      charAngle = angle - w / (2 * radius);
+      angle -= w / radius;
+    } else {
+      charAngle = angle + w / (2 * radius);
+      angle += w / radius;
+    }
+
+    const { x, y } = chartAngleToPoint(cx, cy, radius, charAngle);
+    const rotation = chartAngleToLabelRotation(charAngle, x, cx);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+  }
+}
+
+const kpiOuterDonutLegendRingPlugin = {
+  id: "kpiOuterDonutLegendRing",
+  afterDatasetsDraw(chart) {
+    const opts = chart?.options?.plugins?.kpiOuterDonutLegendRing;
+    if (!opts?.enabled) return;
+    const labels = chart?.data?.labels || [];
+    const innerDatasetIndex = 0;
+    const outerDatasetIndex = chart.data?.datasets?.length - 1;
+    if (outerDatasetIndex < 0) return;
+    const innerMeta = chart.getDatasetMeta(innerDatasetIndex);
+    const outerMeta = chart.getDatasetMeta(outerDatasetIndex);
+    if (!innerMeta?.data?.length || !outerMeta?.data?.length) return;
+
+    const { ctx } = chart;
+    const textColor = opts.textColor || "#111827";
+    const fontSize = opts.fontSize || 10;
+    const fontWeight = opts.fontWeight || 700;
+    const formatValue =
+      typeof opts.formatValue === "function"
+        ? opts.formatValue
+        : (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0);
+    const valueTextColor = opts.valueTextColor || opts.textColor || "#111827";
+    const curveOuterText = opts.curveOuterText !== false;
+    const outerRingMode = opts.outerRingMode || "value";
+    const innerShowValue = Boolean(opts.innerShowValue);
+    const curveInnerText = opts.curveInnerText !== false;
+    const racLabels = chart?.data?.racLabels || [];
+    const innerLabelColor = opts.innerLabelColor || valueTextColor;
+
+    // Inner ring: curved class label or numeric value
+    innerMeta.data.forEach((arc, index) => {
+      const value = coerceChartDataValue(chart.data?.datasets?.[0]?.data?.[index]);
+      if (value == null || value <= 0) return;
+
+      const innerText = innerShowValue
+        ? formatValue(value, index)
+        : String(labels[index] ?? "").trim();
+      if (!innerText) return;
+
+      const props = arc.getProps(
+        ["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"],
+        true
+      );
+      const labelRadius = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.52;
+      const innerFillStyle = innerShowValue ? valueTextColor : innerLabelColor;
+
+      if (curveInnerText) {
+        drawTextAlongArc(
+          ctx,
+          innerText,
+          props.x,
+          props.y,
+          labelRadius,
+          props.startAngle,
+          props.endAngle,
+          {
+            fontSize,
+            fontWeight,
+            fillStyle: innerFillStyle,
+            shadowColor: opts.textShadowColor || "rgba(0, 0, 0, 0.65)",
+            shadowBlur: 3,
+          }
+        );
+        return;
+      }
+
+      const midAngle = (props.startAngle + props.endAngle) / 2;
+      const x = props.x + Math.cos(midAngle) * labelRadius;
+      const y = props.y + Math.sin(midAngle) * labelRadius;
+
+      ctx.save();
+      ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
+      ctx.fillStyle = innerFillStyle;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.85)";
+      ctx.shadowBlur = 3;
+      ctx.fillText(innerText, x, y);
+      ctx.restore();
+    });
+
+    // Outer ring: RAC name or numeric value, curved along the colored band
+    outerMeta.data.forEach((arc, index) => {
+      const value = coerceChartDataValue(chart.data?.datasets?.[0]?.data?.[index]);
+      if (value == null || value <= 0) return;
+
+      const valueText =
+        outerRingMode === "rac" ? String(racLabels[index] ?? "").trim() : formatValue(value, index);
+      if (!valueText) return;
+
+      const props = arc.getProps(
+        ["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"],
+        true
+      );
+      const valueRadius = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.52;
+      const outerFillStyle = valueTextColor;
+
+      if (curveOuterText) {
+        drawTextAlongArc(
+          ctx,
+          valueText,
+          props.x,
+          props.y,
+          valueRadius,
+          props.startAngle,
+          props.endAngle,
+          {
+            fontSize: fontSize + 1,
+            fontWeight,
+            fillStyle: outerFillStyle,
+            shadowColor: opts.textShadowColor || "rgba(255, 255, 255, 0.85)",
+            shadowBlur: 3,
+          }
+        );
+        return;
+      }
+
+      const midAngle = (props.startAngle + props.endAngle) / 2;
+      const x = props.x + Math.cos(midAngle) * valueRadius;
+      const y = props.y + Math.sin(midAngle) * valueRadius;
+
+      ctx.save();
+      ctx.font = `700 ${fontSize + 1}px ${DONUT_LABEL_FONT}`;
+      ctx.fillStyle = outerFillStyle;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.85)";
+      ctx.shadowBlur = 3;
+      ctx.fillText(valueText, x, y);
+      ctx.restore();
+    });
+  },
+};
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+  kpiOuterDonutLegendRingPlugin
+);
+ensureKpiZoomChartPluginsRegistered();
 
 const SHARE_COLORS = ["#025B64", "#00D47E", "#F5A524", "#3B82F6", "#6B7280"];
 
@@ -90,34 +330,260 @@ export function getEnterpriseCardSx() {
 const ZOOM_CHART = {
   assetsBar: "assetsBar",
   assetsDonut: "assetsDonut",
+  assetsGovtPafBar: "assetsGovtPafBar",
+  assetsGovtPafDonut: "assetsGovtPafDonut",
   govtPafBar: "govtPafBar",
   govtPafDonut: "govtPafDonut",
   ahqRacBaseBar: "ahqRacBaseBar",
   ahqRacBaseDonut: "ahqRacBaseDonut",
 };
 
-function buildGroupedBarData(cards, series) {
+function kpiNumeric(value) {
+  return coerceChartDataValue(value) ?? 0;
+}
+
+/** Category financial donut total — excludes Govt Share and PAF Share. */
+function cellFinancialCategoryTotal(mil) {
+  if (!mil || typeof mil !== "object") return 0;
+  const income = kpiNumeric(mil.incomePA);
+  if (income > 0) return income;
+  return kpiNumeric(mil.ahq) + kpiNumeric(mil.rac) + kpiNumeric(mil.base);
+}
+
+function buildCategoryRacBarDataFromMatrix(cells, series) {
   return {
-    labels: cards.map((a) => a.label),
-    datasets: series.map((s) => ({
-      label: s.label,
-      data: cards.map((a) => nullIfZeroChartBarValue(a.mil?.[s.milKey])),
-      backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
-      borderRadius: 6,
-      maxBarThickness: 16,
-    })),
+    labels: cells.map((c) => c.chartLabel),
+    datasets: withKpiOverviewWideBarDatasets(
+      series.map((s) => ({
+        label: s.label,
+        data: cells.map((c) => nullIfZeroChartBarValue(c.mil?.[s.milKey])),
+        backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
+        borderRadius: 6,
+      }))
+    ),
   };
 }
 
-/** One bar per category with Govt + PAF as stacked shaded segments. */
-function buildGovtPafStackedBarData(cards) {
-  const base = buildGroupedBarData(cards, GOVT_PAF_SERIES);
+const CLASS_COLOR_BY_CATEGORY_KEY = {
+  categoryA: CATEGORY_BAR_COLORS[0],
+  categoryB: CATEGORY_BAR_COLORS[1],
+  categoryC: CATEGORY_BAR_COLORS[2],
+  bts: CATEGORY_BAR_COLORS[3],
+  hb: CATEGORY_BAR_COLORS[4],
+};
+
+function parseCellCategoryKey(cell) {
+  const idx = String(cell?.key ?? "").lastIndexOf("-");
+  return idx >= 0 ? cell.key.slice(idx + 1) : "";
+}
+
+/** RAC on x-axis; one clustered bar per property class, colored by class. */
+function buildRacClusteredClassFinancialBarData(cells) {
+  const racLabels = [];
+  const racSeen = new Set();
+  const categoryKeys = [];
+  const categorySeen = new Set();
+  const valueByRacCategory = new Map();
+
+  for (const cell of cells) {
+    if (!racSeen.has(cell.racLabel)) {
+      racSeen.add(cell.racLabel);
+      racLabels.push(cell.racLabel);
+    }
+
+    const categoryKey = parseCellCategoryKey(cell);
+    if (categoryKey && !categorySeen.has(categoryKey)) {
+      categorySeen.add(categoryKey);
+      categoryKeys.push(categoryKey);
+    }
+
+    valueByRacCategory.set(
+      `${cell.racLabel}::${categoryKey}`,
+      cellFinancialCategoryTotal(cell.mil)
+    );
+  }
+
+  return {
+    labels: racLabels,
+    datasets: withKpiOverviewWideBarDatasets(
+      categoryKeys.map((categoryKey, idx) => {
+        const sample = cells.find((c) => parseCellCategoryKey(c) === categoryKey);
+        return {
+          label: sample?.catLabel || categoryKey,
+          data: racLabels.map((racLabel) =>
+            nullIfZeroChartBarValue(valueByRacCategory.get(`${racLabel}::${categoryKey}`))
+          ),
+          backgroundColor:
+            CLASS_COLOR_BY_CATEGORY_KEY[categoryKey] ||
+            CATEGORY_BAR_COLORS[idx % CATEGORY_BAR_COLORS.length],
+          borderRadius: 6,
+        };
+      })
+    ),
+  };
+}
+
+function buildCategoryRacFinancialDonutChart(cells, darkMode) {
+  const labels = cells.map((c) => c.catLabel);
+  const racLabels = cells.map((c) => c.racLabel);
+  const values = cells.map((c) => cellFinancialCategoryTotal(c.mil));
+  const colors = cells.map((c) => {
+    const categoryKey = parseCellCategoryKey(c);
+    const idx = ["categoryA", "categoryB", "categoryC", "bts", "hb"].indexOf(categoryKey);
+    return (
+      CLASS_COLOR_BY_CATEGORY_KEY[categoryKey] ||
+      CATEGORY_BAR_COLORS[(idx >= 0 ? idx : 0) % CATEGORY_BAR_COLORS.length]
+    );
+  });
+  const sumTotal = values.reduce((a, b) => a + kpiNumeric(b), 0) || 1;
+  const outerRingColors = colors.map((hex) => `${hex}80`);
+
+  return {
+    data: {
+      labels,
+      racLabels,
+      datasets: [
+        {
+          data: values,
+          backgroundColor: colors,
+          borderWidth: 2,
+          borderColor: darkMode ? "#1e1e1e" : "#fff",
+          hoverOffset: 4,
+          weight: 1.8,
+        },
+        {
+          data: values,
+          backgroundColor: outerRingColors,
+          borderWidth: 1,
+          borderColor: darkMode ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)",
+          hoverOffset: 0,
+          weight: 0.9,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "52%",
+      plugins: {
+        legend: {
+          position: "right",
+          labels: buildKpiDonutLegendLabelOptions({
+            darkMode,
+            fontSize: 11,
+            fontWeight: "bold",
+            padding: 8,
+            boxWidth: 10,
+          }),
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              if ((ctx.datasetIndex ?? 0) > 0) return null;
+              const pct = ((ctx.raw / sumTotal) * 100).toFixed(1);
+              const rac = racLabels[ctx.dataIndex] || "";
+              const classLabel = labels[ctx.dataIndex] || ctx.label;
+              const prefix = rac ? `${classLabel} — ${rac}` : classLabel;
+              return `${prefix}: ${formatKpiMoneyLabel(kpiNumeric(ctx.raw))} (${pct}%)`;
+            },
+          },
+        },
+        kpiOuterDonutLegendRing: {
+          enabled: true,
+          outerRingMode: "value",
+          innerShowValue: false,
+          curveInnerText: true,
+          curveOuterText: true,
+          valueTextColor: "#ffffff",
+          innerLabelColor: "#ffffff",
+          textColor: darkMode ? "#f3f4f6" : "#1f2937",
+          textShadowColor: "rgba(0, 0, 0, 0.65)",
+          fontSize: 9,
+          fontWeight: 700,
+          formatValue: (value) => formatKpiMoneyLabel(kpiNumeric(value)),
+        },
+      },
+    },
+  };
+}
+
+function buildGovtPafOuterRingDonutChart({
+  labels,
+  values,
+  colors,
+  darkMode,
+  legendFontSize = 11,
+}) {
+  const sumTotal = values.reduce((a, b) => a + kpiNumeric(b), 0) || 1;
+  const outerRingColors = colors.map((hex) => `${hex}80`);
+
+  return {
+    data: {
+      labels,
+      datasets: [
+        {
+          data: values,
+          backgroundColor: colors,
+          borderWidth: 2,
+          borderColor: darkMode ? "#1e1e1e" : "#fff",
+          hoverOffset: 4,
+          weight: 1.8,
+        },
+        {
+          data: values,
+          backgroundColor: outerRingColors,
+          borderWidth: 1,
+          borderColor: darkMode ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)",
+          hoverOffset: 0,
+          weight: 0.9,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "52%",
+      plugins: {
+        legend: {
+          position: "right",
+          labels: buildKpiDonutLegendLabelOptions({
+            darkMode,
+            fontSize: legendFontSize,
+            fontWeight: "bold",
+            padding: legendFontSize >= 13 ? 10 : 8,
+            boxWidth: legendFontSize >= 13 ? 12 : 10,
+          }),
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              if ((ctx.datasetIndex ?? 0) > 0) return null;
+              const pct = ((ctx.raw / sumTotal) * 100).toFixed(1);
+              return `${ctx.label}: ${formatKpiMoneyLabel(kpiNumeric(ctx.raw))} (${pct}%)`;
+            },
+          },
+        },
+        kpiOuterDonutLegendRing: {
+          enabled: true,
+          textColor: darkMode ? "#f3f4f6" : "#1f2937",
+          textShadowColor: darkMode ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.9)",
+          fontSize: 10,
+          fontWeight: 700,
+          curveOuterText: true,
+          formatValue: (value) => formatKpiMoneyLabel(kpiNumeric(value)),
+        },
+      },
+    },
+  };
+}
+
+function buildRacGovtPafStackedBarData(cells) {
+  const base = buildCategoryRacBarDataFromMatrix(cells, GOVT_PAF_SERIES);
   const lastIdx = base.datasets.length - 1;
   return {
     labels: base.labels,
     datasets: base.datasets.map((ds, idx) => ({
       ...ds,
-      maxBarThickness: 36,
       borderSkipped: false,
       borderRadius:
         idx === lastIdx
@@ -127,42 +593,103 @@ function buildGovtPafStackedBarData(cards) {
   };
 }
 
-function buildShareDonutChart(shareItems, shareIds, darkMode) {
+function buildGroupedBarData(cards, series) {
+  return {
+    labels: cards.map((a) => a.label),
+    datasets: withKpiOverviewWideBarDatasets(
+      series.map((s) => ({
+        label: s.label,
+        data: cards.map((a) => nullIfZeroChartBarValue(a.mil?.[s.milKey])),
+        backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
+        borderRadius: 6,
+      }))
+    ),
+  };
+}
+
+function buildShareDonutChart(shareItems, shareIds, darkMode, { outerLegendRing = false } = {}) {
   const filtered = (shareItems || []).filter((s) => shareIds.includes(s.id));
   const donutLabels = filtered.map((s) => s.label);
   const donutValues = filtered.map((s) => s.value);
-  const sumTotal = donutValues.reduce((a, b) => a + (Number(b) || 0), 0) || 1;
-  const tc = darkMode ? "#e8e8e8" : "#344767";
+  const donutColors = shareIds.map((id) => DONUT_COLOR_BY_SHARE_ID[id] || SHARE_COLORS[0]);
+
+  if (
+    outerLegendRing &&
+    shareIds.length === 2 &&
+    shareIds.includes("govt") &&
+    shareIds.includes("paf")
+  ) {
+    return buildGovtPafOuterRingDonutChart({
+      labels: donutLabels,
+      values: donutValues,
+      colors: donutColors,
+      darkMode,
+      legendFontSize: 13,
+    });
+  }
+
+  const sumTotal = donutValues.reduce((a, b) => a + kpiNumeric(b), 0) || 1;
+  const outerRingColors = donutColors.map((hex) => `${hex}80`);
+
+  const datasets = [
+    {
+      data: donutValues,
+      backgroundColor: donutColors,
+      borderWidth: 2,
+      borderColor: darkMode ? "#1e1e1e" : "#fff",
+      hoverOffset: 4,
+      weight: outerLegendRing ? 1.8 : 1,
+    },
+  ];
+
+  if (outerLegendRing) {
+    datasets.push({
+      data: donutValues,
+      backgroundColor: outerRingColors,
+      borderWidth: 1,
+      borderColor: darkMode ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)",
+      hoverOffset: 0,
+      weight: 0.9,
+    });
+  }
 
   return {
     data: {
       labels: donutLabels,
-      datasets: [
-        {
-          data: donutValues,
-          backgroundColor: shareIds.map((id) => DONUT_COLOR_BY_SHARE_ID[id] || SHARE_COLORS[0]),
-          borderWidth: 2,
-          borderColor: darkMode ? "#1e1e1e" : "#fff",
-          hoverOffset: 4,
-        },
-      ],
+      datasets,
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      cutout: "62%",
+      cutout: outerLegendRing ? "52%" : "62%",
       plugins: {
         legend: {
           position: "right",
-          labels: { color: tc, boxWidth: 12, padding: 10 },
+          labels: buildKpiDonutLegendLabelOptions({
+            darkMode,
+            fontSize: 13,
+            fontWeight: "bold",
+            padding: 10,
+            boxWidth: 12,
+          }),
         },
         tooltip: {
           callbacks: {
             label: (ctx) => {
+              if ((ctx.datasetIndex ?? 0) > 0) return null;
               const pct = ((ctx.raw / sumTotal) * 100).toFixed(1);
-              return `${ctx.label}: ${formatKpiMoneyLabel(Number(ctx.raw) || 0)} (${pct}%)`;
+              return `${ctx.label}: ${formatKpiMoneyLabel(kpiNumeric(ctx.raw))} (${pct}%)`;
             },
           },
+        },
+        kpiOuterDonutLegendRing: {
+          enabled: outerLegendRing,
+          textColor: darkMode ? "#f3f4f6" : "#1f2937",
+          textShadowColor: darkMode ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.9)",
+          fontSize: 10,
+          fontWeight: 700,
+          curveOuterText: true,
+          formatValue: (value) => formatKpiMoneyLabel(kpiNumeric(value)),
         },
       },
     },
@@ -239,6 +766,9 @@ ChartZoomSurface.propTypes = {
 function KpiCharts({
   shareRows,
   contractRows,
+  propertyRows,
+  racOptions,
+  racIds,
   assetCards,
   loading,
   chartZoomOnClick,
@@ -256,28 +786,74 @@ function KpiCharts({
     [shareRows, shareClassFilter, contractRows]
   );
 
+  const categoryKeys = useMemo(
+    () => resolveKpiChartCategoryKeys(shareClassFilter),
+    [shareClassFilter]
+  );
+
+  const categoryRacCells = useMemo(
+    () =>
+      buildKpiCategoryRacMilMatrix({
+        shareRows: shareRows || [],
+        propertyRows: propertyRows || [],
+        contractRows: contractRows || [],
+        racOptions: racOptions || [],
+        racIds: racIds || [],
+        categoryKeys,
+      }),
+    [shareRows, propertyRows, contractRows, racOptions, racIds, categoryKeys]
+  );
+
+  const categoryRacBarData = useMemo(
+    () => buildRacClusteredClassFinancialBarData(categoryRacCells),
+    [categoryRacCells]
+  );
+
+  const categoryRacDonutChart = useMemo(
+    () => buildCategoryRacFinancialDonutChart(categoryRacCells, darkMode),
+    [categoryRacCells, darkMode]
+  );
+
+  const racGovtPafCells = useMemo(
+    () =>
+      buildKpiRacGovtPafCells({
+        shareRows: shareRows || [],
+        contractRows: contractRows || [],
+        racOptions: racOptions || [],
+        racIds: racIds || [],
+      }),
+    [shareRows, contractRows, racOptions, racIds]
+  );
+
+  const categoryRacGovtPafBarData = useMemo(
+    () => buildRacGovtPafStackedBarData(racGovtPafCells),
+    [racGovtPafCells]
+  );
+
+  const govtPafDonutChart = useMemo(
+    () =>
+      buildShareDonutChart(
+        buildFinancialShares(shareRows || [], "all", contractRows || []),
+        ["govt", "paf"],
+        darkMode,
+        { outerLegendRing: true }
+      ),
+    [shareRows, contractRows, darkMode]
+  );
+
   const cards = (assetCards || []).filter((c) => c.chartInclude !== false && c.key !== "total");
 
   const groupedBarData = useMemo(() => buildGroupedBarData(cards, CATEGORY_SERIES), [cards]);
-
-  const govtPafBarData = useMemo(() => buildGovtPafStackedBarData(cards), [cards]);
   const ahqRacBaseBarData = useMemo(() => buildGroupedBarData(cards, AHQ_RAC_BASE_SERIES), [cards]);
 
   const textColor = darkMode ? "#e8e8e8" : "#344767";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)";
 
-  const donutChart = useMemo(
-    () => buildShareDonutChart(donutShares, ["govt", "paf", "ahq", "rac", "base"], darkMode),
-    [donutShares, darkMode]
-  );
-
-  const govtPafDonutChart = useMemo(
-    () => buildShareDonutChart(donutShares, ["govt", "paf"], darkMode),
-    [donutShares, darkMode]
-  );
-
   const ahqRacBaseDonutChart = useMemo(
-    () => buildShareDonutChart(donutShares, ["ahq", "rac", "base"], darkMode),
+    () =>
+      buildShareDonutChart(donutShares, ["ahq", "rac", "base"], darkMode, {
+        outerLegendRing: true,
+      }),
     [donutShares, darkMode]
   );
 
@@ -287,6 +863,7 @@ function KpiCharts({
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: "index", intersect: false },
+    ...KPI_OVERVIEW_WIDE_BAR_OPTIONS,
     scales: {
       x: {
         stacked: false,
@@ -364,6 +941,87 @@ function KpiCharts({
     [groupedBarOptions, darkMode]
   );
 
+  const financialShareBarOptions = useMemo(
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...groupedBarOptions,
+          plugins: {
+            ...groupedBarOptions.plugins,
+            legend: {
+              ...groupedBarOptions.plugins.legend,
+              labels: {
+                ...groupedBarOptions.plugins.legend.labels,
+                font: { size: 11, weight: "600" },
+              },
+            },
+          },
+        },
+        {
+          darkMode,
+          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
+          fontSize: 9,
+          labelPlacement: "inside",
+        }
+      ),
+    [groupedBarOptions, darkMode]
+  );
+
+  const zoomedFinancialShareBarOptions = useMemo(
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...groupedBarOptions,
+          plugins: {
+            ...groupedBarOptions.plugins,
+            legend: {
+              ...groupedBarOptions.plugins.legend,
+              labels: {
+                ...groupedBarOptions.plugins.legend.labels,
+                font: { size: 13, weight: "600" },
+              },
+            },
+          },
+        },
+        {
+          darkMode,
+          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
+          fontSize: 11,
+          labelPlacement: "inside",
+        }
+      ),
+    [groupedBarOptions, darkMode]
+  );
+
+  const govtPafBarOptions = useMemo(
+    () =>
+      applyKpiZoomBarChartEnhancements(
+        {
+          ...stackedBarOptions,
+          plugins: {
+            ...stackedBarOptions.plugins,
+            legend: {
+              ...stackedBarOptions.plugins.legend,
+              labels: {
+                ...stackedBarOptions.plugins.legend.labels,
+                font: { size: 11, weight: "600" },
+              },
+            },
+          },
+        },
+        {
+          darkMode,
+          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          tooltipCallbacks: stackedBarOptions.plugins.tooltip.callbacks,
+          fontSize: 10,
+          labelPlacement: "inside",
+        }
+      ),
+    [stackedBarOptions, darkMode]
+  );
+
   const zoomedGovtPafBarOptions = useMemo(
     () =>
       applyKpiZoomBarChartEnhancements(
@@ -384,7 +1042,8 @@ function KpiCharts({
           darkMode,
           formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
           tooltipCallbacks: stackedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 13,
+          fontSize: 12,
+          labelPlacement: "inside",
         }
       ),
     [stackedBarOptions, darkMode]
@@ -394,6 +1053,7 @@ function KpiCharts({
     (donut) => {
       const values = donut.data?.datasets?.[0]?.data || [];
       const sumTotal = values.reduce((a, b) => a + (coerceChartDataValue(b) ?? 0), 0) || 1;
+      const useLegendNamesOnly = donut?.options?.plugins?.kpiOuterDonutLegendRing?.enabled === true;
       return applyKpiZoomDonutChartEnhancements(
         {
           ...donut.options,
@@ -401,17 +1061,33 @@ function KpiCharts({
             ...donut.options.plugins,
             legend: {
               ...donut.options.plugins.legend,
-              labels: {
-                ...donut.options.plugins.legend.labels,
-                font: { size: 13, weight: "600" },
+              labels: buildKpiDonutLegendLabelOptions({
+                darkMode,
+                fontSize: 16,
+                fontWeight: "bold",
                 padding: 14,
-              },
+                boxWidth: 14,
+              }),
             },
+            ...(useLegendNamesOnly
+              ? {
+                  // Prevent numeric permanent labels from overlaying legend names.
+                  kpiZoomPermanentLabels: { enabled: false },
+                  kpiOuterDonutLegendRing: {
+                    ...donut.options.plugins?.kpiOuterDonutLegendRing,
+                    fontSize: 14,
+                  },
+                }
+              : {}),
           },
         },
         {
           darkMode,
-          formatValue: (value) => {
+          formatValue: (value, meta = {}) => {
+            if (useLegendNamesOnly) {
+              if ((meta.datasetIndex ?? 0) > 0) return "";
+              return String(donut?.data?.labels?.[meta.dataIndex] ?? "");
+            }
             const n = coerceChartDataValue(value) ?? 0;
             const pct = ((n / sumTotal) * 100).toFixed(1);
             return `${formatKpiMoneyLabel(n)}\n${pct}%`;
@@ -429,19 +1105,31 @@ function KpiCharts({
       [ZOOM_CHART.assetsBar]: {
         title: "Financial share by category (M)",
         type: "bar",
-        data: groupedBarData,
-        options: zoomedBarOptions,
+        data: categoryRacBarData,
+        options: zoomedFinancialShareBarOptions,
       },
       [ZOOM_CHART.assetsDonut]: {
         title: "Share Distribution",
         type: "donut",
-        data: donutChart.data,
-        options: makeZoomedDonutOptions(donutChart),
+        data: categoryRacDonutChart.data,
+        options: makeZoomedDonutOptions(categoryRacDonutChart),
+      },
+      [ZOOM_CHART.assetsGovtPafBar]: {
+        title: "Govt & PAF share by category (M)",
+        type: "bar",
+        data: categoryRacGovtPafBarData,
+        options: zoomedGovtPafBarOptions,
+      },
+      [ZOOM_CHART.assetsGovtPafDonut]: {
+        title: "Govt & PAF share distribution",
+        type: "donut",
+        data: govtPafDonutChart.data,
+        options: makeZoomedDonutOptions(govtPafDonutChart),
       },
       [ZOOM_CHART.govtPafBar]: {
         title: "Govt & PAF share by category (M)",
         type: "bar",
-        data: govtPafBarData,
+        data: categoryRacGovtPafBarData,
         options: zoomedGovtPafBarOptions,
       },
       [ZOOM_CHART.govtPafDonut]: {
@@ -466,13 +1154,14 @@ function KpiCharts({
     return configsByKey[zoomChart] || null;
   }, [
     zoomChart,
-    groupedBarData,
-    donutChart,
-    govtPafBarData,
+    categoryRacBarData,
+    categoryRacDonutChart,
+    categoryRacGovtPafBarData,
     govtPafDonutChart,
     ahqRacBaseBarData,
     ahqRacBaseDonutChart,
     zoomedBarOptions,
+    zoomedFinancialShareBarOptions,
     zoomedGovtPafBarOptions,
     makeZoomedDonutOptions,
   ]);
@@ -480,7 +1169,7 @@ function KpiCharts({
   const renderShareClassFilter = (filterIdSuffix) => (
     <FormControl size="small" sx={{ minWidth: 88 }}>
       <InputLabel id={`kpi-share-class-label-${filterIdSuffix}`}>Class</InputLabel>
-      <Select
+      <SearchableSelect
         labelId={`kpi-share-class-label-${filterIdSuffix}`}
         label="Class"
         value={shareClassFilter}
@@ -494,7 +1183,7 @@ function KpiCharts({
             {o.label}
           </MenuItem>
         ))}
-      </Select>
+      </SearchableSelect>
     </FormControl>
   );
 
@@ -525,8 +1214,7 @@ function KpiCharts({
   const renderDonutCard = (
     title,
     donut,
-    filterIdSuffix = "default",
-    zoomKey = ZOOM_CHART.assetsDonut
+    { filterIdSuffix = "default", zoomKey = ZOOM_CHART.assetsDonut, showClassFilter = true } = {}
   ) => (
     <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
       <MDBox
@@ -541,7 +1229,7 @@ function KpiCharts({
           {title}
         </MDTypography>
         <MDBox display="flex" alignItems="center" gap={0.5} flexShrink={0}>
-          {renderShareClassFilter(filterIdSuffix)}
+          {showClassFilter ? renderShareClassFilter(filterIdSuffix) : null}
           <ChartExportButton
             disabled={loading}
             ariaLabel={`Export ${title} to Excel`}
@@ -569,18 +1257,16 @@ function KpiCharts({
             <Grid item xs={12} md={6}>
               {renderBarCard(
                 "Govt & PAF share by category (M)",
-                govtPafBarData,
+                categoryRacGovtPafBarData,
                 ZOOM_CHART.govtPafBar,
-                stackedBarOptions
+                govtPafBarOptions
               )}
             </Grid>
             <Grid item xs={12} md={6}>
-              {renderDonutCard(
-                "Govt & PAF share distribution",
-                govtPafDonutChart,
-                "govt-paf",
-                ZOOM_CHART.govtPafDonut
-              )}
+              {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
+                zoomKey: ZOOM_CHART.govtPafDonut,
+                showClassFilter: false,
+              })}
             </Grid>
           </Grid>
           <Grid container spacing={2} sx={{ mt: 0 }}>
@@ -592,24 +1278,48 @@ function KpiCharts({
               )}
             </Grid>
             <Grid item xs={12} md={6}>
-              {renderDonutCard(
-                "AHQ, RAC & Base share distribution",
-                ahqRacBaseDonutChart,
-                "ahq-rac-base",
-                ZOOM_CHART.ahqRacBaseDonut
-              )}
+              {renderDonutCard("AHQ, RAC & Base share distribution", ahqRacBaseDonutChart, {
+                filterIdSuffix: "ahq-rac-base",
+                zoomKey: ZOOM_CHART.ahqRacBaseDonut,
+              })}
             </Grid>
           </Grid>
         </>
       ) : (
-        <Grid container spacing={2}>
-          <Grid item xs={12} lg={7}>
-            {renderBarCard("Financial share by category (M)", groupedBarData, ZOOM_CHART.assetsBar)}
+        <>
+          <Grid container spacing={2}>
+            <Grid item xs={12} lg={7}>
+              {renderBarCard(
+                "Financial share by category (M)",
+                categoryRacBarData,
+                ZOOM_CHART.assetsBar,
+                financialShareBarOptions
+              )}
+            </Grid>
+            <Grid item xs={12} lg={5}>
+              {renderDonutCard("Share Distribution", categoryRacDonutChart, {
+                filterIdSuffix: "assets",
+                zoomKey: ZOOM_CHART.assetsDonut,
+              })}
+            </Grid>
           </Grid>
-          <Grid item xs={12} lg={5}>
-            {renderDonutCard("Share Distribution", donutChart, "assets")}
+          <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid item xs={12} lg={7}>
+              {renderBarCard(
+                "Govt & PAF share by category (M)",
+                categoryRacGovtPafBarData,
+                ZOOM_CHART.assetsGovtPafBar,
+                govtPafBarOptions
+              )}
+            </Grid>
+            <Grid item xs={12} lg={5}>
+              {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
+                zoomKey: ZOOM_CHART.assetsGovtPafDonut,
+                showClassFilter: false,
+              })}
+            </Grid>
           </Grid>
-        </Grid>
+        </>
       )}
 
       <Dialog
@@ -689,6 +1399,9 @@ function KpiCharts({
 KpiCharts.propTypes = {
   shareRows: PropTypes.arrayOf(PropTypes.object),
   contractRows: PropTypes.arrayOf(PropTypes.object),
+  propertyRows: PropTypes.arrayOf(PropTypes.object),
+  racOptions: PropTypes.arrayOf(PropTypes.object),
+  racIds: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
   assetCards: PropTypes.arrayOf(
     PropTypes.shape({
       label: PropTypes.string,
@@ -710,6 +1423,9 @@ KpiCharts.propTypes = {
 KpiCharts.defaultProps = {
   shareRows: [],
   contractRows: [],
+  propertyRows: [],
+  racOptions: [],
+  racIds: [],
   assetCards: [],
   loading: false,
   chartZoomOnClick: false,

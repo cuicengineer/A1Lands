@@ -6,7 +6,8 @@ import DialogActions from "@mui/material/DialogActions";
 import MDButton from "components/MDButton";
 import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
-import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
+import { FormControl, InputLabel, MenuItem } from "@mui/material";
+import SearchableSelect from "components/SearchableSelect";
 import PropTypes from "prop-types";
 
 function ProfitSharingForm({ open, handleClose }) {
@@ -50,7 +51,7 @@ function ProfitSharingForm({ open, handleClose }) {
         <MDBox component="form" role="form" display="flex" flexDirection="column">
           <FormControl variant="standard" sx={{ mb: 2 }}>
             <InputLabel id="cmd-label">Cmd</InputLabel>
-            <Select
+            <SearchableSelect
               labelId="cmd-label"
               id="cmd"
               name="cmd"
@@ -63,11 +64,11 @@ function ProfitSharingForm({ open, handleClose }) {
                   {option}
                 </MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
           </FormControl>
           <FormControl variant="standard" sx={{ mb: 2 }}>
             <InputLabel id="unit-label">Unit</InputLabel>
-            <Select
+            <SearchableSelect
               labelId="unit-label"
               id="unit"
               name="unit"
@@ -80,11 +81,11 @@ function ProfitSharingForm({ open, handleClose }) {
                   {option}
                 </MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
           </FormControl>
           <FormControl variant="standard" sx={{ mb: 2 }}>
             <InputLabel id="category-label">Category</InputLabel>
-            <Select
+            <SearchableSelect
               labelId="category-label"
               id="category"
               name="category"
@@ -97,7 +98,7 @@ function ProfitSharingForm({ open, handleClose }) {
                   {option}
                 </MenuItem>
               ))}
-            </Select>
+            </SearchableSelect>
           </FormControl>
           <MDInput
             label="Govt Share"

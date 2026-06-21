@@ -48,3 +48,28 @@ export function withCompactGroupedBarDatasets(datasets) {
     ...dataset,
   }));
 }
+
+/** Wide grouped bars — same proportions as KPI Analytics fiscal year chart. */
+export const KPI_OVERVIEW_WIDE_BAR_DATASET_DEFAULTS = {
+  skipNull: true,
+  grouped: true,
+  barThickness: "flex",
+  maxBarThickness: 1000,
+  categoryPercentage: 0.66,
+  barPercentage: 1,
+};
+
+export const KPI_OVERVIEW_WIDE_BAR_OPTIONS = {
+  datasets: {
+    bar: {
+      ...KPI_OVERVIEW_WIDE_BAR_DATASET_DEFAULTS,
+    },
+  },
+};
+
+export function withKpiOverviewWideBarDatasets(datasets) {
+  return (datasets || []).map((dataset) => ({
+    ...KPI_OVERVIEW_WIDE_BAR_DATASET_DEFAULTS,
+    ...dataset,
+  }));
+}

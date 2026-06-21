@@ -55,13 +55,58 @@ const fiscalGroupedBarCompactPlugin = {
   },
 };
 
+/** Draw vertical series name inside each fiscal bar (aligned to legend color/series). */
+const fiscalBarVerticalSeriesLabelPlugin = {
+  id: "fiscalBarVerticalSeriesLabel",
+  afterDatasetsDraw(chart) {
+    const opts = chart?.options?.plugins?.fiscalBarVerticalSeriesLabel;
+    if (!opts?.enabled) return;
+    const { ctx } = chart;
+    const minBarHeight = Number(opts.minBarHeight ?? 28);
+    const fontSize = Number(opts.fontSize ?? 10);
+    const fontWeight = opts.fontWeight ?? 700;
+    const textColor = opts.color || "#ffffff";
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const label = String(dataset?.label || "").trim();
+      if (!label) return;
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((bar, dataIndex) => {
+        const raw = dataset?.data?.[dataIndex];
+        const n = coerceChartDataValue(raw);
+        if (n == null || n === 0) return;
+
+        const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+        const barHeight = Math.abs(base - y);
+        if (barHeight < minBarHeight) return;
+        const centerY = (y + base) / 2;
+
+        ctx.save();
+        ctx.translate(x, centerY);
+        ctx.rotate(-Math.PI / 2);
+        ctx.font = `${fontWeight} ${fontSize}px Inter, Roboto, Helvetica, Arial, sans-serif`;
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowBlur = 2;
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      });
+    });
+  },
+};
+
 ChartJS.register(
   CategoryScale,
   LinearScale,
   BarElement,
   Tooltip,
   Legend,
-  fiscalGroupedBarCompactPlugin
+  fiscalGroupedBarCompactPlugin,
+  fiscalBarVerticalSeriesLabelPlugin
 );
 
 const FISCAL_CHART_COLORS = [
@@ -267,6 +312,10 @@ function FiscalKpiGrid({
           data: activePeriods.map((p) => nullIfZeroChartBarValue(fiscalRowMil(row, p.fieldKey))),
           backgroundColor: FISCAL_CHART_COLORS[idx % FISCAL_CHART_COLORS.length],
           borderRadius: 2,
+          categoryPercentage: 0.66,
+          barPercentage: 1,
+          barThickness: "flex",
+          maxBarThickness: 1000,
           yAxisID: "y",
         }))
       ),
@@ -282,10 +331,25 @@ function FiscalKpiGrid({
       indexAxis: "x",
       interaction: { mode: "index", intersect: false },
       ...COMPACT_GROUPED_BAR_OPTIONS,
+      datasets: {
+        bar: {
+          ...COMPACT_GROUPED_BAR_OPTIONS.datasets.bar,
+          categoryPercentage: 0.66,
+          barPercentage: 1,
+          maxBarThickness: 1000,
+        },
+      },
       plugins: {
         legend: {
           position: "bottom",
           labels: { color: textColor, boxWidth: 12, padding: 12, font: { size: 11 } },
+        },
+        fiscalBarVerticalSeriesLabel: {
+          enabled: true,
+          minBarHeight: 34,
+          fontSize: 9,
+          fontWeight: 700,
+          color: "#ffffff",
         },
         tooltip: {
           mode: "index",
@@ -325,7 +389,7 @@ function FiscalKpiGrid({
           ticks: { color: textColor },
           title: {
             display: hasChartData,
-            text: "Amount (M. / B.)",
+            text: "Amount (M / B)",
             color: textColor,
             font: { size: 12, weight: "600" },
           },

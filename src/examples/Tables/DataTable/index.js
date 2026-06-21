@@ -107,6 +107,68 @@ function getExportRawRowValue(tableRow, column) {
   return undefined;
 }
 
+function getGroupChildRowsForExport(orig) {
+  if (!orig) return [];
+  const children = orig.groupRows ?? orig.GroupRows;
+  return Array.isArray(children) ? children : [];
+}
+
+function isGroupParentRowForExport(orig) {
+  return Boolean(orig?.isGroupRow || orig?.IsGroupRow);
+}
+
+function isExpandedChildRowForExport(orig) {
+  return Boolean(orig?.isExpandedRow || orig?.IsExpandedRow);
+}
+
+function getGroupKeyForExport(orig) {
+  const key = orig?.groupKey ?? orig?.GroupKey;
+  return key != null ? key : null;
+}
+
+/** Append collapsed group children so Excel export matches fully expanded grid view. */
+function expandGroupChildrenForExport(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+  const result = [];
+  const childrenAddedForGroup = new Set();
+
+  rows.forEach((r) => {
+    result.push(r);
+    const orig = r?.original;
+    if (!isGroupParentRowForExport(orig)) return;
+
+    const groupKey = getGroupKeyForExport(orig);
+    const children = getGroupChildRowsForExport(orig);
+    if (children.length === 0) return;
+
+    const hasChildrenAlready = rows.some((other) => {
+      const otherOrig = other?.original;
+      return isExpandedChildRowForExport(otherOrig) && getGroupKeyForExport(otherOrig) === groupKey;
+    });
+    if (hasChildrenAlready) return;
+    if (groupKey != null && childrenAddedForGroup.has(groupKey)) return;
+    if (groupKey != null) childrenAddedForGroup.add(groupKey);
+
+    children.forEach((child) => {
+      const resolvedGroupKey = groupKey ?? getGroupKeyForExport(child);
+      result.push({
+        original: {
+          ...child,
+          isGroupRow: false,
+          IsGroupRow: false,
+          isExpandedRow: true,
+          IsExpandedRow: true,
+          groupKey: resolvedGroupKey,
+          GroupKey: resolvedGroupKey,
+        },
+      });
+    });
+  });
+
+  return result;
+}
+
 function isExportActionColumn(column) {
   const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
   const accessor = typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
@@ -658,6 +720,7 @@ function DataTable({
   exportFileName,
   exportCellFormatter,
   exportExcludeGroupParentsWhenExpanded,
+  exportIncludeAllGroupChildren,
   exportAllColumns,
   initialHiddenColumns,
   stickyToolbarAndHeader,
@@ -720,8 +783,14 @@ function DataTable({
     const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
     const accessor =
       typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
+    const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";
     return (
-      header === "actions" || header === "action" || accessor === "actions" || accessor === "action"
+      header === "actions" ||
+      header === "action" ||
+      accessor === "actions" ||
+      accessor === "action" ||
+      id === "actions" ||
+      id === "action"
     );
   }, []);
 
@@ -800,14 +869,18 @@ function DataTable({
   const data = useMemo(() => table.rows, [table.rows]);
 
   // Function to detect if a column is an "Id" column
-  const isIdColumn = useCallback((column) => {
-    const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
-    const accessor =
-      typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
-    const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";
-    // Match "id", "Id", "ID" exactly (case-insensitive after conversion)
-    return header === "id" || accessor === "id" || id === "id";
-  }, []);
+  const isIdColumn = useCallback(
+    (column) => {
+      if (isActionsColumn(column)) return false;
+      const header = typeof column?.Header === "string" ? column.Header.trim().toLowerCase() : "";
+      const accessor =
+        typeof column?.accessor === "string" ? column.accessor.trim().toLowerCase() : "";
+      const id = typeof column?.id === "string" ? column.id.trim().toLowerCase() : "";
+      // Match "id", "Id", "ID" exactly (case-insensitive after conversion)
+      return header === "id" || accessor === "id" || id === "id";
+    },
+    [isActionsColumn]
+  );
 
   // Automatically hide Id columns by default
   const autoHiddenColumns = useMemo(() => {
@@ -1060,6 +1133,9 @@ function DataTable({
 
       // Export filtered/sorted rows (not just current page)
       let exportRows = (rows || []).slice();
+      if (exportIncludeAllGroupChildren) {
+        exportRows = expandGroupChildrenForExport(exportRows);
+      }
       if (exportExcludeGroupParentsWhenExpanded) {
         const hasExpandedRows = exportRows.some((r) => Boolean(r?.original?.isExpandedRow));
         if (hasExpandedRows) {
@@ -1136,6 +1212,7 @@ function DataTable({
     hiddenColumns,
     rows,
     exportExcludeGroupParentsWhenExpanded,
+    exportIncludeAllGroupChildren,
     prepareRow,
     exportCellFormatter,
     exportFileName,
@@ -1220,10 +1297,20 @@ function DataTable({
 
   // Default page size on mount when page size is not parent-controlled
   useEffect(() => {
-    if (!isControlled && !hasControlledPageSize) {
+    if (!isControlled && !hasControlledPageSize && effectiveEntriesPerPage !== false) {
       setPageSize(defaultValue || 10);
     }
-  }, [defaultValue, isControlled, hasControlledPageSize, setPageSize]);
+  }, [defaultValue, isControlled, hasControlledPageSize, effectiveEntriesPerPage, setPageSize]);
+
+  // When entries-per-page UI is disabled, show all rows on one page.
+  useEffect(() => {
+    if (effectiveEntriesPerPage !== false || hasControlledPageSize) return;
+    const targetSize = Math.max(rows.length, 1);
+    if (currentPageSize !== targetSize) {
+      setPageSize(targetSize);
+      setInternalPageSize(targetSize);
+    }
+  }, [effectiveEntriesPerPage, hasControlledPageSize, rows.length, currentPageSize, setPageSize]);
 
   const dataLength = data?.length ?? 0;
   const prevDataLengthRef = useRef(dataLength);
@@ -1321,9 +1408,9 @@ function DataTable({
 
   useEffect(() => {
     if (typeof onVisibleRowCountChange === "function") {
-      onVisibleRowCountChange(page.length);
+      onVisibleRowCountChange(rows.length);
     }
-  }, [page, onVisibleRowCountChange]);
+  }, [rows.length, onVisibleRowCountChange]);
 
   // A function that sets the sorted value for the table
   const setSortedValue = (column) => {
@@ -2285,6 +2372,8 @@ DataTable.defaultProps = {
   paginationFooter: null,
   paginationHost: null,
   disableHeaderMetrics: false,
+  exportExcludeGroupParentsWhenExpanded: false,
+  exportIncludeAllGroupChildren: false,
 };
 
 // Typechecking props for the DataTable
@@ -2325,6 +2414,7 @@ DataTable.propTypes = {
   exportFileName: PropTypes.string,
   exportCellFormatter: PropTypes.func,
   exportExcludeGroupParentsWhenExpanded: PropTypes.bool,
+  exportIncludeAllGroupChildren: PropTypes.bool,
   exportAllColumns: PropTypes.bool,
   initialHiddenColumns: PropTypes.arrayOf(PropTypes.string),
   stickyToolbarAndHeader: PropTypes.bool,

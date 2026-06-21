@@ -17,7 +17,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Icon from "@mui/material/Icon";
 import InputAdornment from "@mui/material/InputAdornment";
 import MDTypography from "components/MDTypography";
-import api from "services/api.service";
+import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import {
   USER_APPOINT_ENTITY,
   buildAppointNameOptions,
@@ -101,6 +101,7 @@ function AddUserForm({
   const [appointManageError, setAppointManageError] = useState("");
   const [appointManageSubmitting, setAppointManageSubmitting] = useState(false);
   const [appointRemovingId, setAppointRemovingId] = useState(null);
+  const canEditAppoint = isSuperuserOrAhqSupervisorUser();
 
   const PASSWORD_POLICY_TEXT =
     "Password must be 6-12 characters long and contain at least 1 special character.";
@@ -488,6 +489,18 @@ function AddUserForm({
     );
   };
 
+  const renderAppointReadOnly = (value) => (
+    <MDInput
+      value={value || ""}
+      size="small"
+      fullWidth
+      InputProps={{ readOnly: true }}
+      sx={{
+        "& .MuiInputBase-root": { minHeight: "45px" },
+      }}
+    />
+  );
+
   const renderAppointSelect = (field, value) => (
     <MDBox display="flex" alignItems="flex-start" gap={0.5}>
       <MDInput
@@ -530,6 +543,9 @@ function AddUserForm({
       </IconButton>
     </MDBox>
   );
+
+  const renderAppointField = (field, value) =>
+    canEditAppoint ? renderAppointSelect(field, value) : renderAppointReadOnly(value);
 
   const renderLevelReadOnly = (value) => (
     <MDInput
@@ -631,7 +647,7 @@ function AddUserForm({
             <MDTypography variant="caption" fontWeight="bold">
               Appoint
             </MDTypography>
-            {renderAppointSelect("appoint", newRowDraft?.appoint)}
+            {renderAppointField("appoint", newRowDraft?.appoint)}
           </MDBox>
         </MDBox>
       </DialogContent>

@@ -46,6 +46,7 @@ import {
   canViewMenu,
   logoutEverywhere,
 } from "services/api.service";
+import { normalizeSidenavColor } from "utils/sidenavColorTheme";
 
 // Images
 import adminProfile from "assets/images/bruce-mars.PNG";
@@ -200,13 +201,29 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     });
   };
 
+  const findParentCollapseKeyForActiveRoute = (items) => {
+    for (const item of items || []) {
+      if (item?.type !== "collapse" || !Array.isArray(item.collapse)) continue;
+      if (collapseHasActiveChild(item.collapse)) return item.key;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    const parentKey = findParentCollapseKeyForActiveRoute(routes);
+    if (parentKey) {
+      setOpenCollapse(parentKey);
+    }
+  }, [location.pathname, routes]);
+
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
     allRoutes
       .filter((route) => {
         const routePath = route?.route;
-        if (!routePath) return true;
-        return canAccessPrivilegedConfigRoute(routePath);
+        if (routePath && !canAccessPrivilegedConfigRoute(routePath)) return false;
+        if (route?.name) return canViewMenu(route.name);
+        return true;
       })
       .map((route) => {
         const { type, name, icon, title, noCollapse, key, href, route: path, collapse } = route;
@@ -214,13 +231,18 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
 
         if (type === "collapse") {
           const iconNode = icon || defaultIcon;
+          const hasSubmenu = Array.isArray(collapse) && collapse.length > 0;
           const isOpen = openCollapse === key;
           const routeActive = path ? isPathActive(path) : false;
           const childActive = collapseHasActiveChild(collapse);
           const navActive = routeActive || childActive;
+          const submenuProps = {
+            hasSubmenu,
+            expanded: hasSubmenu && isOpen,
+          };
 
           const handleClick = () => {
-            if (Array.isArray(collapse)) {
+            if (hasSubmenu) {
               setOpenCollapse(isOpen ? null : key);
             }
           };
@@ -239,6 +261,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
                 active={navActive}
                 noCollapse={noCollapse}
                 onClick={handleClick}
+                {...submenuProps}
               />
             </Link>
           ) : path ? (
@@ -255,7 +278,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
                 e.preventDefault();
                 navigate(path);
                 // Handle collapse toggle if needed
-                if (Array.isArray(collapse)) {
+                if (hasSubmenu) {
                   handleClick();
                 }
               }}
@@ -266,7 +289,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
                 }
               }}
             >
-              <SidenavCollapse name={name} icon={iconNode} active={navActive} />
+              <SidenavCollapse name={name} icon={iconNode} active={navActive} {...submenuProps} />
             </Link>
           ) : (
             <SidenavCollapse
@@ -275,10 +298,11 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
               icon={iconNode}
               active={navActive || isOpen}
               onClick={handleClick}
+              {...submenuProps}
             />
           );
 
-          if (Array.isArray(collapse) && collapse.length > 0) {
+          if (hasSubmenu) {
             return (
               <MDBox key={`${key}-wrapper`}>
                 {item}
@@ -335,9 +359,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         return null;
       });
 
-  const resolvedSidenavColor = ["default", "grey", "blue"].includes(sidenavColor)
-    ? sidenavColor
-    : "default";
+  const resolvedSidenavColor = normalizeSidenavColor(sidenavColor);
 
   return (
     <SidenavRoot
@@ -541,17 +563,19 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
             )}
           </MDBox>
 
-          <IconButton
-            size="small"
-            onClick={handleConfiguratorOpen}
-            sx={{
-              color: "#ffffff !important",
-              flexShrink: 0,
-            }}
-            title="Settings"
-          >
-            <Icon>settings</Icon>
-          </IconButton>
+          {!miniSidenav ? (
+            <IconButton
+              size="small"
+              onClick={handleConfiguratorOpen}
+              sx={{
+                color: "#ffffff !important",
+                flexShrink: 0,
+              }}
+              title="Settings"
+            >
+              <Icon>settings</Icon>
+            </IconButton>
+          ) : null}
 
           <Menu
             anchorEl={openUserMenu}

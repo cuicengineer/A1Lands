@@ -11,21 +11,27 @@ import MDInput from "components/MDInput";
 import MDTypography from "components/MDTypography";
 import Icon from "@mui/material/Icon";
 import Autocomplete from "@mui/material/Autocomplete";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import Chip from "@mui/material/Chip";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
 import api from "../../../../src/services/api.service";
 import uploadApi from "services/api.upload.service";
 import CurrencyLoading from "components/CurrencyLoading";
 import {
   buildRentalPropertyPId,
+  getBasePrefix,
+  getClassSuffix,
+  getRacPrefix,
   isValidPropertyNumber,
   parsePropertyNumberFromPId,
   sanitizePropertyNumberInput,
 } from "./rentalPropertyId";
+import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 
 function getClassUoM(classRow) {
   if (!classRow) return "";
@@ -35,6 +41,7 @@ function getClassUoM(classRow) {
 function RentalPropertyForm({
   open,
   onClose,
+  onSuccess,
   onSubmit,
   initialData,
   onUploadSuccess,
@@ -44,6 +51,7 @@ function RentalPropertyForm({
 
   // Match "New Property Grouping" form styling (compact, simple, consistent)
   const MENU_PROPS = {
+    disablePortal: true,
     PaperProps: {
       style: { maxHeight: 300 },
     },
@@ -387,6 +395,10 @@ function RentalPropertyForm({
         return;
       }
       if (key === "pId") {
+        if (isEmpty(form?.classId)) {
+          next.pId = "Select Class to generate Property ID";
+          return;
+        }
         if (isEmpty(form?.pId)) {
           next.pId = "Property ID could not be generated. Check RAC, Base, Class, and Property No.";
         }
@@ -502,8 +514,6 @@ function RentalPropertyForm({
           onUploadSuccess();
         }
         setSelectedFiles([]);
-        // Refresh existing files list
-        await fetchExistingFiles(recordId);
       } catch (error) {
         console.error("Error uploading files:", error);
         alert(`Failed to upload files: ${error.message}`);
@@ -511,6 +521,8 @@ function RentalPropertyForm({
         setIsUploading(false);
       }
     }
+
+    onSuccess?.();
   };
 
   const topFields = [
@@ -535,6 +547,29 @@ function RentalPropertyForm({
   ];
 
   const propertyRowGrid = { xs: 6, sm: 3 };
+  const propertyNoGrid = { xs: 12, sm: 6 };
+
+  const selectedBase = bases.find((b) => Number(b.id) === Number(form.baseId));
+  const selectedCommand = commands.find((c) => Number(c.id) === Number(form.cmdId));
+  const selectedClass = classes.find((c) => Number(c.id) === Number(form.classId));
+  const basePrefix = getBasePrefix(selectedBase);
+  const racPrefix = getRacPrefix(selectedCommand);
+  const prefix = basePrefix || racPrefix;
+  const classSuffix = getClassSuffix(selectedClass);
+  const propertyIdPrefixAdornment = prefix ? `${prefix}-` : "";
+  const propertyIdSuffixAdornment =
+    form.classId && classSuffix ? (basePrefix ? classSuffix : `-${classSuffix}`) : "";
+  const propertyNoHasError = Boolean(errors.propertyNumber || errors.pId);
+  const propertyNoHelperText =
+    errors.propertyNumber ||
+    errors.pId ||
+    (form.pId
+      ? `Property ID: ${form.pId}`
+      : form.classId
+      ? prefix
+        ? "Enter property number (1–999)"
+        : "Select RAC and Base to build Property ID"
+      : "Select Class to generate Property ID");
 
   const renderField = (f) => (
     <Grid item {...(f.grid || { xs: 12, sm: 4 })} key={f.key}>
@@ -544,9 +579,12 @@ function RentalPropertyForm({
             size="small"
             fullWidth
             disableClearable
+            disablePortal
             disabled={lockedBaseId != null}
             options={f.key === "cmdId" ? commands : bases}
-            getOptionLabel={(option) => option?.name ?? ""}
+            getOptionLabel={(option) =>
+              f.key === "baseId" ? getBaseDropdownLabel(option) : option?.name ?? ""
+            }
             isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
             value={
               f.key === "cmdId"
@@ -585,7 +623,7 @@ function RentalPropertyForm({
             sx={formControlSx}
           >
             <InputLabel sx={labelSx}>{f.label}</InputLabel>
-            <Select
+            <SearchableSelect
               value={form[f.key] ?? ""}
               label={f.label}
               onChange={(e) => handleChange(f.key, e.target.value)}
@@ -602,7 +640,7 @@ function RentalPropertyForm({
                   </MenuItem>
                 );
               })}
-            </Select>
+            </SearchableSelect>
             {errors[f.key] && <FormHelperText>{errors[f.key]}</FormHelperText>}
           </FormControl>
         )
@@ -629,14 +667,22 @@ function RentalPropertyForm({
   );
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="lg"
+      disableRestoreFocus
+      disableEnforceFocus
+      disableScrollLock
+    >
       <DialogTitle>{initialData ? "Edit Rental Property" : "Add Rental Property"}</DialogTitle>
       <DialogContent>
         <Grid container spacing={2} mt={0.5}>
           {topFields.map(renderField)}
 
-          <Grid item {...propertyRowGrid}>
-            <MDInput
+          <Grid item {...propertyNoGrid}>
+            <TextField
               label="Property No."
               type="text"
               value={form.propertyNumber}
@@ -644,25 +690,25 @@ function RentalPropertyForm({
               fullWidth
               size="small"
               required={isAddMode}
-              error={Boolean(errors.propertyNumber)}
-              helperText={errors.propertyNumber}
+              error={propertyNoHasError}
+              helperText={propertyNoHelperText}
               inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 3 }}
-              sx={inputSx}
-            />
-          </Grid>
-
-          <Grid item {...propertyRowGrid}>
-            <MDInput
-              label="Property ID"
-              type="text"
-              value={form.pId || ""}
-              fullWidth
-              size="small"
-              required={isAddMode}
-              error={Boolean(errors.pId)}
-              helperText={errors.pId}
-              InputProps={{ readOnly: true }}
-              sx={inputSx}
+              sx={{
+                ...inputSx,
+                "& .MuiInputBase-root": { minHeight: "45px" },
+              }}
+              InputProps={{
+                startAdornment: propertyIdPrefixAdornment ? (
+                  <InputAdornment position="start" sx={{ mr: 0.5 }}>
+                    {propertyIdPrefixAdornment}
+                  </InputAdornment>
+                ) : undefined,
+                endAdornment: propertyIdSuffixAdornment ? (
+                  <InputAdornment position="end" sx={{ ml: 0.5 }}>
+                    {propertyIdSuffixAdornment}
+                  </InputAdornment>
+                ) : undefined,
+              }}
             />
           </Grid>
 
@@ -885,6 +931,7 @@ function RentalPropertyForm({
 RentalPropertyForm.propTypes = {
   open: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
+  onSuccess: PropTypes.func,
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
   onUploadSuccess: PropTypes.func,

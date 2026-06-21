@@ -6,7 +6,8 @@ import DialogActions from "@mui/material/DialogActions";
 import MDButton from "components/MDButton";
 import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
-import { Grid, Input, Select, MenuItem, FormControl, InputLabel } from "@mui/material";
+import { Grid, Input, MenuItem, FormControl, InputLabel } from "@mui/material";
+import SearchableSelect from "components/SearchableSelect";
 
 import PropTypes from "prop-types";
 
@@ -109,7 +110,7 @@ function NewContractForm({ open, handleClose }) {
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="class-label">Class</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="class-label"
                   id="class-select"
                   value={contractData.class}
@@ -120,13 +121,13 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="Class A">Class A</MenuItem>
                   <MenuItem value="Class B">Class B</MenuItem>
                   <MenuItem value="Class C">Class C</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="cmd-label">Cmd</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="cmd-label"
                   id="cmd-select"
                   value={contractData.cmd}
@@ -137,13 +138,13 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="CMD001">CMD001</MenuItem>
                   <MenuItem value="CMD002">CMD002</MenuItem>
                   <MenuItem value="CMD003">CMD003</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="unit-label">Unit</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="unit-label"
                   id="unit-select"
                   value={contractData.unit}
@@ -154,7 +155,7 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="Unit 1">Unit 1</MenuItem>
                   <MenuItem value="Unit 2">Unit 2</MenuItem>
                   <MenuItem value="Unit 3">Unit 3</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -200,7 +201,7 @@ function NewContractForm({ open, handleClose }) {
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="nature-of-business-label">Nature of Business</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="nature-of-business-label"
                   id="nature-of-business-select"
                   value={contractData.natureOfBusiness}
@@ -211,7 +212,7 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="Nature A">Nature A</MenuItem>
                   <MenuItem value="Nature B">Nature B</MenuItem>
                   <MenuItem value="Nature C">Nature C</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -227,7 +228,7 @@ function NewContractForm({ open, handleClose }) {
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="gp-id-label">GP ID</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="gp-id-label"
                   id="gp-id-select"
                   value={contractData.gpId}
@@ -238,7 +239,7 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="GPID001">GPID001</MenuItem>
                   <MenuItem value="GPID002">GPID002</MenuItem>
                   <MenuItem value="GPID003">GPID003</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -492,7 +493,7 @@ function NewContractForm({ open, handleClose }) {
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth>
                 <InputLabel id="approving-authority-label">Approving Authority</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="approving-authority-label"
                   id="approving-authority-select"
                   value={contractData.approvingAuthority}
@@ -503,7 +504,7 @@ function NewContractForm({ open, handleClose }) {
                   <MenuItem value="Authority A">Authority A</MenuItem>
                   <MenuItem value="Authority B">Authority B</MenuItem>
                   <MenuItem value="Authority C">Authority C</MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>

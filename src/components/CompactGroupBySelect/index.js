@@ -11,6 +11,8 @@ import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import Icon from "@mui/material/Icon";
+import TextField from "@mui/material/TextField";
+import MDBox from "components/MDBox";
 
 const COMPACT_GROUP_BY_POPOVER_PAPER_SX = {
   mt: 0.5,
@@ -46,6 +48,13 @@ function formatGroupBySummary(selectedOptions) {
 
 function CompactGroupBySelect({ options, value, onChange, summaryMode }) {
   const [anchorEl, setAnchorEl] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const filteredOptions = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return options;
+    return options.filter((opt) => opt.label.toLowerCase().includes(term));
+  }, [options, searchTerm]);
 
   const selectedOptions = useMemo(
     () => options.filter((opt) => value.includes(opt.value)),
@@ -103,7 +112,10 @@ function CompactGroupBySelect({ options, value, onChange, summaryMode }) {
       <Popover
         open={Boolean(anchorEl)}
         anchorEl={anchorEl}
-        onClose={() => setAnchorEl(null)}
+        onClose={() => {
+          setAnchorEl(null);
+          setSearchTerm("");
+        }}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         transformOrigin={{ vertical: "top", horizontal: "left" }}
         PaperProps={{
@@ -111,7 +123,31 @@ function CompactGroupBySelect({ options, value, onChange, summaryMode }) {
           sx: COMPACT_GROUP_BY_POPOVER_PAPER_SX,
         }}
       >
-        {options.map((opt) => {
+        {options.length >= 2 ? (
+          <MDBox
+            sx={{
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+              bgcolor: "background.paper",
+              p: 1,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            <TextField
+              size="small"
+              placeholder="Search..."
+              fullWidth
+              autoFocus
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            />
+          </MDBox>
+        ) : null}
+        {filteredOptions.map((opt) => {
           const checked = value.includes(opt.value);
           return (
             <MenuItem

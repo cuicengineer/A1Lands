@@ -16,7 +16,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -24,18 +24,25 @@ import InputAdornment from "@mui/material/InputAdornment";
 import Autocomplete from "@mui/material/Autocomplete";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
-import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
+import IncomeAgreementsModuleTabs from "layouts/income-agreements/components/IncomeAgreementsModuleTabs";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
 import CompactGroupBySelect from "components/CompactGroupBySelect";
 import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
-import api from "services/api.service";
+import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import accountingSysApi from "services/api.accountingsys.service";
+import AgreementDetailsDialog from "layouts/contracts/components/AgreementDetailsDialog";
+import {
+  AGREEMENT_DETAILS_COLUMNS,
+  fetchNormalizedContractRiseTerms,
+  resolveAgreementContract,
+} from "utils/agreementDetailsSupport";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
 import { format, parseISO, isValid, addDays, addMonths, addYears } from "date-fns";
+import { useNavigate } from "react-router-dom";
 
 const AGREEMENT_PROV_GRID_DATE_FALLBACK_KEYS = {
   contractStartDate: ["contractStartDate", "ContractStartDate"],
@@ -76,7 +83,7 @@ function pickScheduleRowIsFinalized(rowData) {
   return false;
 }
 
-/** Grid row flags: blur + disabled styling when invoice is locked (IsLocked = 1). */
+/** Grid row flags: dimmed disabled styling when invoice is locked (IsLocked = 1). */
 function agreementProvGridRowLockFlags(row) {
   const locked =
     row &&
@@ -261,7 +268,7 @@ function AgreementProvDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -271,7 +278,7 @@ function AgreementProvDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -347,22 +354,23 @@ function readAgreementProvInvoiceUrlParams() {
       return {
         contractNo: String(params.get("contractNo") || "").trim(),
         invoiceNo: String(params.get("invoiceNo") || "").trim(),
+        tenantNo: String(params.get("tenantNo") || "").trim(),
       };
     } catch {
-      return { contractNo: "", invoiceNo: "" };
+      return { contractNo: "", invoiceNo: "", tenantNo: "" };
     }
   };
 
-  if (typeof window === "undefined") return { contractNo: "", invoiceNo: "" };
+  if (typeof window === "undefined") return { contractNo: "", invoiceNo: "", tenantNo: "" };
 
   const fromSearch = readFromSearch(window.location?.search || "");
-  if (fromSearch.contractNo || fromSearch.invoiceNo) return fromSearch;
+  if (fromSearch.contractNo || fromSearch.invoiceNo || fromSearch.tenantNo) return fromSearch;
 
   const hash = String(window.location?.hash || "");
   const queryIndex = hash.indexOf("?");
   if (queryIndex >= 0) return readFromSearch(hash.slice(queryIndex));
 
-  return { contractNo: "", invoiceNo: "" };
+  return { contractNo: "", invoiceNo: "", tenantNo: "" };
 }
 
 const EMPTY_AGREEMENT_PROV_FILTERS = {
@@ -526,17 +534,24 @@ function filterAgreementProvScheduleRows(
   return data;
 }
 
-function openContractsFormInNewTab(contractNo) {
-  const c = String(contractNo || "").trim();
-  if (!c || c === "-") return;
-  window.open(`/contracts?contractNo=${encodeURIComponent(c)}&viewDetails=1`, "_blank");
-}
-
 const EDIT_INVOICE_LINES_TABLE_COLUMNS = [
-  { label: "Order", pascal: "SortOrder", camel: "sortOrder", numeric: true, align: "right" },
-  { label: "Sub Invoice", pascal: "SubInvoiceNo", camel: "subInvoiceNo", align: "left" },
+  {
+    label: "Order",
+    pascal: "SortOrder",
+    camel: "sortOrder",
+    numeric: true,
+    align: "right",
+    compact: true,
+  },
+  {
+    label: "Sub Invoice",
+    pascal: "SubInvoiceNo",
+    camel: "subInvoiceNo",
+    align: "left",
+    compact: true,
+  },
   { label: "Item with Code", pascal: "ItemwithCode", camel: "itemwithCode", align: "left" },
-  { label: "Desc", pascal: "Description", camel: "description", align: "left" },
+  { label: "Particular", pascal: "Description", camel: "description", align: "left", wide: true },
   { label: "Acc Head", pascal: "AccHead", camel: "accHead", align: "left" },
   { label: "Quantity", pascal: "Months", camel: "months", numeric: true, align: "right" },
   {
@@ -551,7 +566,7 @@ const EDIT_INVOICE_LINES_TABLE_COLUMNS = [
 ];
 
 const INVOICE_LINES_DATA_GRID_COLUMNS =
-  "minmax(52px, 0.65fr) minmax(72px, 0.85fr) minmax(88px, 1fr) minmax(96px, 1.1fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(88px, 0.95fr)";
+  "minmax(36px, 0.38fr) minmax(52px, 0.48fr) minmax(88px, 1fr) minmax(128px, 2.5fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(88px, 0.95fr)";
 
 const INVOICE_LINES_GRID_COLUMNS = `${INVOICE_LINES_DATA_GRID_COLUMNS} 150px`;
 
@@ -580,6 +595,96 @@ function pickAgreementProvHeaderDescription(row) {
   ).trim();
 }
 
+/** Contract-level field from schedule header row (parent grid row), then optional fallback row. */
+function pickAgreementProvScheduleHeaderField(headerRow, fallbackRow, pascalKey, camelKey) {
+  for (const row of [headerRow, fallbackRow]) {
+    if (!row) continue;
+    const v = pickScheduleRowField(row, pascalKey, camelKey);
+    if (v !== "" && v !== null && v !== undefined) return v;
+  }
+  return "";
+}
+
+function mergeAgreementProvEditFormContractHeaderFields(form, headerRow, fallbackRow) {
+  const f = form || {};
+  const initialRentPM = pickAgreementProvScheduleHeaderField(
+    headerRow,
+    fallbackRow,
+    "InitialRentPM",
+    "initialRentPM"
+  );
+  const initialRentPA = pickAgreementProvScheduleHeaderField(
+    headerRow,
+    fallbackRow,
+    "InitialRentPA",
+    "initialRentPA"
+  );
+  const securityDepositAmount = pickAgreementProvScheduleHeaderField(
+    headerRow,
+    fallbackRow,
+    "SecurityDepositAmount",
+    "securityDepositAmount"
+  );
+
+  return {
+    ...f,
+    initialRentPM: initialRentPM !== "" ? initialRentPM : f.initialRentPM,
+    initialRentPA: initialRentPA !== "" ? initialRentPA : f.initialRentPA,
+    securityDepositAmount:
+      securityDepositAmount !== "" ? securityDepositAmount : f.securityDepositAmount,
+  };
+}
+
+function enrichAgreementProvRowWithContractHeaderFields(rowData, scheduleRows) {
+  if (!rowData) return rowData;
+  const contractNo = scheduleRowContractNo(rowData);
+  if (!contractNo) return rowData;
+
+  let initialRentPM = pickScheduleRowField(rowData, "InitialRentPM", "initialRentPM");
+  let initialRentPA = pickScheduleRowField(rowData, "InitialRentPA", "initialRentPA");
+  let securityDepositAmount = pickScheduleRowField(
+    rowData,
+    "SecurityDepositAmount",
+    "securityDepositAmount"
+  );
+
+  if (
+    (initialRentPM === "" || initialRentPA === "" || securityDepositAmount === "") &&
+    Array.isArray(scheduleRows)
+  ) {
+    for (const row of scheduleRows) {
+      if (row?.isGroupRow || row?.IsGroupRow) continue;
+      if (scheduleRowContractNo(row).toLowerCase() !== contractNo.toLowerCase()) continue;
+      if (initialRentPM === "") {
+        initialRentPM =
+          pickScheduleRowField(row, "InitialRentPM", "initialRentPM") || initialRentPM;
+      }
+      if (initialRentPA === "") {
+        initialRentPA =
+          pickScheduleRowField(row, "InitialRentPA", "initialRentPA") || initialRentPA;
+      }
+      if (securityDepositAmount === "") {
+        securityDepositAmount =
+          pickScheduleRowField(row, "SecurityDepositAmount", "securityDepositAmount") ||
+          securityDepositAmount;
+      }
+      if (initialRentPM !== "" && initialRentPA !== "" && securityDepositAmount !== "") break;
+    }
+  }
+
+  return {
+    ...rowData,
+    InitialRentPM: initialRentPM !== "" ? initialRentPM : rowData.InitialRentPM,
+    initialRentPM: initialRentPM !== "" ? initialRentPM : rowData.initialRentPM,
+    InitialRentPA: initialRentPA !== "" ? initialRentPA : rowData.InitialRentPA,
+    initialRentPA: initialRentPA !== "" ? initialRentPA : rowData.initialRentPA,
+    SecurityDepositAmount:
+      securityDepositAmount !== "" ? securityDepositAmount : rowData.SecurityDepositAmount,
+    securityDepositAmount:
+      securityDepositAmount !== "" ? securityDepositAmount : rowData.securityDepositAmount,
+  };
+}
+
 function applyInvoiceLinesToForm(parentRow, lines, prevForm = {}) {
   const mainRow = findMainInvoiceScheduleRow(lines);
   const sourceRow = mainRow || parentRow || {};
@@ -588,36 +693,40 @@ function applyInvoiceLinesToForm(parentRow, lines, prevForm = {}) {
     pickAgreementProvHeaderDescription(parentRow) || pickAgreementProvHeaderDescription(mainRow);
   const keptDescription = String(prevForm.description ?? "").trim();
 
-  return {
-    ...fromSource,
-    ...prevForm,
-    contractNo:
-      prevForm.contractNo ||
-      fromSource.contractNo ||
-      String(pickScheduleRowField(sourceRow, "ContractNo", "contractNo") || ""),
-    invoiceNo:
-      prevForm.invoiceNo ||
-      fromSource.invoiceNo ||
-      String(pickScheduleRowField(sourceRow, "InvoiceNo", "invoiceNo") || ""),
-    cod: pickScheduleCodDate(parentRow) || pickScheduleCodDate(sourceRow) || prevForm.cod || "",
-    description: keptDescription !== "" ? keptDescription : headerDescription,
-    cmdName:
-      prevForm.cmdName ||
-      fromSource.cmdName ||
-      String(pickScheduleRowField(parentRow, "CmdName", "cmdName") || ""),
-    baseName:
-      prevForm.baseName ||
-      fromSource.baseName ||
-      String(pickScheduleRowField(parentRow, "BaseName", "baseName") || ""),
-    daysToDue:
-      prevForm.daysToDue ??
-      fromSource.daysToDue ??
-      pickScheduleRowField(parentRow, "DaysToDue", "daysToDue"),
-    daysOverdue:
-      prevForm.daysOverdue ??
-      fromSource.daysOverdue ??
-      pickScheduleRowField(parentRow, "DaysOverdue", "daysOverdue"),
-  };
+  return mergeAgreementProvEditFormContractHeaderFields(
+    {
+      ...fromSource,
+      ...prevForm,
+      contractNo:
+        prevForm.contractNo ||
+        fromSource.contractNo ||
+        String(pickScheduleRowField(sourceRow, "ContractNo", "contractNo") || ""),
+      invoiceNo:
+        prevForm.invoiceNo ||
+        fromSource.invoiceNo ||
+        String(pickScheduleRowField(sourceRow, "InvoiceNo", "invoiceNo") || ""),
+      cod: pickScheduleCodDate(parentRow) || pickScheduleCodDate(sourceRow) || prevForm.cod || "",
+      description: keptDescription !== "" ? keptDescription : headerDescription,
+      cmdName:
+        prevForm.cmdName ||
+        fromSource.cmdName ||
+        String(pickScheduleRowField(parentRow, "CmdName", "cmdName") || ""),
+      baseName:
+        prevForm.baseName ||
+        fromSource.baseName ||
+        String(pickScheduleRowField(parentRow, "BaseName", "baseName") || ""),
+      daysToDue:
+        prevForm.daysToDue ??
+        fromSource.daysToDue ??
+        pickScheduleRowField(parentRow, "DaysToDue", "daysToDue"),
+      daysOverdue:
+        prevForm.daysOverdue ??
+        fromSource.daysOverdue ??
+        pickScheduleRowField(parentRow, "DaysOverdue", "daysOverdue"),
+    },
+    parentRow,
+    mainRow
+  );
 }
 
 function pickInvoiceLineSortOrder(row) {
@@ -822,7 +931,7 @@ function validateInvoiceLineDraftForm(draftForm, parentForm) {
     return "Item with Code is required.";
   }
   if (!isInvoiceLineDraftFieldFilled(draftForm?.desc)) {
-    return "Description is required.";
+    return "Particular is required.";
   }
   if (!isInvoiceLineDraftFieldFilled(draftForm?.accHead)) {
     return "Acc Head is required.";
@@ -1249,12 +1358,14 @@ function AgreementProvInvoiceLineDraftRow({
         "& > *": { borderBottom: "1px solid rgba(0,0,0,0.08)" },
       }}
     >
-      <MDBox sx={{ ...bodyCellSx, textAlign: "right", fontWeight: 600 }}>
+      <MDBox sx={{ ...bodyCellSx, px: 0.5, py: 0.5, textAlign: "right", fontWeight: 600 }}>
         {draftForm.sortOrder || "1"}
       </MDBox>
       <MDBox
         sx={{
           ...bodyCellSx,
+          px: 0.5,
+          py: 0.5,
           textAlign: "left",
           fontWeight: 600,
           color: subLabel !== "—" ? "text.primary" : "text.secondary",
@@ -1278,7 +1389,7 @@ function AgreementProvInvoiceLineDraftRow({
           onChange={onDraftFieldChange("desc")}
           fullWidth
           size="small"
-          placeholder="Desc"
+          placeholder="Particular"
           sx={invoiceLineDraftInputSx}
         />
       </MDBox>
@@ -1453,6 +1564,17 @@ function AgreementProvInvoiceLinesGrid({
     borderBottom: "1px solid rgba(0,0,0,0.06)",
   };
 
+  const getInvoiceLineColumnCellSx = (col, variant = "body") => {
+    const base = variant === "header" ? headerCellSx : bodyCellSx;
+    return {
+      ...base,
+      textAlign: col.align === "right" ? "right" : "left",
+      ...(col.compact ? { px: 0.5, py: 0.5 } : {}),
+      ...(col.wide ? { minWidth: 0 } : {}),
+      ...(col.numeric && variant === "body" ? { fontVariantNumeric: "tabular-nums" } : {}),
+    };
+  };
+
   if (loading) {
     return (
       <MDBox display="flex" justifyContent="center" py={3}>
@@ -1488,13 +1610,7 @@ function AgreementProvInvoiceLinesGrid({
     >
       <MDBox sx={gridRowSx}>
         {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
-          <MDBox
-            key={col.camel}
-            sx={{
-              ...headerCellSx,
-              textAlign: col.align === "right" ? "right" : "left",
-            }}
-          >
+          <MDBox key={col.camel} sx={getInvoiceLineColumnCellSx(col, "header")}>
             {col.label}
           </MDBox>
         ))}
@@ -1563,18 +1679,11 @@ function AgreementProvInvoiceLinesGrid({
                 }}
               >
                 {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
-                  <MDBox
-                    key={col.camel}
-                    sx={{
-                      ...bodyCellSx,
-                      textAlign: col.align === "right" ? "right" : "left",
-                      fontVariantNumeric: col.numeric ? "tabular-nums" : undefined,
-                    }}
-                  >
+                  <MDBox key={col.camel} sx={getInvoiceLineColumnCellSx(col, "body")}>
                     {col.camel === "description" ? (
                       <AgreementProvLongTextCell
                         compact
-                        maxVisibleChars={15}
+                        maxVisibleChars={30}
                         value={
                           pickScheduleRowField(lineRow, "Description", "description") ||
                           pickScheduleRowField(lineRow, "Desc", "desc")
@@ -1893,17 +2002,72 @@ function normalizeAgreementProvInvoiceStatusKey(raw) {
     .replace(/\s+/g, " ");
 }
 
-function agreementProvInvoiceStatusBadgePalette(raw) {
+const AGREEMENT_PROV_INVOICE_STATUS_PALETTES = {
+  unpaid: { bg: "#f8d7da", fg: "#721c24", outline: "#f5c6cb" },
+  "full paid": { bg: "#d4edda", fg: "#155724", outline: "#c3e6cb" },
+  "partial paid": { bg: "#cfe2ff", fg: "#084298", outline: "#b6d4fe" },
+  "over paid": { bg: "#ffe0b2", fg: "#e65100", outline: "#ffcc80" },
+  "over due": { bg: "#f8d7da", fg: "#721c24", outline: "#f5c6cb" },
+  "coming due": { bg: "#fff9c4", fg: "#f57f17", outline: "#fff59d" },
+};
+
+function resolveAgreementProvInvoiceStatusKey(raw) {
   const key = normalizeAgreementProvInvoiceStatusKey(raw);
-  if (!key) return null;
-  if (key === "paid" || key === "full paid")
-    return { bg: "#d4edda", fg: "#155724", outline: "#c3e6cb" };
-  if (key === "unpaid") return { bg: "#f8d7da", fg: "#721c24", outline: "#f5c6cb" };
-  if (key === "partial" || key === "partial paid")
-    return { bg: "#ffe0b2", fg: "#e65100", outline: "#ffcc80" };
-  if (key === "coming due") return { bg: "#fff9c4", fg: "#f57f17", outline: "#fff59d" };
-  if (key === "overdue") return { bg: "#ffe0b2", fg: "#e65100", outline: "#ffcc80" };
-  return null;
+  if (!key) return "";
+  if (key === "paid") return "full paid";
+  if (key === "partial") return "partial paid";
+  if (key === "overdue") return "over due";
+  if (key === "overpaid") return "over paid";
+  return key;
+}
+
+function agreementProvInvoiceStatusBadgePalette(raw) {
+  const key = resolveAgreementProvInvoiceStatusKey(raw);
+  return AGREEMENT_PROV_INVOICE_STATUS_PALETTES[key] || null;
+}
+
+/** Single-word label for PDF invoice status watermark. */
+function getAgreementProvPdfInvoiceStatusWatermarkWord(raw) {
+  const key = resolveAgreementProvInvoiceStatusKey(raw);
+  if (!key) return "";
+  const words = {
+    unpaid: "Unpaid",
+    "full paid": "FullPaid",
+    "partial paid": "PartialPaid",
+    "over paid": "OverPaid",
+    "over due": "OverDue",
+    "coming due": "ComingDue",
+  };
+  return words[key] || "";
+}
+
+function drawAgreementProvPdfInvoiceStatusWatermark(doc, statusWord, pageWidth, pageHeight) {
+  const text = String(statusWord || "").trim();
+  if (!text) return;
+
+  const centerX = pageWidth / 2;
+  const centerY = pageHeight / 2;
+
+  doc.saveGraphicsState();
+  try {
+    if (typeof doc.GState === "function") {
+      doc.setGState(new doc.GState({ opacity: 0.5 }));
+    }
+  } catch {
+    // GState may be unavailable in some environments.
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(64);
+  doc.setTextColor(160, 160, 160);
+  doc.text(text, centerX, centerY, {
+    align: "center",
+    baseline: "middle",
+    angle: 45,
+  });
+
+  doc.restoreGraphicsState();
+  doc.setTextColor(0, 0, 0);
 }
 
 function pickScheduleCodDate(row) {
@@ -2086,7 +2250,11 @@ const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
   bottomIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
   leftIn: AGREEMENT_PROV_PDF_MARGIN_LEFT_IN,
   rightIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
+  contentScale: 1,
 };
+const AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN = 0.5;
+const AGREEMENT_PROV_PDF_CONTENT_SCALE_MAX = 1.5;
+const AGREEMENT_PROV_PDF_CONTENT_SCALE_STEP = 0.05;
 const AGREEMENT_PROV_PDF_FONT_TITLE = 18;
 const AGREEMENT_PROV_PDF_FONT_BODY = 10;
 const AGREEMENT_PROV_PDF_LINE_HEIGHT_MM = 5;
@@ -2094,6 +2262,41 @@ const AGREEMENT_PROV_PDF_LINE_HEIGHT_MM = 5;
 function agreementProvInchesToMm(inches) {
   const n = Number(inches);
   return Number.isFinite(n) ? n * 25.4 : 0;
+}
+
+function normalizeAgreementProvPdfContentScale(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return AGREEMENT_PROV_PDF_DEFAULT_MARGINS.contentScale;
+  const clamped = Math.min(
+    AGREEMENT_PROV_PDF_CONTENT_SCALE_MAX,
+    Math.max(AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN, n)
+  );
+  return Math.round(clamped * 100) / 100;
+}
+
+function formatAgreementProvPdfContentScalePercent(contentScale) {
+  return `${Math.round(normalizeAgreementProvPdfContentScale(contentScale) * 100)}%`;
+}
+
+function createAgreementProvPdfScaleHelpers({
+  contentScale,
+  marginLeft,
+  marginTop,
+  pageHeight,
+  marginBottom,
+}) {
+  const scale = normalizeAgreementProvPdfContentScale(contentScale);
+  const scaleFromOrigin = (value, origin) => origin + (value - origin) * scale;
+
+  return {
+    contentScale: scale,
+    sx: (x) => scaleFromOrigin(x, marginLeft),
+    sy: (y) => scaleFromOrigin(y, marginTop),
+    sf: (pt) => pt * scale,
+    sc: (mm) => mm * scale,
+    logicalPageBottomY: marginTop + (pageHeight - marginBottom - marginTop) / scale,
+    logicalPageBottomReserve: 20 / scale,
+  };
 }
 
 function agreementProvPdfMarginsInchesToMm(marginsIn) {
@@ -2115,6 +2318,7 @@ function loadAgreementProvPdfMargins() {
       bottomIn: Number(parsed?.bottomIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.bottomIn,
       leftIn: Number(parsed?.leftIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.leftIn,
       rightIn: Number(parsed?.rightIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.rightIn,
+      contentScale: normalizeAgreementProvPdfContentScale(parsed?.contentScale),
     };
   } catch {
     return { ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS };
@@ -2123,7 +2327,16 @@ function loadAgreementProvPdfMargins() {
 
 function saveAgreementProvPdfMargins(margins) {
   try {
-    localStorage.setItem(AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY, JSON.stringify(margins));
+    localStorage.setItem(
+      AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY,
+      JSON.stringify({
+        topIn: Number(margins?.topIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.topIn,
+        bottomIn: Number(margins?.bottomIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.bottomIn,
+        leftIn: Number(margins?.leftIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.leftIn,
+        rightIn: Number(margins?.rightIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.rightIn,
+        contentScale: normalizeAgreementProvPdfContentScale(margins?.contentScale),
+      })
+    );
   } catch {
     // ignore storage errors
   }
@@ -2146,6 +2359,37 @@ function formatPdfCurrency(value) {
   if (value === null || value === undefined || value === "") return "0";
   const n = Number(value);
   return Number.isFinite(n) ? n.toLocaleString("en-US") : String(value);
+}
+
+const AGREEMENT_PROV_PDF_VALUE_UNDERLINE_GAP_MM = 0.75;
+
+function getPdfRowCenteredBaselineY(rowTop, rowBandHeight, textHeight) {
+  return rowTop + (rowBandHeight + textHeight) / 2 - textHeight * 0.12;
+}
+
+/** Place underline slightly below the rendered text baseline (not through glyph bottoms). */
+function getPdfValueUnderlineY(baselineY, textHeight, scaleLength = (mm) => mm) {
+  return baselineY + textHeight * 0.32 + scaleLength(AGREEMENT_PROV_PDF_VALUE_UNDERLINE_GAP_MM);
+}
+
+function resolveSingleLinePdfFontSize(
+  doc,
+  text,
+  maxWidth,
+  startSize,
+  minSize,
+  fontStyle = "normal"
+) {
+  let size = startSize;
+  const value = String(text ?? "");
+  doc.setFont("helvetica", fontStyle);
+  while (size > minSize) {
+    doc.setFontSize(size);
+    if (doc.getTextWidth(value) <= maxWidth) return size;
+    size -= 0.5;
+  }
+  doc.setFontSize(minSize);
+  return minSize;
 }
 
 function unwrapAccountingSysList(response) {
@@ -2405,10 +2649,38 @@ function getAgreementProvSaveErrorMessage(error) {
   return rawMessage || "Failed to save invoice schedule. Please try again.";
 }
 
-const EDIT_BASIC_INFO_ROW_SX = {
-  display: "grid",
-  gap: 1.25,
-  alignItems: "start",
+const EDIT_INVOICE_HEADER_ROW_SX = {
+  display: "flex",
+  flexWrap: { xs: "wrap", lg: "nowrap" },
+  gap: { xs: 1.25, lg: 1 },
+  mt: 0.75,
+  alignItems: "flex-start",
+  width: "100%",
+};
+
+const EDIT_INVOICE_HEADER_COMPACT_GROUP_SX = {
+  display: "flex",
+  flexWrap: { xs: "wrap", sm: "nowrap" },
+  gap: 0.75,
+  flexShrink: 0,
+  alignItems: "flex-start",
+};
+
+const EDIT_INVOICE_HEADER_INVOICE_NO_SX = {
+  flex: "0 0 auto",
+  width: { xs: "100%", sm: 128 },
+  maxWidth: { sm: 128 },
+};
+
+const EDIT_INVOICE_HEADER_DATE_SX = {
+  flex: "0 0 auto",
+  width: { xs: "100%", sm: 142 },
+  maxWidth: { sm: 142 },
+};
+
+const EDIT_INVOICE_HEADER_DESCRIPTION_SX = {
+  flex: "1 1 0",
+  minWidth: { xs: "100%", lg: 200 },
 };
 
 const EDIT_BASIC_INFO_READONLY_SCROLL_SX = {
@@ -2427,46 +2699,32 @@ const EDIT_BASIC_INFO_READONLY_SCROLL_SX = {
   },
 };
 
-function getAgreementProvEditDialogReadonlyBasicInfoItems(form) {
-  const f = form || {};
+function getAgreementProvEditDialogReadonlyBasicInfoItems(form, headerRow) {
+  const f = mergeAgreementProvEditFormContractHeaderFields(form || {}, headerRow, null);
   return [
     { label: "Contract No", value: f.contractNo },
     { label: "CSD", value: formatDateDDMMMYYYY(f.contractStartDate) },
-    { label: "CED", value: formatDateDDMMMYYYY(f.contractEndDate) },
     { label: "COD", value: formatDateDDMMMYYYY(f.cod) },
-    { label: "Revenue Rate", value: formatScheduleGridNumber(f.rentalValueRate) },
+    { label: "CED", value: formatDateDDMMMYYYY(f.contractEndDate) },
     { label: "Initial Rent PM", value: formatScheduleGridNumber(f.initialRentPM) },
+    { label: "Initial Rent PA", value: formatScheduleGridNumber(f.initialRentPA) },
+    { label: "Security Deposit", value: formatScheduleGridNumber(f.securityDepositAmount) },
     { label: "Tenant No", value: f.prefixNo },
     { label: "Business Name", value: f.businessName },
     { label: "Address", value: f.address },
-    { label: "Period Start", value: formatDateDDMMMYYYY(f.periodStart) },
-    { label: "Period End", value: formatDateDDMMMYYYY(f.periodEnd) },
-    { label: "Invoice Date Type", value: f.invoiceDateType },
-    { label: "Invoice Status", value: f.invoiceStatus },
     { label: "Rate PM", value: formatScheduleGridNumber(f.calculatedRentPM) },
     { label: "Months", value: formatScheduleGridNumber(f.months, true) },
-    { label: "Total Amount", value: formatScheduleGridNumber(f.totalRent) },
-    { label: "Amount Received", value: formatScheduleGridNumber(f.amountReceived) },
-    { label: "Amount Receivable", value: formatScheduleGridNumber(f.amountReceivable) },
-    { label: "Amount Pending", value: formatScheduleGridNumber(f.amountPending) },
-    { label: "Days to Due", value: formatScheduleGridNumber(f.daysToDue, true) },
-    { label: "Days Overdue", value: formatScheduleGridNumber(f.daysOverdue, true) },
     {
       label: "Payment Term (Months)",
       value: formatScheduleGridNumber(f.paymentTermMonths, true),
     },
-    { label: "RAC", value: f.cmdName },
-    { label: "Base", value: f.baseName },
-    { label: "Rise Term Type", value: f.riseTermType },
     { label: "Rise Term", value: f.riseTerm },
     { label: "Rise Rate", value: formatScheduleGridNumber(f.riseRate) },
-    { label: "Rise Date", value: formatDateDDMMMYYYY(f.riseDate) },
-    { label: "Remarks", value: f.remarks },
   ];
 }
 
-function AgreementProvEditDialogReadonlyStrip({ form }) {
-  const items = getAgreementProvEditDialogReadonlyBasicInfoItems(form);
+function AgreementProvEditDialogReadonlyStrip({ form, headerRow }) {
+  const items = getAgreementProvEditDialogReadonlyBasicInfoItems(form, headerRow);
   return (
     <MDBox sx={EDIT_BASIC_INFO_READONLY_SCROLL_SX}>
       {items.map((item) => (
@@ -2480,6 +2738,7 @@ function AgreementProvEditDialogReadonlyStrip({ form }) {
 
 AgreementProvEditDialogReadonlyStrip.propTypes = {
   form: PropTypes.object,
+  headerRow: PropTypes.object,
 };
 
 function AgreementProvReadOnlyField({ label, value, compact }) {
@@ -2702,13 +2961,16 @@ function AgreementProvContractBasicInfoStrip({ form }) {
   const items = [
     { label: "Contract No", value: f.contractNo },
     { label: "CSD", value: formatDateDDMMMYYYY(f.contractStartDate) },
-    { label: "CED", value: formatDateDDMMMYYYY(f.contractEndDate) },
     { label: "COD", value: formatDateDDMMMYYYY(f.cod) },
-    { label: "Revenue Rate", value: formatScheduleGridNumber(f.rentalValueRate) },
+    { label: "CED", value: formatDateDDMMMYYYY(f.contractEndDate) },
     { label: "Initial Rent PM", value: formatScheduleGridNumber(f.initialRentPM) },
+    { label: "Initial Rent PA", value: formatScheduleGridNumber(f.initialRentPA) },
+    { label: "Security Deposit", value: formatScheduleGridNumber(f.securityDepositAmount) },
     { label: "Tenant No", value: f.prefixNo },
     { label: "Business Name", value: f.businessName },
     { label: "Address", value: f.address },
+    { label: "Payment Term (Months)", value: formatScheduleGridNumber(f.paymentTermMonths, true) },
+    { label: "Rise Term", value: f.riseTerm },
   ];
 
   return (
@@ -2775,6 +3037,12 @@ function buildAgreementProvEditForm(row) {
     cod: pickScheduleCodDate(row),
     rentalValueRate: pickScheduleRowField(row, "RentalValueRate", "rentalValueRate"),
     initialRentPM: pickScheduleRowField(row, "InitialRentPM", "initialRentPM"),
+    initialRentPA: pickScheduleRowField(row, "InitialRentPA", "initialRentPA"),
+    securityDepositAmount: pickScheduleRowField(
+      row,
+      "SecurityDepositAmount",
+      "securityDepositAmount"
+    ),
     invoiceDateType: String(pickScheduleRowField(row, "InvoiceDateType", "invoiceDateType") || ""),
     invoiceStatus: String(pickScheduleRowField(row, "InvoiceStatus", "invoiceStatus") || ""),
     description: pickAgreementProvHeaderDescription(row),
@@ -2815,7 +3083,7 @@ function AgreementProvInvoiceEditDialog({
 }) {
   const isCreateMode = Boolean(createMode);
   const editInvoiceHeaderFields = isCreateMode || !viewMode;
-  const headerDescriptionLabel = isCreateMode ? "Period" : "Description";
+  const headerDescriptionLabel = isCreateMode ? "Period" : "Particular";
   const [form, setForm] = useState({});
   const [invoiceLinesRows, setInvoiceLinesRows] = useState([]);
   const [invoiceLinesLoading, setInvoiceLinesLoading] = useState(false);
@@ -2873,7 +3141,13 @@ function AgreementProvInvoiceEditDialog({
     const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
     if (!invoiceNo) {
       setInvoiceLinesRows([]);
-      setForm(buildAgreementProvEditForm(rowData));
+      setForm(
+        mergeAgreementProvEditFormContractHeaderFields(
+          buildAgreementProvEditForm(rowData),
+          rowData,
+          null
+        )
+      );
       originalServerSubsRef.current = new Set();
       originalLinePayloadSnapshotsRef.current = new Map();
       return [];
@@ -2906,7 +3180,13 @@ function AgreementProvInvoiceEditDialog({
       console.error("Error loading invoice records by invoice no:", error);
       setInvoiceLinesRows([]);
       setInvoiceLinesError(getAgreementProvSaveErrorMessage(error));
-      setForm(buildAgreementProvEditForm(rowData));
+      setForm(
+        mergeAgreementProvEditFormContractHeaderFields(
+          buildAgreementProvEditForm(rowData),
+          rowData,
+          null
+        )
+      );
       return [];
     } finally {
       setInvoiceLinesLoading(false);
@@ -2952,7 +3232,13 @@ function AgreementProvInvoiceEditDialog({
     }
 
     if (viewMode) {
-      setForm(buildAgreementProvEditForm(rowData));
+      setForm(
+        mergeAgreementProvEditFormContractHeaderFields(
+          buildAgreementProvEditForm(rowData),
+          rowData,
+          null
+        )
+      );
       setInvoiceLinesRows([]);
       setInvoiceLinesError("");
       setInvoiceLinesLoading(false);
@@ -2963,6 +3249,20 @@ function AgreementProvInvoiceEditDialog({
       originalLinePayloadSnapshotsRef.current = new Map();
       return undefined;
     }
+
+    setForm(
+      mergeAgreementProvEditFormContractHeaderFields(
+        buildAgreementProvEditForm(rowData),
+        rowData,
+        null
+      )
+    );
+    setInvoiceLinesError("");
+    setNewLineDrafts([]);
+    setEditingLineDraft(null);
+    setPendingDeleteSubs([]);
+    originalServerSubsRef.current = new Set();
+    originalLinePayloadSnapshotsRef.current = new Map();
 
     let cancelled = false;
     const load = async () => {
@@ -3217,160 +3517,166 @@ function AgreementProvInvoiceEditDialog({
         >
           <MDBox sx={{ flexShrink: 0, width: "100%" }}>
             <AgreementProvReadOnlyInfoPanel>
-              <AgreementProvEditDialogReadonlyStrip form={form} />
-              <MDBox
-                sx={{
-                  ...EDIT_BASIC_INFO_ROW_SX,
-                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                  mt: 0.75,
-                }}
-              >
-                <AgreementProvReadOnlyField compact label="Invoice No" value={form.invoiceNo} />
-                {!editInvoiceHeaderFields ? (
-                  <AgreementProvReadOnlyField
-                    compact
-                    label="Invoice Date"
-                    value={formatDateDDMMMYYYY(form.invoiceDate)}
-                  />
-                ) : (
-                  <AgreementProvPanelEditableField label="Invoice Date">
-                    <MDBox sx={{ position: "relative" }}>
-                      <input
-                        type="date"
-                        ref={invoiceDateInputRef}
-                        value={form.invoiceDate || ""}
-                        onChange={handleChange("invoiceDate")}
-                        style={{
-                          position: "absolute",
-                          opacity: 0.01,
-                          width: "100%",
-                          height: "100%",
-                          top: 0,
-                          left: 0,
-                          cursor: "pointer",
-                        }}
-                        aria-hidden
-                      />
-                      <MDInput
-                        type="text"
-                        value={toAgreementProvDisplayDate(form.invoiceDate)}
-                        readOnly
-                        fullWidth
-                        size="small"
-                        onClick={() => openAgreementProvDatePicker(invoiceDateInputRef)}
-                        InputProps={{
-                          readOnly: true,
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <Icon
-                                sx={{ cursor: "pointer", fontSize: "1.1rem" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openAgreementProvDatePicker(invoiceDateInputRef);
-                                }}
-                              >
-                                calendar_today
-                              </Icon>
-                            </InputAdornment>
-                          ),
-                        }}
-                        sx={{
-                          ...agreementProvPanelInputSx,
-                          mt: 0,
-                          "& .MuiInputBase-input": { cursor: "pointer" },
-                        }}
-                      />
-                    </MDBox>
-                  </AgreementProvPanelEditableField>
-                )}
-                {!editInvoiceHeaderFields ? (
-                  <AgreementProvReadOnlyField
-                    compact
-                    label="Due Date"
-                    value={formatDateDDMMMYYYY(form.dueDate)}
-                  />
-                ) : (
-                  <AgreementProvPanelEditableField label="Due Date">
-                    <MDBox sx={{ position: "relative" }}>
-                      <input
-                        type="date"
-                        ref={dueDateInputRef}
-                        value={form.dueDate || ""}
-                        onChange={(e) => setForm((prev) => ({ ...prev, dueDate: e.target.value }))}
-                        style={{
-                          position: "absolute",
-                          opacity: 0.01,
-                          width: "100%",
-                          height: "100%",
-                          top: 0,
-                          left: 0,
-                          cursor: "pointer",
-                        }}
-                        aria-hidden
-                      />
-                      <MDInput
-                        type="text"
-                        value={toAgreementProvDisplayDate(form.dueDate)}
-                        readOnly
-                        fullWidth
-                        size="small"
-                        onClick={() => openAgreementProvDatePicker(dueDateInputRef)}
-                        InputProps={{
-                          readOnly: true,
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <Icon
-                                sx={{ cursor: "pointer", fontSize: "1.1rem" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openAgreementProvDatePicker(dueDateInputRef);
-                                }}
-                              >
-                                calendar_today
-                              </Icon>
-                            </InputAdornment>
-                          ),
-                        }}
-                        sx={{
-                          ...agreementProvPanelInputSx,
-                          mt: 0,
-                          "& .MuiInputBase-input": { cursor: "pointer" },
-                        }}
-                      />
-                    </MDBox>
-                  </AgreementProvPanelEditableField>
-                )}
-                {!editInvoiceHeaderFields ? (
-                  <MDBox sx={{ minHeight: 34, pr: 0.5 }}>
-                    <MDTypography
-                      variant="caption"
-                      color="text"
-                      fontWeight="medium"
-                      display="block"
-                      lineHeight={1.15}
-                      sx={agreementProvPanelFieldLabelSx}
-                    >
-                      {headerDescriptionLabel}
-                    </MDTypography>
-                    <MDBox sx={{ mt: 0.25 }}>
-                      <AgreementProvLongTextCell
-                        compact
-                        maxVisibleChars={35}
-                        value={form.description}
-                      />
-                    </MDBox>
+              <AgreementProvEditDialogReadonlyStrip form={form} headerRow={rowData} />
+              <MDBox sx={EDIT_INVOICE_HEADER_ROW_SX}>
+                <MDBox sx={EDIT_INVOICE_HEADER_COMPACT_GROUP_SX}>
+                  <MDBox sx={EDIT_INVOICE_HEADER_INVOICE_NO_SX}>
+                    <AgreementProvReadOnlyField compact label="Invoice No" value={form.invoiceNo} />
                   </MDBox>
-                ) : (
-                  <AgreementProvPanelEditableField label={headerDescriptionLabel}>
-                    <MDInput
-                      value={form.description ?? ""}
-                      onChange={handleChange("description")}
-                      fullWidth
-                      size="small"
-                      sx={{ ...agreementProvPanelInputSx, mt: 0 }}
-                    />
-                  </AgreementProvPanelEditableField>
-                )}
+                  <MDBox sx={EDIT_INVOICE_HEADER_DATE_SX}>
+                    {!editInvoiceHeaderFields ? (
+                      <AgreementProvReadOnlyField
+                        compact
+                        label="Invoice Date"
+                        value={formatDateDDMMMYYYY(form.invoiceDate)}
+                      />
+                    ) : (
+                      <AgreementProvPanelEditableField label="Invoice Date">
+                        <MDBox sx={{ position: "relative" }}>
+                          <input
+                            type="date"
+                            ref={invoiceDateInputRef}
+                            value={form.invoiceDate || ""}
+                            onChange={handleChange("invoiceDate")}
+                            style={{
+                              position: "absolute",
+                              opacity: 0.01,
+                              width: "100%",
+                              height: "100%",
+                              top: 0,
+                              left: 0,
+                              cursor: "pointer",
+                            }}
+                            aria-hidden
+                          />
+                          <MDInput
+                            type="text"
+                            value={toAgreementProvDisplayDate(form.invoiceDate)}
+                            readOnly
+                            fullWidth
+                            size="small"
+                            onClick={() => openAgreementProvDatePicker(invoiceDateInputRef)}
+                            InputProps={{
+                              readOnly: true,
+                              endAdornment: (
+                                <InputAdornment position="end">
+                                  <Icon
+                                    sx={{ cursor: "pointer", fontSize: "1.1rem" }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAgreementProvDatePicker(invoiceDateInputRef);
+                                    }}
+                                  >
+                                    calendar_today
+                                  </Icon>
+                                </InputAdornment>
+                              ),
+                            }}
+                            sx={{
+                              ...agreementProvPanelInputSx,
+                              mt: 0,
+                              "& .MuiInputBase-input": { cursor: "pointer" },
+                            }}
+                          />
+                        </MDBox>
+                      </AgreementProvPanelEditableField>
+                    )}
+                  </MDBox>
+                  <MDBox sx={EDIT_INVOICE_HEADER_DATE_SX}>
+                    {!editInvoiceHeaderFields ? (
+                      <AgreementProvReadOnlyField
+                        compact
+                        label="Due Date"
+                        value={formatDateDDMMMYYYY(form.dueDate)}
+                      />
+                    ) : (
+                      <AgreementProvPanelEditableField label="Due Date">
+                        <MDBox sx={{ position: "relative" }}>
+                          <input
+                            type="date"
+                            ref={dueDateInputRef}
+                            value={form.dueDate || ""}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, dueDate: e.target.value }))
+                            }
+                            style={{
+                              position: "absolute",
+                              opacity: 0.01,
+                              width: "100%",
+                              height: "100%",
+                              top: 0,
+                              left: 0,
+                              cursor: "pointer",
+                            }}
+                            aria-hidden
+                          />
+                          <MDInput
+                            type="text"
+                            value={toAgreementProvDisplayDate(form.dueDate)}
+                            readOnly
+                            fullWidth
+                            size="small"
+                            onClick={() => openAgreementProvDatePicker(dueDateInputRef)}
+                            InputProps={{
+                              readOnly: true,
+                              endAdornment: (
+                                <InputAdornment position="end">
+                                  <Icon
+                                    sx={{ cursor: "pointer", fontSize: "1.1rem" }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAgreementProvDatePicker(dueDateInputRef);
+                                    }}
+                                  >
+                                    calendar_today
+                                  </Icon>
+                                </InputAdornment>
+                              ),
+                            }}
+                            sx={{
+                              ...agreementProvPanelInputSx,
+                              mt: 0,
+                              "& .MuiInputBase-input": { cursor: "pointer" },
+                            }}
+                          />
+                        </MDBox>
+                      </AgreementProvPanelEditableField>
+                    )}
+                  </MDBox>
+                </MDBox>
+                <MDBox sx={EDIT_INVOICE_HEADER_DESCRIPTION_SX}>
+                  {!editInvoiceHeaderFields ? (
+                    <MDBox sx={{ minHeight: 34, pr: 0.5 }}>
+                      <MDTypography
+                        variant="caption"
+                        color="text"
+                        fontWeight="medium"
+                        display="block"
+                        lineHeight={1.15}
+                        sx={agreementProvPanelFieldLabelSx}
+                      >
+                        {headerDescriptionLabel}
+                      </MDTypography>
+                      <MDBox sx={{ mt: 0.25 }}>
+                        <AgreementProvLongTextCell
+                          compact
+                          maxVisibleChars={120}
+                          value={form.description}
+                        />
+                      </MDBox>
+                    </MDBox>
+                  ) : (
+                    <AgreementProvPanelEditableField label={headerDescriptionLabel}>
+                      <MDInput
+                        value={form.description ?? ""}
+                        onChange={handleChange("description")}
+                        fullWidth
+                        size="small"
+                        sx={{ ...agreementProvPanelInputSx, mt: 0 }}
+                      />
+                    </AgreementProvPanelEditableField>
+                  )}
+                </MDBox>
               </MDBox>
             </AgreementProvReadOnlyInfoPanel>
           </MDBox>
@@ -3540,6 +3846,8 @@ function normalizeAgreementProvInvoiceRow(row) {
     businessName: row.BusinessName ?? row.businessName ?? "",
     tenantName: formatPrefixNoDisplay(row),
     initialRentPM: row.InitialRentPM ?? row.initialRentPM ?? "",
+    initialRentPA: row.InitialRentPA ?? row.initialRentPA ?? "",
+    securityDepositAmount: row.SecurityDepositAmount ?? row.securityDepositAmount ?? "",
     paymentTermMonths: row.PaymentTermMonths ?? row.paymentTermMonths ?? "",
     riseTermType: row.RiseTermType ?? row.riseTermType ?? "",
     riseTerm: row.RiseTerm ?? row.riseTerm ?? "",
@@ -3568,6 +3876,7 @@ function normalizeAgreementProvInvoiceRow(row) {
 }
 
 export default function AgreementProvInvoice() {
+  const navigate = useNavigate();
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [filters, setFilters] = useState(buildInitialAgreementProvFilters);
@@ -3578,6 +3887,12 @@ export default function AgreementProvInvoice() {
   const [commands, setCommands] = useState([]);
   const [bases, setBases] = useState([]);
   const [units, setUnits] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [agreementDetailsOpen, setAgreementDetailsOpen] = useState(false);
+  const [selectedAgreementDetails, setSelectedAgreementDetails] = useState(null);
+  const [agreementRiseTerms, setAgreementRiseTerms] = useState([]);
+  const [loadingAgreementRiseTerms, setLoadingAgreementRiseTerms] = useState(false);
+  const [openingAgreementDetails, setOpeningAgreementDetails] = useState(false);
   const [filteredBases, setFilteredBases] = useState([]);
   const [allScheduleRows, setAllScheduleRows] = useState([]);
   const [searchResultRows, setSearchResultRows] = useState([]);
@@ -3603,6 +3918,8 @@ export default function AgreementProvInvoice() {
   const registerReloadInvoiceLines = useCallback((fn) => {
     reloadInvoiceLinesRef.current = typeof fn === "function" ? fn : null;
   }, []);
+  const canUnlockInvoiceFromGrid = isSuperuserOrAhqSupervisorUser();
+  const canDeleteInvoiceFromGrid = canUnlockInvoiceFromGrid;
   const AGREEMENT_PROV_GROUP_BY_CACHE_KEY = "agreementProvInvoice_groupByColumns";
   const [groupByColumns, setGroupByColumns] = useState(() => {
     try {
@@ -3633,14 +3950,16 @@ export default function AgreementProvInvoice() {
   useEffect(() => {
     const fetchLookups = async () => {
       try {
-        const [commandsRes, basesRes, unitsRes] = await Promise.all([
+        const [commandsRes, basesRes, unitsRes, tenantsRes] = await Promise.all([
           api.list("command"),
           api.list("base"),
           api.list("unit"),
+          api.list("tenant"),
         ]);
         setCommands(Array.isArray(commandsRes) ? commandsRes : []);
         setBases(Array.isArray(basesRes) ? basesRes : []);
         setUnits(Array.isArray(unitsRes) ? unitsRes : []);
+        setTenants(Array.isArray(tenantsRes) ? tenantsRes : []);
       } catch (error) {
         console.error("Error fetching lookup data:", error);
       }
@@ -3807,6 +4126,7 @@ export default function AgreementProvInvoice() {
   };
 
   const handleInvoiceLockChange = async (rowData, nextLocked) => {
+    if (!nextLocked && !canUnlockInvoiceFromGrid) return;
     const contractNo = String(
       pickScheduleRowField(rowData, "ContractNo", "contractNo") || ""
     ).trim();
@@ -3836,9 +4156,17 @@ export default function AgreementProvInvoice() {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const { marginLeft, marginRight, marginTop, marginBottom } = agreementProvPdfMarginsInchesToMm(
-      marginsInParam ?? loadAgreementProvPdfMargins()
-    );
+    const marginsIn = marginsInParam ?? loadAgreementProvPdfMargins();
+    const { marginLeft, marginRight, marginTop, marginBottom } =
+      agreementProvPdfMarginsInchesToMm(marginsIn);
+    const { sx, sy, sf, sc, logicalPageBottomY, logicalPageBottomReserve } =
+      createAgreementProvPdfScaleHelpers({
+        contentScale: marginsIn?.contentScale,
+        marginLeft,
+        marginTop,
+        pageHeight,
+        marginBottom,
+      });
     const contentRight = pageWidth - marginRight;
     const contentWidth = contentRight - marginLeft;
     const lineHeight = AGREEMENT_PROV_PDF_LINE_HEIGHT_MM;
@@ -3864,10 +4192,19 @@ export default function AgreementProvInvoice() {
     );
     const contractPeriodStart = formatPdfContractDateShort(contractStartDate);
     const contractPeriodEnd = formatPdfContractDateShort(contractEndDate);
-    const contractDisplay =
+    const businessName = String(
+      pickScheduleRowField(rowData, "BusinessName", "businessName") || ""
+    ).trim();
+    let contractDisplay =
       contractPeriodStart && contractPeriodEnd
         ? `${contractNo} (${contractPeriodStart} To ${contractPeriodEnd})`
         : contractNo || "—";
+    if (businessName) {
+      contractDisplay =
+        contractDisplay && contractDisplay !== "—"
+          ? `${contractDisplay} — ${businessName}`
+          : businessName;
+    }
 
     let particularName = "—";
     let accountingAddressLine1 = "—";
@@ -3916,25 +4253,29 @@ export default function AgreementProvInvoice() {
     const invoiceValueX = invoiceSepX + 2;
     const customerValueX = textStartX;
 
-    await loadPafLogoIntoPdf(doc, marginLeft, marginTop, LOGO_WIDTH_MM);
+    await loadPafLogoIntoPdf(doc, sx(marginLeft), sy(marginTop), sc(LOGO_WIDTH_MM));
 
     const drawBodyText = (text, x, y, options = {}) => {
       doc.setFont("helvetica", options.bold ? "bold" : "normal");
-      doc.setFontSize(options.fontSize || bodyFont);
-      doc.text(String(text ?? ""), x, y, options.textOptions);
+      doc.setFontSize(sf(options.fontSize || bodyFont));
+      doc.text(String(text ?? ""), sx(x), sy(y), options.textOptions);
+    };
+
+    const drawPdfLine = (x1, y1, x2, y2) => {
+      doc.line(sx(x1), sy(y1), sx(x2), sy(y2));
     };
 
     const ensurePageSpace = (y, needed = lineHeight) => {
-      if (y + needed <= pageHeight - marginBottom - 20) return y;
+      if (y + needed <= logicalPageBottomY - logicalPageBottomReserve) return y;
       doc.addPage();
       return marginTop;
     };
 
-    doc.setLineWidth(0.15);
+    doc.setLineWidth(sc(0.15));
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(AGREEMENT_PROV_PDF_FONT_TITLE);
-    doc.text("Sales Invoice", textStartX, marginTop + 5);
+    doc.setFontSize(sf(AGREEMENT_PROV_PDF_FONT_TITLE));
+    doc.text("Sales Invoice", sx(textStartX), sy(marginTop + 5));
 
     let headerY = marginTop + 11;
     drawBodyText(particularName, textStartX, headerY, { bold: true });
@@ -3959,23 +4300,70 @@ export default function AgreementProvInvoice() {
 
     let yPos = Math.max(headerY, invoiceMetaY) + lineHeight + 3;
 
-    const drawUnderlinedCustomerRow = (label, value, withColon = true) => {
+    const drawUnderlinedCustomerRow = (label, value, withColon = true, options = {}) => {
+      const { singleLine = false, shrinkFont = false, minFontSize = 6 } = options;
       const rowTop = yPos;
       const labelText = withColon ? `${label} :` : label;
-      drawBodyText(labelText, marginLeft + 1, rowTop, { bold: true });
-      const valueLines = doc.splitTextToSize(String(value || "—"), contentRight - textStartX - 1);
+      const maxValueWidth = contentRight - customerValueX - 1;
+      const valueText = String(value || "—");
+      const rowBandHeight = lineHeight;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(sf(bodyFont));
+      const labelHeight = doc.getTextDimensions(labelText).h;
+      const labelBaselineY = getPdfRowCenteredBaselineY(rowTop, rowBandHeight, labelHeight);
+      doc.text(labelText, sx(marginLeft + 1), sy(labelBaselineY));
+
+      let valueFontSize = sf(bodyFont);
+      if (singleLine && shrinkFont) {
+        valueFontSize = resolveSingleLinePdfFontSize(
+          doc,
+          valueText,
+          maxValueWidth,
+          sf(bodyFont),
+          sf(minFontSize),
+          "normal"
+        );
+      }
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(valueFontSize);
+
+      if (singleLine) {
+        const valueHeight = doc.getTextDimensions(valueText).h;
+        const valueBaselineY = getPdfRowCenteredBaselineY(rowTop, rowBandHeight, valueHeight);
+        doc.text(valueText, sx(customerValueX), sy(valueBaselineY));
+        const underlineY = getPdfValueUnderlineY(valueBaselineY, valueHeight, sc);
+        drawPdfLine(customerValueX, underlineY, contentRight, underlineY);
+        yPos = underlineY + 1.75;
+        return underlineY - rowTop + 1.75;
+      }
+
+      const valueLines = doc.splitTextToSize(valueText, maxValueWidth);
+      let lastLineBaselineY = rowTop;
+      let lastLineHeight = 0;
       valueLines.forEach((line, index) => {
-        drawBodyText(line, customerValueX, rowTop + index * lineHeight);
+        const lineHeightDim = doc.getTextDimensions(line).h;
+        const lineBaselineY = getPdfRowCenteredBaselineY(
+          rowTop + index * lineHeight,
+          lineHeight,
+          lineHeightDim
+        );
+        doc.text(line, sx(customerValueX), sy(lineBaselineY));
+        lastLineBaselineY = lineBaselineY;
+        lastLineHeight = lineHeightDim;
       });
-      const rowHeight = Math.max(lineHeight, valueLines.length * lineHeight);
-      const underlineY = rowTop + rowHeight - 0.5;
-      doc.line(customerValueX, underlineY, contentRight, underlineY);
-      yPos = rowTop + rowHeight + 3;
-      return rowHeight + 3;
+      const underlineY = getPdfValueUnderlineY(lastLineBaselineY, lastLineHeight, sc);
+      drawPdfLine(customerValueX, underlineY, contentRight, underlineY);
+      yPos = underlineY + 1.75;
+      return underlineY - rowTop + 1.75;
     };
 
-    drawUnderlinedCustomerRow("Customer", customerDisplay, true);
-    drawUnderlinedCustomerRow("Contract", contractDisplay, true);
+    drawUnderlinedCustomerRow("Customer", customerDisplay, true, { singleLine: true });
+    drawUnderlinedCustomerRow("Contract", contractDisplay, true, {
+      singleLine: true,
+      shrinkFont: true,
+    });
     drawUnderlinedCustomerRow("Description", descriptionText, false);
 
     yPos += lineHeight;
@@ -3992,10 +4380,10 @@ export default function AgreementProvInvoice() {
       drawBodyText("Total", contentRight, rowTop, { bold: true, textOptions: { align: "right" } });
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(bodyFont);
+      doc.setFontSize(sf(bodyFont));
       const headerTextHeight = doc.getTextDimensions("Description").h;
-      const underlineY = rowTop + headerTextHeight * 0.28 + 0.4;
-      doc.line(marginLeft, underlineY, contentRight, underlineY);
+      const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
+      drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
       yPos = underlineY + lineHeight;
     };
 
@@ -4006,6 +4394,7 @@ export default function AgreementProvInvoice() {
       }
 
       const descLines = doc.splitTextToSize(String(description || "—"), pdfBodyDescWidth);
+      doc.setFontSize(sf(bodyFont));
       descLines.forEach((line, index) => {
         if (index > 0) {
           yPos = ensurePageSpace(yPos, lineHeight);
@@ -4065,23 +4454,39 @@ export default function AgreementProvInvoice() {
 
     const totalText = `Total: ${formatPdfCurrency(displayTotal)}`;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(bodyFont);
+    doc.setFontSize(sf(bodyFont));
     const totalDims = doc.getTextDimensions(totalText);
     const totalRowY = yPos;
-    const totalOverlineY = totalRowY - totalDims.h * 0.75 - 0.5;
-    doc.line(marginLeft, totalOverlineY, contentRight, totalOverlineY);
+    const totalOverlineY = totalRowY - totalDims.h * 0.75 - sc(0.5);
+    drawPdfLine(marginLeft, totalOverlineY, contentRight, totalOverlineY);
     drawBodyText(totalText, contentRight, totalRowY, {
       bold: true,
       textOptions: { align: "right" },
     });
 
     yPos += lineHeight + 8;
-    if (yPos > pageHeight - marginBottom - 20) {
+    if (yPos > logicalPageBottomY - logicalPageBottomReserve) {
       doc.addPage();
       yPos = marginTop;
     }
-    const signatureY = Math.max(yPos + 10, pageHeight - marginBottom - 18);
-    doc.line(marginLeft, signatureY, contentRight, signatureY);
+    const signatureY = Math.max(yPos + 10, logicalPageBottomY - sc(18));
+    drawPdfLine(marginLeft, signatureY, contentRight, signatureY);
+
+    const invoiceStatusWatermark = getAgreementProvPdfInvoiceStatusWatermarkWord(
+      pickScheduleRowField(rowData, "InvoiceStatus", "invoiceStatus")
+    );
+    if (invoiceStatusWatermark) {
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let page = 1; page <= pageCount; page += 1) {
+        doc.setPage(page);
+        drawAgreementProvPdfInvoiceStatusWatermark(
+          doc,
+          invoiceStatusWatermark,
+          pageWidth,
+          pageHeight
+        );
+      }
+    }
 
     const pdfBlob = doc.output("blob");
     if (!openNewTab) return pdfBlob;
@@ -4134,6 +4539,19 @@ export default function AgreementProvInvoice() {
   const handleApplyPdfMargins = async () => {
     await regeneratePdfPreview(pdfPreviewRowData, pdfPreviewMarginsIn);
   };
+
+  const adjustPdfPreviewContentScale = (delta) => {
+    setPdfPreviewMarginsIn((prev) => ({
+      ...prev,
+      contentScale: normalizeAgreementProvPdfContentScale(
+        normalizeAgreementProvPdfContentScale(prev?.contentScale) + delta
+      ),
+    }));
+  };
+
+  const pdfPreviewContentScale = normalizeAgreementProvPdfContentScale(
+    pdfPreviewMarginsIn?.contentScale
+  );
 
   const AGREEMENT_PROV_DATE_COLUMN_IDS = new Set([
     "contractstartdate",
@@ -4190,7 +4608,7 @@ export default function AgreementProvInvoice() {
   };
 
   // eslint-disable-next-line react/prop-types
-  const renderClickableAmountCell = ({ value }) => {
+  const renderClickableAmountCell = ({ value, onClick }) => {
     const n = Number(value);
     const safe = Number.isFinite(n) ? n : 0;
     return (
@@ -4201,6 +4619,7 @@ export default function AgreementProvInvoice() {
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          if (typeof onClick === "function") onClick();
         }}
         sx={clickableAmountCellSx}
       >
@@ -4238,7 +4657,14 @@ export default function AgreementProvInvoice() {
     },
   });
 
-  const scheduleNumberColumn = (id, header, pascalKey, camelKey, clickable = false) => ({
+  const scheduleNumberColumn = (
+    id,
+    header,
+    pascalKey,
+    camelKey,
+    clickable = false,
+    onClickRowValue = null
+  ) => ({
     id,
     Header: header,
     accessor: camelKey,
@@ -4250,6 +4676,7 @@ export default function AgreementProvInvoice() {
           if (isAgreementProvContractBasicInfoRow(rowData)) return null;
           return renderClickableAmountCell({
             value: pickScheduleRowField(rowData, pascalKey, camelKey),
+            onClick: () => onClickRowValue?.(rowData),
           });
         }
       : // eslint-disable-next-line react/prop-types
@@ -4260,15 +4687,24 @@ export default function AgreementProvInvoice() {
         },
   });
 
+  const agreementProvScheduleHeaderLookupRows = useMemo(() => {
+    if (searchApplied) return searchResultRows;
+    return allScheduleRows;
+  }, [allScheduleRows, searchResultRows, searchApplied]);
+
   const handleOpenEditRow = (rowData) => {
-    if (pickScheduleRowIsLocked(rowData) && !api.isSuperuserUser()) return;
-    setEditRowData(rowData);
+    if (pickScheduleRowIsLocked(rowData)) return;
+    setEditRowData(
+      enrichAgreementProvRowWithContractHeaderFields(rowData, agreementProvScheduleHeaderLookupRows)
+    );
     setEditDialogViewMode(false);
     setEditDialogOpen(true);
   };
 
   const handleOpenViewRow = (rowData) => {
-    setEditRowData(rowData);
+    setEditRowData(
+      enrichAgreementProvRowWithContractHeaderFields(rowData, agreementProvScheduleHeaderLookupRows)
+    );
     setEditDialogViewMode(true);
     setEditDialogOpen(true);
   };
@@ -4279,10 +4715,58 @@ export default function AgreementProvInvoice() {
     setEditDialogViewMode(false);
   };
 
+  const handleOpenCollectionsForInvoice = (rowData) => {
+    const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
+    const contractNo = String(
+      pickScheduleRowField(rowData, "ContractNo", "contractNo") || ""
+    ).trim();
+    if (!invoiceNo) return;
+    const params = new URLSearchParams({ invoiceNo });
+    if (contractNo) params.set("contractNo", contractNo);
+    navigate(`/income-agreements/collections?${params.toString()}`);
+  };
+
+  const handleDeleteInvoiceRow = async (rowData) => {
+    if (!canDeleteInvoiceFromGrid) return;
+    if (pickScheduleRowIsLocked(rowData)) {
+      alert("This invoice is locked. Unlock it before deleting.");
+      return;
+    }
+    const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData);
+    if (!contractNo || !invoiceNo) {
+      alert("Cannot delete: Contract No and Invoice ID are required.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete invoice "${invoiceNo}" for contract "${contractNo}"?\n\nThis will soft-delete the invoice and all its line items.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await contractApi.deleteInvoiceScheduleInvoice(contractNo, invoiceNo);
+      if (
+        editDialogOpen &&
+        getAgreementProvInvoiceActionKey(editRowData) === getAgreementProvInvoiceActionKey(rowData)
+      ) {
+        handleCloseEditRow();
+      }
+      await refreshScheduleGrid();
+    } catch (error) {
+      console.error("Error deleting invoice schedule:", error);
+      alert(getAgreementProvSaveErrorMessage(error));
+    }
+  };
+
   const handleSaveEditRow = async (form, rowData, lineSaveContext = {}) => {
     const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form);
     if (!contractNo || !invoiceNo) {
       alert("Cannot update: Contract No and Invoice ID are required.");
+      return;
+    }
+    if (pickScheduleRowIsLocked(rowData)) {
+      alert("This invoice is locked. Unlock it before editing.");
       return;
     }
 
@@ -4314,7 +4798,7 @@ export default function AgreementProvInvoice() {
     Header: "Action",
     accessor: "actions",
     align: "center",
-    width: "56px",
+    width: canDeleteInvoiceFromGrid ? "88px" : "56px",
     disableSortBy: true,
     // eslint-disable-next-line react/prop-types
     Cell: ({ row }) => {
@@ -4322,26 +4806,46 @@ export default function AgreementProvInvoice() {
       const rowData = row?.original || {};
       if (isAgreementProvContractBasicInfoRow(rowData)) return null;
       if (rowData.isGroupRow || rowData.IsGroupRow) return "";
-      if (pickScheduleRowIsLocked(rowData) && !api.isSuperuserUser()) return "";
+      const isLocked = pickScheduleRowIsLocked(rowData);
+      const showEdit = !isLocked;
+      const showDelete = canDeleteInvoiceFromGrid && !isLocked;
+      if (!showEdit && !showDelete) return "";
       const hasItemRecords = invoiceKeysWithItemRecords.has(
         getAgreementProvInvoiceActionKey(rowData)
       );
       return (
-        <Tooltip title={hasItemRecords ? "Edit (has invoice item records)" : "Edit"}>
-          <IconButton
-            size="small"
-            className="erp-grid-action-edit"
-            onClick={() => handleOpenEditRow(rowData)}
-            aria-label="Edit"
-            sx={
-              hasItemRecords
-                ? agreementProvActionIconSx.editWithItemRecords
-                : agreementProvActionIconSx.edit
-            }
-          >
-            <Icon>edit</Icon>
-          </IconButton>
-        </Tooltip>
+        <MDBox display="flex" alignItems="center" justifyContent="center" gap={0.25}>
+          {showEdit ? (
+            <Tooltip title={hasItemRecords ? "Edit (has invoice item records)" : "Edit"}>
+              <IconButton
+                size="small"
+                className="erp-grid-action-edit"
+                onClick={() => handleOpenEditRow(rowData)}
+                aria-label="Edit"
+                sx={
+                  hasItemRecords
+                    ? agreementProvActionIconSx.editWithItemRecords
+                    : agreementProvActionIconSx.edit
+                }
+              >
+                <Icon>edit</Icon>
+              </IconButton>
+            </Tooltip>
+          ) : null}
+          {showDelete ? (
+            <Tooltip title="Delete invoice">
+              <IconButton
+                size="small"
+                className="erp-grid-action-delete"
+                onClick={() => handleDeleteInvoiceRow(rowData)}
+                aria-label="Delete invoice"
+                sx={agreementProvActionIconSx.delete}
+              >
+                <Icon>delete</Icon>
+              </IconButton>
+            </Tooltip>
+          ) : null}
+        </MDBox>
       );
     },
   };
@@ -4380,6 +4884,24 @@ export default function AgreementProvInvoice() {
       },
       "& .MuiIcon-root": {
         color: "#16a34a !important",
+        fontSize: "1.15rem",
+      },
+    },
+    delete: {
+      padding: "2px",
+      color: "#d32f2f",
+      opacity: "1 !important",
+      transform: "none !important",
+      filter: "none !important",
+      transition: "background-color 0.15s ease",
+      "&:hover": {
+        opacity: "1 !important",
+        transform: "none !important",
+        filter: "none !important",
+        backgroundColor: "rgba(211, 47, 47, 0.12)",
+      },
+      "& .MuiIcon-root": {
+        color: "#d32f2f !important",
         fontSize: "1.15rem",
       },
     },
@@ -4452,7 +4974,7 @@ export default function AgreementProvInvoice() {
         );
       }
       const isLocked = pickScheduleRowIsLocked(rowData);
-      const isSuper = api.isSuperuserUser();
+      const canUnlockInvoice = canUnlockInvoiceFromGrid;
       const contractNo = String(
         pickScheduleRowField(rowData, "ContractNo", "contractNo") || ""
       ).trim();
@@ -4469,7 +4991,7 @@ export default function AgreementProvInvoice() {
           alignItems="center"
           gap={0.25}
           onDoubleClick={(e) => {
-            if (isSuper && isLocked) {
+            if (canUnlockInvoice && isLocked) {
               e.preventDefault();
               e.stopPropagation();
               void handleInvoiceLockChange(rowData, false);
@@ -4479,16 +5001,16 @@ export default function AgreementProvInvoice() {
           <Tooltip
             title={
               isLocked
-                ? isSuper
+                ? canUnlockInvoice
                   ? "Locked — double-click this cell to unlock"
-                  : "Locked"
+                  : "Locked — only superuser or AHQ supervisor can unlock"
                 : "Lock invoice"
             }
           >
             <span>
               <IconButton
                 size="small"
-                disabled={lockBusy || (isLocked && !isSuper)}
+                disabled={lockBusy || isLocked}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isLocked) return;
@@ -4720,6 +5242,34 @@ export default function AgreementProvInvoice() {
     },
   };
 
+  const handleOpenAgreementDetails = useCallback(async (contractNo, contractId) => {
+    const key = String(contractNo || "").trim();
+    if (!key) return;
+    setOpeningAgreementDetails(true);
+    setAgreementDetailsOpen(true);
+    setSelectedAgreementDetails(null);
+    setAgreementRiseTerms([]);
+    setLoadingAgreementRiseTerms(true);
+    try {
+      const contract = await resolveAgreementContract({ contractNo: key, contractId });
+      if (!contract) {
+        setAgreementDetailsOpen(false);
+        alert(`Agreement not found: ${key}`);
+        return;
+      }
+      setSelectedAgreementDetails(contract);
+      const riseTerms = await fetchNormalizedContractRiseTerms(contract.Id ?? contract.id);
+      setAgreementRiseTerms(riseTerms);
+    } catch (error) {
+      console.error("Error opening agreement details:", error);
+      setAgreementDetailsOpen(false);
+      alert("Failed to load agreement details. Please try again.");
+    } finally {
+      setOpeningAgreementDetails(false);
+      setLoadingAgreementRiseTerms(false);
+    }
+  }, []);
+
   const tenantNameColumn = {
     id: "tenantName",
     Header: "Tenant Name",
@@ -4772,7 +5322,10 @@ export default function AgreementProvInvoice() {
           }}
           onClick={(e) => {
             e.stopPropagation();
-            openContractsFormInNewTab(contractNo);
+            handleOpenAgreementDetails(
+              contractNo,
+              rowData.contractId ?? rowData.ContractId ?? rowData.contractID
+            );
           }}
         >
           {contractNo}
@@ -4799,7 +5352,14 @@ export default function AgreementProvInvoice() {
     scheduleNumberColumn("months", "Months", "Months", "months"),
     scheduleNumberColumn("totalRent", "Receivable", "TotalRent", "totalRent", true),
     scheduleTextColumn("remarks", "Remarks", "Remarks", "remarks"),
-    scheduleNumberColumn("amountReceived", "Received", "AmountReceived", "amountReceived", true),
+    scheduleNumberColumn(
+      "amountReceived",
+      "Received",
+      "AmountReceived",
+      "amountReceived",
+      true,
+      handleOpenCollectionsForInvoice
+    ),
     scheduleNumberColumn("amountPending", "Balance", "AmountPending", "amountPending", true),
 
     descriptionColumn,
@@ -4958,20 +5518,34 @@ export default function AgreementProvInvoice() {
   }, [displayScheduleRows, commands, bases, expandedGroups, groupByColumns]);
 
   const computedRows = useMemo(() => {
-    if (!urlDeepLink.invoiceNo) return groupedData;
-    const invKey = urlDeepLink.invoiceNo.toLowerCase();
+    const tenantKey = String(urlDeepLink.tenantNo || "")
+      .trim()
+      .toLowerCase();
+    const invKey = String(urlDeepLink.invoiceNo || "")
+      .trim()
+      .toLowerCase();
+    if (!tenantKey && !invKey) return groupedData;
+
     const matchesInvoice = (row) =>
       String(pickScheduleRowField(row, "InvoiceNo", "invoiceNo")).trim().toLowerCase() === invKey;
+    const matchesTenant = (row) =>
+      String(pickScheduleRowField(row, "TenantNo", "tenantNo")).trim().toLowerCase() === tenantKey;
+    const matchesRow = (row) => {
+      if (tenantKey && !matchesTenant(row)) return false;
+      if (invKey && !matchesInvoice(row)) return false;
+      return true;
+    };
+
     return groupedData.filter((row) => {
       if (row.isContractBasicInfoRow || row.IsContractBasicInfoRow) {
-        return (row.GroupRows || []).some(matchesInvoice);
+        return (row.GroupRows || []).some(matchesRow);
       }
       if (row.isGroupRow || row.IsGroupRow) {
-        return (row.GroupRows || []).some(matchesInvoice);
+        return (row.GroupRows || []).some(matchesRow);
       }
-      return matchesInvoice(row);
+      return matchesRow(row);
     });
-  }, [groupedData, urlDeepLink.invoiceNo]);
+  }, [groupedData, urlDeepLink.invoiceNo, urlDeepLink.tenantNo]);
 
   const groupByInputSx = darkMode
     ? {
@@ -5106,7 +5680,7 @@ export default function AgreementProvInvoice() {
       <EnterpriseWorkspace
         title="Agreement Invoice"
         subtitle="Manage agreement provisional invoice records"
-        tabs={<ContractsModuleTabs />}
+        tabs={<IncomeAgreementsModuleTabs />}
         filters={
           <MDBox px={3} sx={{ flexShrink: 0 }}>
             {/* Filters — single compact row before Search */}
@@ -5127,7 +5701,7 @@ export default function AgreementProvInvoice() {
                   >
                     Command
                   </InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="command-filter-label"
                     value={filters.command}
                     label="Command"
@@ -5142,7 +5716,7 @@ export default function AgreementProvInvoice() {
                         {cmd.name}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </MDBox>
 
@@ -5159,7 +5733,7 @@ export default function AgreementProvInvoice() {
                   >
                     Base
                   </InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="base-filter-label"
                     value={filters.base}
                     label="Base"
@@ -5174,7 +5748,7 @@ export default function AgreementProvInvoice() {
                         {base.name}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </MDBox>
 
@@ -5186,7 +5760,7 @@ export default function AgreementProvInvoice() {
                   >
                     Unit
                   </InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="unit-filter-label"
                     value={filters.unit}
                     label="Unit"
@@ -5201,7 +5775,7 @@ export default function AgreementProvInvoice() {
                         {unit.name || unit.unitName}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </MDBox>
 
@@ -5381,16 +5955,19 @@ export default function AgreementProvInvoice() {
               minHeight: 0,
               overflow: "hidden",
               "& tr.agreement-prov-invoice-locked-row > td": {
-                filter: "blur(1px)",
-                WebkitFilter: "blur(1px)",
-                opacity: 0.72,
+                backgroundColor: "rgba(0, 0, 0, 0.045)",
+                color: "rgba(52, 71, 103, 0.82)",
                 userSelect: "none",
               },
+              "& tr.agreement-prov-invoice-locked-row > td .MuiIconButton-root, & tr.agreement-prov-invoice-locked-row > td .MuiIconButton-root:hover":
+                {
+                  opacity: "1 !important",
+                  color: "inherit",
+                },
               "& td .MuiIconButton-root.erp-grid-action-edit, & td .MuiIconButton-root.erp-grid-action-edit:hover":
                 {
                   opacity: "1 !important",
                   transform: "none !important",
-                  filter: "none !important",
                 },
               "& .MuiTableContainer-root": {
                 flex: "1 1 0",
@@ -5584,6 +6161,70 @@ export default function AgreementProvInvoice() {
               />
             </MDBox>
 
+            <MDTypography variant="h6" sx={{ mt: 2, mb: 1 }}>
+              Content scale
+            </MDTypography>
+            <MDBox display="flex" alignItems="center" gap={0.5}>
+              <Tooltip title="Zoom out content">
+                <span>
+                  <IconButton
+                    size="small"
+                    color="dark"
+                    onClick={() =>
+                      adjustPdfPreviewContentScale(-AGREEMENT_PROV_PDF_CONTENT_SCALE_STEP)
+                    }
+                    disabled={
+                      pdfPreviewLoading ||
+                      pdfPreviewContentScale <= AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN
+                    }
+                  >
+                    <Icon fontSize="small">zoom_out</Icon>
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <MDInput
+                size="small"
+                label="Scale %"
+                type="number"
+                value={Math.round(pdfPreviewContentScale * 100)}
+                readOnly
+                InputProps={{ readOnly: true }}
+                inputProps={{
+                  min: AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN * 100,
+                  max: AGREEMENT_PROV_PDF_CONTENT_SCALE_MAX * 100,
+                  step: AGREEMENT_PROV_PDF_CONTENT_SCALE_STEP * 100,
+                }}
+                sx={{
+                  width: 100,
+                  "& .MuiInputBase-input": { cursor: "default" },
+                }}
+              />
+              <Tooltip title="Zoom in content">
+                <span>
+                  <IconButton
+                    size="small"
+                    color="dark"
+                    onClick={() =>
+                      adjustPdfPreviewContentScale(AGREEMENT_PROV_PDF_CONTENT_SCALE_STEP)
+                    }
+                    disabled={
+                      pdfPreviewLoading ||
+                      pdfPreviewContentScale >= AGREEMENT_PROV_PDF_CONTENT_SCALE_MAX
+                    }
+                  >
+                    <Icon fontSize="small">zoom_in</Icon>
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </MDBox>
+            <MDTypography variant="body2" sx={{ mt: 0.75, color: "text.secondary" }}>
+              Current: {formatAgreementProvPdfContentScalePercent(pdfPreviewContentScale)} (print
+              content size)
+            </MDTypography>
+            <MDTypography variant="body2" sx={{ mt: 0.5, color: "text.secondary" }}>
+              A4 size is 100% scale.
+            </MDTypography>
+
             <MDBox mt={2} display="flex" gap={1} alignItems="center">
               <MDButton
                 variant="outlined"
@@ -5605,8 +6246,12 @@ export default function AgreementProvInvoice() {
               </MDButton>
             </MDBox>
 
-            <MDTypography variant="caption" sx={{ mt: 1, color: "text.secondary" }}>
-              Values are applied when you click Update.
+            <MDTypography
+              variant="caption"
+              sx={{ mt: 1, color: "text.secondary", display: "block" }}
+            >
+              Margins and content scale are applied when you click Update. Scale adjusts fonts,
+              spacing, and layout in the generated PDF (not just the preview display).
             </MDTypography>
           </MDBox>
 
@@ -5664,6 +6309,20 @@ export default function AgreementProvInvoice() {
         registerReloadInvoiceLines={registerReloadInvoiceLines}
         onInvoiceLinesLoaded={syncInvoiceItemRecordKeyFromLines}
       />
+
+      <AgreementDetailsDialog
+        open={agreementDetailsOpen}
+        onClose={() => {
+          setAgreementDetailsOpen(false);
+          setSelectedAgreementDetails(null);
+          setAgreementRiseTerms([]);
+        }}
+        contractDetails={selectedAgreementDetails}
+        columns={AGREEMENT_DETAILS_COLUMNS}
+        riseTerms={agreementRiseTerms}
+        loadingRiseTerms={loadingAgreementRiseTerms || openingAgreementDetails}
+        displayContext={{ tenants }}
+      />
     </DashboardLayout>
   );
 }
@@ -5673,6 +6332,8 @@ export {
   AgreementProvInvoiceEditDialog,
   buildAgreementProvContractBasicInfoForm,
   buildAgreementProvEditForm,
+  enrichAgreementProvRowWithContractHeaderFields,
   getAgreementProvSaveErrorMessage,
+  mergeAgreementProvEditFormContractHeaderFields,
   persistAllInvoiceScheduleLines,
 };

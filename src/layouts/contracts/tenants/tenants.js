@@ -11,11 +11,13 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
+import InputAdornment from "@mui/material/InputAdornment";
+import Autocomplete from "@mui/material/Autocomplete";
 import IconButton from "@mui/material/IconButton";
 import Popover from "@mui/material/Popover";
 import api, {
@@ -23,6 +25,7 @@ import api, {
   canDeleteCurrentMenu,
   canEditCurrentMenu,
 } from "services/api.service";
+import contractApi from "services/api.contract.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
@@ -34,6 +37,7 @@ import StatusBadge from "components/StatusBadge";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import CurrencyLoading from "components/CurrencyLoading";
 import { format, parseISO, isValid } from "date-fns";
+import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
 
 /** Address column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
 function AddressTableCell({ value }) {
@@ -119,6 +123,41 @@ AddressTableCell.propTypes = {
 const TENANTS_HSCROLL_HIDE_MS = 1800;
 const TENANTS_HSCROLL_THUMB_MIN_PX = 28;
 const TENANTS_HSCROLL_RAIL_H = 6;
+
+function pickCoaField(row, ...keys) {
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = row?.[keys[i]];
+    if (value != null && String(value).trim() !== "") return String(value).trim();
+  }
+  return "";
+}
+
+function normalizeTenantCoaOption(row) {
+  const id = row?.Id ?? row?.id;
+  return {
+    id: id != null ? Number(id) : null,
+    acctId: pickCoaField(row, "acctId", "AcctId"),
+    acctName: pickCoaField(row, "acctName", "AcctName"),
+    controlAccount: pickCoaField(row, "controlAccount", "ControlAccount"),
+  };
+}
+
+function isTenantsControlAccount(controlAccount) {
+  return /^tenants$/i.test(String(controlAccount || "").trim());
+}
+
+function getTenantCoaDropdownLabel(option) {
+  if (option == null) return "";
+  const acctId = String(option.acctId ?? "").trim();
+  const acctName = String(option.acctName ?? "").trim();
+  if (acctId && acctName) return `${acctId} - ${acctName}`;
+  return acctId || acctName || "";
+}
+
+function findTenantCoaOption(options, coaId) {
+  if (coaId === "" || coaId == null) return null;
+  return (options || []).find((option) => Number(option.id) === Number(coaId)) ?? null;
+}
 
 function findTenantsMainHorizontalScrollEl(root) {
   if (!root || typeof root.querySelector !== "function") return null;
@@ -553,8 +592,45 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     gstNo: "",
     status: true,
     remarks: "",
+    coaId: "",
   });
   const [errors, setErrors] = useState({});
+  const [tenantCoaOptions, setTenantCoaOptions] = useState([]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    let cancelled = false;
+
+    const fetchTenantCoaOptions = async () => {
+      try {
+        const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
+        const options = (chartOfAccountsApi.unwrapList(response) || [])
+          .map(normalizeTenantCoaOption)
+          .filter((row) => row.id != null && isTenantsControlAccount(row.controlAccount))
+          .sort((a, b) => {
+            const idDiff = String(a.acctId).localeCompare(String(b.acctId), undefined, {
+              numeric: true,
+              sensitivity: "base",
+            });
+            if (idDiff !== 0) return idDiff;
+            return String(a.acctName).localeCompare(String(b.acctName), undefined, {
+              sensitivity: "base",
+            });
+          });
+        if (!cancelled) setTenantCoaOptions(options);
+      } catch (error) {
+        console.error("Error fetching tenant chart of account options:", error);
+        if (!cancelled) setTenantCoaOptions([]);
+      }
+    };
+
+    fetchTenantCoaOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     setErrors({});
@@ -573,6 +649,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         gstNo: initialData.gstNo || "",
         status: initialData.status !== undefined ? initialData.status : true,
         remarks: initialData.remarks || "",
+        coaId: initialData.coaId ?? initialData.CoaId ?? "",
       });
     } else {
       setForm({
@@ -589,6 +666,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         gstNo: "",
         status: true,
         remarks: "",
+        coaId: "",
       });
     }
   }, [initialData, open]);
@@ -608,34 +686,34 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     return false;
   };
 
-  const validateAddNew = () => {
+  const validateForm = () => {
     const next = {};
-    const required = [
-      { key: "tenantNo", label: "Tenant No" },
-      { key: "ownerName", label: "Particular Name" },
-      { key: "prefix", label: "Prefix" },
-      { key: "address", label: "Address" },
-      { key: "province", label: "Province" },
-      { key: "city", label: "City" },
-      { key: "telephoneNo", label: "Telephone No" },
-      { key: "cellNo", label: "Cell No" },
-      { key: "ntnNo", label: "NTN No" },
-      { key: "gstNo", label: "GST No" },
-      { key: "remarks", label: "Remarks" },
-    ];
-    required.forEach(({ key, label }) => {
-      if (isEmpty(form?.[key])) next[key] = `${label} is required`;
-    });
+    if (isAddMode) {
+      const required = [
+        { key: "tenantNo", label: "Tenant No" },
+        { key: "ownerName", label: "Particular Name" },
+        { key: "prefix", label: "Prefix" },
+        { key: "address", label: "Address" },
+        { key: "province", label: "Province" },
+        { key: "city", label: "City" },
+        { key: "telephoneNo", label: "Telephone No" },
+        { key: "cellNo", label: "Cell No" },
+        { key: "ntnNo", label: "NTN No" },
+        { key: "gstNo", label: "GST No" },
+        { key: "remarks", label: "Remarks" },
+      ];
+      required.forEach(({ key, label }) => {
+        if (isEmpty(form?.[key])) next[key] = `${label} is required`;
+      });
+    }
+    if (isEmpty(form?.coaId)) next.coaId = "Account is required";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
 
   const handleSave = () => {
-    // Mandatory validation only for Create New (as requested)
-    if (isAddMode) {
-      const ok = validateAddNew();
-      if (!ok) return;
-    }
+    const ok = validateForm();
+    if (!ok) return;
     onSubmit(form);
   };
 
@@ -678,35 +756,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
       </DialogTitle>
       <DialogContent>
         <Grid container spacing={3} mt={1}>
-          {/* Prefix first, then Owner Name */}
-          <Grid item xs={12} sm={2}>
-            <FormControl fullWidth size="small" required={isAddMode} error={Boolean(errors.prefix)}>
-              <InputLabel>Prefix</InputLabel>
-              <Select
-                value={form.prefix}
-                label="Prefix"
-                sx={{
-                  "& .MuiInputBase-input": {
-                    fontSize: "1.1rem",
-                    padding: "12px 14px",
-                  },
-                  "& .MuiInputLabel-root": {
-                    fontSize: "1.1rem",
-                  },
-                }}
-                onChange={(e) => handleChange("prefix", e.target.value)}
-              >
-                <MenuItem value="">Select</MenuItem>
-                <MenuItem value="Mr">Mr</MenuItem>
-                <MenuItem value="Mrs">Mrs</MenuItem>
-                <MenuItem value="Miss">Miss</MenuItem>
-                <MenuItem value="M/S">M/S</MenuItem>
-              </Select>
-              {errors.prefix && <FormHelperText>{errors.prefix}</FormHelperText>}
-            </FormControl>
-          </Grid>
-
-          <Grid item xs={12} sm={10}>
+          <Grid item xs={12}>
             <MDInput
               label="Particular Name"
               type="text"
@@ -715,8 +765,8 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
-              error={Boolean(errors.ownerName)}
-              helperText={errors.ownerName}
+              error={Boolean(errors.ownerName || errors.prefix)}
+              helperText={errors.ownerName || errors.prefix}
               sx={{
                 "& .MuiInputBase-input": {
                   fontSize: "1.1rem",
@@ -725,6 +775,38 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 "& .MuiInputLabel-root": {
                   fontSize: "1.1rem",
                 },
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ mr: 0 }}>
+                    <SearchableSelect
+                      value={form.prefix}
+                      onChange={(e) => handleChange("prefix", e.target.value)}
+                      displayEmpty
+                      variant="standard"
+                      disableUnderline
+                      renderValue={(selected) => {
+                        const value = String(selected || "").trim();
+                        return value || "Prefix";
+                      }}
+                      sx={{
+                        minWidth: 72,
+                        maxWidth: 120,
+                        fontSize: "0.875rem",
+                        "& .MuiSelect-select": { py: 0.25, pr: "24px !important" },
+                      }}
+                      MenuProps={{ PaperProps: { sx: { maxHeight: 320 } } }}
+                    >
+                      <MenuItem value="">
+                        <em>Select</em>
+                      </MenuItem>
+                      <MenuItem value="Mr">Mr</MenuItem>
+                      <MenuItem value="Mrs">Mrs</MenuItem>
+                      <MenuItem value="Miss">Miss</MenuItem>
+                      <MenuItem value="M/S">M/S</MenuItem>
+                    </SearchableSelect>
+                  </InputAdornment>
+                ),
               }}
             />
           </Grid>
@@ -771,7 +853,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               error={Boolean(errors.province)}
             >
               <InputLabel>Province</InputLabel>
-              <Select
+              <SearchableSelect
                 value={form.province}
                 label="Province"
                 onChange={(e) => handleChange("province", e.target.value)}
@@ -784,7 +866,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 <MenuItem value="Balochistan">Balochistan</MenuItem>
                 <MenuItem value="GB">GB</MenuItem>
                 <MenuItem value="AJK">AJK</MenuItem>
-              </Select>
+              </SearchableSelect>
               {errors.province && <FormHelperText>{errors.province}</FormHelperText>}
             </FormControl>
           </Grid>
@@ -915,7 +997,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               <InputLabel id="status-label" sx={{ fontSize: "1.1rem" }}>
                 Status
               </InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="status-label"
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
@@ -948,7 +1030,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 <MenuItem value={false} sx={{ fontSize: "1.1rem", padding: "10px 14px" }}>
                   Inactive
                 </MenuItem>
-              </Select>
+              </SearchableSelect>
               {errors.status && <FormHelperText>{errors.status}</FormHelperText>}
             </FormControl>
           </Grid>
@@ -1001,18 +1083,73 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
           </Grid>
         </Grid>
       </DialogContent>
-      <DialogActions>
-        <MDButton variant="outlined" color="secondary" onClick={onClose}>
-          <Icon>close</Icon>&nbsp;Cancel
-        </MDButton>
-        <MDButton
-          variant="gradient"
-          color="info"
-          onClick={handleSave}
-          disabled={isAddMode ? !canCreate : !canEdit}
+      <DialogActions
+        sx={{
+          px: 3,
+          py: 2,
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: { xs: "wrap", sm: "nowrap" },
+          gap: 2,
+        }}
+      >
+        <MDBox
+          sx={{
+            flex: { xs: "1 1 100%", sm: "0 0 50%" },
+            maxWidth: { xs: "100%", sm: "50%" },
+            pr: { sm: 1 },
+          }}
         >
-          <Icon>save</Icon>&nbsp;Save
-        </MDButton>
+          <Autocomplete
+            size="small"
+            fullWidth
+            disableClearable
+            options={tenantCoaOptions}
+            getOptionLabel={(option) => getTenantCoaDropdownLabel(option)}
+            isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+            value={findTenantCoaOption(tenantCoaOptions, form.coaId)}
+            onChange={(_, newValue) => handleChange("coaId", newValue != null ? newValue.id : "")}
+            ListboxProps={{ style: { maxHeight: 300 } }}
+            sx={{
+              fontSize: "1.1rem",
+              "& .MuiAutocomplete-inputRoot": {
+                paddingTop: 0,
+                paddingBottom: 0,
+              },
+              "& .MuiInputBase-input": {
+                fontSize: "1.1rem",
+                padding: "12px 14px",
+              },
+            }}
+            renderInput={(params) => (
+              <MDInput
+                {...params}
+                label="Account"
+                required
+                error={Boolean(errors.coaId)}
+                helperText={errors.coaId}
+                sx={{
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1.1rem",
+                  },
+                }}
+              />
+            )}
+          />
+        </MDBox>
+        <MDBox display="flex" gap={1} flexShrink={0} alignSelf={{ xs: "flex-end", sm: "center" }}>
+          <MDButton variant="outlined" color="secondary" onClick={onClose}>
+            <Icon>close</Icon>&nbsp;Cancel
+          </MDButton>
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleSave}
+            disabled={isAddMode ? !canCreate : !canEdit}
+          >
+            <Icon>save</Icon>&nbsp;Save
+          </MDButton>
+        </MDBox>
       </DialogActions>
     </Dialog>
   );
@@ -1024,6 +1161,47 @@ TenantsForm.propTypes = {
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
 };
+
+function readTenantsUrlParams() {
+  try {
+    const params = new URLSearchParams(
+      typeof window !== "undefined" ? window.location?.search || "" : ""
+    );
+    return {
+      tenantNo: String(params.get("tenantNo") || "").trim(),
+    };
+  } catch {
+    return { tenantNo: "" };
+  }
+}
+
+function buildTenantFormState(tenant) {
+  return {
+    ...tenant,
+    tenantNo: tenant.tenantNo || "",
+    ownerName: tenant.ownerName || "",
+    prefix: tenant.prefix || "",
+    businessName: tenant.businessName || "",
+    address: tenant.address || "",
+    province: tenant.province || "",
+    city: tenant.city || "",
+    telephoneNo: tenant.telephoneNo || "",
+    cellNo: tenant.cellNo || "",
+    ntnNo: tenant.ntnNo || "",
+    gstNo: tenant.gstNo || "",
+    status: tenant.status !== undefined ? tenant.status : true,
+    remarks: tenant.remarks || "",
+    coaId: tenant.coaId ?? tenant.CoaId ?? "",
+  };
+}
+
+function openAgreementProvInvoiceForTenantInNewTab(tenantNo) {
+  const normalized = String(tenantNo || "").trim();
+  if (!normalized || typeof window === "undefined") return;
+  const params = new URLSearchParams({ tenantNo: normalized });
+  const url = `${window.location.origin}/contracts/agreement-prov-invoice?${params.toString()}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 
 export default function Tenants() {
   const [controller] = useMaterialUIController();
@@ -1046,12 +1224,96 @@ export default function Tenants() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(true);
+  const [coaLabelById, setCoaLabelById] = useState({});
+  const deepLinkTenantNoRef = useRef(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const params = new URLSearchParams(String(window.location?.search || ""));
+      return String(params.get("tenantNo") || "").trim();
+    } catch {
+      return "";
+    }
+  });
+  const deepLinkTenantAppliedRef = useRef(false);
+
+  const fetchCoaLabels = useCallback(async () => {
+    try {
+      const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
+      const coaRows = chartOfAccountsApi.unwrapList(response) || [];
+      const lookup = {};
+      coaRows.forEach((row) => {
+        const id = row?.id ?? row?.Id;
+        if (id == null) return;
+        if (!isTenantsControlAccount(pickCoaField(row, "controlAccount", "ControlAccount"))) return;
+        lookup[Number(id)] = getTenantCoaDropdownLabel(normalizeTenantCoaOption(row));
+      });
+      setCoaLabelById(lookup);
+    } catch (error) {
+      console.error("Error fetching tenant chart of account labels:", error);
+      setCoaLabelById({});
+    }
+  }, []);
 
   const fetchTenants = async () => {
     setLoading(true);
     try {
-      const response = await api.list("tenant");
-      setRows(response);
+      const [tenantResponse, contractResponse, invoiceResponse] = await Promise.all([
+        api.list("tenant"),
+        contractApi.getAllRecords(),
+        contractApi.getAllInvoiceScheduleRecords({ isFinalized: true }),
+      ]);
+
+      const tenantRows = Array.isArray(tenantResponse) ? tenantResponse : [];
+      const contractRows = Array.isArray(contractResponse?.data)
+        ? contractResponse.data
+        : Array.isArray(contractResponse)
+        ? contractResponse
+        : [];
+      const invoiceRows = Array.isArray(invoiceResponse?.data)
+        ? invoiceResponse.data
+        : Array.isArray(invoiceResponse)
+        ? invoiceResponse
+        : [];
+
+      const contractTenantByNo = new Map();
+      const contractCountsByTenant = new Map();
+      contractRows.forEach((contract) => {
+        const contractNo = String(contract?.contractNo ?? contract?.ContractNo ?? "").trim();
+        const tenantNo = String(contract?.tenantNo ?? contract?.TenantNo ?? "").trim();
+        if (contractNo && tenantNo) contractTenantByNo.set(contractNo, tenantNo);
+        if (tenantNo) {
+          contractCountsByTenant.set(tenantNo, (contractCountsByTenant.get(tenantNo) || 0) + 1);
+        }
+      });
+
+      const invoiceSetsByTenant = new Map();
+      invoiceRows.forEach((invoice) => {
+        const contractNo = String(invoice?.contractNo ?? invoice?.ContractNo ?? "").trim();
+        const invoiceNo = String(invoice?.invoiceNo ?? invoice?.InvoiceNo ?? "").trim();
+        const tenantNoDirect = String(invoice?.tenantNo ?? invoice?.TenantNo ?? "").trim();
+        const tenantNo = tenantNoDirect || contractTenantByNo.get(contractNo) || "";
+        if (!tenantNo || !invoiceNo) return;
+        const key = contractNo ? `${contractNo}|${invoiceNo}` : invoiceNo;
+        if (!invoiceSetsByTenant.has(tenantNo)) invoiceSetsByTenant.set(tenantNo, new Set());
+        invoiceSetsByTenant.get(tenantNo).add(key);
+      });
+
+      const enrichedTenantRows = tenantRows.map((tenant) => {
+        const tenantNo = String(tenant?.tenantNo ?? tenant?.TenantNo ?? "").trim();
+        const totalInvoices = invoiceSetsByTenant.get(tenantNo)?.size ?? 0;
+        const fallbackContractCount = contractCountsByTenant.get(tenantNo) || 0;
+        const currentTotalContracts = Number(tenant?.totalContracts ?? tenant?.TotalContracts);
+        return {
+          ...tenant,
+          totalInvoices,
+          TotalInvoices: totalInvoices,
+          totalContracts: Number.isFinite(currentTotalContracts)
+            ? currentTotalContracts
+            : fallbackContractCount,
+        };
+      });
+
+      setRows(enrichedTenantRows);
     } catch (error) {
       console.error("Error fetching tenants:", error);
     } finally {
@@ -1061,7 +1323,8 @@ export default function Tenants() {
 
   useEffect(() => {
     fetchTenants();
-  }, []);
+    fetchCoaLabels();
+  }, [fetchCoaLabels]);
 
   const handleOpenForm = () => {
     if (!canCreate) return;
@@ -1089,9 +1352,25 @@ export default function Tenants() {
       gstNo: tenant.gstNo || "",
       status: tenant.status !== undefined ? tenant.status : true,
       remarks: tenant.remarks || "",
+      coaId: tenant.coaId ?? tenant.CoaId ?? "",
     });
     setOpenForm(true);
   };
+
+  useEffect(() => {
+    if (deepLinkTenantAppliedRef.current) return;
+    const readTenantNo =
+      typeof deepLinkTenantNoRef.current === "function"
+        ? deepLinkTenantNoRef.current()
+        : String(deepLinkTenantNoRef.current || "").trim();
+    if (!readTenantNo || !Array.isArray(rows) || rows.length === 0) return;
+    const tenant = rows.find(
+      (row) => String(row?.tenantNo ?? row?.TenantNo ?? "").trim() === readTenantNo
+    );
+    if (!tenant?.id) return;
+    deepLinkTenantAppliedRef.current = true;
+    handleEditTenant(tenant.id);
+  }, [rows]);
 
   const handleDeleteTenant = (id) => {
     if (!canDelete) return;
@@ -1173,6 +1452,7 @@ export default function Tenants() {
         gstNo: data.gstNo || null,
         status: data.status !== undefined ? Boolean(data.status) : true,
         remarks: data.remarks || null,
+        coaId: data.coaId !== "" && data.coaId != null ? Number(data.coaId) : null,
       };
       if (currentTenant) {
         if (!canEdit) return;
@@ -1284,25 +1564,29 @@ export default function Tenants() {
       accessor: "totalInvoices",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => (
-        <MDButton
-          size="small"
-          variant="text"
-          color="info"
-          onClick={() => {}}
-          sx={{
-            minWidth: "auto",
-            p: 0.5,
-            textDecoration: "underline",
-            justifyContent: "flex-start",
-            alignItems: "flex-start",
-          }}
-        >
-          {value ?? 0}
-        </MDButton>
-      ),
+      Cell: (cell) => {
+        const tenantNo = cell?.row?.original?.tenantNo;
+        return (
+          <MDButton
+            size="small"
+            variant="text"
+            color="info"
+            onClick={() => openAgreementProvInvoiceForTenantInNewTab(tenantNo)}
+            sx={{
+              minWidth: "auto",
+              p: 0.5,
+              textDecoration: "underline",
+              justifyContent: "flex-start",
+              alignItems: "flex-start",
+            }}
+          >
+            {cell?.value ?? 0}
+          </MDButton>
+        );
+      },
     },
     { Header: "Business", accessor: "businessName", align: "left" },
+    { Header: "Account", accessor: "accountLabel", align: "left" },
     {
       Header: "Status",
       accessor: "status",
@@ -1312,9 +1596,15 @@ export default function Tenants() {
     { Header: "Remarks", accessor: "remarks", align: "left" },
   ];
 
-  const computedRows = rows.map((row) => ({
-    ...row,
-    actions: (
+  const computedRows = rows.map((row) => {
+    const coaId = row.coaId ?? row.CoaId ?? "";
+    const accountLabel =
+      coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
+
+    return {
+      ...row,
+      accountLabel,
+      actions: (
       <MDBox
         alignItems="left"
         justifyContent="left"
@@ -1349,7 +1639,8 @@ export default function Tenants() {
         )}
       </MDBox>
     ),
-  }));
+    };
+  });
 
   return (
     <DashboardLayout>

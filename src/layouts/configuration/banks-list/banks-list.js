@@ -11,7 +11,7 @@ import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -53,7 +53,7 @@ function BanksList() {
   const [newRowDraft, setNewRowDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [pageNumber, setPageNumber] = useState(1);
-  const [pageSize, setPageSize] = useState(1000);
+  const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -71,9 +71,15 @@ function BanksList() {
         pageNumber: page.toString(),
         pageSize: size.toString(),
       }).toString();
-      const response = await api.request("GET", `/api/BankLists?${params}`);
-      const data = response?.data ?? (Array.isArray(response) ? response : []);
-      const pagination = response?.pagination;
+      const res = await api.requestRaw("GET", `/api/BankLists?${params}`);
+      const contentType = res.headers.get("content-type");
+      const payload =
+        contentType && contentType.includes("application/json") ? await res.json() : [];
+      const data = Array.isArray(payload) ? payload : payload?.data ?? [];
+      const headerTotal = res.headers.get("X-Total-Count");
+      const paginationTotal = headerTotal
+        ? parseInt(headerTotal, 10)
+        : Number(payload?.pagination?.totalCount);
 
       // Normalize status: convert byte (0/1) to boolean for UI
       const normalizedData = Array.isArray(data)
@@ -84,7 +90,11 @@ function BanksList() {
         : [];
 
       setTableRows(normalizedData);
-      setTotalCount(Number(pagination?.totalCount || 0));
+      setTotalCount(
+        Number.isFinite(paginationTotal) && paginationTotal > 0
+          ? paginationTotal
+          : normalizedData.length
+      );
     } catch (error) {
       console.error("Error fetching banks:", error);
       setTableRows([]);
@@ -274,7 +284,7 @@ function BanksList() {
       <InputLabel id="bank-status-label" sx={darkMode ? { color: "#000000 !important" } : {}}>
         Status
       </InputLabel>
-      <Select
+      <SearchableSelect
         labelId="bank-status-label"
         value={value}
         label="Status"
@@ -297,7 +307,7 @@ function BanksList() {
             {opt.label}
           </MenuItem>
         ))}
-      </Select>
+      </SearchableSelect>
       {newErrors.status && (
         <FormHelperText sx={darkMode ? { color: "#000000 !important" } : {}}>
           {newErrors.status}
@@ -448,16 +458,18 @@ function BanksList() {
   // Memoize the table object to prevent DataTable from resetting pagination
   const tableData = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);
 
+  const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
+
   const serverPaginationFooter = useMemo(
     () => (
       <ServerGridPagination
         page={pageNumber}
-        totalCount={totalCount}
+        totalCount={displayTotal}
         pageSize={pageSize}
         onPageChange={setPageNumber}
       />
     ),
-    [totalCount, pageNumber, pageSize]
+    [displayTotal, pageNumber, pageSize]
   );
 
   return (

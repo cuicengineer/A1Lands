@@ -51,6 +51,29 @@ async function createSubGroup(groupName, subGroupName) {
   return api.request("POST", "/api/ChartOfAccountSubGroups", payload);
 }
 
+async function updateSubGroup(id, groupName, subGroupName) {
+  const payload = await withAudit(
+    {
+      Id: Number(id),
+      GroupName: groupName,
+      groupName,
+      SubGroupName: subGroupName,
+      subGroupName,
+    },
+    "Update"
+  );
+  return api.request("PUT", `/api/ChartOfAccountSubGroups/${id}`, payload);
+}
+
+async function deleteSubGroup(id) {
+  const actionBy = await getActionBy();
+  return api.request("DELETE", `/api/ChartOfAccountSubGroups/${id}`, {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  });
+}
+
 function getControlAccounts() {
   return api.request("GET", "/api/ChartOfAccountControlAccounts");
 }
@@ -113,6 +136,8 @@ const chartOfAccountsApi = {
   getAll,
   getSubGroups,
   createSubGroup,
+  updateSubGroup,
+  deleteSubGroup,
   getControlAccounts,
   createControlAccount,
   create,

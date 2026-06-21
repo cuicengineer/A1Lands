@@ -46,11 +46,12 @@ export const kpiZoomPermanentLabelsPlugin = {
       typeof opts.fontWeight === "number" || typeof opts.fontWeight === "string"
         ? opts.fontWeight
         : 600;
-    const chartType = chart.config?.type;
+    const chartType = chart.config?.type || chart.config?._config?.type;
 
     chart.data.datasets.forEach((dataset, datasetIndex) => {
       const meta = chart.getDatasetMeta(datasetIndex);
       if (meta.hidden) return;
+      const elementType = meta.type || chartType;
 
       meta.data.forEach((element, dataIndex) => {
         const raw = dataset.data[dataIndex];
@@ -63,20 +64,25 @@ export const kpiZoomPermanentLabelsPlugin = {
           datasetIndex,
           dataIndex,
           element,
-          chartType,
+          chartType: elementType,
         });
         const labelText = String(text ?? "").trim();
         if (!labelText) return;
 
         ctx.save();
-        ctx.font = `${fontWeight} ${fontSize}px ${LABEL_FONT_FAMILY}`;
-        ctx.fillStyle = color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.9)";
-        ctx.shadowBlur = 4;
 
-        if (chartType === "doughnut" || chartType === "pie") {
+        if (
+          elementType === "doughnut" ||
+          elementType === "pie" ||
+          chartType === "doughnut" ||
+          chartType === "pie"
+        ) {
+          ctx.font = `${fontWeight} ${fontSize}px ${LABEL_FONT_FAMILY}`;
+          ctx.fillStyle = color;
+          ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.9)";
+          ctx.shadowBlur = 4;
           const props = element.getProps(
             ["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"],
             true
@@ -91,7 +97,38 @@ export const kpiZoomPermanentLabelsPlugin = {
           lines.forEach((line, lineIndex) => {
             ctx.fillText(line, x, startY + lineIndex * lineHeight);
           });
-        } else {
+        } else if (elementType === "bar" && opts.labelPlacement === "inside") {
+          const props = element.getProps(["x", "y", "base", "width"], true);
+          const segmentHeight = Math.abs(props.base - props.y);
+          const barWidth = props.width ?? 0;
+          let drawFontSize = fontSize;
+
+          ctx.font = `${fontWeight} ${drawFontSize}px ${LABEL_FONT_FAMILY}`;
+          let textWidth = ctx.measureText(labelText).width;
+          while (
+            drawFontSize > 6 &&
+            (segmentHeight < drawFontSize * 1.15 || barWidth < textWidth + 4)
+          ) {
+            drawFontSize -= 1;
+            ctx.font = `${fontWeight} ${drawFontSize}px ${LABEL_FONT_FAMILY}`;
+            textWidth = ctx.measureText(labelText).width;
+          }
+
+          if (segmentHeight < drawFontSize * 0.8 || barWidth < textWidth + 2) {
+            ctx.restore();
+            return;
+          }
+
+          const labelY = (props.y + props.base) / 2;
+          ctx.fillStyle = opts.insideLabelColor || "#ffffff";
+          ctx.shadowColor = opts.insideTextShadowColor || "rgba(0, 0, 0, 0.55)";
+          ctx.shadowBlur = 3;
+          ctx.fillText(labelText, props.x, labelY);
+        } else if (elementType === "bar") {
+          ctx.font = `${fontWeight} ${fontSize}px ${LABEL_FONT_FAMILY}`;
+          ctx.fillStyle = color;
+          ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.9)";
+          ctx.shadowBlur = 4;
           const props = element.getProps(["x", "y", "base"], true);
           const labelY = Math.min(props.y, props.base) - 6;
           ctx.textBaseline = "bottom";
@@ -143,7 +180,12 @@ export function buildKpiZoomTooltipOptions(darkMode) {
   };
 }
 
-export function buildKpiZoomPermanentLabelOptions({ darkMode, formatValue, fontSize = 13 }) {
+export function buildKpiZoomPermanentLabelOptions({
+  darkMode,
+  formatValue,
+  fontSize = 13,
+  labelPlacement = "above",
+}) {
   return {
     enabled: true,
     formatValue,
@@ -151,12 +193,62 @@ export function buildKpiZoomPermanentLabelOptions({ darkMode, formatValue, fontS
     textShadowColor: darkMode ? "rgba(0, 0, 0, 0.75)" : "rgba(255, 255, 255, 0.95)",
     fontSize,
     fontWeight: 700,
+    labelPlacement,
+    insideLabelColor: "#ffffff",
+    insideTextShadowColor: "rgba(0, 0, 0, 0.55)",
+  };
+}
+
+export function buildKpiDonutLegendLabelOptions({
+  darkMode = false,
+  fontSize = 13,
+  fontWeight = "bold",
+  padding = 10,
+  boxWidth = 12,
+} = {}) {
+  const textColor = darkMode ? "#e8e8e8" : "#344767";
+
+  return {
+    boxWidth,
+    padding,
+    usePointStyle: true,
+    pointStyle: "circle",
+    font: {
+      size: fontSize,
+      weight: fontWeight,
+      family: LABEL_FONT_FAMILY,
+    },
+    color: textColor,
+    generateLabels(chart) {
+      const labels = chart?.data?.labels || [];
+      const dataset = chart?.data?.datasets?.[0] || {};
+      const colors = dataset?.backgroundColor;
+
+      return labels.map((label, index) => {
+        let sliceColor = textColor;
+        if (Array.isArray(colors)) {
+          sliceColor = colors[index] || textColor;
+        } else if (typeof colors === "string") {
+          sliceColor = colors;
+        }
+        return {
+          text: String(label ?? ""),
+          fillStyle: sliceColor,
+          strokeStyle: sliceColor,
+          lineWidth: 1,
+          hidden: !chart.getDataVisibility(index),
+          index,
+          pointStyle: "circle",
+          fontColor: textColor,
+        };
+      });
+    },
   };
 }
 
 export function applyKpiZoomBarChartEnhancements(
   baseOptions,
-  { darkMode, formatValue, tooltipCallbacks, fontSize = 13 } = {}
+  { darkMode, formatValue, tooltipCallbacks, fontSize = 13, labelPlacement = "above" } = {}
 ) {
   ensureKpiZoomChartPluginsRegistered();
 
@@ -174,6 +266,7 @@ export function applyKpiZoomBarChartEnhancements(
         darkMode,
         formatValue,
         fontSize,
+        labelPlacement,
       }),
     },
   };
@@ -184,6 +277,7 @@ export function applyKpiZoomDonutChartEnhancements(
   { darkMode, formatValue, tooltipCallbacks, fontSize = 12 } = {}
 ) {
   ensureKpiZoomChartPluginsRegistered();
+  const permanentLabelsDisabled = baseOptions?.plugins?.kpiZoomPermanentLabels?.enabled === false;
 
   return {
     ...baseOptions,
@@ -195,11 +289,13 @@ export function applyKpiZoomDonutChartEnhancements(
         ...buildKpiZoomTooltipOptions(darkMode),
         ...(tooltipCallbacks ? { callbacks: wrapTooltipCallbacks(tooltipCallbacks) } : {}),
       },
-      kpiZoomPermanentLabels: buildKpiZoomPermanentLabelOptions({
-        darkMode,
-        formatValue,
-        fontSize,
-      }),
+      kpiZoomPermanentLabels: permanentLabelsDisabled
+        ? { enabled: false }
+        : buildKpiZoomPermanentLabelOptions({
+            darkMode,
+            formatValue,
+            fontSize,
+          }),
     },
   };
 }

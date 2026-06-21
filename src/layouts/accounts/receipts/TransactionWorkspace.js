@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -14,15 +16,23 @@ import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
+import IncomeAgreementsModuleTabs from "layouts/income-agreements/components/IncomeAgreementsModuleTabs";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
-import { withGridValueChip } from "utils/gridValueChipCell";
 import {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
 } from "services/api.service";
 import ReceiptForm from "./ReceiptForm";
-import { flattenReceiptForGrid, formatAmount } from "./receiptUtils";
+import {
+  computeGrandTotal,
+  flattenReceiptForGrid,
+  formatAmount,
+  isReceiptFinalizedByAhq,
+  RECEIPT_AHQ_TAB,
+} from "./receiptUtils";
+import receiptsApi from "services/api.receipts.service";
+import { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 
 function formatDateDisplay(value) {
   if (!value) return "-";
@@ -33,14 +43,54 @@ function formatDateDisplay(value) {
   return raw;
 }
 
-export default function TransactionWorkspace({ labels }) {
+function TransactionWorkspace({ labels, incomeAgreementsModule, useReceiptApi = false }) {
   const [records, setRecords] = useState([]);
+  const [paginationHost, setPaginationHost] = useState(null);
   const [openForm, setOpenForm] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = useState(false);
   const [attachmentsRecord, setAttachmentsRecord] = useState(null);
+  const [ahqTab, setAhqTab] = useState(RECEIPT_AHQ_TAB.PENDING);
+
+  const showAhqTabs = useReceiptApi;
+  const showMonthField = Boolean(labels.gridMonth);
+
+  const pendingRecords = useMemo(
+    () => records.filter((record) => !isReceiptFinalizedByAhq(record)),
+    [records]
+  );
+  const finalizedRecords = useMemo(
+    () => records.filter((record) => isReceiptFinalizedByAhq(record)),
+    [records]
+  );
+  const visibleRecords = useMemo(() => {
+    if (!showAhqTabs) return records;
+    return ahqTab === RECEIPT_AHQ_TAB.FINALIZED ? finalizedRecords : pendingRecords;
+  }, [ahqTab, finalizedRecords, pendingRecords, records, showAhqTabs]);
+
+  useEffect(() => {
+    if (!useReceiptApi) return undefined;
+
+    let mounted = true;
+    const loadReceipts = async () => {
+      try {
+        const response = await receiptsApi.listReceipts();
+        if (!mounted) return;
+        const rows = receiptsApi.unwrapList(response).map(receiptsApi.normalizeReceiptRow);
+        setRecords(rows);
+      } catch (error) {
+        console.error("Failed to load receipts:", error);
+        if (mounted) window.alert("Failed to load receipts.");
+      }
+    };
+
+    loadReceipts();
+    return () => {
+      mounted = false;
+    };
+  }, [useReceiptApi]);
 
   const txt = (v) => (v != null && String(v).trim() !== "" ? String(v) : "-");
 
@@ -66,8 +116,17 @@ export default function TransactionWorkspace({ labels }) {
     setDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (recordToDelete == null) return;
+    if (useReceiptApi) {
+      try {
+        await receiptsApi.removeReceipt(recordToDelete);
+      } catch (error) {
+        console.error("Failed to delete receipt:", error);
+        window.alert("Failed to delete receipt.");
+        return;
+      }
+    }
     setRecords((prev) => prev.filter((row) => Number(row.id) !== Number(recordToDelete)));
     setDeleteDialogOpen(false);
     setRecordToDelete(null);
@@ -90,6 +149,43 @@ export default function TransactionWorkspace({ labels }) {
 
   const handleSubmit = async (payload) => {
     const existingId = currentRecord?.id;
+    const grandTotal = computeGrandTotal(payload.lines);
+
+    if (useReceiptApi) {
+      const canFinalizeByAhq = Boolean(existingId) && isSuperuserOrAhqSupervisorUser();
+      const apiPayload = receiptsApi.buildReceiptApiPayload(payload, grandTotal, {
+        includeFinalizedByAhq: canFinalizeByAhq,
+      });
+      try {
+        if (existingId) {
+          await receiptsApi.updateReceipt(existingId, apiPayload);
+          const normalized = receiptsApi.normalizeReceiptRow({
+            ...apiPayload,
+            ...(canFinalizeByAhq ? {} : { FinalizedByAhq: currentRecord?.finalizedByAhq }),
+            Id: existingId,
+          });
+          setRecords((prev) =>
+            prev.map((row) => (Number(row.id) === Number(existingId) ? normalized : row))
+          );
+          return { id: existingId };
+        }
+
+        const created = await receiptsApi.createReceipt(apiPayload);
+        const createdId = created?.id ?? created?.Id;
+        const normalized = receiptsApi.normalizeReceiptRow({
+          ...apiPayload,
+          ...(created || {}),
+          Id: createdId,
+        });
+        setRecords((prev) => [normalized, ...prev]);
+        return { id: createdId };
+      } catch (error) {
+        console.error("Failed to save receipt:", error);
+        window.alert("Failed to save receipt.");
+        throw error;
+      }
+    }
+
     if (existingId) {
       setRecords((prev) =>
         prev.map((row) =>
@@ -125,20 +221,6 @@ export default function TransactionWorkspace({ labels }) {
         accessor: "sno",
         align: "center",
         Cell: ({ value }) => (value != null && value !== "" ? value : "-"),
-      },
-      {
-        id: "racDisplay",
-        Header: "RAC",
-        accessor: "racDisplay",
-        align: "left",
-        Cell: ({ value, row }) => withGridValueChip(txt(value), "rac", { row }),
-      },
-      {
-        id: "baseDisplay",
-        Header: "Base",
-        accessor: "baseDisplay",
-        align: "left",
-        Cell: ({ value, row }) => withGridValueChip(txt(value), "base", { row }),
       },
       {
         id: "item",
@@ -182,6 +264,17 @@ export default function TransactionWorkspace({ labels }) {
         align: "left",
         Cell: ({ value }) => formatDateDisplay(value),
       },
+      ...(labels.gridMonth
+        ? [
+            {
+              id: "month",
+              Header: labels.gridMonth,
+              accessor: "month",
+              align: "left",
+              Cell: ({ value }) => txt(value),
+            },
+          ]
+        : []),
       {
         id: "reference",
         Header: "Reference",
@@ -204,12 +297,12 @@ export default function TransactionWorkspace({ labels }) {
         Cell: ({ value }) => txt(value),
       },
     ],
-    [labels.gridPaidFrom, labels.gridPayee]
+    [labels.gridPaidFrom, labels.gridPayee, labels.gridMonth]
   );
 
   const computedRows = useMemo(
     () =>
-      records.map((record, index) => {
+      visibleRecords.map((record, index) => {
         const flat = flattenReceiptForGrid(record, index);
         const hasAttachments = flat.attachmentCount > 0;
         return {
@@ -263,13 +356,20 @@ export default function TransactionWorkspace({ labels }) {
           ),
         };
       }),
-    [records]
+    [visibleRecords]
   );
 
   const workspaceMetadata = useMemo(
-    () => buildWorkspaceRecordMetrics({ total: records.length }),
-    [records.length]
+    () => buildWorkspaceRecordMetrics({ total: visibleRecords.length }),
+    [visibleRecords.length]
   );
+
+  const exportFileName = useMemo(() => {
+    if (!showAhqTabs) return labels.exportFileName;
+    return ahqTab === RECEIPT_AHQ_TAB.FINALIZED
+      ? `${labels.exportFileName}-Finalized`
+      : `${labels.exportFileName}-Pending`;
+  }, [ahqTab, labels.exportFileName, showAhqTabs]);
 
   return (
     <DashboardLayout>
@@ -278,6 +378,71 @@ export default function TransactionWorkspace({ labels }) {
         title={labels.pageTitle}
         subtitle={labels.pageSubtitle}
         metadata={workspaceMetadata}
+        tabs={
+          showAhqTabs ? (
+            <MDBox px={3} sx={{ flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
+              <Tabs
+                value={ahqTab}
+                onChange={(_, value) => setAhqTab(value)}
+                aria-label="Receipt AHQ approval tabs"
+                sx={{
+                  minHeight: 40,
+                  "& .MuiTab-root": {
+                    minHeight: 40,
+                    textTransform: "none",
+                    fontSize: "0.8125rem",
+                    fontWeight: 600,
+                  },
+                }}
+              >
+                <Tab
+                  value={RECEIPT_AHQ_TAB.PENDING}
+                  label={`${labels.tabPendingAhq || "Pending AHQ approval"} (${
+                    pendingRecords.length
+                  })`}
+                />
+                <Tab
+                  value={RECEIPT_AHQ_TAB.FINALIZED}
+                  label={`${labels.tabFinalizedAhq || "Finalized by AHQ"} (${
+                    finalizedRecords.length
+                  })`}
+                />
+              </Tabs>
+            </MDBox>
+          ) : incomeAgreementsModule ? (
+            <IncomeAgreementsModuleTabs />
+          ) : null
+        }
+        filters={
+          incomeAgreementsModule ? (
+            <MDBox px={3} sx={{ flexShrink: 0 }}>
+              <MDBox display="flex" justifyContent="flex-end" alignItems="center" minHeight={28}>
+                <MDBox
+                  ref={setPaginationHost}
+                  className="income-agreements-filter-pagination"
+                  sx={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    minHeight: 22,
+                    "& .MuiPaginationItem-root": {
+                      fontSize: "0.6rem",
+                      minWidth: "1.2rem",
+                      height: "1.2rem",
+                      padding: "0 2px",
+                    },
+                    "& .MuiPaginationItem-icon": {
+                      fontSize: "0.8rem",
+                    },
+                    "& .compact-grid-pagination": {
+                      gap: 0,
+                    },
+                  }}
+                />
+              </MDBox>
+            </MDBox>
+          ) : null
+        }
         actions={
           canCreateCurrentMenu() ? (
             <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
@@ -318,16 +483,22 @@ export default function TransactionWorkspace({ labels }) {
           table={{ columns, rows: computedRows }}
           isSorted={false}
           stickyToolbarAndHeader
-          entriesPerPage={{
-            defaultValue: 20,
-            entries: [10, 25, 50, 100],
-          }}
-          showTotalEntries
+          entriesPerPage={
+            incomeAgreementsModule
+              ? false
+              : {
+                  defaultValue: 20,
+                  entries: [10, 25, 50, 100],
+                }
+          }
+          showTotalEntries={!incomeAgreementsModule}
           noEndBorder
           canSearch
-          exportFileName={labels.exportFileName}
+          exportFileName={exportFileName}
           contentFitTable
           disableHeaderMetrics
+          pagination={true}
+          paginationHost={incomeAgreementsModule ? paginationHost : null}
         />
       </EnterpriseWorkspace>
 
@@ -337,6 +508,7 @@ export default function TransactionWorkspace({ labels }) {
         onSubmit={handleSubmit}
         initialData={currentRecord}
         labels={labels}
+        showMonthField={showMonthField}
       />
 
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
@@ -394,6 +566,9 @@ TransactionWorkspace.propTypes = {
     payeePlaceholder: PropTypes.string.isRequired,
     gridPaidFrom: PropTypes.string.isRequired,
     gridPayee: PropTypes.string.isRequired,
+    gridMonth: PropTypes.string,
+    month: PropTypes.string,
+    monthRequired: PropTypes.string,
     pageTitle: PropTypes.string.isRequired,
     pageSubtitle: PropTypes.string.isRequired,
     exportFileName: PropTypes.string.isRequired,
@@ -401,5 +576,16 @@ TransactionWorkspace.propTypes = {
     editFormTitle: PropTypes.string.isRequired,
     deleteConfirm: PropTypes.string.isRequired,
     noAttachments: PropTypes.string.isRequired,
+    tabPendingAhq: PropTypes.string,
+    tabFinalizedAhq: PropTypes.string,
   }).isRequired,
+  incomeAgreementsModule: PropTypes.bool,
+  useReceiptApi: PropTypes.bool,
 };
+
+TransactionWorkspace.defaultProps = {
+  incomeAgreementsModule: false,
+  useReceiptApi: false,
+};
+
+export default TransactionWorkspace;

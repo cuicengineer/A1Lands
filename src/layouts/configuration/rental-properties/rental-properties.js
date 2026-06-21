@@ -322,37 +322,45 @@ function RentalProperties() {
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const fetchQueueRef = useRef(Promise.resolve());
   // Search is handled by shared DataTable (canSearch)
 
   const urlFilters = useMemo(() => readRentalPropertiesUrlFilters(), []);
   const urlFilterActive = hasRentalPropertiesUrlFilters(urlFilters);
 
-  const fetchRentalProperties = useCallback(async () => {
-    perfMark("rental-properties.api");
-    setLoading(true);
-    try {
-      const networkStart = performance.now();
-      const response = await rentalPropertiesApi.getAllRecords();
-      perfLog(
-        "rental-properties.api.network",
-        `${(performance.now() - networkStart).toFixed(1)}ms`
-      );
-      const stateStart = performance.now();
-      startTransition(() => {
-        const rows = response?.data ?? (Array.isArray(response) ? response : []);
-        const arr = Array.isArray(rows) ? rows : [];
-        setTableRows(arr);
-        setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
-      });
-      perfLog("rental-properties.api.state", `${(performance.now() - stateStart).toFixed(1)}ms`);
-    } catch (error) {
-      console.error("Error fetching rental properties:", error);
-      setTableRows([]);
-      setTotalCount(0);
-    } finally {
-      setLoading(false);
-      perfEnd("rental-properties.api");
-    }
+  const fetchRentalProperties = useCallback(({ silent = false } = {}) => {
+    const task = async () => {
+      perfMark("rental-properties.api");
+      if (!silent) setLoading(true);
+      try {
+        const networkStart = performance.now();
+        const response = await rentalPropertiesApi.getAllRecords();
+        perfLog(
+          "rental-properties.api.network",
+          `${(performance.now() - networkStart).toFixed(1)}ms`
+        );
+        const stateStart = performance.now();
+        startTransition(() => {
+          const rows = response?.data ?? (Array.isArray(response) ? response : []);
+          const arr = Array.isArray(rows) ? rows : [];
+          setTableRows(arr);
+          setTotalCount(Number(response?.pagination?.totalCount ?? arr.length));
+        });
+        perfLog("rental-properties.api.state", `${(performance.now() - stateStart).toFixed(1)}ms`);
+      } catch (error) {
+        console.error("Error fetching rental properties:", error);
+        if (!silent) {
+          setTableRows([]);
+          setTotalCount(0);
+        }
+      } finally {
+        if (!silent) setLoading(false);
+        perfEnd("rental-properties.api");
+      }
+    };
+
+    fetchQueueRef.current = fetchQueueRef.current.catch(() => {}).then(task);
+    return fetchQueueRef.current;
   }, []);
 
   useEffect(() => {
@@ -506,10 +514,8 @@ function RentalProperties() {
         // Extract ID from response (could be response.id or response.data.id)
         createdOrUpdatedId = response?.id || response?.data?.id || null;
       }
-      await fetchRentalProperties();
-      setFormOpen(false);
 
-      // Return the ID so the form can upload files if needed
+      // Return the ID so the form can upload files if needed (close + refresh via onSuccess)
       return createdOrUpdatedId;
     } catch (error) {
       console.error("Error saving rental property:", error);
@@ -520,6 +526,12 @@ function RentalProperties() {
 
   const handleFormClose = () => {
     setFormOpen(false);
+    setCurrentProperty(null);
+  };
+
+  const handleFormSuccess = () => {
+    handleFormClose();
+    fetchRentalProperties({ silent: true });
   };
 
   const handleDeleteProperty = (id) => {
@@ -550,9 +562,9 @@ function RentalProperties() {
     }
     try {
       await rentalPropertiesApi.remove(propertyToDelete);
-      await fetchRentalProperties();
       setShowDeleteDialog(false);
       setPropertyToDelete(null);
+      fetchRentalProperties({ silent: true });
     } catch (error) {
       console.error("Error deleting rental property:", error);
       // Optionally, show an error message to the user
@@ -668,8 +680,7 @@ function RentalProperties() {
   };
 
   const handleUploadSuccess = () => {
-    // Refresh the table after successful upload
-    fetchRentalProperties();
+    fetchRentalProperties({ silent: true });
   };
 
   // Helper function to normalize property IDs from a group (same logic as property-grouping)
@@ -1048,14 +1059,17 @@ function RentalProperties() {
         <WorkspaceLoadingOverlay active={loading} />
       </EnterpriseWorkspace>
 
-      <RentalPropertyForm
-        open={formOpen}
-        onClose={handleFormClose}
-        onSubmit={handleFormSubmit}
-        initialData={currentProperty}
-        onUploadSuccess={handleUploadSuccess}
-        lockedBaseId={lockedBaseIdForForm}
-      />
+      {formOpen ? (
+        <RentalPropertyForm
+          open
+          onClose={handleFormClose}
+          onSuccess={handleFormSuccess}
+          onSubmit={handleFormSubmit}
+          initialData={currentProperty}
+          onUploadSuccess={handleUploadSuccess}
+          lockedBaseId={lockedBaseIdForForm}
+        />
+      ) : null}
 
       <Dialog
         open={attachmentDialogOpen}

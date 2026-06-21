@@ -14,7 +14,7 @@ import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
 import MDTypography from "components/MDTypography";
@@ -26,6 +26,7 @@ import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ConfigurationModuleTabs from "layouts/configuration/components/ConfigurationModuleTabs";
 import DataTable from "examples/Tables/DataTable";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
+import { GRID_DARK_ARROW_ICON_SX } from "utils/gridDarkArrowIconSx";
 import chartOfAccountsApi, {
   COA_GROUP_OPTIONS,
   COA_SECTION_TYPE,
@@ -36,6 +37,7 @@ import {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  isSuperuserOrAhqSupervisorUser,
 } from "services/api.service";
 import { useMaterialUIController } from "context";
 import IncomeStatementPanel from "layouts/configuration/income-statement/IncomeStatementPanel";
@@ -43,11 +45,7 @@ import {
   DUPLICATE_ACCT_ROW_STYLE,
   getDuplicateAcctRowIds,
 } from "layouts/configuration/utils/coaDuplicateHighlight";
-import {
-  coaPanelColumnSx,
-  coaPanelTableBodySx,
-  coaSplitBodySx,
-} from "utils/coaPanelTableSx";
+import { coaPanelColumnSx, coaPanelTableBodySx, coaSplitBodySx } from "utils/coaPanelTableSx";
 
 const SHOW_ATTACHMENTS = false;
 const MAX_ATTACHMENT_FILES = 2;
@@ -226,6 +224,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
+  const canManageSubGroups = isSuperuserOrAhqSupervisorUser();
 
   const [tableRows, setTableRows] = useState([]);
   const [subGroupOptions, setSubGroupOptions] = useState([]);
@@ -241,6 +240,8 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [addSubGroupOpen, setAddSubGroupOpen] = useState(false);
   const [addSubGroupName, setAddSubGroupName] = useState("");
+  const [subGroupDialogMode, setSubGroupDialogMode] = useState("add");
+  const [editingSubGroup, setEditingSubGroup] = useState(null);
   const [addControlAccountOpen, setAddControlAccountOpen] = useState(false);
   const [addControlAccountName, setAddControlAccountName] = useState("");
   const [formExistingFiles, setFormExistingFiles] = useState([]);
@@ -514,14 +515,54 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
       return;
     }
     try {
-      await chartOfAccountsApi.createSubGroup(groupName, subGroupName);
+      if (subGroupDialogMode === "edit" && editingSubGroup?.id) {
+        await chartOfAccountsApi.updateSubGroup(editingSubGroup.id, groupName, subGroupName);
+        if (formDraft?.subGroup === editingSubGroup.subGroupName) {
+          handleFormChange("subGroup", subGroupName);
+        }
+      } else {
+        await chartOfAccountsApi.createSubGroup(groupName, subGroupName);
+        handleFormChange("subGroup", subGroupName);
+      }
       await fetchSubGroups();
-      handleFormChange("subGroup", subGroupName);
-      setAddSubGroupOpen(false);
-      setAddSubGroupName("");
+      resetSubGroupDialog();
     } catch (error) {
-      alert(error?.message || "Failed to add sub-group.");
+      alert(error?.message || "Failed to save sub-group.");
     }
+  };
+
+  const handleEditSubGroup = (item, event) => {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    if (!canManageSubGroups || !item?.id) return;
+    setSubGroupDialogMode("edit");
+    setEditingSubGroup(item);
+    setAddSubGroupName(item.subGroupName || "");
+    setAddSubGroupOpen(true);
+  };
+
+  const handleDeleteSubGroup = async (item, event) => {
+    event?.stopPropagation?.();
+    event?.preventDefault?.();
+    if (!canManageSubGroups || !item?.id) return;
+    const label = item.subGroupName || "this sub-group";
+    if (!window.confirm(`Delete "${label}"? This cannot be undone from the dropdown.`)) return;
+    try {
+      await chartOfAccountsApi.deleteSubGroup(item.id);
+      if (formDraft?.subGroup === item.subGroupName) {
+        handleFormChange("subGroup", "");
+      }
+      await fetchSubGroups();
+    } catch (error) {
+      alert(error?.message || "Failed to delete sub-group.");
+    }
+  };
+
+  const resetSubGroupDialog = () => {
+    setAddSubGroupOpen(false);
+    setAddSubGroupName("");
+    setSubGroupDialogMode("add");
+    setEditingSubGroup(null);
   };
 
   const handleSaveControlAccount = async () => {
@@ -659,10 +700,9 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                 <span>
                   <IconButton
                     size="small"
-                    color="info"
                     onClick={() => handleMoveRow(row.id, "up")}
                     disabled={!canEdit || !canMoveUp || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px" }}
+                    sx={{ padding: "2px", ...GRID_DARK_ARROW_ICON_SX }}
                   >
                     {isReordering ? (
                       <CurrencyLoading size={16} />
@@ -676,10 +716,9 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                 <span>
                   <IconButton
                     size="small"
-                    color="info"
                     onClick={() => handleMoveRow(row.id, "down")}
                     disabled={!canEdit || !canMoveDown || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px" }}
+                    sx={{ padding: "2px", ...GRID_DARK_ARROW_ICON_SX }}
                   >
                     <Icon fontSize="small">keyboard_arrow_down</Icon>
                   </IconButton>
@@ -793,8 +832,8 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
           isSorted={false}
           stickyToolbarAndHeader
           canSearch
-          entriesPerPage={{ defaultValue: 10, entries: [10, 25, 50] }}
-          showTotalEntries
+          entriesPerPage={false}
+          showTotalEntries={false}
           exportFileName="Chart-of-Accounts"
           noEndBorder
         />
@@ -839,7 +878,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
             <Grid item xs={12} sm={6}>
               <FormControl size="small" fullWidth required error={Boolean(formErrors.groupName)}>
                 <InputLabel sx={inputSx}>Group</InputLabel>
-                <Select
+                <SearchableSelect
                   value={formDraft?.groupName || ""}
                   label="Group"
                   onChange={(e) => handleFormChange("groupName", e.target.value)}
@@ -853,7 +892,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                       {option}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {formErrors.groupName && (
                   <FormHelperText sx={inputSx}>{formErrors.groupName}</FormHelperText>
                 )}
@@ -862,7 +901,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
             <Grid item xs={12} sm={6}>
               <FormControl size="small" fullWidth>
                 <InputLabel sx={inputSx}>Sub-Group</InputLabel>
-                <Select
+                <SearchableSelect
                   value={formDraft?.subGroup || ""}
                   label="Sub-Group"
                   disabled={!formDraft?.groupName}
@@ -880,20 +919,59 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                     <em>None</em>
                   </MenuItem>
                   {filteredSubGroups.map((item) => (
-                    <MenuItem key={item.id || item.subGroupName} value={item.subGroupName}>
-                      {item.subGroupName}
+                    <MenuItem
+                      key={item.id || item.subGroupName}
+                      value={item.subGroupName}
+                      sx={canManageSubGroups ? { pr: 1 } : undefined}
+                    >
+                      <MDBox
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        width="100%"
+                        gap={0.5}
+                      >
+                        <span>{item.subGroupName}</span>
+                        {canManageSubGroups && (
+                          <MDBox
+                            display="flex"
+                            alignItems="center"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <IconButton
+                              size="small"
+                              color="info"
+                              title="Edit sub-group"
+                              onClick={(e) => handleEditSubGroup(item, e)}
+                              sx={{ padding: "2px" }}
+                            >
+                              <Icon fontSize="small">edit</Icon>
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              title="Delete sub-group"
+                              onClick={(e) => handleDeleteSubGroup(item, e)}
+                              sx={{ padding: "2px" }}
+                            >
+                              <Icon fontSize="small">delete</Icon>
+                            </IconButton>
+                          </MDBox>
+                        )}
+                      </MDBox>
                     </MenuItem>
                   ))}
                   <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
                     + Add sub-group...
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12}>
               <FormControl size="small" fullWidth>
                 <InputLabel sx={inputSx}>Control Account</InputLabel>
-                <Select
+                <SearchableSelect
                   value={formDraft?.controlAccount || ""}
                   label="Control Account"
                   onChange={(e) => {
@@ -920,7 +998,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                   <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
                     + Add control account...
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -1085,13 +1163,10 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={addSubGroupOpen}
-        onClose={() => setAddSubGroupOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Add Sub-Group</DialogTitle>
+      <Dialog open={addSubGroupOpen} onClose={resetSubGroupDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {subGroupDialogMode === "edit" ? "Edit Sub-Group" : "Add Sub-Group"}
+        </DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -1103,11 +1178,11 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
           />
         </DialogContent>
         <DialogActions>
-          <MDButton color="secondary" onClick={() => setAddSubGroupOpen(false)}>
+          <MDButton color="secondary" onClick={resetSubGroupDialog}>
             Cancel
           </MDButton>
           <MDButton color="info" onClick={handleSaveSubGroup}>
-            Add
+            {subGroupDialogMode === "edit" ? "Save" : "Add"}
           </MDButton>
         </DialogActions>
       </Dialog>

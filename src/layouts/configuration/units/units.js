@@ -4,7 +4,7 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import StatusBadge from "components/StatusBadge";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -267,7 +267,7 @@ function UnitsConfig() {
     console.log("renderCommandSelect - commandOptions:", commandOptions); // Log options here
     console.log("renderCommandSelect - current value:", value); // Log current value
     return (
-      <Select
+      <SearchableSelect
         value={value === null || value === undefined ? "" : value}
         onChange={(e) => handleChange("cmd", e.target.value)}
         size="small"
@@ -290,12 +290,12 @@ function UnitsConfig() {
             {opt.name}
           </MenuItem>
         ))}
-      </Select>
+      </SearchableSelect>
     );
   };
 
   const renderStatusSelect = (field, value) => (
-    <Select
+    <SearchableSelect
       value={value}
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
@@ -315,11 +315,11 @@ function UnitsConfig() {
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Not Active</MenuItem>
-    </Select>
+    </SearchableSelect>
   );
 
   const renderBaseSelect = (value) => (
-    <Select
+    <SearchableSelect
       value={value === null ? "" : value}
       onChange={(e) => handleChange("base", e.target.value)}
       size="small"
@@ -346,7 +346,7 @@ function UnitsConfig() {
       ) : (
         <MenuItem value="">No Base Options</MenuItem>
       )}
-    </Select>
+    </SearchableSelect>
   );
 
   const computedRows = (() => {

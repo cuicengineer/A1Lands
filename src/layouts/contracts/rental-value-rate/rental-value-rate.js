@@ -10,7 +10,8 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
-import Select from "@mui/material/Select";
+import { GRID_DARK_ARROW_ICON_SX } from "utils/gridDarkArrowIconSx";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -42,6 +43,7 @@ import api, {
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
+import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import { format, parseISO, isValid } from "date-fns";
 
 const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
@@ -211,7 +213,7 @@ function ApplicationDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -221,7 +223,7 @@ function ApplicationDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -450,7 +452,7 @@ function RentalValueRateMoneyColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -461,7 +463,7 @@ function RentalValueRateMoneyColumnFilter({ column }) {
               <MenuItem value="lte">Less than or equal to</MenuItem>
               <MenuItem value="eq">Equal to</MenuItem>
               <MenuItem value="between">Price range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lte" || mode === "eq") && (
             <>
@@ -1068,7 +1070,9 @@ function RentalValueRateForm({
                     );
                 return allOpt ? [allOpt, ...filtered] : filtered;
               }}
-              getOptionLabel={(option) => option?.name ?? ""}
+              getOptionLabel={(option) =>
+                String(option?.id) === "__all__" ? option?.name ?? "" : getBaseDropdownLabel(option)
+              }
               isOptionEqualToValue={(a, b) => {
                 if (String(a?.id) === "__all__" || String(b?.id) === "__all__") {
                   return String(a?.id) === "__all__" && String(b?.id) === "__all__";
@@ -1141,7 +1145,7 @@ function RentalValueRateForm({
               <InputLabel id="class-label">
                 {isEditMode ? "Class" : "Class (Multiple Selection)"}
               </InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="class-label"
                 multiple={!isEditMode}
                 value={isEditMode ? form.classIds[0] || "" : form.classIds}
@@ -1176,7 +1180,7 @@ function RentalValueRateForm({
                     {cls.name}
                   </MenuItem>
                 ))}
-              </Select>
+              </SearchableSelect>
               {errors.classIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                   {errors.classIds}
@@ -1203,7 +1207,7 @@ function RentalValueRateForm({
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
               <InputLabel id="status-label">Status</InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="status-label"
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
@@ -1212,7 +1216,7 @@ function RentalValueRateForm({
               >
                 <MenuItem value={true}>Active</MenuItem>
                 <MenuItem value={false}>Inactive</MenuItem>
-              </Select>
+              </SearchableSelect>
             </FormControl>
           </Grid>
 
@@ -1790,10 +1794,9 @@ export default function RentalValueRate() {
             >
               <IconButton
                 size="small"
-                color="info"
                 onClick={() => handleToggleGroup(groupKey)}
                 title={isExpanded ? "Collapse" : "Expand"}
-                sx={{ padding: "1px" }}
+                sx={{ padding: "1px", ...GRID_DARK_ARROW_ICON_SX }}
               >
                 <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
               </IconButton>

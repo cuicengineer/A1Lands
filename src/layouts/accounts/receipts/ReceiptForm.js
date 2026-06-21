@@ -8,7 +8,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -19,15 +19,21 @@ import Box from "@mui/material/Box";
 import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
 import MDTypography from "components/MDTypography";
+import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
+import { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import {
-  BASE_OPTIONS,
   MAX_ATTACHMENT_FILES,
   PAID_FROM_ACCOUNTS,
   PAYEE_CONTACT_TYPES,
+  buildLineAccountOptions,
   buildReceiptFormState,
   computeGrandTotal,
   computeLineTotal,
   createLineRow,
+  isReceiptLineComplete,
+  inputValueToMonthYear,
+  isValidMonthYear,
+  monthYearToInputValue,
   parseAmount,
 } from "./receiptUtils";
 import ReceiptLinesGrid from "./ReceiptLinesGrid";
@@ -45,15 +51,17 @@ function formatFileSize(bytes) {
   return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
 
-function validateReceiptForm(form, labels) {
+function validateReceiptForm(form, labels, showMonthField) {
   const errors = {};
   if (!form.date) errors.date = "Date is required";
+  if (showMonthField && !isValidMonthYear(form.month)) {
+    errors.month = labels.monthRequired || "Month is required";
+  }
   if (!form.paidFrom) errors.paidFrom = labels.paidFromRequired;
   if (!form.payeeName?.trim()) errors.payeeName = labels.payeeRequired;
   const lines = form.lines || [];
   if (!lines.length) errors.lines = "At least one line item is required";
   lines.forEach((line, idx) => {
-    if (!line.racId) errors[`line-${idx}-rac`] = "RAC is required";
     if (!line.item) errors[`line-${idx}-item`] = "Item is required";
     if (!line.account) errors[`line-${idx}-account`] = "Account is required";
     if (parseAmount(line.amount) <= 0) errors[`line-${idx}-amount`] = "Amount is required";
@@ -67,13 +75,45 @@ export default function ReceiptForm({
   onSubmit,
   initialData,
   labels = PAYMENTS_LABELS,
+  showMonthField = false,
 }) {
   const [form, setForm] = useState(() => buildReceiptFormState());
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [lineAccountOptions, setLineAccountOptions] = useState([]);
   const fileInputRef = useRef(null);
 
   const isEditMode = Boolean(initialData?.id);
+  const canFinalizeByAhq = isEditMode && isSuperuserOrAhqSupervisorUser();
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    let cancelled = false;
+
+    const fetchLineAccountOptions = async () => {
+      try {
+        const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
+        const savedAccounts = (initialData?.lines || [])
+          .map((line) => line?.account)
+          .filter(Boolean);
+        const options = buildLineAccountOptions(
+          chartOfAccountsApi.unwrapList(response),
+          savedAccounts
+        );
+        if (!cancelled) setLineAccountOptions(options);
+      } catch (error) {
+        console.error("Error fetching receipt line account options:", error);
+        if (!cancelled) setLineAccountOptions([]);
+      }
+    };
+
+    fetchLineAccountOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialData]);
 
   useEffect(() => {
     if (!open) return;
@@ -88,7 +128,7 @@ export default function ReceiptForm({
                   ...line,
                   total: computeLineTotal(line),
                 }))
-              : [createLineRow()],
+              : [],
           attachments: Array.isArray(initialData.attachments) ? [...initialData.attachments] : [],
         })
       );
@@ -116,14 +156,6 @@ export default function ReceiptForm({
       lines: prev.lines.map((line) => {
         if (line.id !== lineId) return line;
         const updated = { ...line, [field]: value };
-        if (field === "racId") {
-          const bases = BASE_OPTIONS.filter(
-            (base) => !value || Number(base.racId) === Number(value)
-          );
-          updated.baseId = bases.some((b) => Number(b.id) === Number(line.baseId))
-            ? line.baseId
-            : "";
-        }
         if (field === "amount") {
           updated.total = computeLineTotal(updated);
         }
@@ -133,16 +165,17 @@ export default function ReceiptForm({
   };
 
   const handleAddLine = () => {
-    setForm((prev) => ({
-      ...prev,
-      lines: [...prev.lines, createLineRow()],
-    }));
+    setForm((prev) => {
+      const { lines } = prev;
+      if (lines.length > 0 && !lines.every(isReceiptLineComplete)) return prev;
+      return { ...prev, lines: [...lines, createLineRow()] };
+    });
   };
 
   const handleDuplicateLine = (lineId) => {
     setForm((prev) => {
       const source = prev.lines.find((line) => line.id === lineId);
-      if (!source) return prev;
+      if (!source || !isReceiptLineComplete(source)) return prev;
       const duplicate = {
         ...source,
         id: createLineRow().id,
@@ -156,10 +189,10 @@ export default function ReceiptForm({
   };
 
   const handleDeleteLine = (lineId) => {
-    setForm((prev) => {
-      if (prev.lines.length <= 1) return prev;
-      return { ...prev, lines: prev.lines.filter((line) => line.id !== lineId) };
-    });
+    setForm((prev) => ({
+      ...prev,
+      lines: prev.lines.filter((line) => line.id !== lineId),
+    }));
   };
 
   const handleFileSelect = (event) => {
@@ -191,7 +224,7 @@ export default function ReceiptForm({
   };
 
   const handleSave = async () => {
-    const validationErrors = validateReceiptForm(form, labels);
+    const validationErrors = validateReceiptForm(form, labels, showMonthField);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
       window.alert("Please complete all required fields before saving.");
@@ -215,7 +248,15 @@ export default function ReceiptForm({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl" scroll="paper">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="xl"
+      scroll="paper"
+      disableRestoreFocus
+      disableEnforceFocus
+    >
       <DialogTitle sx={{ color: "#344767", pb: 1 }}>
         {isEditMode ? labels.editFormTitle : labels.addFormTitle}
       </DialogTitle>
@@ -235,6 +276,22 @@ export default function ReceiptForm({
               sx={textFieldSx}
             />
           </Grid>
+          {showMonthField ? (
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                fullWidth
+                type="month"
+                label={labels.month || "Month"}
+                value={monthYearToInputValue(form.month)}
+                onChange={(e) => updateHeader("month", inputValueToMonthYear(e.target.value))}
+                InputLabelProps={{ shrink: true }}
+                size="small"
+                error={Boolean(errors.month)}
+                helperText={errors.month || "MMM/YYYY"}
+                sx={textFieldSx}
+              />
+            </Grid>
+          ) : null}
           <Grid item xs={12} sm={6} md={4}>
             <MDBox display="flex" alignItems="center" gap={1}>
               <FormControlLabel
@@ -261,10 +318,12 @@ export default function ReceiptForm({
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small" error={Boolean(errors.paidFrom)}>
-              <InputLabel>{labels.paidFrom}</InputLabel>
-              <Select
+              <InputLabel id="receipt-paid-by-label">{labels.paidFrom}</InputLabel>
+              <SearchableSelect
+                labelId="receipt-paid-by-label"
                 label={labels.paidFrom}
                 value={form.paidFrom}
+                displayEmpty
                 onChange={(e) => updateHeader("paidFrom", e.target.value)}
                 sx={textFieldSx}
               >
@@ -276,7 +335,7 @@ export default function ReceiptForm({
                     {name}
                   </MenuItem>
                 ))}
-              </Select>
+              </SearchableSelect>
             </FormControl>
           </Grid>
           <Grid item xs={12} md={8}>
@@ -285,8 +344,9 @@ export default function ReceiptForm({
             </MDTypography>
             <MDBox display="flex" gap={1} flexWrap="wrap">
               <FormControl size="small" sx={{ minWidth: 140, ...textFieldSx }}>
-                <InputLabel>Contact</InputLabel>
-                <Select
+                <InputLabel id="receipt-contact-label">Contact</InputLabel>
+                <SearchableSelect
+                  labelId="receipt-contact-label"
                   label="Contact"
                   value={form.payeeContactType}
                   onChange={(e) => updateHeader("payeeContactType", e.target.value)}
@@ -296,7 +356,7 @@ export default function ReceiptForm({
                       {type}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
               <TextField
                 fullWidth
@@ -321,11 +381,26 @@ export default function ReceiptForm({
               sx={textFieldSx}
             />
           </Grid>
+          {canFinalizeByAhq ? (
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={Boolean(form.finalizedByAhq)}
+                    onChange={(e) => updateHeader("finalizedByAhq", e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="Finalized by AHQ"
+              />
+            </Grid>
+          ) : null}
         </Grid>
 
         <MDBox sx={{ mb: 2 }}>
           <ReceiptLinesGrid
             lines={form.lines}
+            accountOptions={lineAccountOptions}
             errors={errors}
             saving={saving}
             grandTotal={grandTotal}
@@ -407,10 +482,12 @@ ReceiptForm.propTypes = {
   onSubmit: PropTypes.func,
   initialData: PropTypes.object,
   labels: PropTypes.object,
+  showMonthField: PropTypes.bool,
 };
 
 ReceiptForm.defaultProps = {
   onSubmit: undefined,
   initialData: undefined,
   labels: PAYMENTS_LABELS,
+  showMonthField: false,
 };

@@ -6,7 +6,8 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
 import DataTable from "examples/Tables/DataTable";
-import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
+import { FormControl, InputLabel, MenuItem } from "@mui/material";
+import SearchableSelect from "components/SearchableSelect";
 import MDButton from "components/MDButton";
 
 function ContractsReport() {
@@ -198,7 +199,7 @@ function ContractsReport() {
               <Grid item xs={12} sm={4}>
                 <FormControl variant="standard" fullWidth>
                   <InputLabel id="command-label">Command</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="command-label"
                     id="command"
                     value={command}
@@ -210,13 +211,13 @@ function ContractsReport() {
                         {option}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </Grid>
               <Grid item xs={12} sm={4}>
                 <FormControl variant="standard" fullWidth>
                   <InputLabel id="base-label">Base</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="base-label"
                     id="base"
                     value={base}
@@ -228,7 +229,7 @@ function ContractsReport() {
                         {option}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </Grid>
               <Grid item xs={12} sm={4}>

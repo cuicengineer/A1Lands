@@ -14,8 +14,7 @@ export const CONTRACTS_MODULE_TABS = [
   { label: "Rental Properties", route: "/contracts/rental-properties" },
   { label: "Revenue Rates", route: "/contracts/revenue-rates" },
   { label: "Property Grouping", route: "/contracts/property-grouping" },
-  { label: "Contracts", route: "/contracts" },
-  { label: "Agreement Invoice", route: "/contracts/agreement-prov-invoice" },
+  { label: "Agreements", route: "/contracts" },
 ];
 
 function resolveContractsTabIndex(pathname) {
@@ -57,7 +56,7 @@ function ContractsModuleTabs({ tabs }) {
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile
-        aria-label="Contracts module navigation"
+        aria-label="Agreements module navigation"
       >
         {items.map((tab) => (
           <Tab key={tab.route} label={tab.label} />

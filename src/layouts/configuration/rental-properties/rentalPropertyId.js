@@ -74,7 +74,8 @@ export function buildRentalPropertyPId({ propertyNumber, baseRow, commandRow, cl
   if (!prefix) return "";
 
   const classSuffix = getClassSuffix(classRow);
-  if (!classSuffix) return `${prefix}-${paddedNumber}`;
+  if (!classSuffix) return "";
+
   if (basePrefix) return `${prefix}-${paddedNumber}${classSuffix}`;
   return `${prefix}-${paddedNumber}-${classSuffix}`;
 }

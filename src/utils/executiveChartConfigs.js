@@ -29,7 +29,11 @@ function formatAxisValue(value) {
   return value;
 }
 
-export function executiveBarConfigs(labels, datasets, { color = CHART_PRIMARY } = {}) {
+export function executiveBarConfigs(
+  labels,
+  datasets,
+  { color = CHART_PRIMARY, wideBars = false } = {}
+) {
   const backgroundColor = datasets.backgroundColor || color;
 
   return {
@@ -43,7 +47,14 @@ export function executiveBarConfigs(labels, datasets, { color = CHART_PRIMARY } 
           borderRadius: 6,
           borderSkipped: false,
           borderWidth: 0,
-          maxBarThickness: 40,
+          ...(wideBars
+            ? {
+                barThickness: "flex",
+                maxBarThickness: 1000,
+                categoryPercentage: 0.66,
+                barPercentage: 1,
+              }
+            : { maxBarThickness: 40 }),
         },
       ],
     },
@@ -53,6 +64,18 @@ export function executiveBarConfigs(labels, datasets, { color = CHART_PRIMARY } 
       animation: { duration: 0 },
       plugins: { legend: { display: false } },
       interaction: { intersect: false, mode: "index" },
+      ...(wideBars
+        ? {
+            datasets: {
+              bar: {
+                barThickness: "flex",
+                maxBarThickness: 1000,
+                categoryPercentage: 0.66,
+                barPercentage: 1,
+              },
+            },
+          }
+        : {}),
       scales: {
         y: {
           beginAtZero: true,

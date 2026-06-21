@@ -2,9 +2,10 @@
  * Unified ERP dashboard page shell — workspace header, module tabs, scrollable body.
  */
 
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import PropTypes from "prop-types";
+import MDBox from "components/MDBox";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
@@ -23,14 +24,18 @@ function DashboardPageShell({
   pageClassName,
 }) {
   const { pathname } = useLocation();
+  const bodyRef = useRef(null);
   const workspacePageClassName = ["dashboard-redesign-page", pageClassName]
     .filter(Boolean)
     .join(" ");
 
   // Firefox: flex column heights often stay content-sized after SPA route changes until reflow.
   useLayoutEffect(() => {
+    const bodyEl = bodyRef.current;
+    if (!bodyEl) return undefined;
+
     const frame = window.requestAnimationFrame(() => {
-      window.dispatchEvent(new Event("resize"));
+      void bodyEl.offsetHeight;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [pathname]);
@@ -39,7 +44,6 @@ function DashboardPageShell({
     <DashboardLayout>
       <DashboardNavbar />
       <EnterpriseWorkspace
-        key={pathname}
         title={title}
         subtitle={subtitle}
         metadata={metadata}
@@ -52,7 +56,9 @@ function DashboardPageShell({
           ...bodySx,
         }}
       >
-        {children}
+        <MDBox ref={bodyRef} className="dashboard-module-body">
+          {children}
+        </MDBox>
       </EnterpriseWorkspace>
       <Footer />
     </DashboardLayout>

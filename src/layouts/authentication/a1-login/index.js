@@ -19,44 +19,47 @@ const LOGIN_STYLESHEETS = [
   asset("css/style.css"),
 ];
 
-const CAROUSEL_IMAGES = [
-  "img/agri-land.jpg",
-  "img/bilboard2.jpg",
-  "img/petrol-station.jpg",
-  "img/mall.jpg",
-  "img/mall2.jpg",
-  "img/plot.jpg",
-];
-
 const SLIDES = [
   {
-    icon: "bi-tree",
-    title: "Agricultural Land<br>Management",
-    desc: "Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.",
-  },
-  {
-    icon: "bi-signpost",
-    title: "Billboard Asset<br>Management",
-    desc: "Manage billboard locations, contracts and revenue records.",
-  },
-  {
+    image: "img/petrol-station.jpg",
     icon: "bi-fuel-pump",
     title: "Petrol Station<br>Management",
     desc: "Track petrol station assets and lease agreements.",
   },
   {
+    image: "img/bank.jpg",
+    icon: "bi-buildings",
+    title: "Banks<br>Rental Spaces",
+    desc: "Manage commercial banks spaces.",
+  },
+  {
+    image: "img/mall.jpg",
     icon: "bi-buildings",
     title: "Mall Property<br>Management",
     desc: "Manage commercial mall assets and rental records.",
   },
   {
+    image: "img/agri-land.jpg",
+    icon: "bi-tree",
+    title: "Agricultural Land<br>Management",
+    desc: "Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.",
+  },
+  {
+    image: "img/mall2.jpg",
     icon: "bi-building",
     title: "BTS Tower<br>Management",
     desc: "Monitor tower assets and infrastructure revenue.",
   },
   {
+    image: "img/bilboard2.jpg",
+    icon: "bi-signpost",
+    title: "Billboard Asset<br>Management",
+    desc: "Manage billboard locations, contracts and revenue records.",
+  },
+  {
+    image: "img/plot.jpg",
     icon: "bi-map",
-    title: "Shops<br>Management",
+    title: "Welfare Shops<br>Management",
     desc: "Shops and Stores Rental Management.",
   },
 ];
@@ -246,7 +249,17 @@ function A1Login() {
         Configuration: "/configuration/class",
         "Sales Agreements": "/contracts/tenants",
         "Contracts Mgmt": "/contracts/tenants",
+        Agreements: "/contracts",
+        Contracts: "/contracts",
+        "Income Agreements": "/contracts/agreement-prov-invoice",
         Accounts: "/accounts/bank-account",
+        "Cash & Fund Flow": "/payments",
+        Purchases: "/supplier",
+        Sales: "/customer",
+        Payments: "/payments",
+        Receipts: "/receipts",
+        Supplier: "/supplier",
+        Customer: "/customer",
       };
       navigate(routeByMenu[menuName] || DEFAULT_LANDING_ROUTE);
     } catch (err) {
@@ -269,12 +282,12 @@ function A1Login() {
           >
             <div id="landCarousel" className="carousel slide carousel-fade" data-bs-touch="true">
               <div className="carousel-inner">
-                {CAROUSEL_IMAGES.map((src, index) => (
+                {SLIDES.map((slide, index) => (
                   <div
-                    key={src}
+                    key={slide.image}
                     className={`carousel-item${index === activeSlide ? " active" : ""}`}
                   >
-                    <img src={asset(src)} alt="" />
+                    <img src={asset(slide.image)} alt="" />
                   </div>
                 ))}
               </div>
@@ -300,9 +313,9 @@ function A1Login() {
               </div>
 
               <div className="carousel-indicators custom-dots">
-                {SLIDES.map((_, index) => (
+                {SLIDES.map((slide, index) => (
                   <button
-                    key={SLIDES[index].icon}
+                    key={slide.image}
                     type="button"
                     data-bs-target="#landCarousel"
                     data-bs-slide-to={index}

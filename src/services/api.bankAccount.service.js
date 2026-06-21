@@ -27,7 +27,7 @@ async function requestWithPagination(method, path, body) {
   return data;
 }
 
-function getAll(pageNumber = 1, pageSize = 50) {
+function getAll(pageNumber = 1, pageSize = 850) {
   const params = new URLSearchParams({
     pageNumber: pageNumber.toString(),
     pageSize: pageSize.toString(),

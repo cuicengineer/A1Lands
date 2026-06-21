@@ -10,7 +10,8 @@ import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
-import Select from "@mui/material/Select";
+import { GRID_DARK_ARROW_ICON_SX } from "utils/gridDarkArrowIconSx";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -43,6 +44,7 @@ import api, {
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import govtShareRateApi from "services/api.govtsharerate.service";
+import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import { format, parseISO, isValid } from "date-fns";
 
 const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
@@ -213,7 +215,7 @@ function ApplicationDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -223,7 +225,7 @@ function ApplicationDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -944,7 +946,7 @@ function GovtShareRateForm({
               size="small"
               fullWidth
               options={filteredBases}
-              getOptionLabel={(option) => option?.name ?? ""}
+              getOptionLabel={(option) => getBaseDropdownLabel(option)}
               isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
               value={(form.baseIds || [])
                 .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
@@ -1004,7 +1006,7 @@ function GovtShareRateForm({
               <InputLabel id="class-label">
                 {isEditMode ? "Class" : "Class (Multiple Selection)"}
               </InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="class-label"
                 multiple={!isEditMode}
                 value={isEditMode ? form.classIds[0] || "" : form.classIds}
@@ -1039,7 +1041,7 @@ function GovtShareRateForm({
                     {cls.name}
                   </MenuItem>
                 ))}
-              </Select>
+              </SearchableSelect>
               {errors.classIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                   {errors.classIds}
@@ -1051,7 +1053,7 @@ function GovtShareRateForm({
           <Grid item xs={12} sm={6}>
             <FormControl size="large" fullWidth error={!!errors.config} required={!isEditMode}>
               <InputLabel id="config-label">Factor</InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="config-label"
                 value={form.config || ""}
                 label="Factor"
@@ -1060,7 +1062,7 @@ function GovtShareRateForm({
               >
                 <MenuItem value="Annual Rent">Annual Rent</MenuItem>
                 <MenuItem value="Revenue Rate">Revenue Rate</MenuItem>
-              </Select>
+              </SearchableSelect>
               {errors.config && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                   {errors.config}
@@ -1087,7 +1089,7 @@ function GovtShareRateForm({
           <Grid item xs={12} sm={6}>
             <FormControl size="large" fullWidth>
               <InputLabel id="status-label">Status</InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="status-label"
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
@@ -1096,7 +1098,7 @@ function GovtShareRateForm({
               >
                 <MenuItem value={true}>Active</MenuItem>
                 <MenuItem value={false}>Inactive</MenuItem>
-              </Select>
+              </SearchableSelect>
             </FormControl>
           </Grid>
 
@@ -1732,12 +1734,11 @@ export default function GovtShareRate() {
             >
               <IconButton
                 size="small"
-                color="info"
                 onClick={() =>
                   isRateSub ? handleToggleRateGroup(groupKey) : handleToggleGroup(groupKey)
                 }
                 title={isExpanded ? "Collapse" : "Expand"}
-                sx={{ padding: "1px" }}
+                sx={{ padding: "1px", ...GRID_DARK_ARROW_ICON_SX }}
               >
                 <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
               </IconButton>

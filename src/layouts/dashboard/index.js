@@ -3,6 +3,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import PropTypes from "prop-types";
 import Grid from "@mui/material/Grid";
 import DashboardKpiCard from "components/DashboardKpiCard";
 import DashboardChartPanel from "components/DashboardChartPanel";
@@ -55,7 +56,7 @@ function formatKpiCount(value, ready) {
   return n.toLocaleString();
 }
 
-function Dashboard() {
+function Dashboard({ embedded = false }) {
   const [propertyRows, setPropertyRows] = useState([]);
   const [contractRows, setContractRows] = useState([]);
   const [tenantCount, setTenantCount] = useState(null);
@@ -111,108 +112,124 @@ function Dashboard() {
     datasets: { label: "Govt Share", data: [1000000, 2000000, 3000000, 4000000, 5000000] },
   };
 
+  const body = (
+    <Grid container spacing={1} className="erp-dashboard-kpi-grid">
+      {KPI_ROW.map((kpi, index) => (
+        <Grid item xs={12} sm={6} lg={3} key={kpi.label}>
+          <DashboardKpiCard
+            label={kpi.label}
+            value={
+              kpi.value != null ? kpi.value : formatKpiCount(kpiValueByLabel[kpi.label], kpiReady)
+            }
+            trend={kpi.trend}
+            trendVariant={kpi.trendVariant}
+            variant={index === 0 || kpi.variant === "primary" ? "primary" : "default"}
+            icon={kpi.icon}
+          />
+        </Grid>
+      ))}
+
+      <Grid item xs={12} lg={6}>
+        <DashboardChartPanel title="Annual Rent" description="PAF all RAC — updated just now">
+          <ReportsBarChart
+            flat
+            seriesColor={CHART_PRIMARY}
+            title=""
+            description=""
+            date=""
+            chart={a1AnnualRent}
+            chartHeight="260px"
+          />
+        </DashboardChartPanel>
+      </Grid>
+
+      <Grid item xs={12} lg={6}>
+        <DashboardChartPanel title="Govt Share" description="Command wise — updated just now">
+          <ReportsBarChart
+            flat
+            seriesColor={CHART_SECONDARY}
+            title=""
+            description=""
+            date=""
+            chart={a1GovtShare}
+            chartHeight="260px"
+          />
+        </DashboardChartPanel>
+      </Grid>
+
+      <Grid item xs={12}>
+        <p className="erp-dashboard-section-title erp-dashboard-section-title--spaced">
+          Activity & trends
+        </p>
+      </Grid>
+
+      <Grid item xs={12} md={6} lg={4}>
+        <DashboardChartPanel
+          title="Daily New Contracts"
+          description="(+5%) increase · campaign sent 2 days ago"
+        >
+          <ReportsBarChart
+            flat
+            seriesColor={CHART_PRIMARY}
+            title=""
+            description=""
+            date=""
+            chart={reportsBarChartData}
+            chartHeight="240px"
+          />
+        </DashboardChartPanel>
+      </Grid>
+
+      <Grid item xs={12} md={6} lg={4}>
+        <DashboardChartPanel title="Monthly Revenue Collection" description="(+15%) Dir. NPF">
+          <ReportsLineChart
+            flat
+            seriesColor={CHART_SECONDARY}
+            title=""
+            description=""
+            date=""
+            chart={sales}
+            chartHeight="240px"
+          />
+        </DashboardChartPanel>
+      </Grid>
+
+      <Grid item xs={12} md={6} lg={4}>
+        <DashboardChartPanel title="Completed Contracts" description="Completion trend PAF">
+          <ReportsLineChart
+            flat
+            seriesColor={CHART_PRIMARY}
+            title=""
+            description=""
+            date=""
+            chart={tasks}
+            chartHeight="240px"
+          />
+        </DashboardChartPanel>
+      </Grid>
+    </Grid>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
   return (
     <DashboardPageShell
       title="Dashboard"
       subtitle="Executive overview of land, contracts, and revenue performance"
     >
-      <Grid container spacing={1} className="erp-dashboard-kpi-grid">
-        {KPI_ROW.map((kpi, index) => (
-          <Grid item xs={12} sm={6} lg={3} key={kpi.label}>
-            <DashboardKpiCard
-              label={kpi.label}
-              value={
-                kpi.value != null ? kpi.value : formatKpiCount(kpiValueByLabel[kpi.label], kpiReady)
-              }
-              trend={kpi.trend}
-              trendVariant={kpi.trendVariant}
-              variant={index === 0 || kpi.variant === "primary" ? "primary" : "default"}
-              icon={kpi.icon}
-            />
-          </Grid>
-        ))}
-
-        <Grid item xs={12} lg={6}>
-          <DashboardChartPanel title="Annual Rent" description="PAF all RAC — updated just now">
-            <ReportsBarChart
-              flat
-              seriesColor={CHART_PRIMARY}
-              title=""
-              description=""
-              date=""
-              chart={a1AnnualRent}
-              chartHeight="260px"
-            />
-          </DashboardChartPanel>
-        </Grid>
-
-        <Grid item xs={12} lg={6}>
-          <DashboardChartPanel title="Govt Share" description="Command wise — updated just now">
-            <ReportsBarChart
-              flat
-              seriesColor={CHART_SECONDARY}
-              title=""
-              description=""
-              date=""
-              chart={a1GovtShare}
-              chartHeight="260px"
-            />
-          </DashboardChartPanel>
-        </Grid>
-
-        <Grid item xs={12}>
-          <p className="erp-dashboard-section-title erp-dashboard-section-title--spaced">
-            Activity & trends
-          </p>
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={4}>
-          <DashboardChartPanel
-            title="Daily New Contracts"
-            description="(+5%) increase · campaign sent 2 days ago"
-          >
-            <ReportsBarChart
-              flat
-              seriesColor={CHART_PRIMARY}
-              title=""
-              description=""
-              date=""
-              chart={reportsBarChartData}
-              chartHeight="240px"
-            />
-          </DashboardChartPanel>
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={4}>
-          <DashboardChartPanel title="Monthly Revenue Collection" description="(+15%) Dir. NPF">
-            <ReportsLineChart
-              flat
-              seriesColor={CHART_SECONDARY}
-              title=""
-              description=""
-              date=""
-              chart={sales}
-              chartHeight="240px"
-            />
-          </DashboardChartPanel>
-        </Grid>
-
-        <Grid item xs={12} md={6} lg={4}>
-          <DashboardChartPanel title="Completed Contracts" description="Completion trend PAF">
-            <ReportsLineChart
-              flat
-              seriesColor={CHART_PRIMARY}
-              title=""
-              description=""
-              date=""
-              chart={tasks}
-              chartHeight="240px"
-            />
-          </DashboardChartPanel>
-        </Grid>
-      </Grid>
+      {body}
     </DashboardPageShell>
   );
 }
+
+Dashboard.propTypes = {
+  embedded: PropTypes.bool,
+};
+
+Dashboard.defaultProps = {
+  embedded: false,
+};
 
 export default Dashboard;

@@ -2,7 +2,7 @@
  * KPI Overview — enterprise analytics dashboard (property-summary API).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { format, isValid, parseISO } from "date-fns";
 import PropTypes from "prop-types";
 import Grid from "@mui/material/Grid";
@@ -17,7 +17,7 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
@@ -38,22 +38,27 @@ import KpiCharts, { getEnterpriseCardSx } from "./components/KpiCharts";
 import ChartExportButton from "./components/ChartExportButton";
 import FiscalKpiGrid from "./components/FiscalKpiGrid";
 import { exportSingleSeriesBarChartToExcel } from "utils/kpiChartExcelExport";
+import propertyGroupingApi from "services/api.propertygrouping.service";
 import {
   buildAssetCards,
+  buildGroupedAssetCards,
   buildAhqApproval,
   buildContractHealth,
   buildContractStatus,
   buildExecutiveKpis,
   buildFinancialShares,
+  buildOutstandingRentsStickers,
   buildFiscalKpiGridRows,
   buildKpiCommandFinancialBarChart,
   extractContractsSummaryRows,
   extractGovtPafShareRows,
+  extractPropertyGroupSummaryRows,
   extractPropertySummaryRows,
   filterKpiRowsByRacBase,
   formatKpiMoneyLabel,
   getFiscalYearPeriods,
 } from "./kpiDataUtils";
+import { getBaseDropdownLabel } from "./kpiOverviewNavigation";
 function TabPanel({ children, value, index }) {
   if (value !== index) return null;
   return (
@@ -314,7 +319,120 @@ const ASSET_CARD_SLOT_WIDTH = `calc((100% - ${
   (ASSET_CARDS_VISIBLE_COUNT - 1) * ASSET_CARD_GAP_PX
 }px) / ${ASSET_CARDS_VISIBLE_COUNT})`;
 
-function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick }) {
+const ASSET_CARD_CORNER_ICONS = {
+  categoryA: `${process.env.PUBLIC_URL || ""}/login_page/assets/img/icons/Cat%20A.png`,
+  categoryB: `${process.env.PUBLIC_URL || ""}/login_page/assets/img/icons/Cat%20B.png`,
+  categoryC: `${process.env.PUBLIC_URL || ""}/login_page/assets/img/icons/Cat%20C.png`,
+  bts: `${process.env.PUBLIC_URL || ""}/login_page/assets/img/icons/BTS.png`,
+  hb: `${process.env.PUBLIC_URL || ""}/login_page/assets/img/icons/HB.png`,
+};
+
+const ASSET_CARD_STICKER_KEYWORDS = {
+  total: "Total Properties",
+  categoryA: "Cat A",
+  categoryB: "Cat B",
+  categoryC: "Cat C",
+  bts: "BTS",
+  hb: "HB",
+};
+
+const ASSET_CORNER_BADGE_ICON_SIZE = 48;
+/** ~25% of badge height — overlaps top border only, stays clear of neighboring cards */
+const ASSET_CORNER_BADGE_TOP_OFFSET = -12;
+const ASSET_CORNER_BADGE_RIGHT_INSET = 8;
+
+function AssetCardCornerBadge({ src, keyword, compact = false }) {
+  if (compact && keyword) {
+    return (
+      <MDBox
+        className="erp-asset-card-corner-badge erp-asset-card-corner-badge--keyword"
+        aria-label={keyword}
+        sx={{
+          position: "absolute",
+          top: ASSET_CORNER_BADGE_TOP_OFFSET,
+          right: ASSET_CORNER_BADGE_RIGHT_INSET,
+          minWidth: 48,
+          height: 28,
+          px: 1,
+          borderRadius: "8px",
+          bgcolor: "#c8c6c0",
+          border: "1px solid #dce6e7",
+          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.12)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "none",
+          zIndex: 2,
+        }}
+      >
+        <MDBox
+          component="span"
+          className="erp-asset-card-corner-badge__keyword"
+          sx={{
+            fontSize: "11px",
+            fontWeight: 700,
+            lineHeight: 1,
+            color: "#111827",
+            whiteSpace: "nowrap",
+            letterSpacing: "0.01em",
+          }}
+        >
+          {keyword}
+        </MDBox>
+      </MDBox>
+    );
+  }
+
+  return (
+    <MDBox
+      className="erp-asset-card-corner-badge erp-asset-card-corner-badge--icon"
+      aria-hidden
+      sx={{
+        position: "absolute",
+        top: ASSET_CORNER_BADGE_TOP_OFFSET,
+        right: ASSET_CORNER_BADGE_RIGHT_INSET,
+        width: ASSET_CORNER_BADGE_ICON_SIZE,
+        height: ASSET_CORNER_BADGE_ICON_SIZE,
+        bgcolor: "transparent",
+        border: "none",
+        boxShadow: "none",
+        borderRadius: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        zIndex: 2,
+      }}
+    >
+      <MDBox
+        component="img"
+        src={src}
+        alt=""
+        aria-hidden
+        sx={{
+          width: ASSET_CORNER_BADGE_ICON_SIZE,
+          height: ASSET_CORNER_BADGE_ICON_SIZE,
+          objectFit: "contain",
+          display: "block",
+        }}
+      />
+    </MDBox>
+  );
+}
+
+AssetCardCornerBadge.propTypes = {
+  src: PropTypes.string,
+  keyword: PropTypes.string,
+  compact: PropTypes.bool,
+};
+
+AssetCardCornerBadge.defaultProps = {
+  src: undefined,
+  keyword: undefined,
+  compact: false,
+};
+
+function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick, compact = false }) {
   const scrollRef = useRef(null);
   const [canScrollBack, setCanScrollBack] = useState(false);
   const [canScrollForward, setCanScrollForward] = useState(false);
@@ -372,15 +490,23 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick }) {
   const useLeftArrow = !canScrollForward && canScrollBack;
 
   return (
-    <MDBox display="flex" alignItems="stretch" gap={0.5} sx={{ overflow: "visible" }}>
+    <MDBox
+      className={["erp-asset-cards-scroller", compact ? "erp-asset-cards-scroller--compact" : ""]
+        .filter(Boolean)
+        .join(" ")}
+      display="flex"
+      alignItems="stretch"
+      gap={0.5}
+      sx={{ overflow: "visible", flex: 1, minWidth: 0 }}
+    >
       <MDBox
         ref={scrollRef}
-        className="erp-asset-cards-track"
+        className={["erp-asset-cards-track", compact ? "erp-asset-cards-track--compact" : ""]
+          .filter(Boolean)
+          .join(" ")}
         sx={{
           display: "flex",
           gap: `${ASSET_CARD_GAP_PX}px`,
-          overflowX: "auto",
-          overflowY: "visible",
           flex: 1,
           minWidth: 0,
           scrollbarWidth: "none",
@@ -402,6 +528,7 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick }) {
               maxWidth: ASSET_CARD_SLOT_WIDTH,
               minWidth: 0,
               boxSizing: "border-box",
+              position: "relative",
               overflow: "visible",
             }}
           >
@@ -413,8 +540,14 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick }) {
               mil={a.mil}
               cardSx={cardSx}
               primary={cardIndex === 0}
+              compact={compact}
               onClick={onCardClick ? () => onCardClick(a) : undefined}
             />
+            {compact && ASSET_CARD_STICKER_KEYWORDS[a.key] ? (
+              <AssetCardCornerBadge keyword={ASSET_CARD_STICKER_KEYWORDS[a.key]} compact />
+            ) : ASSET_CARD_CORNER_ICONS[a.key] ? (
+              <AssetCardCornerBadge src={ASSET_CARD_CORNER_ICONS[a.key]} />
+            ) : null}
           </MDBox>
         ))}
       </MDBox>
@@ -440,17 +573,43 @@ AssetCardsScroller.propTypes = {
   darkMode: PropTypes.bool.isRequired,
   cardSx: PropTypes.object.isRequired,
   onCardClick: PropTypes.func,
+  compact: PropTypes.bool,
 };
 
-function AssetCard({ label, count, areaLine, showArea = true, mil, cardSx, primary, onClick }) {
-  const m = mil && typeof mil === "object" ? { ...DEFAULT_MIL, ...mil } : DEFAULT_MIL;
+AssetCardsScroller.defaultProps = {
+  compact: false,
+};
+
+function AssetCard({
+  label,
+  count,
+  areaLine,
+  showArea = true,
+  mil,
+  cardSx,
+  primary,
+  compact = false,
+  onClick,
+}) {
+  const displayCount = Number(count) || 0;
+  const hasCount = displayCount > 0;
+  const m = hasCount && mil && typeof mil === "object" ? { ...DEFAULT_MIL, ...mil } : DEFAULT_MIL;
+  const displayAreaLine = hasCount ? areaLine : "—";
 
   return (
     <MDBox
-      className={["erp-kpi-card", "erp-kpi-card--asset", primary ? "erp-kpi-card--primary" : ""]
+      className={[
+        "erp-kpi-card",
+        "erp-kpi-card--asset",
+        compact ? "erp-kpi-card--asset-compact" : "",
+        primary ? "erp-kpi-card--primary" : "",
+      ]
         .filter(Boolean)
         .join(" ")}
-      sx={mergeKpiCardSx(cardSx, { primary, onClick: Boolean(onClick) })}
+      sx={mergeKpiCardSx(cardSx, {
+        primary,
+        onClick: Boolean(onClick),
+      })}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -465,55 +624,41 @@ function AssetCard({ label, count, areaLine, showArea = true, mil, cardSx, prima
           : undefined
       }
     >
-      <p className="erp-kpi-card__label">{label}</p>
-      <div className="erp-kpi-card__metric">{count.toLocaleString()}</div>
-      {showArea && <p className="erp-kpi-card__trend">Area: {areaLine}</p>}
-      <div className="erp-kpi-card__details">
-        <MDBox
-          className="erp-kpi-card__stat-row"
-          display="flex"
-          justifyContent="space-between"
-          alignItems="baseline"
-          gap={0.5}
-        >
-          <span>Income</span>
-          <span className="erp-kpi-card__detail-value">
-            {formatKpiMoneyLabel(Number(m.incomePA) || 0)}
-          </span>
-        </MDBox>
-        <MDBox
-          component="p"
-          textAlign="center"
-          fontWeight={600}
-          className="erp-kpi-card__stat-row"
-          sx={{
-            fontSize: "12px",
-            color: "#6b7280",
-            mt: 0.25,
-            mb: 0.75,
-            borderTop: "none",
-            paddingTop: 0,
-            marginTop: 0,
-          }}
-        >
-          Shares
-        </MDBox>
-        {SHARE_MIL_ROWS.map((row) => (
+      {!compact && <p className="erp-kpi-card__label">{label}</p>}
+      <div className="erp-kpi-card__metric">{displayCount.toLocaleString()}</div>
+      {showArea && <p className="erp-kpi-card__trend">Area: {displayAreaLine}</p>}
+      {!compact && (
+        <div className="erp-kpi-card__details">
           <MDBox
-            key={row.key}
-            className="erp-kpi-card__stat-row"
+            className="erp-kpi-card__stat-row erp-kpi-card__stat-row--income"
             display="flex"
             justifyContent="space-between"
             alignItems="baseline"
             gap={0.5}
           >
-            <span>{row.label}</span>
-            <span className="erp-kpi-card__detail-value">
-              {formatKpiMoneyLabel(Number(m[row.key]) || 0)}
-            </span>
+            <span>Income</span>
+            <span className="erp-kpi-card__detail-value">{formatKpiMoneyLabel(m.incomePA)}</span>
           </MDBox>
-        ))}
-      </div>
+          {SHARE_MIL_ROWS.map((row) => (
+            <MDBox
+              key={row.key}
+              className={[
+                "erp-kpi-card__stat-row",
+                row.key === "paf" && "erp-kpi-card__stat-row--after-paf",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              display="flex"
+              justifyContent="space-between"
+              alignItems="baseline"
+              gap={0.5}
+            >
+              <span>{row.label}</span>
+              <span className="erp-kpi-card__detail-value">{formatKpiMoneyLabel(m[row.key])}</span>
+            </MDBox>
+          ))}
+        </div>
+      )}
     </MDBox>
   );
 }
@@ -533,12 +678,14 @@ AssetCard.propTypes = {
   }),
   cardSx: PropTypes.object.isRequired,
   primary: PropTypes.bool,
+  compact: PropTypes.bool,
   onClick: PropTypes.func,
 };
 
 AssetCard.defaultProps = {
   mil: DEFAULT_MIL,
   primary: false,
+  compact: false,
   onClick: undefined,
 };
 
@@ -566,7 +713,7 @@ function ContractHealthCard({ label, count, pct, worth, cardSx, primary, onClick
       <p className="erp-kpi-card__label">{label}</p>
       <div className="erp-kpi-card__metric">{count.toLocaleString()}</div>
       <p className="erp-kpi-card__trend">{pct}%</p>
-      <p className="erp-kpi-card__trend">Worth: {formatKpiMoneyLabel(Number(worth) || 0)}</p>
+      <p className="erp-kpi-card__trend">Worth: {formatKpiMoneyLabel(worth)}</p>
     </MDBox>
   );
 }
@@ -586,12 +733,14 @@ ContractHealthCard.defaultProps = {
   onClick: undefined,
 };
 
-function KpiOverview() {
+function KpiOverview({ embedded = false, onShellProps }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [propertyRows, setPropertyRows] = useState([]);
+  const [propertyGroupSummaryRows, setPropertyGroupSummaryRows] = useState([]);
+  const [propertyGroups, setPropertyGroups] = useState([]);
   const [contractRows, setContractRows] = useState([]);
   const [shareRows, setShareRows] = useState([]);
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
@@ -616,7 +765,7 @@ function KpiOverview() {
     [racOptions]
   );
   const baseFilterWidth = useMemo(
-    () => estimateKpiFilterWidth(["All", "Base", ...baseOptions.map(getKpiOptionName)]),
+    () => estimateKpiFilterWidth(["All", "Base", ...baseOptions.map(getBaseDropdownLabel)]),
     [baseOptions]
   );
   const tenureFilterWidth = useMemo(
@@ -640,11 +789,16 @@ function KpiOverview() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.request("GET", "/api/Dashboards/property-summary");
+        const [summaryData, groups] = await Promise.all([
+          api.request("GET", "/api/Dashboards/property-summary"),
+          propertyGroupingApi.getAllRecords(),
+        ]);
         if (!cancelled) {
-          setPropertyRows(extractPropertySummaryRows(data));
-          setContractRows(extractContractsSummaryRows(data));
-          setShareRows(extractGovtPafShareRows(data));
+          setPropertyRows(extractPropertySummaryRows(summaryData));
+          setPropertyGroupSummaryRows(extractPropertyGroupSummaryRows(summaryData));
+          setContractRows(extractContractsSummaryRows(summaryData));
+          setShareRows(extractGovtPafShareRows(summaryData));
+          setPropertyGroups(Array.isArray(groups) ? groups : []);
         }
       } catch (e) {
         if (!cancelled) console.error(e);
@@ -745,6 +899,24 @@ function KpiOverview() {
     () => buildAssetCards(filteredPropertyRows, filteredShareRows, filteredContractRows),
     [filteredPropertyRows, filteredShareRows, filteredContractRows]
   );
+  const groupedAssetCards = useMemo(
+    () =>
+      buildGroupedAssetCards(filteredPropertyRows, filteredShareRows, filteredContractRows, {
+        propertyGroupSummaryRows,
+        propertyGroups,
+        racIds,
+        baseIds,
+      }),
+    [
+      filteredPropertyRows,
+      filteredShareRows,
+      filteredContractRows,
+      propertyGroupSummaryRows,
+      propertyGroups,
+      racIds,
+      baseIds,
+    ]
+  );
   const health = useMemo(() => buildContractHealth(filteredContractRows), [filteredContractRows]);
   const contractStatus = useMemo(
     () => buildContractStatus(filteredContractRows),
@@ -754,6 +926,57 @@ function KpiOverview() {
   const shares = useMemo(
     () => buildFinancialShares(filteredShareRows, "all", filteredContractRows),
     [filteredShareRows, filteredContractRows]
+  );
+  const financialShareStickersRow = useMemo(
+    () => (
+      <Grid container spacing={1.5} mt={1} className="erp-kpi-financial-share-stickers">
+        {shares.map((s) => (
+          <Grid item xs={6} sm={4} md={2.4} key={s.id}>
+            <Card sx={{ ...cardSx, p: 1.5, textAlign: "center" }}>
+              <MDTypography variant="caption" color="text">
+                {s.label}
+              </MDTypography>
+              <MDTypography variant="h5" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+                {s.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </MDTypography>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+    ),
+    [shares, cardSx, darkMode]
+  );
+  const outstandingRentsStickers = useMemo(
+    () => buildOutstandingRentsStickers(filteredPropertyRows),
+    [filteredPropertyRows]
+  );
+  const outstandingRentsStickersRow = useMemo(
+    () => (
+      <>
+        <p className="erp-dashboard-section-title erp-dashboard-section-title--spaced">
+          Outstanding Rents
+        </p>
+        <Grid container spacing={1.5} className="erp-kpi-outstanding-rents-stickers">
+          {outstandingRentsStickers.map((s) => (
+            <Grid item xs={6} sm={4} md={2.4} key={s.id}>
+              <Card sx={{ ...cardSx, p: 1.5, textAlign: "center" }}>
+                <MDTypography
+                  variant="caption"
+                  fontWeight="bold"
+                  color={darkMode ? "white" : "dark"}
+                >
+                  {s.label}
+                </MDTypography>
+                <MDTypography variant="h5" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+                  {s.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </MDTypography>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </>
+    ),
+    [outstandingRentsStickers, cardSx, darkMode]
   );
   const fiscalRows = useMemo(
     () =>
@@ -855,18 +1078,30 @@ function KpiOverview() {
           <CurrencyLoading size={56} />
         </MDBox>
       ) : (
-        <AssetCardsScroller
-          cards={assetCards}
-          loading={loading}
-          darkMode={darkMode}
-          cardSx={cardSx}
-        />
+        <MDBox className="erp-asset-cards-stack">
+          <AssetCardsScroller
+            cards={groupedAssetCards}
+            loading={loading}
+            darkMode={darkMode}
+            cardSx={cardSx}
+          />
+          <AssetCardsScroller
+            cards={assetCards}
+            loading={loading}
+            darkMode={darkMode}
+            cardSx={cardSx}
+            compact
+          />
+        </MDBox>
       )}
 
       <MDBox mt={1}>
         <KpiCharts
-          shareRows={filteredShareRows}
-          contractRows={filteredContractRows}
+          shareRows={shareRows}
+          contractRows={contractRows}
+          propertyRows={propertyRows}
+          racOptions={racOptions}
+          racIds={racIds}
           assetCards={assetCards}
           loading={loading}
           chartZoomOnClick
@@ -928,6 +1163,8 @@ function KpiOverview() {
           </Grid>
         ))}
       </Grid>
+
+      {outstandingRentsStickersRow}
     </>
   );
 
@@ -1028,6 +1265,7 @@ function KpiOverview() {
       >
         <ReportsBarChart
           flat
+          wideBars
           seriesColor={color === "dark" ? CHART_SECONDARY : CHART_PRIMARY}
           title={title}
           description={description}
@@ -1093,20 +1331,7 @@ function KpiOverview() {
         chartZoomOnClick
         chartLayout="financials"
       />
-      <Grid container spacing={1.5} mt={1}>
-        {shares.map((s) => (
-          <Grid item xs={6} sm={4} md={2.4} key={s.id}>
-            <Card sx={{ ...cardSx, p: 1.5, textAlign: "center" }}>
-              <MDTypography variant="caption" color="text">
-                {s.label}
-              </MDTypography>
-              <MDTypography variant="h5" fontWeight="bold" color={darkMode ? "white" : "dark"}>
-                {s.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-              </MDTypography>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+      {financialShareStickersRow}
     </>
   );
 
@@ -1139,7 +1364,7 @@ function KpiOverview() {
     >
       <FormControl size="small" sx={racFilterControlSx}>
         <InputLabel id="kpi-filter-rac-label">RAC</InputLabel>
-        <Select
+        <SearchableSelect
           labelId="kpi-filter-rac-label"
           label="RAC"
           multiple
@@ -1174,11 +1399,11 @@ function KpiOverview() {
               <ListItemText primary={getKpiOptionName(o)} {...KPI_COMPACT_LIST_TEXT_PROPS} />
             </MenuItem>
           ))}
-        </Select>
+        </SearchableSelect>
       </FormControl>
       <FormControl size="small" sx={baseFilterControlSx} disabled={loadingBaseOptions}>
         <InputLabel id="kpi-filter-base-label">Base</InputLabel>
-        <Select
+        <SearchableSelect
           labelId="kpi-filter-base-label"
           label="Base"
           multiple
@@ -1192,7 +1417,7 @@ function KpiOverview() {
               ? selected
                   .map((id) => {
                     const match = baseOptions.find((o) => String(o.id ?? o.Id) === String(id));
-                    return getKpiOptionName(match) || id;
+                    return getBaseDropdownLabel(match) || id;
                   })
                   .join(", ")
               : "All"
@@ -1209,10 +1434,10 @@ function KpiOverview() {
                 size="small"
                 sx={KPI_COMPACT_CHECKBOX_SX}
               />
-              <ListItemText primary={getKpiOptionName(o)} {...KPI_COMPACT_LIST_TEXT_PROPS} />
+              <ListItemText primary={getBaseDropdownLabel(o)} {...KPI_COMPACT_LIST_TEXT_PROPS} />
             </MenuItem>
           ))}
-        </Select>
+        </SearchableSelect>
       </FormControl>
       <MDBox
         width={{ xs: "100%", sm: KPI_DATE_FILTER_WIDTH }}
@@ -1261,7 +1486,7 @@ function KpiOverview() {
       </MDBox>
       <FormControl size="small" sx={tenureFilterControlSx}>
         <InputLabel id="kpi-filter-tenure-label">Tenure</InputLabel>
-        <Select
+        <SearchableSelect
           labelId="kpi-filter-tenure-label"
           label="Tenure"
           value={tenure}
@@ -1273,17 +1498,33 @@ function KpiOverview() {
               {option.label}
             </MenuItem>
           ))}
-        </Select>
+        </SearchableSelect>
       </FormControl>
     </MDBox>
   );
 
-  return (
-    <DashboardPageShell
-      title="KPI Overview"
-      subtitle="Property, contract, and financial analytics with RAC / Base filters"
-      actions={kpiFilters}
-    >
+  useLayoutEffect(() => {
+    if (!embedded || !onShellProps) return;
+    onShellProps({
+      title: "KPI Overview",
+      subtitle: "Property, contract, and financial analytics with RAC / Base filters",
+      actions: kpiFilters,
+    });
+  }, [
+    embedded,
+    onShellProps,
+    racIds,
+    baseIds,
+    asOfDate,
+    tenure,
+    loadingRacOptions,
+    loadingBaseOptions,
+    racOptions,
+    baseOptions,
+  ]);
+
+  const pageContent = (
+    <>
       <Card sx={{ ...cardSx, mb: 1 }}>
         <Tabs
           value={tab}
@@ -1431,6 +1672,7 @@ function KpiOverview() {
             >
               <ReportsBarChart
                 flat
+                wideBars
                 zoomEnhanced
                 seriesColor={financialZoomConfig.color === "dark" ? CHART_SECONDARY : CHART_PRIMARY}
                 title={financialZoomConfig.title}
@@ -1443,8 +1685,32 @@ function KpiOverview() {
           )}
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  if (embedded) {
+    return pageContent;
+  }
+
+  return (
+    <DashboardPageShell
+      title="KPI Overview"
+      subtitle="Property, contract, and financial analytics with RAC / Base filters"
+      actions={kpiFilters}
+    >
+      {pageContent}
     </DashboardPageShell>
   );
 }
+
+KpiOverview.propTypes = {
+  embedded: PropTypes.bool,
+  onShellProps: PropTypes.func,
+};
+
+KpiOverview.defaultProps = {
+  embedded: false,
+  onShellProps: null,
+};
 
 export default KpiOverview;

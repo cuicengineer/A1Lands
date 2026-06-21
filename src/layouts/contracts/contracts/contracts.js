@@ -28,7 +28,7 @@ import MDInput from "components/MDInput";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
 import CurrencyLoading from "components/CurrencyLoading";
 import Autocomplete from "@mui/material/Autocomplete";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import FormControl from "@mui/material/FormControl";
@@ -64,8 +64,11 @@ import { PropertyGroupingForm } from "layouts/contracts/property-grouping/proper
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTabs";
+import AgreementDetailsDialog from "layouts/contracts/components/AgreementDetailsDialog";
+import { fetchNormalizedContractRiseTerms } from "utils/agreementDetailsSupport";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import DataTable from "examples/Tables/DataTable";
+import { ServerGridPagination } from "components/CompactGridPagination";
 import CompactGroupBySelect from "components/CompactGroupBySelect";
 import CompactMultiSelectFilter from "components/CompactMultiSelectFilter";
 import { useMaterialUIController } from "context";
@@ -73,6 +76,7 @@ import PropTypes from "prop-types";
 import jsPDF from "jspdf";
 import { addMonths, format, parseISO, isValid } from "date-fns";
 import {
+  getBaseDropdownLabel,
   hasContractsKpiGridFilters,
   readContractsUrlKpiFilters,
   resolveBaseNameById,
@@ -587,12 +591,13 @@ function ContractsForm({
   useEffect(() => {
     if (!isNewContractForm) return;
 
-    const selectedBase = bases.find((b) => Number(b.id) === Number(form.baseId));
-    const selectedClass = classes.find((c) => Number(c.id) === Number(form.classId));
+    const selectedGroup = propertyGroups.find(
+      (pg) => Number(pg.Id || pg.id) === Number(form.grpId)
+    );
+    const groupGId = selectedGroup?.GId || selectedGroup?.gId || "";
     const generated = buildContractNo({
       contractNumber: form.contractNumber,
-      baseRow: selectedBase,
-      classRow: selectedClass,
+      groupGId,
     });
 
     setForm((prev) => {
@@ -601,7 +606,7 @@ function ContractsForm({
       }
       return prev.contractNo === generated ? prev : { ...prev, contractNo: generated };
     });
-  }, [form.contractNumber, form.baseId, form.classId, bases, classes, isNewContractForm]);
+  }, [form.contractNumber, form.grpId, propertyGroups, isNewContractForm]);
 
   // Filter bases based on selected command
   useEffect(() => {
@@ -921,7 +926,7 @@ function ContractsForm({
       } else if (!isValidContractNumber(form.contractNumber)) {
         newErrors.contractNumber = "Contract No must be a number from 1 to 999";
       } else if (!form.contractNo?.trim()) {
-        newErrors.contractNumber = "Contract No could not be generated. Check Class and Base.";
+        newErrors.contractNumber = "Contract No could not be generated. Select Group ID.";
       }
     } else if (!form.contractNo?.trim()) {
       newErrors.contractNo = "Contract No is required";
@@ -1834,7 +1839,7 @@ function ContractsForm({
               fontWeight="bold"
               sx={darkMode ? { color: "#ffffff !important" } : {}}
             >
-              {initialData && !isClone ? "Edit Contract" : "New Contract"}
+              {initialData && !isClone ? "Edit Agreement" : "New Agreement"}
             </MDTypography>
             <MDBox sx={{ width: { xs: "100%", md: "340px" } }}>
               {isEditContract ? (
@@ -1956,7 +1961,7 @@ function ContractsForm({
                 fullWidth
                 disableClearable
                 options={filteredBases}
-                getOptionLabel={(option) => option?.name ?? ""}
+                getOptionLabel={(option) => getBaseDropdownLabel(option)}
                 isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
                 value={filteredBases.find((b) => Number(b.id) === Number(form.baseId)) ?? null}
                 onChange={(_, newValue) =>
@@ -1989,7 +1994,7 @@ function ContractsForm({
                 <InputLabel id="class-label" sx={labelSx}>
                   Class
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="class-label"
                   value={form.classId || ""}
                   label="Class"
@@ -2002,7 +2007,7 @@ function ContractsForm({
                       {cls.name}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -2013,7 +2018,7 @@ function ContractsForm({
                   <InputLabel id="grp-label" sx={labelSx}>
                     Group ID
                   </InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="grp-label"
                     value={form.grpId || ""}
                     label="Group ID"
@@ -2026,7 +2031,7 @@ function ContractsForm({
                         {pg.GId || pg.gId}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
                 <IconButton
                   color="primary"
@@ -2086,7 +2091,7 @@ function ContractsForm({
                 <InputLabel id="tenant-label" sx={labelSx}>
                   Tenant No
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="tenant-label"
                   value={form.tenantNo || ""}
                   label="Tenant No"
@@ -2098,7 +2103,7 @@ function ContractsForm({
                       {tenant.tenantNo} - {tenant.ownerName}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {errors.tenantNo && <FormHelperText>{errors.tenantNo}</FormHelperText>}
               </FormControl>
               <MDBox mt={0.75} px={0.25}>
@@ -2133,7 +2138,7 @@ function ContractsForm({
                 <InputLabel id="nature-of-business-label" sx={labelSx}>
                   Nature of Business
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="nature-of-business-label"
                   value={form.natureOfBusiness || ""}
                   label="Nature of Business"
@@ -2160,7 +2165,7 @@ function ContractsForm({
                       </MenuItem>
                     );
                   })}
-                </Select>
+                </SearchableSelect>
                 {errors.natureOfBusiness && (
                   <FormHelperText>{errors.natureOfBusiness}</FormHelperText>
                 )}
@@ -2351,7 +2356,7 @@ function ContractsForm({
                 <InputLabel id="payment-term-label" sx={labelSx}>
                   Payment Term
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="payment-term-label"
                   value={form.paymentTermMonths || ""}
                   label="Payment Term"
@@ -2363,7 +2368,7 @@ function ContractsForm({
                       {option.label}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {errors.paymentTermMonths && (
                   <FormHelperText>{errors.paymentTermMonths}</FormHelperText>
                 )}
@@ -2394,7 +2399,7 @@ function ContractsForm({
                 <InputLabel id="sd-rate-label" sx={labelSx}>
                   SD Rate
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="sd-rate-label"
                   value={
                     CONTRACT_SD_RATE_MONTH_VALUES.includes(Number(form.sdRateMonths))
@@ -2410,7 +2415,7 @@ function ContractsForm({
                       {formatContractSdRateDisplay(n)}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {errors.sdRateMonths && <FormHelperText>{errors.sdRateMonths}</FormHelperText>}
               </FormControl>
             </Grid>
@@ -2420,7 +2425,7 @@ function ContractsForm({
                 <InputLabel id="payment-timing-label" sx={labelSx}>
                   Payment Timing
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="payment-timing-label"
                   value={form.paymentTiming || ""}
                   label="Payment Timing"
@@ -2432,7 +2437,7 @@ function ContractsForm({
                       {option}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
                 {errors.paymentTiming && <FormHelperText>{errors.paymentTiming}</FormHelperText>}
               </FormControl>
             </Grid>
@@ -2460,7 +2465,7 @@ function ContractsForm({
                 <InputLabel id="term-label" sx={labelSx}>
                   Term
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="term-label"
                   value={form.term || ""}
                   label="Term"
@@ -2481,7 +2486,7 @@ function ContractsForm({
                   <MenuItem value="Rent or Profit" sx={menuItemSx}>
                     Rent or Profit
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
                 {(errors.term || lockTermAndRiseTermDropdowns) && (
                   <FormHelperText error={!!errors.term} sx={{ mx: 0, mt: 0.5, lineHeight: 1.35 }}>
                     {errors.term ||
@@ -2517,7 +2522,7 @@ function ContractsForm({
                     <InputLabel id="rise-term-type-label" sx={labelSx}>
                       Rise Terms
                     </InputLabel>
-                    <Select
+                    <SearchableSelect
                       labelId="rise-term-type-label"
                       value={form.riseTermType || ""}
                       label="Rise Terms"
@@ -2534,7 +2539,7 @@ function ContractsForm({
                       <MenuItem value="Variable" sx={menuItemSx}>
                         Variable
                       </MenuItem>
-                    </Select>
+                    </SearchableSelect>
                     {errors.riseTermType && (
                       <FormHelperText error sx={{ mx: 0 }}>
                         {errors.riseTermType}
@@ -2598,7 +2603,7 @@ function ContractsForm({
                       <InputLabel id="increase-interval-label" sx={labelSx}>
                         Increase Interval Months
                       </InputLabel>
-                      <Select
+                      <SearchableSelect
                         labelId="increase-interval-label"
                         value={form.increaseIntervalMonths || ""}
                         label="Increase Interval Months"
@@ -2611,7 +2616,7 @@ function ContractsForm({
                             {option}
                           </MenuItem>
                         ))}
-                      </Select>
+                      </SearchableSelect>
                       {errors.increaseIntervalMonths && (
                         <FormHelperText error sx={{ mx: 0 }}>
                           {errors.increaseIntervalMonths}
@@ -2860,7 +2865,7 @@ function ContractsForm({
                 <InputLabel id="status-label" sx={labelSx}>
                   Status
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="status-label"
                   value={form.status !== undefined ? form.status : true}
                   label="Status"
@@ -2873,7 +2878,7 @@ function ContractsForm({
                   <MenuItem value={false} sx={menuItemSx}>
                     Inactive
                   </MenuItem>
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -2883,7 +2888,7 @@ function ContractsForm({
                   <InputLabel id="approval-status-label" sx={labelSx}>
                     Apprv By AHQ
                   </InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="approval-status-label"
                     value={form.approvalStatus || "0"}
                     label="Apprv By AHQ"
@@ -2896,7 +2901,7 @@ function ContractsForm({
                     <MenuItem value="1" sx={menuItemSx}>
                       Approved
                     </MenuItem>
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               </Grid>
             )}
@@ -3659,7 +3664,7 @@ function ContractsForm({
                 <InputLabel id="months-interval-label" sx={labelSx}>
                   Months Interval
                 </InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="months-interval-label"
                   value={riseTermForm.monthsInterval || ""}
                   label="Months Interval"
@@ -3688,7 +3693,7 @@ function ContractsForm({
                       </MenuItem>
                     );
                   })}
-                </Select>
+                </SearchableSelect>
                 {riseTermErrors.monthsInterval && (
                   <FormHelperText>{riseTermErrors.monthsInterval}</FormHelperText>
                 )}
@@ -3989,7 +3994,7 @@ function ContractsDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -3999,7 +4004,7 @@ function ContractsDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -4237,7 +4242,7 @@ function ContractsMoneyColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -4248,7 +4253,7 @@ function ContractsMoneyColumnFilter({ column }) {
               <MenuItem value="lte">Less than or equal to</MenuItem>
               <MenuItem value="eq">Equal to</MenuItem>
               <MenuItem value="between">Price range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lte" || mode === "eq") && (
             <>
@@ -5566,6 +5571,8 @@ export default function Contracts() {
   const [rows, setRows] = useState([]);
 
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
+  const [gridPageNumber, setGridPageNumber] = useState(1);
+  const [paginationHost, setPaginationHost] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [visibleRowCount, setVisibleRowCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -6253,8 +6260,13 @@ export default function Contracts() {
       try {
         const res = await contractApi.getInvoiceSchedule({ contractNo });
         const invoices = unwrapContractInvoiceScheduleList(res);
-        if (invoices.length > 0) {
-          alert("Cannot delete this contract: there are linked invoices.");
+        const hasFinalizedInvoices = invoices.some(
+          (invoice) => pickScheduleRowIsFinalize(invoice) && !invoice?.__isDraftNewInvoice
+        );
+        if (hasFinalizedInvoices) {
+          alert(
+            "Cannot delete this contract: there are finalized invoices linked to this contract."
+          );
           return;
         }
       } catch (error) {
@@ -6271,36 +6283,10 @@ export default function Contracts() {
     setContractDetailsRiseTerms([]);
     setLoadingContractDetailsRiseTerms(true);
 
-    // Fetch ContractRiseTerms if contract has an ID
     const contractId = rowData?.Id || rowData?.id;
     if (contractId) {
       try {
-        const response = await contractApi.getContractRiseTermsByContractId(contractId);
-        const data = Array.isArray(response) ? response : response?.data || [];
-
-        // Filter out deleted records and normalize data
-        const normalizedRiseTerms = data
-          .filter((t) => !t.IsDeleted && t.IsDeleted !== true)
-          .map((t) => {
-            const monthsInterval = t.MonthsInterval ?? null;
-            const risePercent = t.RisePercent ?? null;
-            const sequenceNo = t.SequenceNo ?? null;
-            const id = t.Id ?? null;
-
-            if (monthsInterval === null || risePercent === null || sequenceNo === null) {
-              return null;
-            }
-
-            return {
-              id: id ? Number(id) : null,
-              monthsInterval: String(monthsInterval),
-              risePercent: String(risePercent),
-              sequenceNo: String(sequenceNo),
-            };
-          })
-          .filter(Boolean)
-          .sort((a, b) => Number(a.sequenceNo) - Number(b.sequenceNo));
-
+        const normalizedRiseTerms = await fetchNormalizedContractRiseTerms(contractId);
         setContractDetailsRiseTerms(normalizedRiseTerms);
       } catch (error) {
         console.error("Error fetching ContractRiseTerms for details:", error);
@@ -9494,7 +9480,7 @@ export default function Contracts() {
       let yPos = margin;
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text("Contract Details", margin, yPos);
+      doc.text("Agreement Details", margin, yPos);
       yPos += lineHeight + 2;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -9750,7 +9736,7 @@ export default function Contracts() {
 
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
-      doc.text("Contract Details", margin, yPos);
+      doc.text("Agreement Details", margin, yPos);
       yPos += lineHeight + 2;
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
@@ -9898,6 +9884,19 @@ export default function Contracts() {
         visible: visibleRowCount > 0 && visibleRowCount !== totalCount ? visibleRowCount : null,
       }),
     [totalCount, visibleRowCount]
+  );
+
+  const gridPaginationTotal = visibleRowCount > 0 ? visibleRowCount : computedRows.length;
+  const serverPaginationFooter = useMemo(
+    () => (
+      <ServerGridPagination
+        page={gridPageNumber}
+        totalCount={gridPaginationTotal}
+        pageSize={gridPageSize}
+        onPageChange={setGridPageNumber}
+      />
+    ),
+    [gridPaginationTotal, gridPageNumber, gridPageSize]
   );
 
   const contractsContextFilters = (
@@ -10060,8 +10059,8 @@ export default function Contracts() {
     <DashboardLayout>
       <DashboardNavbar />
       <EnterpriseWorkspace
-        title="Contracts"
-        subtitle="Manage contract records and agreements"
+        title="Agreements"
+        subtitle="Manage agreement records"
         tabs={<ContractsModuleTabs />}
         metadata={workspaceMetadata}
         actions={
@@ -10159,6 +10158,20 @@ export default function Contracts() {
           </MDBox>
         )}
 
+        <MDBox
+          ref={setPaginationHost}
+          className="saas-settings-table-pagination-top"
+          sx={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            flexShrink: 0,
+            minHeight: 28,
+            maxHeight: 32,
+            width: "100%",
+          }}
+        />
+
         <DataTable
           table={{
             columns: contractGridColumns,
@@ -10171,15 +10184,20 @@ export default function Contracts() {
             entries: [10, 25, 50, 100],
           }}
           contentFitTable
+          page={gridPageNumber - 1}
           pageSize={gridPageSize}
+          onPageChange={(newPage) => setGridPageNumber(newPage + 1)}
           onEntriesPerPageChange={(n) => {
             setGridPageSize(Number(n));
+            setGridPageNumber(1);
           }}
+          paginationFooter={serverPaginationFooter}
+          paginationHost={paginationHost}
           showTotalEntries={false}
           pagination={{ variant: "gradient", color: "info" }}
           noEndBorder
           canSearch
-          exportFileName="Contracts"
+          exportFileName="Agreements"
           exportCellFormatter={contractsExportCellFormatter}
           exportExcludeGroupParentsWhenExpanded
           exportAllColumns
@@ -10694,318 +10712,38 @@ export default function Contracts() {
         saving={agreementProvEditSaving}
       />
 
-      {/* Contract Details Dialog */}
-      <Dialog
+      <AgreementDetailsDialog
         open={detailsDialogOpen}
         onClose={() => setDetailsDialogOpen(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>
-          <MDBox display="flex" justifyContent="space-between" alignItems="center">
-            <MDBox>
-              <MDTypography variant="h5" fontWeight="bold" sx={{ mb: 0.5 }}>
-                Contract Details
-              </MDTypography>
-              {selectedContractDetails && (
-                <MDTypography variant="body2" color="text" fontWeight="medium">
-                  Contract No:{" "}
-                  {selectedContractDetails.ContractNo || selectedContractDetails.contractNo || "-"}
-                </MDTypography>
-              )}
-            </MDBox>
-            <IconButton onClick={() => setDetailsDialogOpen(false)} size="small">
-              <Icon>close</Icon>
-            </IconButton>
-          </MDBox>
-        </DialogTitle>
-        <DialogContent dividers sx={{ maxHeight: "70vh", overflowY: "auto" }}>
-          {selectedContractDetails && (
-            <MDBox>
-              <Grid container spacing={2} sx={{ mt: 1 }}>
-                {allColumns
-                  .filter(
-                    (col) =>
-                      col.accessor !== "actions" &&
-                      col.accessor !== "attachments" &&
-                      col.accessor !== "contractAttachments" &&
-                      col.accessor !== "contractAnnotations"
-                  )
-                  .map((col) => {
-                    const accessor = col.accessor;
-                    const accessorKey = typeof accessor === "string" ? accessor : null;
-                    // Access value from both camelCase and PascalCase
-                    const rowData = selectedContractDetails;
-                    let value = accessorKey ? rowData[accessorKey] : undefined;
-
-                    // If not found in camelCase, try PascalCase
-                    if ((value === undefined || value === null) && accessorKey) {
-                      const pascalAccessor =
-                        accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1);
-                      value = rowData[pascalAccessor];
-                    }
-
-                    // Also try accessing from original if available
-                    if (
-                      (value === undefined || value === null) &&
-                      rowData.original &&
-                      accessorKey
-                    ) {
-                      value = rowData.original[accessorKey];
-                      if (value === undefined || value === null) {
-                        value =
-                          rowData.original[
-                            accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)
-                          ];
-                      }
-                    }
-
-                    // Special handling for Rate field - use GroupRate
-                    if (accessor === "groupRate" || accessor === "totalRate") {
-                      value =
-                        rowData.GroupRate ||
-                        rowData.groupRate ||
-                        rowData.TotalRate ||
-                        rowData.totalRate ||
-                        value;
-                    }
-                    if (accessor === "paymentTermMonths") {
-                      value = value ?? rowData.PaymentTermMonths ?? rowData.paymentTermMonths;
-                    }
-                    if (accessor === "sdRateMonths") {
-                      value =
-                        value ??
-                        rowData.SDRateMonths ??
-                        rowData.SdRateMonths ??
-                        rowData.sdRateMonths;
-                    }
-
-                    // Get the cell value using the column's Cell function if available
-                    let displayValue = value;
-                    if (col.Cell) {
-                      try {
-                        const cellProps = { value, row: { original: rowData.original || rowData } };
-                        displayValue = col.Cell(cellProps);
-                      } catch (e) {
-                        displayValue = value || "-";
-                      }
-                    } else {
-                      // Format based on type
-                      if (typeof value === "number") {
-                        displayValue = value.toLocaleString();
-                      } else if (value === null || value === undefined || value === "") {
-                        displayValue = "-";
-                      } else {
-                        displayValue = String(value);
-                      }
-                    }
-
-                    return (
-                      <Grid item xs={12} sm={6} md={4} key={accessor}>
-                        <MDBox
-                          sx={{
-                            p: 1.5,
-                            borderRadius: 1,
-                            backgroundColor: "rgba(0, 0, 0, 0.02)",
-                            border: "1px solid rgba(0, 0, 0, 0.05)",
-                            transition: "all 0.2s ease",
-                            "&:hover": {
-                              backgroundColor: "rgba(0, 0, 0, 0.04)",
-                              borderColor: "rgba(0, 0, 0, 0.1)",
-                            },
-                          }}
-                        >
-                          <MDTypography
-                            variant="caption"
-                            color="text"
-                            fontWeight="bold"
-                            sx={{ display: "block", mb: 0.5 }}
-                          >
-                            {col.Header}:
-                          </MDTypography>
-                          <MDTypography variant="body2" fontWeight="regular" color="text">
-                            {displayValue}
-                          </MDTypography>
-                        </MDBox>
-                      </Grid>
-                    );
-                  })}
-              </Grid>
-
-              {/* Rise Terms Section */}
-              {loadingContractDetailsRiseTerms ? (
-                <MDBox display="flex" justifyContent="center" py={3} mt={3}>
-                  <CurrencyLoading size={40} />
-                </MDBox>
-              ) : contractDetailsRiseTerms.length > 0 ? (
-                <MDBox mt={4}>
-                  <MDTypography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
-                    Existing Rise Terms
-                  </MDTypography>
-                  <Card
-                    sx={{
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                      borderRadius: 2,
-                    }}
-                  >
-                    <MDBox p={2}>
-                      <TableContainer
-                        sx={{
-                          maxHeight: "400px",
-                          overflowY: "auto",
-                          // Firefox
-                          scrollbarWidth: "thin",
-                          scrollbarColor: "#888 transparent",
-                          // Chrome/Safari/Edge
-                          "&::-webkit-scrollbar": {
-                            width: "8px",
-                            height: "8px",
-                          },
-                          "&::-webkit-scrollbar-track": {
-                            background: "transparent",
-                            borderRadius: "4px",
-                          },
-                          "&::-webkit-scrollbar-thumb": {
-                            backgroundColor: "#888",
-                            borderRadius: "4px",
-                            border: "2px solid transparent",
-                            backgroundClip: "padding-box",
-                            "&:hover": {
-                              backgroundColor: "#555",
-                            },
-                          },
-                        }}
-                      >
-                        <Table size="small" sx={{ borderCollapse: "collapse" }}>
-                          <thead
-                            style={{
-                              position: "sticky",
-                              top: 0,
-                              zIndex: 1,
-                              backgroundColor: "#f5f5f5",
-                            }}
-                          >
-                            <TableRow>
-                              <TableCell
-                                sx={{
-                                  fontWeight: 600,
-                                  fontSize: "0.875rem",
-                                  borderBottom: "2px solid #e0e0e0",
-                                  backgroundColor: "#f5f5f5",
-                                  padding: "12px 16px 12px 16px",
-                                  paddingRight: "4px",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Sequence No
-                              </TableCell>
-                              <TableCell
-                                sx={{
-                                  fontWeight: 600,
-                                  fontSize: "0.875rem",
-                                  borderBottom: "2px solid #e0e0e0",
-                                  backgroundColor: "#f5f5f5",
-                                  padding: "12px 16px 12px 4px",
-                                  paddingLeft: "4px",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Months Interval
-                              </TableCell>
-                              <TableCell
-                                align="right"
-                                sx={{
-                                  fontWeight: 600,
-                                  fontSize: "0.875rem",
-                                  borderBottom: "2px solid #e0e0e0",
-                                  backgroundColor: "#f5f5f5",
-                                  padding: "12px 16px",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Rise Percent (%)
-                              </TableCell>
-                            </TableRow>
-                          </thead>
-                          <TableBody>
-                            {contractDetailsRiseTerms.map((term, index) => (
-                              <TableRow
-                                key={term.id || index}
-                                sx={{
-                                  "&:hover": { backgroundColor: "rgba(0, 0, 0, 0.02)" },
-                                  "&:last-child td": {
-                                    borderBottom: "none",
-                                  },
-                                }}
-                              >
-                                <TableCell
-                                  sx={{
-                                    fontSize: "0.875rem",
-                                    borderBottom: "1px solid #e0e0e0",
-                                    padding: "8px 16px 8px 16px",
-                                    paddingRight: "4px",
-                                  }}
-                                >
-                                  <MDTypography variant="body2" fontWeight="medium">
-                                    {term.sequenceNo}
-                                  </MDTypography>
-                                </TableCell>
-                                <TableCell
-                                  sx={{
-                                    fontSize: "0.875rem",
-                                    borderBottom: "1px solid #e0e0e0",
-                                    padding: "8px 16px 8px 4px",
-                                    paddingLeft: "4px",
-                                  }}
-                                >
-                                  <MDTypography variant="body2">{term.monthsInterval}</MDTypography>
-                                </TableCell>
-                                <TableCell
-                                  align="right"
-                                  sx={{
-                                    fontSize: "0.875rem",
-                                    borderBottom: "1px solid #e0e0e0",
-                                    padding: "8px 16px",
-                                  }}
-                                >
-                                  <MDTypography variant="body2" fontWeight="bold" color="primary">
-                                    {term.risePercent}%
-                                  </MDTypography>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </MDBox>
-                  </Card>
-                </MDBox>
-              ) : null}
-            </MDBox>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <MDButton
-            onClick={() => generateContractDetailsPDF(true)}
-            color="info"
-            variant="gradient"
-            disabled={!selectedContractDetails}
-          >
-            <Icon>picture_as_pdf</Icon>&nbsp;View as PDF
-          </MDButton>
-          <MDButton
-            onClick={handleCloneContractFromDetails}
-            color="success"
-            variant="gradient"
-            disabled={!selectedContractDetails || !canCreateCurrentMenu()}
-          >
-            <Icon>content_copy</Icon>&nbsp;Clone Contract
-          </MDButton>
-          <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
-            Close
-          </MDButton>
-        </DialogActions>
-      </Dialog>
+        contractDetails={selectedContractDetails}
+        columns={allColumns}
+        riseTerms={contractDetailsRiseTerms}
+        loadingRiseTerms={loadingContractDetailsRiseTerms}
+        displayContext={{ tenants }}
+        footerActions={
+          <>
+            <MDButton
+              onClick={() => generateContractDetailsPDF(true)}
+              color="info"
+              variant="gradient"
+              disabled={!selectedContractDetails}
+            >
+              <Icon>picture_as_pdf</Icon>&nbsp;View as PDF
+            </MDButton>
+            <MDButton
+              onClick={handleCloneContractFromDetails}
+              color="success"
+              variant="gradient"
+              disabled={!selectedContractDetails || !canCreateCurrentMenu()}
+            >
+              <Icon>content_copy</Icon>&nbsp;Clone Contract
+            </MDButton>
+            <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
+              Close
+            </MDButton>
+          </>
+        }
+      />
     </DashboardLayout>
   );
 }

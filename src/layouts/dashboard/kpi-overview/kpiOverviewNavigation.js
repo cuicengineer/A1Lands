@@ -123,18 +123,24 @@ export function hasContractsKpiGridFilters(filters) {
 }
 
 function catalogEntityId(entity) {
-  return Number(
+  const raw =
     entity?.id ??
-      entity?.Id ??
-      entity?.cmdId ??
-      entity?.CmdId ??
-      entity?.baseId ??
-      entity?.BaseId ??
-      entity?.classId ??
-      entity?.ClassId ??
-      entity?.commandId ??
-      entity?.CommandId
-  );
+    entity?.Id ??
+    entity?.cmdId ??
+    entity?.CmdId ??
+    entity?.baseId ??
+    entity?.BaseId ??
+    entity?.classId ??
+    entity?.ClassId ??
+    entity?.commandId ??
+    entity?.CommandId;
+  if (raw == null || raw === "") return NaN;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : NaN;
+  }
+  return NaN;
 }
 
 export function resolveCommandNameById(commands, cmdId) {
@@ -169,6 +175,26 @@ export function resolveBaseNameById(bases, baseId) {
       match?.BaseName ??
       ""
   ).trim();
+}
+
+/** Display label for Base autocomplete options (name + full name). */
+export function getBaseDropdownLabel(base) {
+  if (base == null) return "";
+  const toText = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value).trim();
+    }
+    return "";
+  };
+  const name = toText(
+    base?.name ?? base?.Name ?? base?.value ?? base?.Value ?? base?.label ?? base?.Label
+  );
+  const fullName = toText(base?.fullName ?? base?.FullName);
+  if (fullName && fullName !== name) {
+    return `${name} - ${fullName}`;
+  }
+  return name;
 }
 
 export function resolveClassNameById(classes, classId) {

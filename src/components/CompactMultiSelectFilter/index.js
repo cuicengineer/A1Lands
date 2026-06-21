@@ -11,6 +11,8 @@ import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import Icon from "@mui/material/Icon";
+import TextField from "@mui/material/TextField";
+import MDBox from "components/MDBox";
 
 const COMPACT_FILTER_POPOVER_PAPER_SX = {
   mt: 0.5,
@@ -50,8 +52,20 @@ function CompactMultiSelectFilter({
   isOptionEqualToValue,
 }) {
   const [anchorEl, setAnchorEl] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const optionList = useMemo(() => options.filter((opt) => opt !== allValue), [options, allValue]);
+
+  const resolveLabel = (option) => {
+    if (option === allValue) return "All";
+    return getOptionLabel ? getOptionLabel(option) : String(option ?? "");
+  };
+
+  const filteredOptionList = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return optionList;
+    return optionList.filter((option) => resolveLabel(option).toLowerCase().includes(term));
+  }, [optionList, searchTerm, getOptionLabel, allValue]);
 
   const summary = useMemo(
     () => formatSummary(label, value.length, optionList.length),
@@ -72,11 +86,6 @@ function CompactMultiSelectFilter({
     } else {
       onChange([...value, option]);
     }
-  };
-
-  const resolveLabel = (option) => {
-    if (option === allValue) return "All";
-    return getOptionLabel ? getOptionLabel(option) : String(option ?? "");
   };
 
   return (
@@ -113,7 +122,10 @@ function CompactMultiSelectFilter({
       <Popover
         open={Boolean(anchorEl)}
         anchorEl={anchorEl}
-        onClose={() => setAnchorEl(null)}
+        onClose={() => {
+          setAnchorEl(null);
+          setSearchTerm("");
+        }}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         transformOrigin={{ vertical: "top", horizontal: "left" }}
         PaperProps={{
@@ -121,6 +133,30 @@ function CompactMultiSelectFilter({
           sx: { ...COMPACT_FILTER_POPOVER_PAPER_SX, minWidth: 180, maxWidth: 260 },
         }}
       >
+        {optionList.length >= 2 ? (
+          <MDBox
+            sx={{
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+              bgcolor: "background.paper",
+              p: 1,
+              borderBottom: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            <TextField
+              size="small"
+              placeholder="Search..."
+              fullWidth
+              autoFocus
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            />
+          </MDBox>
+        ) : null}
         {allValue != null ? (
           <MenuItem dense onClick={handleToggleAll} sx={COMPACT_FILTER_MENU_ITEM_SX}>
             <Checkbox size="small" checked={allSelected} sx={{ p: 0.5, mr: 0.75 }} tabIndex={-1} />
@@ -133,7 +169,7 @@ function CompactMultiSelectFilter({
             />
           </MenuItem>
         ) : null}
-        {optionList.map((option) => {
+        {filteredOptionList.map((option) => {
           const equals = isOptionEqualToValue || ((a, b) => a === b);
           const checked = value.some((v) => equals(v, option));
           return (

@@ -36,7 +36,7 @@ Coded by www.creative-tim.com
 */
 
 // Material Dashboard 2 React layouts
-import Dashboard from "layouts/dashboard";
+import DashboardModuleLayout from "layouts/dashboard/DashboardModuleLayout";
 import Tables from "layouts/tables";
 import Billing from "layouts/billing";
 import RTL from "layouts/rtl";
@@ -69,15 +69,18 @@ import ContractsReport from "layouts/contracts/report";
 import RevenueRates from "layouts/contracts/revenue-rates/revenue-rates";
 import Tenants from "layouts/contracts/tenants/tenants";
 import ContractsNew from "layouts/contracts/contracts/contracts";
+import ShareDistribution from "layouts/contracts/share-distribution/share-distribution";
 import AgreementProvInvoice from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
+import SalesReturns from "layouts/income-agreements/sales-returns/sales-returns";
+import Collections from "layouts/income-agreements/collections/collections";
 import RentalValueRate from "layouts/contracts/rental-value-rate/rental-value-rate";
 import GovtShareRate from "layouts/contracts/govt-share-rate/govt-share-rate";
 import SharingFormula from "layouts/contracts/sharing-formula/sharing-formula";
-import KpiOverview from "layouts/dashboard/kpi-overview";
 import BankAccounts from "layouts/accounts/bank-account/bank-account";
 import Payments from "layouts/accounts/receipts/payments";
 import Receipts from "layouts/receipts/receipts";
 import Supplier from "layouts/supplier/supplier";
+import Customer from "layouts/customer/customer";
 // @mui icons
 import Icon from "@mui/material/Icon";
 
@@ -104,8 +107,8 @@ const routes = [
         name: "KPI",
         key: "dashboard-main",
         icon: <Icon fontSize="small">dashboard</Icon>,
-        route: "/dashboard",
-        component: <Dashboard />,
+        route: "/dashboard/*",
+        component: <DashboardModuleLayout />,
       },
       {
         type: "collapse",
@@ -113,7 +116,6 @@ const routes = [
         key: "dashboard-kpi-overview",
         icon: <Icon fontSize="small">insights</Icon>,
         route: "/dashboard/kpi-overview",
-        component: <KpiOverview />,
       },
     ],
   },
@@ -308,19 +310,11 @@ const routes = [
       },
       {
         type: "collapse",
-        name: "Contracts",
+        name: "Agreements",
         key: "contracts",
         icon: <Icon fontSize="small">article</Icon>,
         route: "/contracts",
         component: <ContractsNew />,
-      },
-      {
-        type: "collapse",
-        name: "Agreement Invoice",
-        key: "agreement-prov-invoice",
-        icon: <Icon fontSize="small">receipt</Icon>,
-        route: "/contracts/agreement-prov-invoice",
-        component: <AgreementProvInvoice />,
       },
       // {
       //   type: "collapse",
@@ -330,6 +324,46 @@ const routes = [
       //   route: "/contracts/report",
       //   component: <ContractsReport />,
       // },
+    ],
+  },
+  {
+    type: "collapse",
+    name: "Income Agreements",
+    key: "income-agreements",
+    icon: <Icon fontSize="small">savings</Icon>,
+    collapse: [
+      {
+        type: "collapse",
+        name: "Agreement Invoice",
+        key: "agreement-prov-invoice",
+        icon: <Icon fontSize="small">receipt</Icon>,
+        route: "/contracts/agreement-prov-invoice",
+        component: <AgreementProvInvoice />,
+      },
+      {
+        type: "collapse",
+        name: "Sales Returns",
+        key: "income-agreements-sales-returns",
+        icon: <Icon fontSize="small">undo</Icon>,
+        route: "/income-agreements/sales-returns",
+        component: <SalesReturns />,
+      },
+      {
+        type: "collapse",
+        name: "Collections",
+        key: "income-agreements-collections",
+        icon: <Icon fontSize="small">account_balance_wallet</Icon>,
+        route: "/income-agreements/collections",
+        component: <Collections />,
+      },
+      {
+        type: "collapse",
+        name: "Share Distribution",
+        key: "income-agreements-share-distribution",
+        icon: <Icon fontSize="small">pie_chart</Icon>,
+        route: "/contracts/share-distribution",
+        component: <ShareDistribution />,
+      },
     ],
   },
   {
@@ -350,27 +384,63 @@ const routes = [
   },
   {
     type: "collapse",
-    name: "Payments",
-    key: "payments",
-    icon: <Icon fontSize="small">payments</Icon>,
-    route: "/payments",
-    component: <Payments />,
+    name: "Cash & Fund Flow",
+    key: "cash-fund-flow",
+    icon: <Icon fontSize="small">account_balance_wallet</Icon>,
+    collapse: [
+      {
+        type: "collapse",
+        name: "Payments",
+        key: "payments",
+        excludeFromAssignRights: true,
+        icon: <Icon fontSize="small">payments</Icon>,
+        route: "/payments",
+        component: <Payments />,
+      },
+      {
+        type: "collapse",
+        name: "Receipts",
+        key: "receipts",
+        excludeFromAssignRights: true,
+        icon: <Icon fontSize="small">receipt_long</Icon>,
+        route: "/receipts",
+        component: <Receipts />,
+      },
+    ],
   },
   {
     type: "collapse",
-    name: "Receipts",
-    key: "receipts",
-    icon: <Icon fontSize="small">receipt_long</Icon>,
-    route: "/receipts",
-    component: <Receipts />,
+    name: "Purchases",
+    key: "purchases",
+    icon: <Icon fontSize="small">shopping_cart</Icon>,
+    collapse: [
+      {
+        type: "collapse",
+        name: "Supplier",
+        key: "supplier",
+        excludeFromAssignRights: true,
+        icon: <Icon fontSize="small">local_shipping</Icon>,
+        route: "/supplier",
+        component: <Supplier />,
+      },
+    ],
   },
   {
     type: "collapse",
-    name: "Supplier",
-    key: "supplier",
-    icon: <Icon fontSize="small">local_shipping</Icon>,
-    route: "/supplier",
-    component: <Supplier />,
+    name: "Sales",
+    key: "sales",
+    icon: <Icon fontSize="small">point_of_sale</Icon>,
+    collapse: [
+      {
+        type: "collapse",
+        name: "Customer",
+        key: "customer",
+        excludeFromAssignRights: true,
+        icon: <Icon fontSize="small">people</Icon>,
+        route: "/customer",
+        component: <Customer />,
+      },
+    ],
   },
 ];
 

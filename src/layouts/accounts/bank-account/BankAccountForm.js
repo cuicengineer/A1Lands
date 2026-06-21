@@ -8,7 +8,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormHelperText from "@mui/material/FormHelperText";
 import Box from "@mui/material/Box";
@@ -965,7 +965,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
               <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
                 <FormControl fullWidth size="small" sx={{ ...selectFormControlSx, flex: 1 }}>
                   <InputLabel id="bank-form-rac">RAC</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="bank-form-rac"
                     label="RAC"
                     value={
@@ -1017,7 +1017,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                         )}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
                 {canQuickAddRacBase && (
                   <IconButton
@@ -1053,7 +1053,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                   }
                 >
                   <InputLabel id="bank-form-base">Unit</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="bank-form-base"
                     label="Base"
                     value={
@@ -1104,7 +1104,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                         )}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
                 {canQuickAddRacBase && (
                   <IconButton
@@ -1178,7 +1178,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small" required sx={selectFormControlSx}>
                 <InputLabel id="bank-funding">Funding Source</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="bank-funding"
                   label="Funding Source"
                   value={form.fundingSource}
@@ -1189,7 +1189,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       {f}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={12} md={4}>
@@ -1217,7 +1217,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
             <Grid item xs={12} sm={6} md={6} sx={{ display: "flex", alignItems: "stretch" }}>
               <FormControl fullWidth size="small" sx={bankNameRowControlSx}>
                 <InputLabel id="bank-name">Bank Name</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="bank-name"
                   label="Bank Name"
                   value={
@@ -1233,7 +1233,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       {o.label}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
 
@@ -1327,7 +1327,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
               ) : (
                 <FormControl fullWidth size="small" required sx={selectFormControlSx}>
                   <InputLabel id="cur">Currency</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="cur"
                     label="Currency"
                     value={form.currency}
@@ -1338,7 +1338,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                         {c}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               )}
             </Grid>
@@ -1395,7 +1395,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
               ) : (
                 <FormControl fullWidth size="small" required sx={selectFormControlSx}>
                   <InputLabel id="acc-type">Type</InputLabel>
-                  <Select
+                  <SearchableSelect
                     labelId="acc-type"
                     label="Type"
                     value={form.accountType}
@@ -1406,7 +1406,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                         {c}
                       </MenuItem>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </FormControl>
               )}
             </Grid>
@@ -1491,7 +1491,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small" required sx={selectFormControlSx}>
                 <InputLabel id="st">Status</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="st"
                   label="Status"
                   value={form.status}
@@ -1502,7 +1502,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       {c}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={12} md={4}>
@@ -1561,7 +1561,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small" required sx={selectFormControlSx}>
                 <InputLabel id="auth">Authority</InputLabel>
-                <Select
+                <SearchableSelect
                   labelId="auth"
                   label="Authority"
                   value={form.authority}
@@ -1572,7 +1572,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       {c}
                     </MenuItem>
                   ))}
-                </Select>
+                </SearchableSelect>
               </FormControl>
             </Grid>
             <Grid item xs={12}>

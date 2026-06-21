@@ -71,6 +71,7 @@ function ReportsBarChart({
   flat,
   seriesColor,
   zoomEnhanced,
+  wideBars,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
@@ -83,10 +84,10 @@ function ReportsBarChart({
     const labels = chart.labels || [];
     const datasets = chart.datasets || {};
     if (flat) {
-      return executiveBarConfigs(labels, datasets, { color: barColor });
+      return executiveBarConfigs(labels, datasets, { color: barColor, wideBars });
     }
     return configs(labels, datasets);
-  }, [flat, chart, barColor]);
+  }, [flat, chart, barColor, wideBars]);
 
   const { data, options: baseOptions } = chartConfig;
 
@@ -167,6 +168,7 @@ ReportsBarChart.defaultProps = {
   flat: false,
   seriesColor: null,
   zoomEnhanced: false,
+  wideBars: false,
 };
 
 // Typechecking props for the ReportsBarChart
@@ -180,6 +182,7 @@ ReportsBarChart.propTypes = {
   flat: PropTypes.bool,
   seriesColor: PropTypes.string,
   zoomEnhanced: PropTypes.bool,
+  wideBars: PropTypes.bool,
 };
 
 export default ReportsBarChart;

@@ -48,6 +48,29 @@ async function createSubGroup(groupName, subGroupName) {
   return api.request("POST", "/api/IncomeStatementSubGroups", payload);
 }
 
+async function updateSubGroup(id, groupName, subGroupName) {
+  const payload = await withAudit(
+    {
+      Id: Number(id),
+      GroupName: groupName,
+      groupName,
+      SubGroupName: subGroupName,
+      subGroupName,
+    },
+    "Update"
+  );
+  return api.request("PUT", `/api/IncomeStatementSubGroups/${id}`, payload);
+}
+
+async function deleteSubGroup(id) {
+  const actionBy = await getActionBy();
+  return api.request("DELETE", `/api/IncomeStatementSubGroups/${id}`, {
+    Action: "Delete",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  });
+}
+
 async function create(data) {
   const payload = await withAudit(data, "Create");
   return api.request("POST", "/api/IncomeStatements", payload);
@@ -82,6 +105,8 @@ const incomeStatementApi = {
   getAll,
   getSubGroups,
   createSubGroup,
+  updateSubGroup,
+  deleteSubGroup,
   create,
   update,
   remove,

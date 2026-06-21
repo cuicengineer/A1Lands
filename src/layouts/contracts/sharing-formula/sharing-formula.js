@@ -5,7 +5,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -23,6 +23,7 @@ import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import DataTable from "examples/Tables/DataTable";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
+import { GRID_DARK_ARROW_ICON_SX } from "utils/gridDarkArrowIconSx";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import MDBadge from "components/MDBadge";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -38,6 +39,7 @@ import api, {
 } from "services/api.service";
 import sharingFormulaApi from "services/api.sharingformula.service";
 import { withGridValueChip } from "utils/gridValueChipCell";
+import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import { format, parseISO, isValid } from "date-fns";
 
 const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
@@ -194,7 +196,7 @@ function ApplicationDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -204,7 +206,7 @@ function ApplicationDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -435,7 +437,7 @@ function SharingFormulaMoneyColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -446,7 +448,7 @@ function SharingFormulaMoneyColumnFilter({ column }) {
               <MenuItem value="lte">Less than or equal to</MenuItem>
               <MenuItem value="eq">Equal to</MenuItem>
               <MenuItem value="between">Price range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lte" || mode === "eq") && (
             <>
@@ -1083,7 +1085,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
               size="small"
               fullWidth
               options={filteredBases}
-              getOptionLabel={(option) => option?.name ?? ""}
+              getOptionLabel={(option) => getBaseDropdownLabel(option)}
               isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
               value={(form.baseIds || [])
                 .map((id) => filteredBases.find((b) => Number(b.id) === Number(id)))
@@ -1141,7 +1143,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth required error={!!errors.classIds}>
               <InputLabel id="class-label">Class (Multiple Selection)</InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="class-label"
                 multiple
                 value={form.classIds}
@@ -1169,7 +1171,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
                     {cls.name}
                   </MenuItem>
                 ))}
-              </Select>
+              </SearchableSelect>
               {errors.classIds && (
                 <MDTypography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
                   {errors.classIds}
@@ -1229,7 +1231,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
               <InputLabel id="status-label">Status</InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="status-label"
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
@@ -1242,7 +1244,7 @@ function SharingFormulaForm({ open, onClose, onSubmit, classes, commands, bases,
               >
                 <MenuItem value={true}>Active</MenuItem>
                 <MenuItem value={false}>Inactive</MenuItem>
-              </Select>
+              </SearchableSelect>
             </FormControl>
           </Grid>
 
@@ -1578,6 +1580,7 @@ export default function SharingFormula() {
               size="small"
               onClick={() => handleToggleGroup(groupKey)}
               title={isExpanded ? "Collapse" : "Expand"}
+              sx={GRID_DARK_ARROW_ICON_SX}
             >
               <Icon>{isExpanded ? "expand_less" : "expand_more"}</Icon>
             </IconButton>
@@ -2036,6 +2039,7 @@ export default function SharingFormula() {
           pagination={{ variant: "gradient", color: "info" }}
           exportFileName="Sharing-Formula"
           exportCellFormatter={exportCellFormatter}
+          exportIncludeAllGroupChildren
           extraFilterTypes={CONFIG_DATATABLE_APPLICATION_DATE_FILTER_TYPES}
           contentFitTable
         />

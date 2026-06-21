@@ -36,7 +36,7 @@ import {
 // Material Dashboard 2 React context
 import { useMaterialUIController } from "context";
 
-function SidenavCollapse({ icon, name, active, ...rest }) {
+function SidenavCollapse({ icon, name, active, hasSubmenu, expanded, ...rest }) {
   const [controller] = useMaterialUIController();
   const { miniSidenav, transparentSidenav, whiteSidenav, darkMode, sidenavColor } = controller;
 
@@ -44,6 +44,7 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
     "enterprise-sidenav-nav-item",
     miniSidenav ? "enterprise-sidenav-nav-item--mini" : "",
     active ? "enterprise-sidenav-nav-item--active" : "",
+    hasSubmenu ? "enterprise-sidenav-nav-item--has-submenu" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -126,6 +127,25 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
             }
           />
         )}
+
+        {hasSubmenu && !miniSidenav ? (
+          <Icon
+            className="enterprise-sidenav-submenu-arrow material-icons-outlined"
+            sx={{
+              flexShrink: 0,
+              ml: 0.5,
+              color: "inherit",
+              opacity: 0.9,
+              fontSize: "1.125rem !important",
+              width: "1.125rem !important",
+              height: "1.125rem !important",
+              transition: "transform 200ms ease-in-out",
+            }}
+            aria-hidden
+          >
+            {expanded ? "keyboard_arrow_down" : "keyboard_arrow_right"}
+          </Icon>
+        ) : null}
       </MDBox>
     </ListItem>
   );
@@ -134,6 +154,8 @@ function SidenavCollapse({ icon, name, active, ...rest }) {
 // Setting default values for the props of SidenavCollapse
 SidenavCollapse.defaultProps = {
   active: false,
+  hasSubmenu: false,
+  expanded: false,
 };
 
 // Typechecking props for the SidenavCollapse
@@ -141,6 +163,8 @@ SidenavCollapse.propTypes = {
   icon: PropTypes.node.isRequired,
   name: PropTypes.string.isRequired,
   active: PropTypes.bool,
+  hasSubmenu: PropTypes.bool,
+  expanded: PropTypes.bool,
 };
 
 export default SidenavCollapse;

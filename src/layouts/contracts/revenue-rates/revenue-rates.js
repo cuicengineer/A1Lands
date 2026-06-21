@@ -14,7 +14,7 @@ import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -42,6 +42,7 @@ import ContractsModuleTabs from "layouts/contracts/components/ContractsModuleTab
 import DataTable from "examples/Tables/DataTable";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
 import {
+  getBaseDropdownLabel,
   resolveBaseNameById,
   resolveClassNameById,
   resolveCommandNameById,
@@ -246,7 +247,7 @@ function RevenueRatesDateColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -256,7 +257,7 @@ function RevenueRatesDateColumnFilter({ column }) {
               <MenuItem value="gt">Greater than (after)</MenuItem>
               <MenuItem value="lt">Less than (before)</MenuItem>
               <MenuItem value="between">Date range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lt") && (
             <MDTypography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
@@ -485,7 +486,7 @@ function RevenueRatesMoneyColumnFilter({ column }) {
           </MDTypography>
           <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
             <InputLabel id={modeLabelId}>Comparison</InputLabel>
-            <Select
+            <SearchableSelect
               labelId={modeLabelId}
               label="Comparison"
               value={mode}
@@ -496,7 +497,7 @@ function RevenueRatesMoneyColumnFilter({ column }) {
               <MenuItem value="lte">Less than or equal to</MenuItem>
               <MenuItem value="eq">Equal to</MenuItem>
               <MenuItem value="between">Price range</MenuItem>
-            </Select>
+            </SearchableSelect>
           </FormControl>
           {(mode === "gt" || mode === "lte" || mode === "eq") && (
             <>
@@ -1212,7 +1213,7 @@ function RevenueRatesForm({
               fullWidth
               disableClearable
               options={baseAutocompleteOptions}
-              getOptionLabel={(option) => (option == null ? "" : getOptionLabel(option))}
+              getOptionLabel={(option) => (option == null ? "" : getBaseDropdownLabel(option))}
               isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
               value={baseAutocompleteValue}
               onChange={(_, newValue) =>
@@ -1248,7 +1249,7 @@ function RevenueRatesForm({
               <InputLabel id="property-label" sx={{ fontSize: "1.1rem" }}>
                 Property
               </InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="property-label"
                 value={isBaseAll ? 0 : form.propertyId ?? ""}
                 label="Property"
@@ -1299,7 +1300,7 @@ function RevenueRatesForm({
                       {option.pId}
                     </MenuItem>
                   ))}
-              </Select>
+              </SearchableSelect>
             </FormControl>
             {selectedProperty && !isBaseAll && (
               <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
@@ -1587,7 +1588,7 @@ function RevenueRatesForm({
               <InputLabel id="status-label" sx={{ fontSize: "1.1rem" }}>
                 Status
               </InputLabel>
-              <Select
+              <SearchableSelect
                 labelId="status-label"
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
@@ -1622,7 +1623,7 @@ function RevenueRatesForm({
                 <MenuItem value={false} sx={{ fontSize: "1.1rem", padding: "10px 14px" }}>
                   Inactive
                 </MenuItem>
-              </Select>
+              </SearchableSelect>
             </FormControl>
           </Grid>
         </Grid>
@@ -1741,6 +1742,7 @@ export default function RevenueRates() {
         arr.map((base) => ({
           id: Number(base?.id),
           name: String(base?.name ?? base?.value ?? base?.label ?? base?.Name ?? base?.Value ?? ""),
+          fullName: String(base?.fullName ?? base?.FullName ?? ""),
           cmdId: Number(base?.cmdId ?? base?.cmd ?? base?.commandId ?? 0),
         }))
       );

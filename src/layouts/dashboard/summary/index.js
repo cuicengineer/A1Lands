@@ -13,7 +13,7 @@ import CurrencyLoading from "components/CurrencyLoading";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
+import SearchableSelect from "components/SearchableSelect";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -671,7 +671,7 @@ function SummaryOfA1Activities() {
                 headerAction={
                   <FormControl size="small" className="erp-dashboard-filter" sx={{ minWidth: 100 }}>
                     <InputLabel id="govt-paf-class-filter-label">Class</InputLabel>
-                    <Select
+                    <SearchableSelect
                       labelId="govt-paf-class-filter-label"
                       label="Class"
                       value={shareClassIdFilter}
@@ -684,7 +684,7 @@ function SummaryOfA1Activities() {
                           {getGovtPafClassIdLabel(id)}
                         </MenuItem>
                       ))}
-                    </Select>
+                    </SearchableSelect>
                   </FormControl>
                 }
               >

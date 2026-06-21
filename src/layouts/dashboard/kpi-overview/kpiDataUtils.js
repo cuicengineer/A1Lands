@@ -2,9 +2,30 @@
  * KPI Overview — data extraction & aggregation (same API as summary dashboard).
  */
 
+import { coerceChartDataValue } from "utils/chartBarDataUtils";
+
 const DATA_SET_PROPERTY_SUMMARY = "PropertySummary";
+const DATA_SET_PROPERTY_GROUP_SUMMARY = "PropertyGroupSummary";
+const DATA_SET_GROUP_SUMMARY = "GroupSummary";
 const DATA_SET_CONTRACTS_SUMMARY = "ContractsSummary";
 const DATA_SET_GOVT_PAF_SHARE = "GovtPAFShare";
+
+const GROUPED_PROPERTY_COUNT_FIELDS = [
+  "GroupedPropertyCount",
+  "groupedPropertyCount",
+  "PropertyGroupCount",
+  "propertyGroupCount",
+  "GroupCount",
+  "groupCount",
+  "PropertyCount",
+  "propertyCount",
+];
+
+function isGroupSummaryDataRow(row) {
+  return (
+    isDataSetRow(row, DATA_SET_GROUP_SUMMARY) || isDataSetRow(row, DATA_SET_PROPERTY_GROUP_SUMMARY)
+  );
+}
 
 export const PROPERTY_CLASS_STICKERS = {
   lands: { classIds: [1], label: "Lands" },
@@ -15,12 +36,26 @@ export const PROPERTY_CLASS_STICKERS = {
   hb: { classIds: [6], label: "HB" },
 };
 
-const ASSET_CARD_FIXED_ORDER = ["categoryA", "categoryB", "categoryC", "bts", "hb", "total"];
+const ASSET_CARD_FIXED_ORDER = ["total", "categoryA", "categoryB", "categoryC", "bts", "hb"];
 
-/** Values from API are in millions; display with M. or B. suffix. */
+/** Row 1 (groups) card label text — bold via dashboard-redesign.css */
+const GROUPED_ASSET_ROW_LABELS = {
+  total: "Total Groups",
+  categoryA: "Cat A",
+  categoryB: "Cat B",
+  categoryC: "Cat C",
+  hb: "HB",
+  bts: "BTS",
+};
+
+function groupedAssetRowLabel(key) {
+  return GROUPED_ASSET_ROW_LABELS[key] || null;
+}
+
+/** Values from API are in millions; display with M or B suffix. */
 export function formatKpiMoneyAmount(valueInMillions) {
-  const n = Number(valueInMillions);
-  if (!Number.isFinite(n)) {
+  const n = coerceChartDataValue(valueInMillions);
+  if (n == null) {
     return { text: "0.00", suffix: "M" };
   }
   const abs = Math.abs(n);
@@ -30,7 +65,7 @@ export function formatKpiMoneyAmount(valueInMillions) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }),
-      suffix: "B.",
+      suffix: "B",
     };
   }
   return {
@@ -129,8 +164,13 @@ function readNumber(row, keys) {
   if (!row || typeof row !== "object") return null;
   for (const k of keys) {
     if (row[k] === undefined || row[k] === null || row[k] === "") continue;
-    const n = Number(row[k]);
-    if (Number.isFinite(n)) return n;
+    const coerced = coerceChartDataValue(row[k]);
+    if (coerced != null) return coerced;
+    if (typeof row[k] === "number" && Number.isFinite(row[k])) return row[k];
+    if (typeof row[k] === "string") {
+      const n = Number(row[k]);
+      if (Number.isFinite(n)) return n;
+    }
   }
   return null;
 }
@@ -225,6 +265,31 @@ export function extractPropertySummaryRows(payload) {
   return extractRowsByDataSet(payload, DATA_SET_PROPERTY_SUMMARY, (r) =>
     isDataSetRow(r, DATA_SET_PROPERTY_SUMMARY)
   );
+}
+
+export function extractPropertyGroupSummaryRows(payload) {
+  if (payload == null || typeof payload !== "object") return [];
+  const root = payload.data ?? payload.Data ?? payload.result ?? payload.Result ?? payload;
+  const resultSets = root.resultSets ?? root.ResultSets ?? payload.resultSets ?? payload.ResultSets;
+  const collected = [];
+
+  if (Array.isArray(resultSets)) {
+    for (const inner of resultSets) {
+      if (!Array.isArray(inner)) continue;
+      for (const row of inner) {
+        if (row && typeof row === "object" && isGroupSummaryDataRow(row)) {
+          collected.push(row);
+        }
+      }
+    }
+  }
+
+  return collected;
+}
+
+/** Alias for GroupSummary rows from property-summary API. */
+export function extractGroupSummaryRows(payload) {
+  return extractPropertyGroupSummaryRows(payload);
 }
 
 export function extractContractsSummaryRows(payload) {
@@ -807,7 +872,228 @@ export function buildAssetCards(propertyRows, shareRows = [], contractRows = [])
     contractRows
   );
 
-  return [...fixedCards, ...extraCards];
+  return [...fixedCards, ...extraCards].map(zeroAssetCardStatsIfNoCount);
+}
+
+function isActiveNotDeletedPropertyGroup(group) {
+  if (!group || typeof group !== "object") return false;
+  const status = group.Status ?? group.status;
+  const isDeleted = group.IsDeleted ?? group.isDeleted;
+  const isActive = status === true || status === 1 || status === "1";
+  const notDeleted = !(isDeleted === true || isDeleted === 1 || isDeleted === "1");
+  return isActive && notDeleted;
+}
+
+function filterPropertyGroupsByRacBase(groups, racIds, baseIds) {
+  const racSet = new Set((racIds || []).map(String));
+  const baseSet = new Set((baseIds || []).map(String));
+  const hasRacFilter = racSet.size > 0;
+  const hasBaseFilter = baseSet.size > 0;
+  if (!hasRacFilter && !hasBaseFilter) return groups || [];
+
+  return (groups || []).filter((group) => {
+    const cmdId = String(group.CmdId ?? group.cmdId ?? "");
+    const baseId = String(group.BaseId ?? group.baseId ?? "");
+    if (hasRacFilter && (!cmdId || !racSet.has(cmdId))) return false;
+    if (hasBaseFilter && (!baseId || !baseSet.has(baseId))) return false;
+    return true;
+  });
+}
+
+function aggregatePropertyGroupsByClassIds(groups, classIds) {
+  const idSet = new Set(classIds.map(Number));
+  let count = 0;
+  const areasByUom = {};
+
+  for (const group of groups) {
+    const classId = Number(group.ClassId ?? group.classId);
+    if (!idSet.has(classId)) continue;
+    count += 1;
+    const area = readPropertySummaryArea(group);
+    if (Number.isFinite(area)) {
+      const uom = readPropertySummaryUom(group) || "—";
+      areasByUom[uom] = (areasByUom[uom] || 0) + area;
+    }
+  }
+
+  return { count, areaLine: formatAreasByUomLine(areasByUom), areasByUom };
+}
+
+function aggregateGroupedSummaryByClassIds(rows, classIds) {
+  const idSet = new Set(classIds.map(Number));
+  let count = 0;
+  const areasByUom = {};
+
+  for (const r of rows) {
+    if (!isGroupSummaryDataRow(r)) continue;
+    const classId = Number(r.ClassId ?? r.classId);
+    if (!idSet.has(classId)) continue;
+    const pc = readNumber(r, GROUPED_PROPERTY_COUNT_FIELDS);
+    if (Number.isFinite(pc)) count += pc;
+    const area = readPropertySummaryArea(r);
+    if (Number.isFinite(area)) {
+      const uom = readPropertySummaryUom(r) || "—";
+      areasByUom[uom] = (areasByUom[uom] || 0) + area;
+    }
+  }
+
+  return { count, areaLine: formatAreasByUomLine(areasByUom), areasByUom };
+}
+
+function mergeGroupedAreasByUom(target, source) {
+  if (!source || typeof source !== "object") return;
+  for (const [uom, area] of Object.entries(source)) {
+    if (!Number.isFinite(area)) continue;
+    target[uom] = (target[uom] || 0) + area;
+  }
+}
+
+/** Total Groups = sum of all category sticker counts/areas (excludes the total key itself). */
+function sumGroupedCategoryStats(groupedStatsByKey) {
+  let count = 0;
+  const areasByUom = {};
+
+  for (const [key, agg] of Object.entries(groupedStatsByKey || {})) {
+    if (key === "total" || !agg || typeof agg !== "object") continue;
+    if (Number.isFinite(agg.count)) count += agg.count;
+    mergeGroupedAreasByUom(areasByUom, agg.areasByUom);
+  }
+
+  return { count, areaLine: formatAreasByUomLine(areasByUom), areasByUom };
+}
+
+function filterGroupedSummaryRowsByRacBase(rows, racIds, baseIds) {
+  return filterKpiRowsByRacBase(rows, racIds, baseIds);
+}
+
+function resolveGroupedAggregateForCard(card, groupedStatsByKey, totalGroupedAgg) {
+  if (card.key === "total") return totalGroupedAgg;
+  if (groupedStatsByKey[card.key]) return groupedStatsByKey[card.key];
+  if (card.isExtraClass && Number.isFinite(Number(card.classId))) {
+    return groupedStatsByKey[`class-${card.classId}`] || null;
+  }
+  return null;
+}
+
+function buildGroupedStatsByKeyFromGroups(groups) {
+  const groupedStatsByKey = {};
+
+  for (const [key, meta] of Object.entries(PROPERTY_CLASS_STICKERS)) {
+    if (key === "lands") continue;
+    groupedStatsByKey[key] = aggregatePropertyGroupsByClassIds(groups, meta.classIds);
+  }
+
+  const knownClassIds = getKnownPropertyClassIds();
+  for (const group of groups) {
+    const classId = Number(group.ClassId ?? group.classId);
+    if (!Number.isFinite(classId) || knownClassIds.has(classId)) continue;
+    const mapKey = `class-${classId}`;
+    if (!groupedStatsByKey[mapKey]) {
+      groupedStatsByKey[mapKey] = aggregatePropertyGroupsByClassIds(groups, [classId]);
+    }
+  }
+
+  groupedStatsByKey.total = sumGroupedCategoryStats(groupedStatsByKey);
+  return groupedStatsByKey;
+}
+
+function buildGroupedStatsByKeyFromSummaryRows(rows) {
+  const groupedStatsByKey = {};
+
+  for (const [key, meta] of Object.entries(PROPERTY_CLASS_STICKERS)) {
+    if (key === "lands") continue;
+    groupedStatsByKey[key] = aggregateGroupedSummaryByClassIds(rows, meta.classIds);
+  }
+
+  const knownClassIds = getKnownPropertyClassIds();
+  for (const r of rows) {
+    if (!isGroupSummaryDataRow(r)) continue;
+    const classId = Number(r.ClassId ?? r.classId);
+    if (!Number.isFinite(classId) || knownClassIds.has(classId)) continue;
+    const mapKey = `class-${classId}`;
+    if (!groupedStatsByKey[mapKey]) {
+      groupedStatsByKey[mapKey] = aggregateGroupedSummaryByClassIds(rows, [classId]);
+    }
+  }
+
+  groupedStatsByKey.total = sumGroupedCategoryStats(groupedStatsByKey);
+  return groupedStatsByKey;
+}
+
+/**
+ * Row 1 asset cards: counts/area from active, not-deleted property groupings per category.
+ * Income/shares stay on property-summary aggregation from buildAssetCards.
+ */
+export function buildGroupedAssetCards(
+  propertyRows,
+  shareRows = [],
+  contractRows = [],
+  { propertyGroupSummaryRows = [], propertyGroups = [], racIds = [], baseIds = [] } = {}
+) {
+  const baseCards = buildAssetCards(propertyRows, shareRows, contractRows);
+  const filteredSummaryRows = filterGroupedSummaryRowsByRacBase(
+    propertyGroupSummaryRows,
+    racIds,
+    baseIds
+  );
+  let groupedStatsByKey = null;
+  if (filteredSummaryRows.length > 0) {
+    groupedStatsByKey = buildGroupedStatsByKeyFromSummaryRows(filteredSummaryRows);
+  } else {
+    const scopedGroups = filterPropertyGroupsByRacBase(
+      (propertyGroups || []).filter(isActiveNotDeletedPropertyGroup),
+      racIds,
+      baseIds
+    );
+    groupedStatsByKey = buildGroupedStatsByKeyFromGroups(scopedGroups);
+  }
+
+  const totalGroupedAgg = groupedStatsByKey.total || {
+    count: 0,
+    areaLine: formatAreasByUomLine({}),
+  };
+
+  return baseCards
+    .map((card) => {
+      const groupedAgg = resolveGroupedAggregateForCard(card, groupedStatsByKey, totalGroupedAgg);
+      const displayLabel = groupedAssetRowLabel(card.key);
+      if (!groupedAgg) {
+        return {
+          ...card,
+          count: 0,
+          areaLine: formatAreasByUomLine({}),
+          ...(displayLabel ? { label: displayLabel } : {}),
+        };
+      }
+      return {
+        ...card,
+        count: groupedAgg.count,
+        areaLine: groupedAgg.areaLine,
+        ...(displayLabel ? { label: displayLabel } : {}),
+      };
+    })
+    .map(zeroAssetCardStatsIfNoCount);
+}
+
+const EMPTY_ASSET_CARD_MIL = {
+  incomePA: 0,
+  govt: 0,
+  paf: 0,
+  ahq: 0,
+  rac: 0,
+  base: 0,
+};
+
+/** When a category has no properties, card stats (worth, area, shares) should read as zero. */
+function zeroAssetCardStatsIfNoCount(card) {
+  if (!card || Number(card.count) > 0) return card;
+  return {
+    ...card,
+    count: 0,
+    worth: 0,
+    areaLine: formatAreasByUomLine({}),
+    mil: { ...EMPTY_ASSET_CARD_MIL },
+  };
 }
 
 export function buildExecutiveKpis(propertyRows, contractRows, shareRows) {
@@ -1272,6 +1558,128 @@ export function buildFinancialShares(shareRows, classIdFilter = "all", contractR
     label: k.label,
     value: totals[k.id],
   }));
+}
+
+export const KPI_ASSET_CHART_CATEGORY_KEYS = ["categoryA", "categoryB", "categoryC", "bts", "hb"];
+
+function resolveKpiRacChartOptions(racOptions, racIds = []) {
+  const list = Array.isArray(racOptions) ? racOptions : [];
+  const selected = new Set((racIds || []).map(String));
+  if (selected.size === 0) return list;
+  return list.filter((option) => selected.has(String(option.id ?? option.Id ?? "")));
+}
+
+function filterKpiRowsByCmdId(rows, cmdId) {
+  const id = String(cmdId ?? "");
+  if (!id) return rows || [];
+  return (rows || []).filter((row) => readKpiRowId(row, KPI_CMD_ID_KEYS) === id);
+}
+
+/** Limit asset chart categories when Share Distribution class filter is active. */
+export function resolveKpiChartCategoryKeys(shareClassFilter = "all") {
+  if (!shareClassFilter || shareClassFilter === "all") {
+    return [...KPI_ASSET_CHART_CATEGORY_KEYS];
+  }
+  const shareClassId = Number(shareClassFilter);
+  const propertyClassIds = SHARE_CLASS_TO_PROPERTY_CLASSES[shareClassId];
+  if (!propertyClassIds?.length) return [...KPI_ASSET_CHART_CATEGORY_KEYS];
+  const idSet = new Set(propertyClassIds);
+  return KPI_ASSET_CHART_CATEGORY_KEYS.filter((key) => {
+    const meta = PROPERTY_CLASS_STICKERS[key];
+    return meta?.classIds?.some((classId) => idSet.has(classId));
+  });
+}
+
+/**
+ * Financial mil values for each property category × RAC (CmdId) combination.
+ * Used by Assets tab bar/donut charts.
+ */
+export function buildKpiCategoryRacMilMatrix({
+  shareRows = [],
+  propertyRows = [],
+  contractRows = [],
+  racOptions = [],
+  racIds = [],
+  categoryKeys,
+}) {
+  const keys =
+    Array.isArray(categoryKeys) && categoryKeys.length
+      ? categoryKeys
+      : KPI_ASSET_CHART_CATEGORY_KEYS;
+  const racs = resolveKpiRacChartOptions(racOptions, racIds);
+  const racList = racs.length > 0 ? racs : [{ id: "", name: "All" }];
+  const cells = [];
+
+  for (const rac of racList) {
+    const cmdId = String(rac.id ?? rac.Id ?? "");
+    const racLabel = getKpiOptionName(rac) || cmdId || "All";
+    const racShare = cmdId ? filterKpiRowsByCmdId(shareRows, cmdId) : shareRows;
+    const racProperty = cmdId ? filterKpiRowsByCmdId(propertyRows, cmdId) : propertyRows;
+    const racContract = cmdId ? filterKpiRowsByCmdId(contractRows, cmdId) : contractRows;
+
+    for (const key of keys) {
+      const meta = PROPERTY_CLASS_STICKERS[key];
+      if (!meta) continue;
+      const catLabel = groupedAssetRowLabel(key) || meta.label;
+      const mil = buildMilForCategory(racShare, racProperty, meta.classIds, racContract);
+      cells.push({
+        key: `${cmdId || "all"}-${key}`,
+        racLabel,
+        catLabel,
+        chartLabel: `${catLabel} — ${racLabel}`,
+        mil,
+      });
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * Govt / PAF mil per RAC (CmdId), consolidated across all property classes.
+ * Used by Govt & PAF bar charts without class-wise breakdown.
+ */
+export function buildKpiRacGovtPafCells({
+  shareRows = [],
+  contractRows = [],
+  racOptions = [],
+  racIds = [],
+}) {
+  const racs = resolveKpiRacChartOptions(racOptions, racIds);
+  const racList = racs.length > 0 ? racs : [{ id: "", name: "All" }];
+  const cells = [];
+
+  for (const rac of racList) {
+    const cmdId = String(rac.id ?? rac.Id ?? "");
+    const racLabel = getKpiOptionName(rac) || cmdId || "All";
+    const racShare = cmdId ? filterKpiRowsByCmdId(shareRows, cmdId) : shareRows;
+    const racContract = cmdId ? filterKpiRowsByCmdId(contractRows, cmdId) : contractRows;
+    const shares = buildFinancialShares(racShare, "all", racContract);
+    const govt = shares.find((s) => s.id === "govt")?.value ?? 0;
+    const paf = shares.find((s) => s.id === "paf")?.value ?? 0;
+    cells.push({
+      key: cmdId || "all",
+      chartLabel: racLabel,
+      mil: { govt, paf },
+    });
+  }
+
+  return cells;
+}
+
+const OUTSTANDING_RENTS_STICKER_ORDER = ["categoryA", "categoryB", "categoryC", "bts", "hb"];
+
+/** Outstanding rent (ClassRevenue_Million) per property category for Contracts tab stickers. */
+export function buildOutstandingRentsStickers(propertyRows) {
+  return OUTSTANDING_RENTS_STICKER_ORDER.map((key) => {
+    const meta = PROPERTY_CLASS_STICKERS[key];
+    const agg = aggregateByClassIds(propertyRows, meta.classIds);
+    return {
+      id: key,
+      label: groupedAssetRowLabel(key) || meta.label,
+      value: agg.worth,
+    };
+  });
 }
 
 /** GovtPAFShare ClassId values (aligned with summary dashboard). */

@@ -7,18 +7,14 @@ import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
 import MDTypography from "components/MDTypography";
 import {
-  BASE_OPTIONS,
   ITEM_OPTIONS,
-  LINE_ACCOUNT_OPTIONS,
-  RAC_OPTIONS,
   computeLineTotal,
   formatAmount,
+  isReceiptLineComplete,
 } from "./receiptUtils";
 
 const RECEIPT_LINES_TABLE_COLUMNS = [
   { label: "#", key: "sno", align: "right", numeric: true },
-  { label: "RAC", key: "rac", align: "left" },
-  { label: "Base", key: "base", align: "left" },
   { label: "Item", key: "item", align: "left" },
   { label: "Account", key: "account", align: "left" },
   { label: "TIN-TRN", key: "tinTrn", align: "left" },
@@ -27,7 +23,7 @@ const RECEIPT_LINES_TABLE_COLUMNS = [
 ];
 
 const RECEIPT_LINES_DATA_GRID_COLUMNS =
-  "minmax(40px, 0.5fr) minmax(88px, 1fr) minmax(88px, 1fr) minmax(96px, 1.1fr) minmax(88px, 1fr) minmax(80px, 0.9fr) minmax(80px, 0.9fr) minmax(72px, 0.8fr)";
+  "minmax(40px, 0.5fr) minmax(120px, 1.3fr) minmax(110px, 1.2fr) minmax(96px, 1fr) minmax(96px, 1fr) minmax(84px, 0.9fr)";
 
 const RECEIPT_LINES_GRID_COLUMNS = `${RECEIPT_LINES_DATA_GRID_COLUMNS} 120px`;
 
@@ -43,24 +39,20 @@ const receiptLineInputSx = {
   },
 };
 
-function filteredBasesForLine(racId) {
-  return BASE_OPTIONS.filter((base) => !racId || Number(base.racId) === Number(racId));
-}
-
 function ReceiptLineRow({
   gridRowSx,
   bodyCellSx,
   line,
   index,
+  accountOptions,
   errors,
   saving,
   canDelete,
+  canDuplicate,
   onLineChange,
   onDuplicateLine,
   onDeleteLine,
 }) {
-  const bases = filteredBasesForLine(line.racId);
-
   return (
     <MDBox
       sx={{
@@ -71,49 +63,6 @@ function ReceiptLineRow({
       }}
     >
       <MDBox sx={{ ...bodyCellSx, textAlign: "right", fontWeight: 600 }}>{index + 1}</MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
-        <MDInput
-          select
-          value={line.racId}
-          onChange={(e) => onLineChange(line.id, "racId", e.target.value)}
-          fullWidth
-          size="small"
-          displayEmpty
-          error={Boolean(errors[`line-${index}-rac`])}
-          sx={receiptLineInputSx}
-        >
-          <MenuItem value="">
-            <em>Select RAC</em>
-          </MenuItem>
-          {RAC_OPTIONS.map((opt) => (
-            <MenuItem key={opt.id} value={opt.id}>
-              {opt.name}
-            </MenuItem>
-          ))}
-        </MDInput>
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
-        <MDInput
-          select
-          value={line.baseId}
-          onChange={(e) => onLineChange(line.id, "baseId", e.target.value)}
-          fullWidth
-          size="small"
-          displayEmpty
-          sx={receiptLineInputSx}
-        >
-          <MenuItem value="">
-            <em>Select Base</em>
-          </MenuItem>
-          {bases.map((opt) => (
-            <MenuItem key={opt.id} value={opt.id}>
-              {opt.name}
-            </MenuItem>
-          ))}
-        </MDInput>
-      </MDBox>
 
       <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
         <MDInput
@@ -140,16 +89,20 @@ function ReceiptLineRow({
       <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
         <MDInput
           select
-          value={line.account || "Suspense"}
+          value={line.account}
           onChange={(e) => onLineChange(line.id, "account", e.target.value)}
           fullWidth
           size="small"
+          displayEmpty
           error={Boolean(errors[`line-${index}-account`])}
           sx={receiptLineInputSx}
         >
-          {LINE_ACCOUNT_OPTIONS.map((name) => (
-            <MenuItem key={name} value={name}>
-              {name}
+          <MenuItem value="">
+            <em>Select Account</em>
+          </MenuItem>
+          {accountOptions.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              {option.label}
             </MenuItem>
           ))}
         </MDInput>
@@ -199,12 +152,12 @@ function ReceiptLineRow({
           gap: 0.25,
         }}
       >
-        <Tooltip title="Duplicate">
+        <Tooltip title={canDuplicate ? "Duplicate" : "Complete this row before duplicating"}>
           <span>
             <IconButton
               size="small"
               color="secondary"
-              disabled={saving}
+              disabled={saving || !canDuplicate}
               onClick={() => onDuplicateLine(line.id)}
               sx={{ padding: "2px" }}
             >
@@ -230,21 +183,37 @@ function ReceiptLineRow({
   );
 }
 
+const lineAccountOptionShape = PropTypes.shape({
+  value: PropTypes.string.isRequired,
+  label: PropTypes.string.isRequired,
+});
+
 ReceiptLineRow.propTypes = {
   gridRowSx: PropTypes.object.isRequired,
   bodyCellSx: PropTypes.object.isRequired,
   line: PropTypes.object.isRequired,
   index: PropTypes.number.isRequired,
+  accountOptions: PropTypes.arrayOf(lineAccountOptionShape),
   errors: PropTypes.object,
   saving: PropTypes.bool,
   canDelete: PropTypes.bool,
+  canDuplicate: PropTypes.bool,
   onLineChange: PropTypes.func.isRequired,
   onDuplicateLine: PropTypes.func.isRequired,
   onDeleteLine: PropTypes.func.isRequired,
 };
 
-export default function ReceiptLinesGrid({
+ReceiptLineRow.defaultProps = {
+  accountOptions: [],
+  errors: {},
+  saving: false,
+  canDelete: true,
+  canDuplicate: false,
+};
+
+function ReceiptLinesGrid({
   lines,
+  accountOptions,
   errors,
   saving,
   grandTotal,
@@ -290,6 +259,13 @@ export default function ReceiptLinesGrid({
     ? { flex: "1 1 0", minHeight: 0, overflow: "auto" }
     : { maxHeight: 280, overflow: "auto" };
 
+  const canAddLine =
+    !saving && (lines.length === 0 || lines.every((line) => isReceiptLineComplete(line)));
+  const addLineTooltip =
+    lines.length === 0 || lines.every((line) => isReceiptLineComplete(line))
+      ? "Add line"
+      : "Complete all rows before adding another line";
+
   return (
     <MDBox sx={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
       <MDBox
@@ -312,12 +288,12 @@ export default function ReceiptLinesGrid({
           <MDTypography variant="button" fontWeight="medium">
             Total Amount: {formatAmount(grandTotal)}
           </MDTypography>
-          <Tooltip title="Add line">
+          <Tooltip title={addLineTooltip}>
             <span>
               <IconButton
                 color="info"
                 size="small"
-                disabled={saving}
+                disabled={!canAddLine}
                 onClick={onAddLine}
                 sx={{
                   p: 0.35,
@@ -372,9 +348,11 @@ export default function ReceiptLinesGrid({
                 bodyCellSx={bodyCellSx}
                 line={line}
                 index={index}
+                accountOptions={accountOptions}
                 errors={errors}
                 saving={saving}
-                canDelete={lines.length > 1}
+                canDelete
+                canDuplicate={isReceiptLineComplete(line)}
                 onLineChange={onLineChange}
                 onDuplicateLine={onDuplicateLine}
                 onDeleteLine={onDeleteLine}
@@ -389,6 +367,7 @@ export default function ReceiptLinesGrid({
 
 ReceiptLinesGrid.propTypes = {
   lines: PropTypes.arrayOf(PropTypes.object).isRequired,
+  accountOptions: PropTypes.arrayOf(lineAccountOptionShape),
   errors: PropTypes.object,
   saving: PropTypes.bool,
   grandTotal: PropTypes.number,
@@ -400,8 +379,11 @@ ReceiptLinesGrid.propTypes = {
 };
 
 ReceiptLinesGrid.defaultProps = {
+  accountOptions: [],
   errors: {},
   saving: false,
   grandTotal: 0,
   fillHeight: false,
 };
+
+export default ReceiptLinesGrid;

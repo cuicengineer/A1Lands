@@ -1,3 +1,5 @@
+import { normalizeSidenavColor } from "utils/sidenavColorTheme";
+
 /**
 =========================================================
 * Material Dashboard 2 React - v2.2.0
@@ -22,7 +24,8 @@ function collapseItem(theme, ownerState) {
   const { borderRadius } = borders;
   const { pxToRem, rgba, linearGradient } = functions;
 
-  const gradientKey = gradients[sidenavColor] ? sidenavColor : "info";
+  const resolvedSidenavColor = normalizeSidenavColor(sidenavColor);
+  const gradientKey = gradients[resolvedSidenavColor] ? resolvedSidenavColor : "primary";
 
   return {
     background: active

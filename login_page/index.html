@@ -26,11 +26,12 @@
 
             <div class="carousel-inner">
 
-                <div class="carousel-item active"><img src="assets/img/agri-land.jpg"></div>
-                <div class="carousel-item"><img src="assets/img/bilboard2.jpg"></div>
-                <div class="carousel-item"><img src="assets/img/petrol-station.jpg"></div>
+                <div class="carousel-item active"><img src="assets/img/petrol-station.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/bank.jpg"></div>
                 <div class="carousel-item"><img src="assets/img/mall.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/agri-land.jpg"></div>
                 <div class="carousel-item"><img src="assets/img/mall2.jpg"></div>
+                <div class="carousel-item"><img src="assets/img/bilboard2.jpg"></div>
                 <div class="carousel-item"><img src="assets/img/plot.jpg"></div>
 
             </div>
@@ -41,10 +42,10 @@
         <div class="logo-placeholder"><img src="assets/img/PAF-Logo.webp"></div>
 
         <div class="slide-content">
-            <div id="slideIcon" class="slide-icon"><i class="bi bi-tree"></i></div>
-            <div id="slideTitle" class="slide-title">Agricultural Land<br>Management</div>
+            <div id="slideIcon" class="slide-icon"><i class="bi bi-fuel-pump"></i></div>
+            <div id="slideTitle" class="slide-title">Petrol Station<br>Management</div>
             <div id="slideDesc" class="slide-desc">
-                Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.
+                Track petrol station assets and lease agreements.
             </div>
 
             <div class="carousel-indicators custom-dots">
@@ -72,6 +73,10 @@
     <button type="button"
             data-bs-target="#landCarousel"
             data-bs-slide-to="5"></button>
+
+    <button type="button"
+            data-bs-target="#landCarousel"
+            data-bs-slide-to="6"></button>
 </div>
         </div>
 
@@ -138,12 +143,13 @@
 
 <script>
 const slides=[
-{icon:'bi-tree',title:'Agricultural Land<br>Management',desc:'Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.'},
-{icon:'bi-signpost',title:'Billboard Asset<br>Management',desc:'Manage billboard locations, contracts and revenue records.'},
 {icon:'bi-fuel-pump',title:'Petrol Station<br>Management',desc:'Track petrol station assets and lease agreements.'},
-{icon:'bi bi-buildings',title:'Mall Property<br>Management',desc:'Manage commercial mall assets and rental records.'},
-{icon:'bi-building',title:'Tower Asset<br>Management',desc:'Monitor tower assets and infrastructure revenue.'},
-{icon:'bi-map',title:'Shops<br>Management',desc:'Shops and Stores Rental Management.'}
+{icon:'bi-buildings',title:'Banks<br>Rental Spaces',desc:'Manage commercial banks spaces.'},
+{icon:'bi-buildings',title:'Mall Property<br>Management',desc:'Manage commercial mall assets and rental records.'},
+{icon:'bi-tree',title:'Agricultural Land<br>Management',desc:'Manage agricultural land holdings, cultivation agreements, lease contracts, revenue and performance metrics.'},
+{icon:'bi-building',title:'BTS Tower<br>Management',desc:'Monitor tower assets and infrastructure revenue.'},
+{icon:'bi-signpost',title:'Billboard Asset<br>Management',desc:'Manage billboard locations, contracts and revenue records.'},
+{icon:'bi-map',title:'Welfare Shops<br>Management',desc:'Shops and Stores Rental Management.'}
 ];
 
 const el=document.querySelector('#landCarousel');

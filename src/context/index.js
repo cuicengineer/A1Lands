@@ -22,6 +22,7 @@ import { createContext, useContext, useReducer, useMemo, useEffect } from "react
 
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
+import { normalizeSidenavColor } from "utils/sidenavColorTheme";
 
 // Material Dashboard 2 React main context
 const MaterialUI = createContext();
@@ -48,10 +49,6 @@ const getStorageKey = () => {
   const userId = getUserId();
   return userId ? `ui_preferences_${userId}` : "ui_preferences_guest";
 };
-
-const VALID_SIDENAV_COLORS = ["default", "grey", "blue"];
-
-const normalizeSidenavColor = (color) => (VALID_SIDENAV_COLORS.includes(color) ? color : "default");
 
 // Helper function to load preferences from localStorage
 const loadPreferencesFromStorage = (defaultState) => {
