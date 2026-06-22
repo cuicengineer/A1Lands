@@ -90,6 +90,104 @@ body.enterprise-ui .dashboard-layout-root {
   box-sizing: border-box !important;
 }
 
+body.enterprise-ui .dashboard-layout-root:has(> .coa-split-workspace-page) {
+  padding: 0 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page,
+body.enterprise-ui .coa-split-workspace-page .saas-workspace-card,
+body.enterprise-ui .coa-split-workspace-page .enterprise-workspace-grid-host,
+body.enterprise-ui .coa-split-workspace-page .saas-workspace-grid-host,
+body.enterprise-ui .coa-split-workspace-page .coa-panel-grid-host,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table.MuiTableContainer-root,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table-scroll {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table.MuiTableContainer-root,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table-scroll {
+  flex: 1 1 auto !important;
+  align-self: stretch !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table.MuiTableContainer-root > .MuiBox-root {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page table.MuiTable-root {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page table.MuiTable-root thead th {
+  background-color: #c8e6c9 !important;
+  background-image: none !important;
+  color: #1b5e20 !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12) !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow: none !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table > .saas-settings-table-toolbar,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table > .saas-settings-filter-toolbar,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table > .MuiBox-root:last-child {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* COA split panels — keep action icons vivid (override ghost 0.55 opacity) */
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Edit"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Delete"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Clone"] {
+  opacity: 1 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Edit"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Edit"] .MuiIcon-root {
+  color: #1a73e8 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Delete"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Delete"] .MuiIcon-root {
+  color: #f44335 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Clone"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Clone"] .MuiIcon-root {
+  color: #7b809a !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Edit"]:hover,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Edit"]:hover .MuiIcon-root {
+  color: #1557b0 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Delete"]:hover,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Delete"]:hover .MuiIcon-root {
+  color: #d32f2f !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Clone"]:hover,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconButton-root[title="Clone"]:hover .MuiIcon-root {
+  color: #5a6278 !important;
+}
+
 /* ---- Settings workspace layout ---- */
 .saas-settings-page {
   gap: 0 !important;
@@ -810,7 +908,7 @@ body.enterprise-ui .saas-settings-table .MuiOutlinedInput-notchedOutline {
 }
 
 /* Ghost toolbar icon buttons */
-body.enterprise-ui .saas-settings-table .MuiIconButton-root {
+body.enterprise-ui .saas-settings-table .MuiIconButton-root:not(.coa-grid-action-icon) {
   border: none !important;
   background: transparent !important;
   width: 30px !important;
@@ -822,7 +920,7 @@ body.enterprise-ui .saas-settings-table .MuiIconButton-root {
     transform var(--motion-micro), opacity var(--motion-fast);
 }
 
-body.enterprise-ui .saas-settings-table .MuiIconButton-root:hover {
+body.enterprise-ui .saas-settings-table .MuiIconButton-root:not(.coa-grid-action-icon):hover {
   background: var(--settings-row-hover) !important;
   color: var(--settings-text) !important;
   transform: scale(1.06);
@@ -1009,14 +1107,26 @@ body.enterprise-ui .saas-workspace-card td .MuiBox-root:has(> .MuiIconButton-roo
   border-radius: 0 !important;
 }
 
-body.enterprise-ui .saas-settings-table td .MuiIconButton-root,
-body.enterprise-ui .saas-workspace-card td .MuiIconButton-root {
+body.enterprise-ui .saas-settings-table td .MuiIconButton-root:not(.coa-grid-action-icon),
+body.enterprise-ui .saas-workspace-card td .MuiIconButton-root:not(.coa-grid-action-icon) {
   width: 28px !important;
   height: 28px !important;
   padding: 2px !important;
   border: none !important;
   opacity: 0.55;
   transition: opacity var(--motion-fast), transform var(--motion-micro), background-color var(--motion-micro);
+}
+
+body.enterprise-ui .saas-settings-table td .coa-grid-action-icon,
+body.enterprise-ui .saas-workspace-card td .coa-grid-action-icon,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon {
+  opacity: 1 !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  padding: 1px !important;
+  border: none !important;
+  background: transparent !important;
 }
 
 body.enterprise-ui .saas-settings-table tr:hover td .MuiIconButton-root,
@@ -1213,6 +1323,35 @@ body.enterprise-ui .enterprise-workspace-grid-host .MuiTableContainer-root > .sa
 body.enterprise-ui .enterprise-workspace-grid-host .MuiTableContainer-root > .MuiBox-root:last-child {
   background: var(--layer-controls) !important;
   border-top: 1px solid var(--layer-controls-border) !important;
+}
+
+body.enterprise-ui
+  .coa-split-workspace-page
+  .saas-settings-table.MuiTableContainer-root
+  > .MuiBox-root:last-child {
+  width: 100% !important;
+  max-width: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body.enterprise-ui
+  .coa-split-workspace-page
+  .saas-settings-table.MuiTableContainer-root
+  > .MuiBox-root:last-child
+  > .saas-settings-table-scroll {
+  width: 100% !important;
+  max-width: none !important;
+  scrollbar-gutter: auto !important;
+}
+
+body.enterprise-ui .dashboard-layout-root:has(> .coa-split-workspace-page) .MuiBox-root,
+body.enterprise-ui .coa-split-workspace-page,
+body.enterprise-ui .coa-split-workspace-page .MuiBox-root {
+  scrollbar-gutter: auto !important;
 }
 
 /* Dialogs — settings modal feel */
@@ -1460,4 +1599,38 @@ body.enterprise-ui .saas-workspace-card thead th .MuiBox-root,
 body.enterprise-ui .enterprise-workspace-grid-host thead th .MuiBox-root,
 body.enterprise-ui .MuiTableContainer-root thead th .MuiBox-root {
   font-size: 0.75rem !important;
+}
+
+/* COA / Income Statement action icons — override ghost grid icon styles */
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon .MuiIcon-root {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Edit"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Edit"] .MuiIcon-root {
+  color: #1a73e8 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Delete"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Delete"] .MuiIcon-root {
+  color: #f44335 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Clone"],
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon[title="Clone"] .MuiIcon-root {
+  color: #7b809a !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon.Mui-disabled[title="Edit"] .MuiIcon-root {
+  color: rgba(26, 115, 232, 0.75) !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon.Mui-disabled[title="Delete"] .MuiIcon-root {
+  color: rgba(244, 67, 53, 0.75) !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon.Mui-disabled[title="Clone"] .MuiIcon-root {
+  color: rgba(123, 128, 154, 0.75) !important;
 }

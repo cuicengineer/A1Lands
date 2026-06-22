@@ -29,9 +29,8 @@ import {
   buildFinancialShares,
   buildKpiCategoryRacMilMatrix,
   buildKpiRacGovtPafCells,
+  filterKpiRowsByRacBase,
   formatKpiMoneyLabel,
-  resolveKpiChartCategoryKeys,
-  SHARE_DISTRIBUTION_CLASS_OPTIONS,
 } from "../kpiDataUtils";
 import ChartExportButton from "./ChartExportButton";
 import {
@@ -58,17 +57,119 @@ function measureDonutLabelWidth(ctx, text, fontSize, fontWeight) {
   return ctx.measureText(text).width;
 }
 
-/** Chart.js arc angles: 0 at top (12 o'clock), increasing clockwise. */
+/** Chart.js/canvas arc angles: 0 at right (3 o'clock), increasing clockwise. */
 function chartAngleToPoint(cx, cy, radius, angle) {
   return {
-    x: cx + Math.sin(angle) * radius,
-    y: cy - Math.cos(angle) * radius,
+    x: cx + Math.cos(angle) * radius,
+    y: cy + Math.sin(angle) * radius,
   };
 }
 
-/** Tangent rotation for readable curved labels; flip 180° per character on the left. */
-function chartAngleToLabelRotation(angle, x, cx) {
-  return x < cx ? angle + Math.PI : angle;
+/** Horizontal static label at arc midpoint — always draws (shrinks/truncates to fit). */
+function drawHorizontalSliceLabel(ctx, text, cx, cy, radius, startAngle, endAngle, opts = {}) {
+  const line = String(text ?? "")
+    .trim()
+    .split("\n")
+    .map((part) => part.trim())
+    .find(Boolean);
+  if (!line) return;
+
+  let fontSize = opts.fontSize ?? 10;
+  const minFontSize = opts.minFontSize ?? 5;
+  const fontWeight = opts.fontWeight ?? 700;
+  const fillStyle = opts.fillStyle ?? "#ffffff";
+  const shadowColor = opts.shadowColor ?? "rgba(0, 0, 0, 0.75)";
+  const shadowBlur = opts.shadowBlur ?? 4;
+  const arcSpan = Math.max(endAngle - startAngle, 0.04);
+  const maxChordWidth = Math.max(2 * radius * Math.sin(arcSpan / 2) * 0.94, 8);
+
+  while (fontSize > minFontSize) {
+    ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
+    if (ctx.measureText(line).width <= maxChordWidth) break;
+    fontSize -= 1;
+  }
+
+  const midAngle = (startAngle + endAngle) / 2;
+  const { x, y } = chartAngleToPoint(cx, cy, radius, midAngle);
+
+  ctx.save();
+  if (
+    opts.clipSliceLabels === true &&
+    opts.clipInnerRadius != null &&
+    opts.clipOuterRadius != null
+  ) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, opts.clipOuterRadius, startAngle, endAngle);
+    ctx.arc(cx, cy, opts.clipInnerRadius, endAngle, startAngle, true);
+    ctx.closePath();
+    ctx.clip();
+  }
+
+  ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
+  ctx.fillStyle = fillStyle;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = shadowColor;
+  ctx.shadowBlur = shadowBlur;
+
+  let displayText = line;
+  if (ctx.measureText(displayText).width > maxChordWidth) {
+    while (displayText.length > 1 && ctx.measureText(`${displayText}…`).width > maxChordWidth) {
+      displayText = displayText.slice(0, -1);
+    }
+    if (ctx.measureText(displayText).width > maxChordWidth && displayText.length > 1) {
+      displayText = `${displayText.slice(0, 1)}…`;
+    } else if (ctx.measureText(`${displayText}…`).width <= maxChordWidth) {
+      displayText = `${displayText}…`;
+    }
+  }
+
+  ctx.fillText(displayText, x, y);
+  ctx.restore();
+}
+
+function getDonutRingLabelMetrics(
+  innerRadius,
+  outerRadius,
+  { radiusRatio = 0.5, insetRatio = 0.08 } = {}
+) {
+  const thickness = Math.max(outerRadius - innerRadius, 0);
+  const inset = Math.max(thickness * insetRatio, 0.5);
+  return {
+    thickness,
+    labelRadius: innerRadius + thickness * radiusRatio,
+    clipInnerRadius: innerRadius + inset,
+    clipOuterRadius: outerRadius - inset,
+  };
+}
+
+function formatDonutSlicePercent(value, total) {
+  const numeric = coerceChartDataValue(value) ?? 0;
+  const sum = coerceChartDataValue(total) ?? 0;
+  if (sum <= 0) return "0.0%";
+  return `${((numeric / sum) * 100).toFixed(1)}%`;
+}
+
+function buildDonutRacPercentOuterLabel(racLabel, value, total) {
+  const rac = String(racLabel ?? "").trim();
+  const pct = formatDonutSlicePercent(value, total);
+  return rac ? `${rac}\n${pct}` : pct;
+}
+
+function getDonutArcDataIndex(arc, fallbackIndex) {
+  const fromContext = arc?.$context?.dataIndex ?? arc?.$context?.index;
+  return Number.isInteger(fromContext) ? fromContext : fallbackIndex;
+}
+
+function getDonutArcSliceProps(arc) {
+  return arc.getProps(["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"], true);
+}
+
+function buildRacClassSliceLabel(racLabel, classLabel) {
+  const rac = String(racLabel ?? "").trim();
+  const cls = String(classLabel ?? "").trim();
+  if (rac && cls) return `${rac} — ${cls}`;
+  return rac || cls;
 }
 
 /** Draw label characters tangential to an arc, centered within the slice. */
@@ -106,31 +207,18 @@ function drawTextAlongArc(ctx, text, cx, cy, radius, startAngle, endAngle, opts 
   const totalAngle = totalWidth / radius;
 
   const midAngle = (startAngle + endAngle) / 2;
-  const { x: midX } = chartAngleToPoint(cx, cy, radius, midAngle);
-  const reverseOrder = midX < cx;
-  const renderChars = reverseOrder ? [...chars].reverse() : chars;
-  const renderWidths = reverseOrder ? [...charWidths].reverse() : charWidths;
+  let angle = midAngle - totalAngle / 2;
 
-  let angle = reverseOrder ? midAngle + totalAngle / 2 : midAngle - totalAngle / 2;
-
-  for (let i = 0; i < renderChars.length; i += 1) {
-    const ch = renderChars[i];
-    const w = renderWidths[i];
-    let charAngle;
-    if (reverseOrder) {
-      charAngle = angle - w / (2 * radius);
-      angle -= w / radius;
-    } else {
-      charAngle = angle + w / (2 * radius);
-      angle += w / radius;
-    }
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i];
+    const w = charWidths[i];
+    const charAngle = angle + w / (2 * radius);
+    angle += w / radius;
 
     const { x, y } = chartAngleToPoint(cx, cy, radius, charAngle);
-    const rotation = chartAngleToLabelRotation(charAngle, x, cx);
 
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(rotation);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(ch, 0, 0);
@@ -140,9 +228,13 @@ function drawTextAlongArc(ctx, text, cx, cy, radius, startAngle, endAngle, opts 
 
 const kpiOuterDonutLegendRingPlugin = {
   id: "kpiOuterDonutLegendRing",
-  afterDatasetsDraw(chart) {
-    const opts = chart?.options?.plugins?.kpiOuterDonutLegendRing;
-    if (!opts?.enabled) return;
+  /** Draw after all chart layers so labels stay on top. */
+  afterDraw(chart, _args, pluginOptions) {
+    const opts =
+      pluginOptions ??
+      chart?.config?.options?.plugins?.kpiOuterDonutLegendRing ??
+      chart?.options?.plugins?.kpiOuterDonutLegendRing;
+    if (!opts || opts.enabled === false || opts.showSliceLabels === false) return;
     const labels = chart?.data?.labels || [];
     const innerDatasetIndex = 0;
     const outerDatasetIndex = chart.data?.datasets?.length - 1;
@@ -159,115 +251,184 @@ const kpiOuterDonutLegendRingPlugin = {
       typeof opts.formatValue === "function"
         ? opts.formatValue
         : (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0);
-    const valueTextColor = opts.valueTextColor || opts.textColor || "#111827";
-    const curveOuterText = opts.curveOuterText !== false;
+    const valueTextColor = opts.valueTextColor || "#ffffff";
+    const curveOuterText = opts.curveOuterText === true;
     const outerRingMode = opts.outerRingMode || "value";
+    const innerRingMode = opts.innerRingMode || "racClass";
     const innerShowValue = Boolean(opts.innerShowValue);
-    const curveInnerText = opts.curveInnerText !== false;
+    const curveInnerText = opts.curveInnerText === true;
     const racLabels = chart?.data?.racLabels || [];
+    const classLabels = chart?.data?.classLabels || [];
     const innerLabelColor = opts.innerLabelColor || valueTextColor;
+    const primaryMeta = innerMeta;
+    const secondaryMeta = outerMeta;
+    const hasSeparateOuterRing = outerDatasetIndex > innerDatasetIndex;
 
-    // Inner ring: curved class label or numeric value
-    innerMeta.data.forEach((arc, index) => {
-      const value = coerceChartDataValue(chart.data?.datasets?.[0]?.data?.[index]);
+    const sliceTotal =
+      coerceChartDataValue(chart.data?.donutSliceTotal) ??
+      ((chart.data?.datasets?.[0]?.data || []).reduce(
+        (sum, raw) => sum + (coerceChartDataValue(raw) ?? 0),
+        0
+      ) ||
+        1);
+
+    primaryMeta.data.forEach((primaryArc, loopIndex) => {
+      const index = getDonutArcDataIndex(primaryArc, loopIndex);
+      if (typeof chart.getDataVisibility === "function" && !chart.getDataVisibility(index)) {
+        return;
+      }
+      if (primaryArc.hidden || primaryArc.skip) return;
+
+      const value =
+        coerceChartDataValue(chart.data?.datasets?.[0]?.data?.[index]) ??
+        coerceChartDataValue(primaryArc?.$context?.raw);
       if (value == null || value <= 0) return;
 
-      const innerText = innerShowValue
-        ? formatValue(value, index)
-        : String(labels[index] ?? "").trim();
-      if (!innerText) return;
-
-      const props = arc.getProps(
-        ["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"],
-        true
-      );
-      const labelRadius = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.52;
-      const innerFillStyle = innerShowValue ? valueTextColor : innerLabelColor;
-
-      if (curveInnerText) {
-        drawTextAlongArc(
-          ctx,
-          innerText,
-          props.x,
-          props.y,
-          labelRadius,
-          props.startAngle,
-          props.endAngle,
-          {
-            fontSize,
-            fontWeight,
-            fillStyle: innerFillStyle,
-            shadowColor: opts.textShadowColor || "rgba(0, 0, 0, 0.65)",
-            shadowBlur: 3,
-          }
-        );
+      const primaryProps = getDonutArcSliceProps(primaryArc);
+      if (
+        !Number.isFinite(primaryProps.x) ||
+        !Number.isFinite(primaryProps.y) ||
+        primaryProps.outerRadius <= primaryProps.innerRadius
+      ) {
         return;
       }
 
-      const midAngle = (props.startAngle + props.endAngle) / 2;
-      const x = props.x + Math.cos(midAngle) * labelRadius;
-      const y = props.y + Math.sin(midAngle) * labelRadius;
+      const sliceStart = primaryProps.startAngle;
+      const sliceEnd = primaryProps.endAngle;
+      const { x: cx, y: cy } = primaryProps;
 
-      ctx.save();
-      ctx.font = `${fontWeight} ${fontSize}px ${DONUT_LABEL_FONT}`;
-      ctx.fillStyle = innerFillStyle;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.85)";
-      ctx.shadowBlur = 3;
-      ctx.fillText(innerText, x, y);
-      ctx.restore();
-    });
-
-    // Outer ring: RAC name or numeric value, curved along the colored band
-    outerMeta.data.forEach((arc, index) => {
-      const value = coerceChartDataValue(chart.data?.datasets?.[0]?.data?.[index]);
-      if (value == null || value <= 0) return;
-
-      const valueText =
-        outerRingMode === "rac" ? String(racLabels[index] ?? "").trim() : formatValue(value, index);
-      if (!valueText) return;
-
-      const props = arc.getProps(
-        ["startAngle", "endAngle", "innerRadius", "outerRadius", "x", "y"],
-        true
+      const innerRingMetrics = getDonutRingLabelMetrics(
+        primaryProps.innerRadius,
+        primaryProps.outerRadius,
+        {
+          radiusRatio: opts.innerLabelRadiusRatio ?? 0.5,
+          insetRatio: opts.innerLabelInsetRatio ?? 0.08,
+        }
       );
-      const valueRadius = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.52;
-      const outerFillStyle = valueTextColor;
+
+      const innerText = innerShowValue
+        ? formatValue(value, index)
+        : innerRingMode === "class"
+        ? String(classLabels[index] ?? labels[index] ?? "").trim()
+        : innerRingMode === "rac"
+        ? String(racLabels[index] ?? "").trim()
+        : buildRacClassSliceLabel(racLabels[index], classLabels[index]) ||
+          String(labels[index] ?? "").trim();
+
+      const innerFillStyle = innerShowValue ? valueTextColor : innerLabelColor;
+
+      if (innerText) {
+        const innerLabelOpts = {
+          fontSize,
+          minFontSize: 6,
+          fontWeight,
+          fillStyle: innerFillStyle,
+          shadowColor: opts.textShadowColor || "rgba(0, 0, 0, 0.75)",
+          shadowBlur: 4,
+          clipSliceLabels: opts.clipSliceLabels === true,
+          clipInnerRadius: innerRingMetrics.clipInnerRadius,
+          clipOuterRadius: innerRingMetrics.clipOuterRadius,
+        };
+
+        if (curveInnerText) {
+          drawTextAlongArc(
+            ctx,
+            innerText,
+            cx,
+            cy,
+            innerRingMetrics.labelRadius,
+            sliceStart,
+            sliceEnd,
+            innerLabelOpts
+          );
+        } else {
+          drawHorizontalSliceLabel(
+            ctx,
+            innerText,
+            cx,
+            cy,
+            innerRingMetrics.labelRadius,
+            sliceStart,
+            sliceEnd,
+            innerLabelOpts
+          );
+        }
+      }
+
+      if (!hasSeparateOuterRing) return;
+
+      const secondaryArc = secondaryMeta.data[index] ?? secondaryMeta.data[loopIndex];
+      if (!secondaryArc || secondaryArc.hidden || secondaryArc.skip) return;
+
+      const secondaryProps = getDonutArcSliceProps(secondaryArc);
+      if (secondaryProps.outerRadius <= secondaryProps.innerRadius) return;
+
+      const classLabel = String(classLabels[index] ?? "").trim();
+      let outerText = "";
+      if (typeof opts.formatOuterLabel === "function") {
+        outerText = String(
+          opts.formatOuterLabel(value, index, {
+            racLabel: racLabels[index],
+            classLabel,
+            sliceTotal,
+            chart,
+          }) ?? ""
+        ).trim();
+      } else if (outerRingMode === "racPercent") {
+        outerText = buildDonutRacPercentOuterLabel(racLabels[index], value, sliceTotal);
+      } else if (outerRingMode === "racClass") {
+        outerText = buildRacClassSliceLabel(racLabels[index], classLabel);
+      } else if (outerRingMode === "rac") {
+        outerText = String(racLabels[index] ?? "").trim();
+      } else {
+        outerText = formatValue(value, index);
+      }
+      if (!outerText) return;
+
+      const outerRingMetrics = getDonutRingLabelMetrics(
+        secondaryProps.innerRadius,
+        secondaryProps.outerRadius,
+        {
+          radiusRatio: opts.outerLabelRadiusRatio ?? 0.5,
+          insetRatio: opts.outerLabelInsetRatio ?? 0.08,
+        }
+      );
+
+      const outerLabelOpts = {
+        fontSize: Math.max(fontSize - 1, 7),
+        minFontSize: 5,
+        fontWeight,
+        fillStyle: valueTextColor,
+        shadowColor: opts.textShadowColor || "rgba(0, 0, 0, 0.75)",
+        shadowBlur: 4,
+        clipSliceLabels: opts.clipSliceLabels === true,
+        clipInnerRadius: outerRingMetrics.clipInnerRadius,
+        clipOuterRadius: outerRingMetrics.clipOuterRadius,
+      };
 
       if (curveOuterText) {
         drawTextAlongArc(
           ctx,
-          valueText,
-          props.x,
-          props.y,
-          valueRadius,
-          props.startAngle,
-          props.endAngle,
-          {
-            fontSize: fontSize + 1,
-            fontWeight,
-            fillStyle: outerFillStyle,
-            shadowColor: opts.textShadowColor || "rgba(255, 255, 255, 0.85)",
-            shadowBlur: 3,
-          }
+          outerText,
+          cx,
+          cy,
+          outerRingMetrics.labelRadius,
+          sliceStart,
+          sliceEnd,
+          outerLabelOpts
         );
-        return;
+      } else {
+        drawHorizontalSliceLabel(
+          ctx,
+          outerText,
+          cx,
+          cy,
+          outerRingMetrics.labelRadius,
+          sliceStart,
+          sliceEnd,
+          outerLabelOpts
+        );
       }
-
-      const midAngle = (props.startAngle + props.endAngle) / 2;
-      const x = props.x + Math.cos(midAngle) * valueRadius;
-      const y = props.y + Math.sin(midAngle) * valueRadius;
-
-      ctx.save();
-      ctx.font = `700 ${fontSize + 1}px ${DONUT_LABEL_FONT}`;
-      ctx.fillStyle = outerFillStyle;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = opts.textShadowColor || "rgba(255, 255, 255, 0.85)";
-      ctx.shadowBlur = 3;
-      ctx.fillText(valueText, x, y);
-      ctx.restore();
     });
   },
 };
@@ -313,6 +474,11 @@ const DONUT_COLOR_BY_SHARE_ID = {
   base: SHARE_COLORS[4],
 };
 
+const DONUT_TOOLTIP_INTERACTION = {
+  mode: "nearest",
+  intersect: true,
+};
+
 export function getEnterpriseCardSx() {
   return {
     borderRadius: "16px",
@@ -338,8 +504,30 @@ const ZOOM_CHART = {
   ahqRacBaseDonut: "ahqRacBaseDonut",
 };
 
+const ZOOM_CHARTS_WITH_RAC_FILTER = new Set([ZOOM_CHART.assetsDonut, ZOOM_CHART.ahqRacBaseDonut]);
+
+function getRacOptionLabel(option) {
+  return String(
+    option?.name ??
+      option?.Name ??
+      option?.cmdName ??
+      option?.CmdName ??
+      option?.id ??
+      option?.Id ??
+      ""
+  ).trim();
+}
+
 function kpiNumeric(value) {
   return coerceChartDataValue(value) ?? 0;
+}
+
+function formatKpiMillionUnitLabel(value) {
+  const n = coerceChartDataValue(value) ?? 0;
+  return `${n.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })} M`;
 }
 
 /** Category financial donut total — excludes Govt Share and PAF Share. */
@@ -423,12 +611,48 @@ function buildRacClusteredClassFinancialBarData(cells) {
   };
 }
 
+/** Sum financial totals by RAC × Class for Share Distribution donut slices. */
+function groupDonutCellsByRacAndClass(cells) {
+  const grouped = new Map();
+
+  for (const cell of cells || []) {
+    const value = cellFinancialCategoryTotal(cell.mil);
+    if (value <= 0) continue;
+
+    const racLabel = String(cell.racLabel ?? "").trim() || "All";
+    const catLabel = String(cell.catLabel ?? "").trim();
+    const key = `${racLabel}::${catLabel}`;
+    const categoryKey = parseCellCategoryKey(cell);
+    const existing = grouped.get(key);
+
+    if (existing) {
+      existing.value += value;
+      continue;
+    }
+
+    grouped.set(key, {
+      racLabel,
+      catLabel,
+      categoryKey,
+      value,
+    });
+  }
+
+  return [...grouped.values()].sort((a, b) => {
+    const racCmp = String(a.racLabel).localeCompare(String(b.racLabel));
+    if (racCmp !== 0) return racCmp;
+    return String(a.catLabel).localeCompare(String(b.catLabel));
+  });
+}
+
 function buildCategoryRacFinancialDonutChart(cells, darkMode) {
-  const labels = cells.map((c) => c.catLabel);
-  const racLabels = cells.map((c) => c.racLabel);
-  const values = cells.map((c) => cellFinancialCategoryTotal(c.mil));
-  const colors = cells.map((c) => {
-    const categoryKey = parseCellCategoryKey(c);
+  const groupedCells = groupDonutCellsByRacAndClass(cells);
+  const labels = groupedCells.map((c) => buildRacClassSliceLabel(c.racLabel, c.catLabel));
+  const racLabels = groupedCells.map((c) => c.racLabel);
+  const classLabels = groupedCells.map((c) => c.catLabel);
+  const values = groupedCells.map((c) => c.value);
+  const colors = groupedCells.map((c) => {
+    const categoryKey = c.categoryKey;
     const idx = ["categoryA", "categoryB", "categoryC", "bts", "hb"].indexOf(categoryKey);
     return (
       CLASS_COLOR_BY_CATEGORY_KEY[categoryKey] ||
@@ -442,13 +666,15 @@ function buildCategoryRacFinancialDonutChart(cells, darkMode) {
     data: {
       labels,
       racLabels,
+      classLabels,
+      donutSliceTotal: sumTotal,
       datasets: [
         {
           data: values,
           backgroundColor: colors,
           borderWidth: 2,
           borderColor: darkMode ? "#1e1e1e" : "#fff",
-          hoverOffset: 4,
+          hoverOffset: 0,
           weight: 1.8,
         },
         {
@@ -465,6 +691,14 @@ function buildCategoryRacFinancialDonutChart(cells, darkMode) {
       responsive: true,
       maintainAspectRatio: false,
       cutout: "52%",
+      interaction: DONUT_TOOLTIP_INTERACTION,
+      hover: DONUT_TOOLTIP_INTERACTION,
+      animation: { duration: 0 },
+      elements: {
+        arc: {
+          borderAlign: "center",
+        },
+      },
       plugins: {
         legend: {
           position: "right",
@@ -477,28 +711,40 @@ function buildCategoryRacFinancialDonutChart(cells, darkMode) {
           }),
         },
         tooltip: {
+          mode: "nearest",
+          intersect: true,
           callbacks: {
             label: (ctx) => {
               if ((ctx.datasetIndex ?? 0) > 0) return null;
               const pct = ((ctx.raw / sumTotal) * 100).toFixed(1);
-              const rac = racLabels[ctx.dataIndex] || "";
-              const classLabel = labels[ctx.dataIndex] || ctx.label;
-              const prefix = rac ? `${classLabel} — ${rac}` : classLabel;
-              return `${prefix}: ${formatKpiMoneyLabel(kpiNumeric(ctx.raw))} (${pct}%)`;
+              const sliceLabel =
+                labels[ctx.dataIndex] ||
+                buildRacClassSliceLabel(
+                  racLabels[ctx.dataIndex],
+                  classLabels?.[ctx.dataIndex] ?? ctx.label
+                );
+              return `${sliceLabel}: ${formatKpiMoneyLabel(kpiNumeric(ctx.raw))} (${pct}%)`;
             },
           },
         },
         kpiOuterDonutLegendRing: {
           enabled: true,
+          showSliceLabels: true,
+          clipSliceLabels: false,
           outerRingMode: "value",
+          innerRingMode: "class",
           innerShowValue: false,
-          curveInnerText: true,
-          curveOuterText: true,
+          innerLabelRadiusRatio: 0.5,
+          outerLabelRadiusRatio: 0.5,
+          innerLabelInsetRatio: 0.08,
+          outerLabelInsetRatio: 0.08,
+          curveInnerText: false,
+          curveOuterText: false,
           valueTextColor: "#ffffff",
           innerLabelColor: "#ffffff",
           textColor: darkMode ? "#f3f4f6" : "#1f2937",
-          textShadowColor: "rgba(0, 0, 0, 0.65)",
-          fontSize: 9,
+          textShadowColor: "rgba(0, 0, 0, 0.75)",
+          fontSize: 10,
           fontWeight: 700,
           formatValue: (value) => formatKpiMoneyLabel(kpiNumeric(value)),
         },
@@ -516,17 +762,23 @@ function buildGovtPafOuterRingDonutChart({
 }) {
   const sumTotal = values.reduce((a, b) => a + kpiNumeric(b), 0) || 1;
   const outerRingColors = colors.map((hex) => `${hex}80`);
+  const sliceLabels = labels.map((label) =>
+    String(label ?? "")
+      .replace(/\s*Share\s*$/i, "")
+      .trim()
+  );
 
   return {
     data: {
       labels,
+      classLabels: sliceLabels,
       datasets: [
         {
           data: values,
           backgroundColor: colors,
           borderWidth: 2,
           borderColor: darkMode ? "#1e1e1e" : "#fff",
-          hoverOffset: 4,
+          hoverOffset: 0,
           weight: 1.8,
         },
         {
@@ -543,6 +795,8 @@ function buildGovtPafOuterRingDonutChart({
       responsive: true,
       maintainAspectRatio: false,
       cutout: "52%",
+      interaction: DONUT_TOOLTIP_INTERACTION,
+      hover: DONUT_TOOLTIP_INTERACTION,
       plugins: {
         legend: {
           position: "right",
@@ -555,6 +809,8 @@ function buildGovtPafOuterRingDonutChart({
           }),
         },
         tooltip: {
+          mode: "nearest",
+          intersect: true,
           callbacks: {
             label: (ctx) => {
               if ((ctx.datasetIndex ?? 0) > 0) return null;
@@ -565,11 +821,21 @@ function buildGovtPafOuterRingDonutChart({
         },
         kpiOuterDonutLegendRing: {
           enabled: true,
+          showSliceLabels: true,
+          clipSliceLabels: false,
+          outerRingMode: "value",
+          innerRingMode: "class",
+          innerShowValue: false,
+          innerLabelRadiusRatio: 0.5,
+          outerLabelRadiusRatio: 0.5,
           textColor: darkMode ? "#f3f4f6" : "#1f2937",
-          textShadowColor: darkMode ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.9)",
-          fontSize: 10,
+          valueTextColor: "#ffffff",
+          innerLabelColor: "#ffffff",
+          textShadowColor: "rgba(0, 0, 0, 0.75)",
+          fontSize: 12,
           fontWeight: 700,
-          curveOuterText: true,
+          curveInnerText: false,
+          curveOuterText: false,
           formatValue: (value) => formatKpiMoneyLabel(kpiNumeric(value)),
         },
       },
@@ -662,6 +928,8 @@ function buildShareDonutChart(shareItems, shareIds, darkMode, { outerLegendRing 
       responsive: true,
       maintainAspectRatio: false,
       cutout: outerLegendRing ? "52%" : "62%",
+      interaction: DONUT_TOOLTIP_INTERACTION,
+      hover: DONUT_TOOLTIP_INTERACTION,
       plugins: {
         legend: {
           position: "right",
@@ -674,6 +942,8 @@ function buildShareDonutChart(shareItems, shareIds, darkMode, { outerLegendRing 
           }),
         },
         tooltip: {
+          mode: "nearest",
+          intersect: true,
           callbacks: {
             label: (ctx) => {
               if ((ctx.datasetIndex ?? 0) > 0) return null;
@@ -684,6 +954,8 @@ function buildShareDonutChart(shareItems, shareIds, darkMode, { outerLegendRing 
         },
         kpiOuterDonutLegendRing: {
           enabled: outerLegendRing,
+          showSliceLabels: outerLegendRing,
+          clipSliceLabels: false,
           textColor: darkMode ? "#f3f4f6" : "#1f2937",
           textShadowColor: darkMode ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.9)",
           fontSize: 10,
@@ -776,22 +1048,40 @@ function KpiCharts({
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
-  const [shareClassFilter, setShareClassFilter] = useState("all");
+  const [donutRacFilter, setDonutRacFilter] = useState("all");
   const [zoomChart, setZoomChart] = useState(null);
 
   const closeZoom = useCallback(() => setZoomChart(null), []);
 
-  const donutShares = useMemo(
-    () => buildFinancialShares(shareRows || [], shareClassFilter, contractRows || []),
-    [shareRows, shareClassFilter, contractRows]
-  );
+  const donutRacSelectOptions = useMemo(() => {
+    const list = racOptions || [];
+    if (!racIds?.length) return list;
+    const selected = new Set(racIds.map(String));
+    return list.filter((option) => selected.has(String(option.id ?? option.Id ?? "")));
+  }, [racOptions, racIds]);
 
-  const categoryKeys = useMemo(
-    () => resolveKpiChartCategoryKeys(shareClassFilter),
-    [shareClassFilter]
-  );
+  const effectiveDonutRacIds = useMemo(() => {
+    if (donutRacFilter && donutRacFilter !== "all") {
+      return [String(donutRacFilter)];
+    }
+    return racIds || [];
+  }, [donutRacFilter, racIds]);
 
-  const categoryRacCells = useMemo(
+  const ahqDonutShareRows = useMemo(() => {
+    if (!donutRacFilter || donutRacFilter === "all") {
+      return shareRows || [];
+    }
+    return filterKpiRowsByRacBase(shareRows || [], [String(donutRacFilter)], []);
+  }, [shareRows, donutRacFilter]);
+
+  const ahqDonutContractRows = useMemo(() => {
+    if (!donutRacFilter || donutRacFilter === "all") {
+      return contractRows || [];
+    }
+    return filterKpiRowsByRacBase(contractRows || [], [String(donutRacFilter)], []);
+  }, [contractRows, donutRacFilter]);
+
+  const categoryRacBarCells = useMemo(
     () =>
       buildKpiCategoryRacMilMatrix({
         shareRows: shareRows || [],
@@ -799,19 +1089,30 @@ function KpiCharts({
         contractRows: contractRows || [],
         racOptions: racOptions || [],
         racIds: racIds || [],
-        categoryKeys,
       }),
-    [shareRows, propertyRows, contractRows, racOptions, racIds, categoryKeys]
+    [shareRows, propertyRows, contractRows, racOptions, racIds]
+  );
+
+  const categoryRacDonutCells = useMemo(
+    () =>
+      buildKpiCategoryRacMilMatrix({
+        shareRows: shareRows || [],
+        propertyRows: propertyRows || [],
+        contractRows: contractRows || [],
+        racOptions: racOptions || [],
+        racIds: effectiveDonutRacIds,
+      }),
+    [shareRows, propertyRows, contractRows, racOptions, effectiveDonutRacIds]
   );
 
   const categoryRacBarData = useMemo(
-    () => buildRacClusteredClassFinancialBarData(categoryRacCells),
-    [categoryRacCells]
+    () => buildRacClusteredClassFinancialBarData(categoryRacBarCells),
+    [categoryRacBarCells]
   );
 
   const categoryRacDonutChart = useMemo(
-    () => buildCategoryRacFinancialDonutChart(categoryRacCells, darkMode),
-    [categoryRacCells, darkMode]
+    () => buildCategoryRacFinancialDonutChart(categoryRacDonutCells, darkMode),
+    [categoryRacDonutCells, darkMode]
   );
 
   const racGovtPafCells = useMemo(
@@ -851,10 +1152,13 @@ function KpiCharts({
 
   const ahqRacBaseDonutChart = useMemo(
     () =>
-      buildShareDonutChart(donutShares, ["ahq", "rac", "base"], darkMode, {
-        outerLegendRing: true,
-      }),
-    [donutShares, darkMode]
+      buildShareDonutChart(
+        buildFinancialShares(ahqDonutShareRows, "all", ahqDonutContractRows),
+        ["ahq", "rac", "base"],
+        darkMode,
+        { outerLegendRing: true }
+      ),
+    [ahqDonutShareRows, ahqDonutContractRows, darkMode]
   );
 
   const isFinancialsLayout = chartLayout === "financials";
@@ -959,7 +1263,7 @@ function KpiCharts({
         },
         {
           darkMode,
-          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          formatValue: formatKpiMillionUnitLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
           fontSize: 9,
           labelPlacement: "inside",
@@ -986,7 +1290,7 @@ function KpiCharts({
         },
         {
           darkMode,
-          formatValue: (value) => formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0),
+          formatValue: formatKpiMillionUnitLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
           fontSize: 11,
           labelPlacement: "inside",
@@ -1075,6 +1379,9 @@ function KpiCharts({
                   kpiZoomPermanentLabels: { enabled: false },
                   kpiOuterDonutLegendRing: {
                     ...donut.options.plugins?.kpiOuterDonutLegendRing,
+                    enabled: true,
+                    showSliceLabels: true,
+                    clipSliceLabels: false,
                     fontSize: 14,
                   },
                 }
@@ -1166,23 +1473,31 @@ function KpiCharts({
     makeZoomedDonutOptions,
   ]);
 
-  const renderShareClassFilter = (filterIdSuffix) => (
-    <FormControl size="small" sx={{ minWidth: 88 }}>
-      <InputLabel id={`kpi-share-class-label-${filterIdSuffix}`}>Class</InputLabel>
+  const renderShareRacFilter = (filterIdSuffix) => (
+    <FormControl size="small" sx={{ minWidth: 120 }}>
+      <InputLabel id={`kpi-share-rac-label-${filterIdSuffix}`}>RAC</InputLabel>
       <SearchableSelect
-        labelId={`kpi-share-class-label-${filterIdSuffix}`}
-        label="Class"
-        value={shareClassFilter}
-        onChange={(e) => setShareClassFilter(e.target.value)}
-        renderValue={(val) =>
-          SHARE_DISTRIBUTION_CLASS_OPTIONS.find((o) => o.value === val)?.label ?? val
-        }
+        labelId={`kpi-share-rac-label-${filterIdSuffix}`}
+        label="RAC"
+        value={donutRacFilter}
+        onChange={(e) => setDonutRacFilter(e.target.value)}
+        renderValue={(val) => {
+          if (!val || val === "all") return "All";
+          const match = donutRacSelectOptions.find(
+            (option) => String(option.id ?? option.Id ?? "") === String(val)
+          );
+          return getRacOptionLabel(match) || val;
+        }}
       >
-        {SHARE_DISTRIBUTION_CLASS_OPTIONS.map((o) => (
-          <MenuItem key={o.value} value={o.value}>
-            {o.label}
-          </MenuItem>
-        ))}
+        <MenuItem value="all">All</MenuItem>
+        {donutRacSelectOptions.map((option) => {
+          const id = String(option.id ?? option.Id ?? "");
+          return (
+            <MenuItem key={id} value={id}>
+              {getRacOptionLabel(option) || id}
+            </MenuItem>
+          );
+        })}
       </SearchableSelect>
     </FormControl>
   );
@@ -1214,7 +1529,7 @@ function KpiCharts({
   const renderDonutCard = (
     title,
     donut,
-    { filterIdSuffix = "default", zoomKey = ZOOM_CHART.assetsDonut, showClassFilter = true } = {}
+    { filterIdSuffix = "default", zoomKey = ZOOM_CHART.assetsDonut, showRacFilter = true } = {}
   ) => (
     <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
       <MDBox
@@ -1229,7 +1544,7 @@ function KpiCharts({
           {title}
         </MDTypography>
         <MDBox display="flex" alignItems="center" gap={0.5} flexShrink={0}>
-          {showClassFilter ? renderShareClassFilter(filterIdSuffix) : null}
+          {showRacFilter ? renderShareRacFilter(filterIdSuffix) : null}
           <ChartExportButton
             disabled={loading}
             ariaLabel={`Export ${title} to Excel`}
@@ -1265,7 +1580,7 @@ function KpiCharts({
             <Grid item xs={12} md={6}>
               {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
                 zoomKey: ZOOM_CHART.govtPafDonut,
-                showClassFilter: false,
+                showRacFilter: false,
               })}
             </Grid>
           </Grid>
@@ -1315,7 +1630,7 @@ function KpiCharts({
             <Grid item xs={12} lg={5}>
               {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
                 zoomKey: ZOOM_CHART.assetsGovtPafDonut,
-                showClassFilter: false,
+                showRacFilter: false,
               })}
             </Grid>
           </Grid>
@@ -1351,6 +1666,9 @@ function KpiCharts({
             {zoomDialogConfig?.title || ""}
           </MDTypography>
           <MDBox display="flex" alignItems="center" gap={0.5}>
+            {zoomChart && ZOOM_CHARTS_WITH_RAC_FILTER.has(zoomChart)
+              ? renderShareRacFilter("zoom")
+              : null}
             {zoomDialogConfig ? (
               <ChartExportButton
                 disabled={loading}

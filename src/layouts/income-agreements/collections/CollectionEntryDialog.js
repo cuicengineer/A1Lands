@@ -17,10 +17,9 @@ import {
   computeCollectionGroupAmounts,
   createEmptyCollectionLineItem,
   formatAgreementLabel,
-  formatContractNoLabel,
   formatAmount,
   formatDisplayDate,
-  formatInvoiceLabel,
+  formatCollectionInvoiceDropdownLabel,
   buildInvoiceKey,
   getCollectionAgreementsForClass,
   getCollectionInvoicesForContract,
@@ -64,19 +63,56 @@ const parentFieldsRowSx = {
   display: "grid",
   gridTemplateColumns: {
     xs: "1fr",
-    sm: "minmax(100px, 0.75fr) minmax(180px, 1.5fr) minmax(120px, 1fr)",
+    sm: "minmax(180px, 1.5fr) minmax(120px, 1fr)",
   },
   gap: 2,
 };
 
-const selectionRowSx = {
+const selectionRowSx = (showCurrentDue = false) => ({
   display: "grid",
   gridTemplateColumns: {
     xs: "1fr",
-    sm: "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)",
+    sm: showCurrentDue
+      ? "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)"
+      : "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)",
   },
   gap: 2,
   alignItems: "start",
+});
+
+function CollectionAmountFields({ amounts, hasInvoiceSelected, showCurrentDue }) {
+  return (
+    <>
+      <ReadOnlyField
+        label="Due"
+        value={hasInvoiceSelected ? formatAmount(amounts.due) : "—"}
+        valueSx={amountReadOnlySx}
+      />
+      {showCurrentDue ? (
+        <ReadOnlyField
+          label="Current Due"
+          value={formatAmount(amounts.currentDue)}
+          valueSx={amountReadOnlySx}
+        />
+      ) : null}
+      <ReadOnlyField
+        label="Balance"
+        value={hasInvoiceSelected ? formatAmount(amounts.balance) : "—"}
+        valueSx={amountReadOnlySx}
+      />
+    </>
+  );
+}
+
+CollectionAmountFields.propTypes = {
+  amounts: PropTypes.shape({
+    due: PropTypes.number,
+    currentDue: PropTypes.number,
+    balance: PropTypes.number,
+    totalPaid: PropTypes.number,
+  }).isRequired,
+  hasInvoiceSelected: PropTypes.bool.isRequired,
+  showCurrentDue: PropTypes.bool.isRequired,
 };
 
 function ReadOnlyField({ label, value, valueSx }) {
@@ -349,7 +385,7 @@ export default function CollectionEntryDialog({
     if (!isCreateMode) return [];
     return getCollectionAgreementsForClass(contracts, draftParent.classId).map((option) => (
       <MenuItem key={option.id} value={option.id}>
-        {formatContractNoLabel(option)}
+        {formatAgreementLabel(option)}
       </MenuItem>
     ));
   }, [isCreateMode, contracts, draftParent.classId]);
@@ -386,7 +422,7 @@ export default function CollectionEntryDialog({
               : undefined
           }
         >
-          {formatInvoiceLabel(option)}
+          {formatCollectionInvoiceDropdownLabel(option)}
         </MenuItem>
       );
     });
@@ -399,6 +435,7 @@ export default function CollectionEntryDialog({
     ? formatAgreementLabel(parent.selectedContract)
     : "";
   const hasInvoiceSelected = Boolean(isCreateMode ? draftParent.invoiceKey : parent.invoiceKey);
+  const showCurrentDue = !readOnly && hasInvoiceSelected && parseAmount(amounts.totalPaid) > 0;
 
   const handleParentChange = (field, value) => {
     setDraftParent((prev) => {
@@ -525,7 +562,7 @@ export default function CollectionEntryDialog({
         >
           {isCreateMode ? (
             <>
-              <MDBox sx={selectionRowSx}>
+              <MDBox sx={selectionRowSx(showCurrentDue)}>
                 <EditableSelectField
                   label="Class"
                   value={draftParent.classId}
@@ -555,49 +592,37 @@ export default function CollectionEntryDialog({
                   options={invoiceOptions}
                   note="Unlocked invoices for the selected CA No are listed. Invoices already in collections appear dimmed and cannot be selected."
                 />
-                <ReadOnlyField
-                  label="Due"
-                  value={formatAmount(amounts.due)}
-                  valueSx={amountReadOnlySx}
-                />
-                <ReadOnlyField
-                  label="Balance"
-                  value={formatAmount(amounts.balance)}
-                  valueSx={amountReadOnlySx}
+                <CollectionAmountFields
+                  amounts={amounts}
+                  hasInvoiceSelected={hasInvoiceSelected}
+                  showCurrentDue={showCurrentDue}
                 />
               </MDBox>
               <MDBox sx={parentFieldsRowSx}>
-                <ReadOnlyField label="Tenant No" value={parent.tenantNo} />
                 <ReadOnlyField label="Tenant and Business" value={parent.tenantBusiness} />
                 <ReadOnlyField label="Account" value={parent.accountLabel} />
               </MDBox>
             </>
           ) : (
             <>
-              <MDBox sx={selectionRowSx}>
+              <MDBox sx={selectionRowSx(showCurrentDue)}>
                 <ReadOnlyField label="Class" value={parent.className || parent.classId} />
                 <ReadOnlyField label="Agreement" value={agreementLabel} />
                 <ReadOnlyField
                   label="Invoice"
                   value={
                     parent.selectedInvoice
-                      ? formatInvoiceLabel(parent.selectedInvoice)
+                      ? formatCollectionInvoiceDropdownLabel(parent.selectedInvoice)
                       : parent.invoiceKey
                   }
                 />
-                <ReadOnlyField
-                  label="Due"
-                  value={formatAmount(amounts.due)}
-                  valueSx={amountReadOnlySx}
-                />
-                <ReadOnlyField
-                  label="Balance"
-                  value={formatAmount(amounts.balance)}
-                  valueSx={amountReadOnlySx}
+                <CollectionAmountFields
+                  amounts={amounts}
+                  hasInvoiceSelected={hasInvoiceSelected}
+                  showCurrentDue={showCurrentDue}
                 />
               </MDBox>
               <MDBox sx={parentFieldsRowSx}>
-                <ReadOnlyField label="Tenant No" value={parent.tenantNo} />
                 <ReadOnlyField label="Tenant and Business" value={parent.tenantBusiness} />
                 <ReadOnlyField label="Account" value={parent.accountLabel} />
               </MDBox>

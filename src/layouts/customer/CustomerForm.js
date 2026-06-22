@@ -48,9 +48,7 @@ import customerApi from "services/api.customer.service";
 
 import supplierApi from "services/api.supplier.service";
 
-import {
-  validateCodePrefixDescription,
-} from "../supplier/supplierUtils";
+import { validateCodePrefixDescription } from "../supplier/supplierUtils";
 import CodePrefixDropdownLabel from "../supplier/CodePrefixDropdownLabel";
 
 import {
@@ -82,6 +80,16 @@ async function reloadCodePrefixOptions() {
     .filter((row) => row.prefixAlpha);
 }
 
+async function reloadRankOptions() {
+  const response = await customerApi.getRanks();
+
+  return (customerApi.unwrapList(response) || [])
+
+    .map(customerApi.normalizeRankRow)
+
+    .filter((row) => row.rankName);
+}
+
 export default function CustomerForm({ open, onClose, onSubmit, initialData, isClone }) {
   const [form, setForm] = useState(() => buildCustomerFormState());
 
@@ -101,6 +109,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
   const [addRankName, setAddRankName] = useState("");
 
+  const [editRankOpen, setEditRankOpen] = useState(false);
+
+  const [editingRank, setEditingRank] = useState(null);
+
   const [addCodePrefixOpen, setAddCodePrefixOpen] = useState(false);
 
   const [addCodePrefixName, setAddCodePrefixName] = useState("");
@@ -113,7 +125,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
   const canManageCodePrefixes = isSuperuserOrAhqSupervisorUser();
   const canDeleteCodePrefixes = isSuperuserOrAhqSupervisorUser();
+  const canManageRanks = isSuperuserOrAhqSupervisorUser();
+  const canDeleteRanks = isSuperuserOrAhqSupervisorUser();
   const showCodePrefixActions = canManageCodePrefixes || canDeleteCodePrefixes;
+  const showRankActions = canManageRanks || canDeleteRanks;
 
   const isEditMode = Boolean(initialData?.id) && !isClone;
 
@@ -124,13 +139,7 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
     const fetchRanks = async () => {
       try {
-        const response = await customerApi.getRanks();
-
-        const options = (customerApi.unwrapList(response) || [])
-
-          .map(customerApi.normalizeRankRow)
-
-          .filter((row) => row.rankName);
+        const options = await reloadRankOptions();
 
         if (!cancelled) setRankOptions(options);
       } catch (error) {
@@ -273,15 +282,13 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
     }
 
     try {
-      await customerApi.createRank(rankName);
+      if (editingRank?.id) {
+        await customerApi.updateRank(editingRank.id, rankName);
+      } else {
+        await customerApi.createRank(rankName);
+      }
 
-      const response = await customerApi.getRanks();
-
-      const options = (customerApi.unwrapList(response) || [])
-
-        .map(customerApi.normalizeRankRow)
-
-        .filter((row) => row.rankName);
+      const options = await reloadRankOptions();
 
       setRankOptions(options);
 
@@ -289,9 +296,40 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
       setAddRankOpen(false);
 
+      setEditRankOpen(false);
+
       setAddRankName("");
+
+      setEditingRank(null);
     } catch (error) {
-      window.alert(error?.message || "Failed to add rank.");
+      window.alert(error?.message || "Failed to save rank.");
+    }
+  };
+
+  const handleEditRank = (item, event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!canManageRanks || !item?.id) return;
+    setEditingRank(item);
+    setAddRankName(item.rankName || "");
+    setEditRankOpen(true);
+  };
+
+  const handleDeleteRank = async (item, event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!canDeleteRanks || !item?.id) return;
+    const label = item.rankName || "this rank";
+    if (!window.confirm(`Delete rank "${label}"?`)) return;
+    try {
+      await customerApi.deleteRank(item.id);
+      const options = await reloadRankOptions();
+      setRankOptions(options);
+      if (String(form.rank) === String(item.rankName)) {
+        updateField("rank", "");
+      }
+    } catch (error) {
+      window.alert(error?.message || "Failed to delete rank.");
     }
   };
 
@@ -538,6 +576,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                   value={form.rank}
                   onChange={(e) => {
                     if (e.target.value === "__add__") {
+                      setEditingRank(null);
+
                       setAddRankName("");
 
                       setAddRankOpen(true);
@@ -547,20 +587,66 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
                     updateField("rank", e.target.value);
                   }}
+                  MenuProps={{ PaperProps: { sx: { maxHeight: 320, minWidth: 280 } } }}
                 >
                   <MenuItem value="">
                     <em>Select</em>
                   </MenuItem>
 
                   {rankOptions.map((item) => (
-                    <MenuItem key={item.id || item.rankName} value={item.rankName}>
-                      {item.rankName}
+                    <MenuItem
+                      key={item.id || item.rankName}
+                      value={item.rankName}
+                      sx={showRankActions ? { pr: 1 } : undefined}
+                    >
+                      <MDBox
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        width="100%"
+                        gap={0.5}
+                      >
+                        <span>{item.rankName}</span>
+                        {showRankActions && (
+                          <MDBox
+                            display="flex"
+                            alignItems="center"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            {canManageRanks && (
+                              <IconButton
+                                size="small"
+                                color="info"
+                                title="Edit rank"
+                                onClick={(e) => handleEditRank(item, e)}
+                                sx={{ padding: "2px" }}
+                              >
+                                <Icon fontSize="small">edit</Icon>
+                              </IconButton>
+                            )}
+                            {canDeleteRanks && (
+                              <IconButton
+                                size="small"
+                                color="error"
+                                title="Delete rank"
+                                onClick={(e) => handleDeleteRank(item, e)}
+                                sx={{ padding: "2px" }}
+                              >
+                                <Icon fontSize="small">delete</Icon>
+                              </IconButton>
+                            )}
+                          </MDBox>
+                        )}
+                      </MDBox>
                     </MenuItem>
                   ))}
 
-                  <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
-                    + Add rank...
-                  </MenuItem>
+                  {canManageRanks && (
+                    <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
+                      + Add rank...
+                    </MenuItem>
+                  )}
                 </SearchableSelect>
               </FormControl>
             </Grid>
@@ -753,13 +839,9 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                       ? ""
                       : String(form.bankListsId)
                   }
-                  displayEmpty
                   onChange={(e) => updateField("bankListsId", e.target.value)}
                   sx={textFieldSx}
                 >
-                  <MenuItem value="">
-                    <em>Select Bank</em>
-                  </MenuItem>
                   {bankOptions.map((option) => (
                     <MenuItem key={option.id} value={String(option.id)}>
                       {option.label}
@@ -804,8 +886,18 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
         </DialogActions>
       </Dialog>
 
-      <Dialog open={addRankOpen} onClose={() => setAddRankOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Add Rank</DialogTitle>
+      <Dialog
+        open={addRankOpen || editRankOpen}
+        onClose={() => {
+          setAddRankOpen(false);
+          setEditRankOpen(false);
+          setEditingRank(null);
+          setAddRankName("");
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>{editingRank ? "Edit Rank" : "Add Rank"}</DialogTitle>
 
         <DialogContent>
           <MDInput
@@ -819,12 +911,21 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
         </DialogContent>
 
         <DialogActions>
-          <MDButton color="secondary" variant="outlined" onClick={() => setAddRankOpen(false)}>
+          <MDButton
+            color="secondary"
+            variant="outlined"
+            onClick={() => {
+              setAddRankOpen(false);
+              setEditRankOpen(false);
+              setEditingRank(null);
+              setAddRankName("");
+            }}
+          >
             Cancel
           </MDButton>
 
           <MDButton color="info" variant="gradient" onClick={handleSaveRank}>
-            Add
+            {editingRank ? "Save" : "Add"}
           </MDButton>
         </DialogActions>
       </Dialog>

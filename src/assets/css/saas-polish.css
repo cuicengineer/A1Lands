@@ -189,9 +189,14 @@ body.enterprise-ui .saas-workspace-card .MuiTableBody-root tr:hover {
 }
 
 /* ---- Row action icons — reveal on hover ---- */
-body.enterprise-ui .saas-settings-table td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]),
-body.enterprise-ui .saas-workspace-card td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]) {
+body.enterprise-ui .saas-settings-table td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]):not(.coa-grid-action-icon),
+body.enterprise-ui .saas-workspace-card td .MuiIconButton-root:not([title="Edit"]):not([title="Delete"]):not([title*="ttachment" i]):not(.coa-grid-action-icon) {
   opacity: 0.42 !important;
+}
+
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon,
+body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .coa-grid-action-icon .MuiIcon-root {
+  opacity: 1 !important;
 }
 
 body.enterprise-ui .saas-settings-table tr:hover td .MuiIconButton-root,

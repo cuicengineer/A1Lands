@@ -289,6 +289,13 @@ function getActiveByAsOfDate(asOfDateYyyyMmDd) {
   return requestWithPagination("GET", `/api/Contracts/ActiveByAsOfDate?${params}`);
 }
 
+function getShareDistributionByAsOfDate(asOfDateYyyyMmDd) {
+  const params = new URLSearchParams({
+    asOfDate: asOfDateYyyyMmDd,
+  }).toString();
+  return requestWithPagination("GET", `/api/Contracts/ShareDistribution?${params}`);
+}
+
 // Backwards-compatible alias
 function list(pageNumber = 1, pageSize = 1000) {
   return getAll(pageNumber, pageSize);
@@ -393,6 +400,7 @@ const contractApi = {
   deleteInvoiceScheduleInvoice,
   updateInvoiceSchedule,
   getActiveByAsOfDate,
+  getShareDistributionByAsOfDate,
   list,
   searchByGrpName,
   create,

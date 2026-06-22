@@ -4,6 +4,7 @@ import {
   createLineRow,
   currentMonthYear,
   isValidMonthYear,
+  normalizeReceiptLineNumericDefaults,
 } from "layouts/accounts/receipts/receiptUtils";
 
 function unwrapList(response) {
@@ -58,10 +59,12 @@ function pickBoolean(row, ...keys) {
 }
 
 export function normalizeReceiptRow(row) {
-  const lines = parseJsonArray(pickField(row, "linesJson", "LinesJson"), []).map((line) => ({
-    ...createLineRow(),
-    ...line,
-  }));
+  const lines = parseJsonArray(pickField(row, "linesJson", "LinesJson"), []).map((line) =>
+    normalizeReceiptLineNumericDefaults({
+      ...createLineRow(),
+      ...line,
+    })
+  );
   const attachments = parseJsonArray(pickField(row, "attachmentsJson", "AttachmentsJson"), []);
 
   return buildReceiptFormState({
@@ -72,6 +75,16 @@ export function normalizeReceiptRow(row) {
     reference: pickField(row, "reference", "Reference"),
     paidFrom: pickField(row, "paidFrom", "PaidFrom"),
     payeeContactType: pickField(row, "payeeContactType", "PayeeContactType") || "Supplier",
+    payeePartyId: pickField(row, "payeePartyId", "PayeePartyId"),
+    payeePartyCode: pickField(row, "payeePartyCode", "PayeePartyCode"),
+    payeePartyKey: [
+      pickField(row, "payeeContactType", "PayeeContactType") || "Supplier",
+      pickField(row, "payeePartyId", "PayeePartyId") ||
+        pickField(row, "payeePartyCode", "PayeePartyCode") ||
+        pickField(row, "payeeName", "PayeeName"),
+    ]
+      .map((part) => String(part || "").trim())
+      .join("|"),
     payeeName: pickField(row, "payeeName", "PayeeName"),
     description: pickField(row, "description", "Description"),
     finalizedByAhq: pickBoolean(row, "finalizedByAhq", "FinalizedByAhq"),
@@ -91,6 +104,9 @@ export function buildReceiptApiPayload(form, grandTotal, { includeFinalizedByAhq
     Reference: form.reference || null,
     PaidFrom: form.paidFrom || null,
     PayeeContactType: form.payeeContactType || null,
+    PayeePartyId:
+      form.payeePartyId !== "" && form.payeePartyId != null ? Number(form.payeePartyId) : null,
+    PayeePartyCode: form.payeePartyCode || null,
     PayeeName: form.payeeName || null,
     Description: form.description || null,
     GrandTotal: grandTotal,
@@ -109,6 +125,18 @@ export function buildReceiptApiPayload(form, grandTotal, { includeFinalizedByAhq
   }
 
   return payload;
+}
+
+export function buildReceiptFinalizePayload(record, finalizedByAhq) {
+  const grandTotal =
+    Number(record?.grandTotal) ||
+    (Array.isArray(record?.lines)
+      ? record.lines.reduce((sum, line) => sum + (Number(line?.total) || 0), 0)
+      : 0);
+  return {
+    ...buildReceiptApiPayload(record, grandTotal, { includeFinalizedByAhq: true }),
+    FinalizedByAhq: Boolean(finalizedByAhq),
+  };
 }
 
 function listReceipts() {
@@ -156,6 +184,7 @@ const receiptsApi = {
   unwrapList,
   normalizeReceiptRow,
   buildReceiptApiPayload,
+  buildReceiptFinalizePayload,
   listReceipts,
   getReceiptById,
   createReceipt,

@@ -21,6 +21,13 @@ import {
   canDeleteCurrentMenu,
   canEditCurrentMenu,
 } from "services/api.service";
+import {
+  buildCollectionsGridTableBodySx,
+  COLLECTIONS_GRID_ACTION_BOX_SX,
+  COLLECTIONS_GRID_ICON_BUTTON_SX,
+  renderCollectionsGridSno,
+  renderCollectionsGridText,
+} from "utils/collectionsGridTableSx";
 import SupplierForm from "./SupplierForm";
 import {
   buildSupplierPayload,
@@ -59,7 +66,7 @@ export default function Supplier() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
 
-  const txt = (v) => (v != null && String(v).trim() !== "" ? String(v) : "-");
+  const txt = (v) => renderCollectionsGridText(v);
 
   const fetchCoaLabels = useCallback(async () => {
     try {
@@ -175,6 +182,7 @@ export default function Supplier() {
         Header: "Action",
         accessor: "actions",
         align: "center",
+        width: "96px",
         Cell: ({ row }) => row?.original?.actions,
       },
       {
@@ -182,7 +190,8 @@ export default function Supplier() {
         Header: "S.No",
         accessor: "sno",
         align: "center",
-        Cell: ({ value }) => (value != null && value !== "" ? value : "-"),
+        width: "48px",
+        Cell: ({ value }) => renderCollectionsGridSno(value),
       },
       {
         id: "code",
@@ -287,26 +296,16 @@ export default function Supplier() {
         return {
           ...flat,
           actions: (
-            <MDBox
-              display="flex"
-              alignItems="center"
-              justifyContent="center"
-              sx={{
-                backgroundColor: "#f8f9fa",
-                gap: "2px",
-                padding: "2px",
-                borderRadius: "2px",
-              }}
-            >
+            <MDBox sx={COLLECTIONS_GRID_ACTION_BOX_SX}>
               {canCreateCurrentMenu() && (
                 <IconButton
                   size="small"
                   color="success"
                   onClick={() => handleCloneRecord(recordId)}
                   title="Clone"
-                  sx={{ padding: "1px" }}
+                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
                 >
-                  <Icon>content_copy</Icon>
+                  <Icon fontSize="small">content_copy</Icon>
                 </IconButton>
               )}
               {canEditCurrentMenu() && (
@@ -315,9 +314,9 @@ export default function Supplier() {
                   color="info"
                   onClick={() => handleEditRecord(recordId)}
                   title="Edit"
-                  sx={{ padding: "1px" }}
+                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
                 >
-                  <Icon>edit</Icon>
+                  <Icon fontSize="small">edit</Icon>
                 </IconButton>
               )}
               {canDeleteCurrentMenu() && (
@@ -326,9 +325,9 @@ export default function Supplier() {
                   color="error"
                   onClick={() => handleDeleteRecord(recordId)}
                   title="Delete"
-                  sx={{ padding: "1px" }}
+                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
                 >
-                  <Icon>delete</Icon>
+                  <Icon fontSize="small">delete</Icon>
                 </IconButton>
               )}
             </MDBox>
@@ -357,34 +356,7 @@ export default function Supplier() {
             </MDButton>
           ) : null
         }
-        bodySx={{
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative",
-          "& .MuiTableContainer-root": {
-            flex: "1 1 0",
-            minHeight: 0,
-            overflow: "auto",
-          },
-          "& .MuiTable-root": {
-            tableLayout: "auto",
-            width: "max-content",
-            borderCollapse: "collapse",
-          },
-          "& .MuiTable-root th": {
-            fontSize: "0.875rem !important",
-            fontWeight: "700 !important",
-            padding: "1px 4px !important",
-            borderBottom: "1px solid #d0d0d0",
-            whiteSpace: "nowrap",
-          },
-          "& .MuiTable-root td": {
-            padding: "1px 4px !important",
-            borderBottom: "1px solid #e0e0e0",
-            whiteSpace: "nowrap",
-          },
-        }}
+        bodySx={buildCollectionsGridTableBodySx({ leadingCompactColumnCount: 1 })}
       >
         {loading ? (
           <MDBox display="flex" justifyContent="center" alignItems="center" py={6}>

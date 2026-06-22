@@ -169,6 +169,9 @@ export function validateSupplierForm(form) {
   if (!form.province) errors.province = "Province is required";
   if (!form.city?.trim()) errors.city = "City is required";
   if (!form.ntnCnic?.trim()) errors.ntnCnic = "NTN / CNIC is required";
+  if (form.coaId === "" || form.coaId == null) {
+    errors.coaId = "Control Account is required";
+  }
   return errors;
 }
 

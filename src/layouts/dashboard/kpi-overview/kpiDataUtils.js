@@ -32,8 +32,8 @@ export const PROPERTY_CLASS_STICKERS = {
   categoryA: { classIds: [2], label: "CAT A" },
   categoryB: { classIds: [3], label: "CAT B" },
   categoryC: { classIds: [4], label: "CAT C" },
-  bts: { classIds: [9], label: "BTS" },
-  hb: { classIds: [6], label: "HB" },
+  bts: { classIds: [6], label: "BTS" },
+  hb: { classIds: [9], label: "HB" },
 };
 
 const ASSET_CARD_FIXED_ORDER = ["total", "categoryA", "categoryB", "categoryC", "bts", "hb"];
@@ -53,29 +53,34 @@ function groupedAssetRowLabel(key) {
 }
 
 /** Values from API are in millions; display with M or B suffix. */
-export function formatKpiMoneyAmount(valueInMillions) {
+export function formatKpiMoneyAmount(valueInMillions, options = {}) {
+  const { fixedDecimals } = options;
+  const fractionDigits =
+    fixedDecimals != null
+      ? { minimumFractionDigits: fixedDecimals, maximumFractionDigits: fixedDecimals }
+      : { minimumFractionDigits: 0, maximumFractionDigits: 2 };
+
   const n = coerceChartDataValue(valueInMillions);
   if (n == null) {
-    return { text: "0.00", suffix: "M" };
+    const zeroText =
+      fixedDecimals != null ? Number(0).toLocaleString(undefined, fractionDigits) : "0";
+    return { text: zeroText, suffix: "M" };
   }
   const abs = Math.abs(n);
   if (abs >= 1000) {
     return {
-      text: (n / 1000).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
+      text: (n / 1000).toLocaleString(undefined, fractionDigits),
       suffix: "B",
     };
   }
   return {
-    text: n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    text: n.toLocaleString(undefined, fractionDigits),
     suffix: "M",
   };
 }
 
-export function formatKpiMoneyLabel(valueInMillions) {
-  const { text, suffix } = formatKpiMoneyAmount(valueInMillions);
+export function formatKpiMoneyLabel(valueInMillions, options) {
+  const { text, suffix } = formatKpiMoneyAmount(valueInMillions, options);
   return `${text} ${suffix}`;
 }
 
@@ -490,8 +495,8 @@ const PROPERTY_CLASS_TO_SHARE_CLASS = {
   2: 1,
   3: 2,
   4: 3,
-  9: 4,
-  6: 5,
+  6: 4,
+  9: 5,
 };
 
 /** GovtPAFShare class ids → property-summary class ids used on category cards. */
@@ -499,8 +504,8 @@ const SHARE_CLASS_TO_PROPERTY_CLASSES = {
   1: [1, 2],
   2: [3],
   3: [4],
-  4: [9],
-  5: [6],
+  4: [6],
+  5: [9],
 };
 
 function expandShareClassIds(classIds) {

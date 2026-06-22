@@ -39,6 +39,23 @@ async function createRank(rankName) {
   });
 }
 
+async function updateRank(id, rankName) {
+  const actionBy = await getActionBy();
+  return api.request("PUT", `/api/SupplierRanks/${id}`, {
+    Id: id,
+    id,
+    RankName: rankName,
+    rankName,
+    Action: "Update",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  });
+}
+
+function deleteRank(id) {
+  return api.remove("SupplierRanks", id);
+}
+
 function getCodePrefixes() {
   return api.request("GET", "/api/SupplierCodePrefixes");
 }
@@ -98,6 +115,8 @@ const supplierApi = {
   normalizeCodePrefixRow,
   getRanks,
   createRank,
+  updateRank,
+  deleteRank,
   getCodePrefixes,
   createCodePrefix,
   updateCodePrefix,

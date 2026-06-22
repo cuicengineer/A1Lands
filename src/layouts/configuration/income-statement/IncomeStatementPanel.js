@@ -38,7 +38,18 @@ import {
   DUPLICATE_ACCT_ROW_STYLE,
   getDuplicateAcctRowIds,
 } from "layouts/configuration/utils/coaDuplicateHighlight";
-import { coaPanelColumnSx, coaPanelTableBodySx } from "utils/coaPanelTableSx";
+import {
+  coaActionControlsSx,
+  coaCloneIconButtonSx,
+  coaCloneIconSx,
+  coaDeleteIconButtonSx,
+  coaDeleteIconSx,
+  coaEditIconButtonSx,
+  coaEditIconSx,
+  coaPanelInnerSx,
+  coaPanelTableBodySx,
+  coaSortControlsSx,
+} from "utils/coaPanelTableSx";
 
 const SHOW_ATTACHMENTS = false;
 const MAX_ATTACHMENT_FILES = 2;
@@ -161,6 +172,29 @@ function buildApiPayload(draft) {
 function displayCell(value) {
   const text = String(value ?? "").trim();
   return text || "—";
+}
+
+function displayAccountCell(row) {
+  const acctId = String(row?.acctId ?? "").trim();
+  const acctName = String(row?.acctName ?? "").trim();
+  const accountText =
+    acctId && acctName ? `${acctId} - ${acctName}` : displayCell(acctId || acctName);
+  return (
+    <MDBox
+      component="span"
+      sx={{
+        display: "block",
+        width: "100%",
+        maxWidth: "100%",
+        whiteSpace: "normal !important",
+        wordBreak: "break-word !important",
+        overflowWrap: "anywhere !important",
+        lineHeight: 1.1,
+      }}
+    >
+      {accountText}
+    </MDBox>
+  );
 }
 
 function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
@@ -584,16 +618,20 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
 
   const columns = useMemo(
     () => [
-      { Header: "Order", accessor: "sortOrderControls", align: "center", width: "9%" },
-      { Header: "Actions", accessor: "actions", align: "center", width: "13%" },
+      {
+        Header: "Sort",
+        accessor: "sortOrderControls",
+        align: "right",
+        width: "36px",
+        disableFilters: true,
+      },
+      { Header: "Actions", accessor: "actions", align: "center", width: "10%" },
       ...(SHOW_ATTACHMENTS
-        ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "6%" }]
+        ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "5%" }]
         : []),
-      { Header: "S.No", accessor: "sno", align: "center", width: "6%" },
-      { Header: "Acct ID", accessor: "acctId", align: "left", width: "12%" },
-      { Header: "Acct Name", accessor: "acctName", align: "left", width: "26%" },
-      { Header: "Group", accessor: "groupName", align: "left", width: "14%" },
-      { Header: "Sub-Group", accessor: "subGroup", align: "left", width: "20%" },
+      { Header: "Acc ID - Acc Name", accessor: "account", align: "left", width: "38%" },
+      { Header: "Group", accessor: "groupName", align: "left", width: "20%" },
+      { Header: "Sub Group", accessor: "subGroup", align: "left", width: "26%" },
     ],
     []
   );
@@ -607,10 +645,9 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
 
         return {
           id: row.id,
-          sno: index + 1,
           ...(duplicateAcctRowIds.has(row.id) ? { __rowStyle: DUPLICATE_ACCT_ROW_STYLE } : {}),
           sortOrderControls: (
-            <MDBox display="flex" justifyContent="center" gap={0.25}>
+            <MDBox sx={coaSortControlsSx}>
               <Tooltip title="Move up">
                 <span>
                   <IconButton
@@ -618,10 +655,9 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
                     color="info"
                     onClick={() => handleMoveRow(row.id, "up")}
                     disabled={!canEdit || !canMoveUp || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px" }}
                   >
                     {isReordering ? (
-                      <CurrencyLoading size={16} />
+                      <CurrencyLoading size={12} />
                     ) : (
                       <Icon fontSize="small">keyboard_arrow_up</Icon>
                     )}
@@ -635,7 +671,6 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
                     color="info"
                     onClick={() => handleMoveRow(row.id, "down")}
                     disabled={!canEdit || !canMoveDown || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px" }}
                   >
                     <Icon fontSize="small">keyboard_arrow_down</Icon>
                   </IconButton>
@@ -643,8 +678,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
               </Tooltip>
             </MDBox>
           ),
-          acctId: displayCell(row.acctId),
-          acctName: displayCell(row.acctName),
+          account: displayAccountCell(row),
           groupName: displayCell(row.groupName),
           subGroup: displayCell(row.subGroup),
           ...(SHOW_ATTACHMENTS
@@ -663,35 +697,44 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
               }
             : {}),
           actions: (
-            <MDBox display="flex" gap={0.25}>
+            <MDBox sx={coaActionControlsSx}>
               {canCreate && (
                 <IconButton
                   size="small"
-                  color="secondary"
+                  className="coa-grid-action-icon"
                   onClick={() => handleClone(row.id)}
                   title="Clone"
                   disabled={formDialogOpen}
+                  sx={coaCloneIconButtonSx}
                 >
-                  <Icon fontSize="small">content_copy</Icon>
+                  <Icon fontSize="small" sx={coaCloneIconSx}>
+                    content_copy
+                  </Icon>
                 </IconButton>
               )}
               <IconButton
                 size="small"
-                color="info"
+                className="coa-grid-action-icon"
                 onClick={() => handleEdit(row.id)}
                 title="Edit"
                 disabled={!canEdit || formDialogOpen}
+                sx={coaEditIconButtonSx}
               >
-                <Icon fontSize="small">edit</Icon>
+                <Icon fontSize="small" sx={coaEditIconSx}>
+                  edit
+                </Icon>
               </IconButton>
               <IconButton
                 size="small"
-                color="error"
+                className="coa-grid-action-icon"
                 onClick={() => handleDelete(row.id)}
                 title="Delete"
                 disabled={!canDelete || formDialogOpen}
+                sx={coaDeleteIconButtonSx}
               >
-                <Icon fontSize="small">delete</Icon>
+                <Icon fontSize="small" sx={coaDeleteIconSx}>
+                  delete
+                </Icon>
               </IconButton>
             </MDBox>
           ),
@@ -717,7 +760,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
   );
 
   return (
-    <MDBox sx={{ ...coaPanelColumnSx, ...coaPanelTableBodySx }}>
+    <MDBox sx={{ ...coaPanelInnerSx, ...coaPanelTableBodySx }}>
       <MDBox
         display="flex"
         alignItems="center"

@@ -31,6 +31,17 @@ function wrapTooltipCallbacks(callbacks) {
   return next;
 }
 
+function getInsideBarLabelCandidates(labelText) {
+  const normalized = String(labelText ?? "").trim();
+  if (!normalized) return [];
+
+  const candidates = [normalized];
+  const compactUnitLabel = normalized.replace(/^(-?[\d,]+(?:\.\d+)?)\s+([MB])$/i, "$1$2");
+  if (compactUnitLabel !== normalized) candidates.push(compactUnitLabel);
+
+  return candidates;
+}
+
 export const kpiZoomPermanentLabelsPlugin = {
   id: "kpiZoomPermanentLabels",
   afterDatasetsDraw(chart) {
@@ -102,16 +113,21 @@ export const kpiZoomPermanentLabelsPlugin = {
           const segmentHeight = Math.abs(props.base - props.y);
           const barWidth = props.width ?? 0;
           let drawFontSize = fontSize;
+          let drawLabelText = labelText;
 
           ctx.font = `${fontWeight} ${drawFontSize}px ${LABEL_FONT_FAMILY}`;
-          let textWidth = ctx.measureText(labelText).width;
+          let textWidth = ctx.measureText(drawLabelText).width;
           while (
             drawFontSize > 6 &&
             (segmentHeight < drawFontSize * 1.15 || barWidth < textWidth + 4)
           ) {
             drawFontSize -= 1;
             ctx.font = `${fontWeight} ${drawFontSize}px ${LABEL_FONT_FAMILY}`;
-            textWidth = ctx.measureText(labelText).width;
+            const fittingLabel = getInsideBarLabelCandidates(labelText).find(
+              (candidate) => barWidth >= ctx.measureText(candidate).width + 4
+            );
+            drawLabelText = fittingLabel || labelText;
+            textWidth = ctx.measureText(drawLabelText).width;
           }
 
           if (segmentHeight < drawFontSize * 0.8 || barWidth < textWidth + 2) {
@@ -123,7 +139,7 @@ export const kpiZoomPermanentLabelsPlugin = {
           ctx.fillStyle = opts.insideLabelColor || "#ffffff";
           ctx.shadowColor = opts.insideTextShadowColor || "rgba(0, 0, 0, 0.55)";
           ctx.shadowBlur = 3;
-          ctx.fillText(labelText, props.x, labelY);
+          ctx.fillText(drawLabelText, props.x, labelY);
         } else if (elementType === "bar") {
           ctx.font = `${fontWeight} ${fontSize}px ${LABEL_FONT_FAMILY}`;
           ctx.fillStyle = color;
@@ -282,11 +298,15 @@ export function applyKpiZoomDonutChartEnhancements(
   return {
     ...baseOptions,
     animation: { ...(baseOptions.animation || {}), duration: 0 },
+    interaction: { ...(baseOptions.interaction || {}), mode: "nearest", intersect: true },
+    hover: { ...(baseOptions.hover || {}), mode: "nearest", intersect: true },
     plugins: {
       ...baseOptions.plugins,
       tooltip: {
         ...(baseOptions.plugins?.tooltip || {}),
         ...buildKpiZoomTooltipOptions(darkMode),
+        mode: "nearest",
+        intersect: true,
         ...(tooltipCallbacks ? { callbacks: wrapTooltipCallbacks(tooltipCallbacks) } : {}),
       },
       kpiZoomPermanentLabels: permanentLabelsDisabled

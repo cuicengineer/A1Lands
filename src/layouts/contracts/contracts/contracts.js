@@ -91,6 +91,10 @@ import {
   persistAllInvoiceScheduleLines,
 } from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
 import {
+  buildAgreementProvInvoiceDeepLink,
+  openAppRouteInNewTab,
+} from "layouts/income-agreements/collections/collectionsUtils";
+import {
   buildContractNo,
   isValidContractNumber,
   parseContractNumberFromContractNo,
@@ -243,6 +247,66 @@ const CONTRACT_SD_RATE_MONTH_VALUES = [1, 2, 3, 4, 6, 9, 12];
 
 const CONTRACT_PAYMENT_TIMING_OPTIONS = ["Start", "End"];
 
+function pickContractField(row, ...keys) {
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = row?.[keys[i]];
+    if (value !== undefined && value !== null) return value;
+  }
+
+  const entries = Object.entries(row || {});
+  for (let i = 0; i < keys.length; i += 1) {
+    const expected = String(keys[i]).toLowerCase();
+    const match = entries.find(([key]) => String(key).toLowerCase() === expected);
+    if (match && match[1] !== undefined && match[1] !== null) return match[1];
+  }
+
+  return "";
+}
+
+function normalizeContractPaymentTiming(value) {
+  if (value === undefined || value === null) return "";
+
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === "null") return "";
+
+  const exactMatch = CONTRACT_PAYMENT_TIMING_OPTIONS.find(
+    (option) => option.toLowerCase() === text.toLowerCase()
+  );
+  if (exactMatch) return exactMatch;
+
+  const lower = text.toLowerCase();
+  if (
+    lower === "0" ||
+    lower.includes("start") ||
+    lower.includes("begin") ||
+    lower.includes("advance") ||
+    lower.includes("opening")
+  ) {
+    return "Start";
+  }
+  if (
+    lower === "1" ||
+    lower.includes("end") ||
+    lower.includes("close") ||
+    lower.includes("arrear")
+  ) {
+    return "End";
+  }
+
+  return "";
+}
+
+function getContractPaymentTimingFromRow(row) {
+  return normalizeContractPaymentTiming(
+    pickContractField(row, "PaymentTiming", "paymentTiming", "Payment_Timing", "payment_timing")
+  );
+}
+
+function resolveContractPaymentTimingSelectValue(value) {
+  const normalized = normalizeContractPaymentTiming(value);
+  return CONTRACT_PAYMENT_TIMING_OPTIONS.includes(normalized) ? normalized : "";
+}
+
 function formatContractPaymentTermDisplay(months) {
   if (months === "" || months === null || months === undefined) return "";
   const n = Number(months);
@@ -347,6 +411,7 @@ function ContractsForm({
   const contractEndDateInputRef = useRef(null);
   const commercialOperationDateInputRef = useRef(null);
   const riseDateInputRef = useRef(null);
+  const [recalculateEditCalculatedValues, setRecalculateEditCalculatedValues] = useState(false);
 
   const toDisplayDate = (isoStr) => {
     if (!isoStr || typeof isoStr !== "string") return "";
@@ -400,6 +465,7 @@ function ContractsForm({
     }
 
     if (initialData) {
+      setRecalculateEditCalculatedValues(false);
       // Use only PascalCase (strict API response format)
       const rawRiseType = initialData.RiseTermType || "";
       const rawRiseYear = initialData.RiseYear ?? null;
@@ -447,7 +513,7 @@ function ContractsForm({
         increaseRatePercent: initialData.IncreaseRatePercent || "",
         increaseIntervalMonths: initialData.IncreaseIntervalMonths || "",
         sdRateMonths: initialData.SDRateMonths || "",
-        paymentTiming: initialData.PaymentTiming || initialData.paymentTiming || "",
+        paymentTiming: getContractPaymentTimingFromRow(initialData),
         dpc:
           initialData.Dpc !== undefined && initialData.Dpc !== null
             ? String(initialData.Dpc)
@@ -541,6 +607,7 @@ function ContractsForm({
         setFormLoading(false);
       }, 100);
     } else {
+      setRecalculateEditCalculatedValues(false);
       setForm({
         contractNumber: "",
         contractNo: "",
@@ -587,6 +654,8 @@ function ContractsForm({
   }, [initialData, open, isClone]);
 
   const isNewContractForm = !initialData || isClone;
+  const shouldUseStoredCalculatedValues =
+    Boolean(initialData) && !isClone && !recalculateEditCalculatedValues;
 
   useEffect(() => {
     if (!isNewContractForm) return;
@@ -650,7 +719,7 @@ function ContractsForm({
 
   // Auto-calculate initialRentPA when initialRentPM changes (rounded to integer)
   useEffect(() => {
-    if (initialData && !isClone) return;
+    if (shouldUseStoredCalculatedValues) return;
     const initialRent = Number(form.initialRentPM);
 
     if (initialRent && !isNaN(initialRent)) {
@@ -665,11 +734,11 @@ function ContractsForm({
         initialRentPA: "",
       }));
     }
-  }, [form.initialRentPM, initialData, isClone]);
+  }, [form.initialRentPM, shouldUseStoredCalculatedValues]);
 
   // Auto-calculate securityDepositAmount when sdRateMonths or initialRentPM changes (rounded to integer)
   useEffect(() => {
-    if (initialData && !isClone) return;
+    if (shouldUseStoredCalculatedValues) return;
     const sdRate = Number(form.sdRateMonths);
     const initialRent = Number(form.initialRentPM);
 
@@ -685,7 +754,7 @@ function ContractsForm({
         securityDepositAmount: "",
       }));
     }
-  }, [form.sdRateMonths, form.initialRentPM, initialData, isClone]);
+  }, [form.sdRateMonths, form.initialRentPM, shouldUseStoredCalculatedValues]);
 
   // Load Rental Value Rate (%) records when form opens.
   useEffect(() => {
@@ -746,6 +815,24 @@ function ContractsForm({
       if (nextValue !== "" && !/^\d+(\.\d{0,2})?$/.test(nextValue)) {
         return;
       }
+    }
+
+    if (
+      initialData &&
+      !isClone &&
+      [
+        "contractStartDate",
+        "commercialOperationDate",
+        "contractEndDate",
+        "initialRentPM",
+        "sdRateMonths",
+        "cmdId",
+        "baseId",
+        "classId",
+        "grpId",
+      ].includes(field)
+    ) {
+      setRecalculateEditCalculatedValues(true);
     }
 
     setForm((prev) => {
@@ -924,7 +1011,7 @@ function ContractsForm({
       if (!form.contractNumber?.trim()) {
         newErrors.contractNumber = "Contract No is required";
       } else if (!isValidContractNumber(form.contractNumber)) {
-        newErrors.contractNumber = "Contract No must be a number from 1 to 999";
+        newErrors.contractNumber = "Contract No must be a number from 0 to 999";
       } else if (!form.contractNo?.trim()) {
         newErrors.contractNumber = "Contract No could not be generated. Select Group ID.";
       }
@@ -935,6 +1022,9 @@ function ContractsForm({
     if (!form.baseId) newErrors.baseId = "Base is required";
     if (!form.classId) newErrors.classId = "Class is required";
     if (!form.grpId) newErrors.grpId = "Group is required";
+    if (form.vaArea == null || String(form.vaArea).trim() === "") {
+      newErrors.vaArea = "CA Area is required";
+    }
     if (!form.tenantNo?.trim()) newErrors.tenantNo = "Tenant No is required";
     if (!form.businessName?.trim()) newErrors.businessName = "Business Name is required";
     if (!form.natureOfBusiness?.trim())
@@ -1082,9 +1172,9 @@ function ContractsForm({
       govtShare: form.govtShare ? Number(form.govtShare) : null,
       pafShare: form.pafShare ? Number(form.pafShare) : null,
       feasible:
-        initialData && !isClone && storedFeasibleValue
+        shouldUseStoredCalculatedValues && storedFeasibleValue
           ? storedFeasibleValue
-          : Number(form.initialRentPA || 0) > Number(form.govtShare || 0)
+          : Number(form.govtShare || 0) >= Number(form.initialRentPA || 0)
           ? "Unviable"
           : "Viable",
       status: form.status,
@@ -1322,17 +1412,17 @@ function ContractsForm({
   const selectedRentalValuePercentRate = selectedRentalValueRateMeta.percent;
   const savedRentalValueRate = initialData?.RentalValueRate ?? initialData?.rentalValueRate ?? "";
   const displayGroupRate =
-    initialData && !isClone && savedGroupRate !== "" && savedGroupRate != null
+    shouldUseStoredCalculatedValues && savedGroupRate !== "" && savedGroupRate != null
       ? savedGroupRate
       : selectedGroupRate;
   const displayRentalValueRate =
-    initialData && !isClone && savedRentalValueRate !== "" && savedRentalValueRate != null
+    shouldUseStoredCalculatedValues && savedRentalValueRate !== "" && savedRentalValueRate != null
       ? savedRentalValueRate
       : selectedRentalValuePercentRate;
 
   // Auto-calculate Rental Value = Area * Rate * (%Rate / 100) (rounded to integer)
   useEffect(() => {
-    if (initialData && !isClone) return;
+    if (shouldUseStoredCalculatedValues) return;
     const area = Number(selectedGroupArea);
     const rate = Number(selectedGroupRate);
     const percent = Number(selectedRentalValuePercentRate);
@@ -1344,10 +1434,17 @@ function ContractsForm({
       if (prevNum === calculated) return prev;
       return { ...prev, rentalValue: calculated };
     });
-  }, [initialData, isClone, selectedGroupArea, selectedGroupRate, selectedRentalValuePercentRate]);
+  }, [
+    selectedGroupArea,
+    selectedGroupRate,
+    selectedRentalValuePercentRate,
+    shouldUseStoredCalculatedValues,
+    form.commercialOperationDate,
+    form.contractEndDate,
+  ]);
 
   const rentalValueFormulaText = useMemo(() => {
-    if (initialData && !isClone) return "Stored value from this contract.";
+    if (shouldUseStoredCalculatedValues) return "Stored value from this contract.";
     const area = Number(selectedGroupArea) || 0;
     const rate = Number(selectedGroupRate) || 0;
     const percent = Number(selectedRentalValuePercentRate) || 0;
@@ -1365,8 +1462,7 @@ function ContractsForm({
     selectedRentalValuePercentRate,
     selectedRentalValueRateMeta.applicationDate,
     form.contractStartDate,
-    initialData,
-    isClone,
+    shouldUseStoredCalculatedValues,
   ]);
 
   const selectedGovtShareRateMeta = useMemo(() => {
@@ -1446,20 +1542,19 @@ function ContractsForm({
   }, [govtShareRates, form.cmdId, form.baseId, form.classId, form.contractStartDate]);
   const selectedGovtSharePercentRate = selectedGovtShareRateMeta.percent;
 
-  const govtShareUsesInitialRentPAForNewContract = useMemo(
+  const govtShareUsesInitialRentPA = useMemo(
     () =>
-      !initialData &&
       String(selectedGovtShareRateMeta.config || "")
         .trim()
         .toLowerCase() === "annual rent",
-    [initialData, selectedGovtShareRateMeta.config]
+    [selectedGovtShareRateMeta.config]
   );
 
   // Auto-calculate Govt Share = Rental Value * (%Govt Share / 100), or for New Contract when rate Config is "Annual Rent": Initial Rent PA * (% / 100) (rounded to integer)
   useEffect(() => {
-    if (initialData) return;
+    if (shouldUseStoredCalculatedValues) return;
     const percent = Number(selectedGovtSharePercentRate);
-    const baseAmount = govtShareUsesInitialRentPAForNewContract
+    const baseAmount = govtShareUsesInitialRentPA
       ? Number(form.initialRentPA)
       : Number(form.rentalValue);
     const hasInputs = Number.isFinite(baseAmount) && Number.isFinite(percent);
@@ -1474,11 +1569,14 @@ function ContractsForm({
     form.rentalValue,
     form.initialRentPA,
     selectedGovtSharePercentRate,
-    govtShareUsesInitialRentPAForNewContract,
+    govtShareUsesInitialRentPA,
+    shouldUseStoredCalculatedValues,
+    form.commercialOperationDate,
+    form.contractEndDate,
   ]);
 
   const govtShareFormulaText = useMemo(() => {
-    if (initialData && !isClone) return "Stored value from this contract.";
+    if (shouldUseStoredCalculatedValues) return "Stored value from this contract.";
     const percent = Number(selectedGovtSharePercentRate) || 0;
     const conceptOld =
       "Formula: GovtShare = Rental Value x (% Govt Share / 100). Select Contract Start Date to apply the correct % rate.";
@@ -1487,12 +1585,12 @@ function ContractsForm({
     const conceptOldApplied = "Formula: GovtShare = Rental Value x (% Govt Share / 100).";
     const conceptNewApplied = "Formula: GovtShare = Initial Rent PA x (% Govt Share / 100).";
     if (!form.contractStartDate) {
-      return govtShareUsesInitialRentPAForNewContract ? conceptNew : conceptOld;
+      return govtShareUsesInitialRentPA ? conceptNew : conceptOld;
     }
     const appDateInfo = selectedGovtShareRateMeta.applicationDate
       ? ` | % Rate App Date: ${String(selectedGovtShareRateMeta.applicationDate).split("T")[0]}`
       : " | % Rate App Date: N/A";
-    if (govtShareUsesInitialRentPAForNewContract) {
+    if (govtShareUsesInitialRentPA) {
       const initialRentPA = Number(form.initialRentPA) || 0;
       const calculated = Math.round((initialRentPA * percent) / 100);
       return `${conceptNewApplied} ${initialRentPA} x (${percent} / 100) = ${calculated}${appDateInfo}`;
@@ -1506,14 +1604,13 @@ function ContractsForm({
     selectedGovtSharePercentRate,
     selectedGovtShareRateMeta.applicationDate,
     form.contractStartDate,
-    govtShareUsesInitialRentPAForNewContract,
-    initialData,
-    isClone,
+    govtShareUsesInitialRentPA,
+    shouldUseStoredCalculatedValues,
   ]);
 
   // Auto-calculate PAF Share = Initial Rent PA - Govt Share (rounded, min 0)
   useEffect(() => {
-    if (initialData) return;
+    if (shouldUseStoredCalculatedValues) return;
     const initialRentPA = Number(form.initialRentPA);
     const govtShare = Number(form.govtShare);
     const hasInputs = Number.isFinite(initialRentPA) && Number.isFinite(govtShare);
@@ -1524,34 +1621,21 @@ function ContractsForm({
       if (prevNum === calculated) return prev;
       return { ...prev, pafShare: calculated };
     });
-  }, [form.initialRentPA, form.govtShare]);
+  }, [form.initialRentPA, form.govtShare, shouldUseStoredCalculatedValues]);
 
   const pafShareFormulaText = useMemo(() => {
-    if (initialData && !isClone) return "Stored value from this contract.";
+    if (shouldUseStoredCalculatedValues) return "Stored value from this contract.";
     const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
     const calculated = Math.max(0, Math.round(initialRentPA - govtShare));
     return `Formula: ${initialRentPA} - ${govtShare} = ${calculated}`;
-  }, [form.initialRentPA, form.govtShare, initialData, isClone]);
+  }, [form.initialRentPA, form.govtShare, shouldUseStoredCalculatedValues]);
 
   const viabilityLabel = useMemo(() => {
-    if (initialData && !isClone) {
-      const stored =
-        initialData?.Viability ??
-        initialData?.viability ??
-        initialData?.Feasible ??
-        initialData?.feasible ??
-        "";
-      const trimmed = String(stored || "").trim();
-      const lower = trimmed.toLowerCase();
-      if (lower === "viable") return "Viable";
-      if (lower === "unviable") return "Unviable";
-      return trimmed || "-";
-    }
     const initialRentPA = Number(form.initialRentPA) || 0;
     const govtShare = Number(form.govtShare) || 0;
-    return initialRentPA > govtShare ? "Unviable" : "Viable";
-  }, [form.initialRentPA, form.govtShare, initialData, isClone]);
+    return govtShare >= initialRentPA ? "Unviable" : "Viable";
+  }, [form.initialRentPA, form.govtShare]);
 
   // Rise Terms handlers
   const getNextRiseSequenceNo = () => {
@@ -2081,6 +2165,9 @@ function ContractsForm({
                 onChange={(e) => handleChange("vaArea", e.target.value)}
                 fullWidth
                 size="small"
+                required
+                error={!!errors.vaArea}
+                helperText={errors.vaArea}
                 sx={inputSx}
               />
             </Grid>
@@ -2422,13 +2509,18 @@ function ContractsForm({
 
             <Grid item xs={12} sm={6} md={4}>
               <FormControl size="small" fullWidth required error={!!errors.paymentTiming}>
-                <InputLabel id="payment-timing-label" sx={labelSx}>
+                <InputLabel
+                  id="payment-timing-label"
+                  sx={labelSx}
+                  shrink={Boolean(resolveContractPaymentTimingSelectValue(form.paymentTiming))}
+                >
                   Payment Timing
                 </InputLabel>
                 <SearchableSelect
                   labelId="payment-timing-label"
-                  value={form.paymentTiming || ""}
+                  value={resolveContractPaymentTimingSelectValue(form.paymentTiming)}
                   label="Payment Timing"
+                  searchable={false}
                   onChange={(e) => handleChange("paymentTiming", e.target.value)}
                   sx={selectSx}
                 >
@@ -2748,7 +2840,7 @@ function ContractsForm({
                       sx={{ fontWeight: 700 }}
                     />
                     <MDTypography variant="caption" color="text" sx={{ mt: 0.5 }}>
-                      Govt Share ≥ Initial Rent PA = Viable
+                      Govt Share ≥ Initial Rent PA = Unviable
                     </MDTypography>
                   </MDBox>
                 </MDBox>
@@ -7947,6 +8039,9 @@ export default function Contracts() {
   const isContractGridBlank = (value) =>
     value === null || value === undefined || String(value).trim() === "";
 
+  const isContractGridGroupRow = (row) =>
+    Boolean(row?.original?.IsGroupRow || row?.IsGroupRow || row?.isGroupRow);
+
   const getContractGridValue = (row, keys) => {
     const data = row || {};
     const sources = [data, data.original].filter(Boolean);
@@ -7967,6 +8062,71 @@ export default function Contracts() {
     const numericValue = Number(value);
     const display = Number.isFinite(numericValue) ? numericValue.toLocaleString() : String(value);
     return `${display}${suffix}`;
+  };
+
+  const buildContractReceiptsDeepLink = (contractNo) => {
+    const params = new URLSearchParams();
+    const cn = String(contractNo || "").trim();
+    params.set("tab", "finalized");
+    if (cn) params.set("contractNo", cn);
+    return `/receipts?${params.toString()}`;
+  };
+
+  const openContractAgreementInvoices = (contractNo) => {
+    const cn = String(contractNo || "").trim();
+    if (!cn) return;
+    openAppRouteInNewTab(buildAgreementProvInvoiceDeepLink(cn));
+  };
+
+  const openContractFinalizedReceipts = (contractNo) => {
+    const cn = String(contractNo || "").trim();
+    if (!cn) return;
+    openAppRouteInNewTab(buildContractReceiptsDeepLink(cn));
+  };
+
+  const renderContractInvoiceAmountCell = ({ value, row, target }) => {
+    const display = formatContractGridNumber(value);
+    if (!display) return "";
+    if (isContractGridGroupRow(row) || !canAddContractAnnotations()) return display;
+
+    const rowData = row?.original || {};
+    const contractNo = getContractGridValue(rowData, ["contractNo", "ContractNo"]);
+    if (!contractNo) return display;
+
+    const handleClick = () => {
+      if (target === "receipts") {
+        openContractFinalizedReceipts(contractNo);
+      } else {
+        openContractAgreementInvoices(contractNo);
+      }
+    };
+
+    return (
+      <MDTypography
+        component="button"
+        type="button"
+        variant="body2"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleClick();
+        }}
+        sx={{
+          background: "none",
+          border: 0,
+          p: 0,
+          m: 0,
+          color: "info.main",
+          cursor: "pointer",
+          font: "inherit",
+          fontVariantNumeric: "tabular-nums",
+          textDecoration: "underline",
+          "&:hover": { opacity: 0.8 },
+        }}
+      >
+        {display}
+      </MDTypography>
+    );
   };
 
   const formatContractGridAreaWithUnit = (areaValue, rtRow) => {
@@ -8002,12 +8162,20 @@ export default function Contracts() {
     id,
     Header,
     accessor: (row) => getContractGridValue(row, keys),
-    align,
+    align: type === "number" || type === "percent" ? "center" : align,
     ...(moneyCompareFilter
       ? { filter: "contractsMoneyCompare", Filter: ContractsMoneyColumnFilter }
       : {}),
     // eslint-disable-next-line react/prop-types
-    Cell: ({ value }) => {
+    Cell: ({ value, row }) => {
+      if (isContractGridGroupRow(row)) {
+        if (id === "contractNo") {
+          return isContractGridBlank(value) ? "" : String(value);
+        }
+        if (type === "number") return formatContractGridNumber(value);
+        if (type === "percent") return formatContractGridNumber(value, "%");
+        return "";
+      }
       if (type === "date") return formatContractGridDate(value);
       if (type === "number") return formatContractGridNumber(value);
       if (type === "percent") return formatContractGridNumber(value, "%");
@@ -8147,7 +8315,12 @@ export default function Contracts() {
       accessor: (row) => getContractGridValue(row, ["location", "Location"]),
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <ContractGridLongTextCell value={value} matchGridPlainText />,
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? (
+          ""
+        ) : (
+          <ContractGridLongTextCell value={value} matchGridPlainText />
+        ),
     },
     {
       id: "tenantNo",
@@ -8155,7 +8328,8 @@ export default function Contracts() {
       accessor: (row) => getContractGridValue(row, ["tenantNo", "TenantNo"]),
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => formatContractGridTenant(value, row),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : formatContractGridTenant(value, row),
     },
     makeContractGridColumn({
       id: "businessName",
@@ -8171,17 +8345,23 @@ export default function Contracts() {
       id: "booArea",
       Header: "BoO Area",
       accessor: (row) => getContractGridValue(row, ["totalArea", "TotalArea", "Area"]),
-      align: "right",
+      align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => formatContractGridAreaWithUnit(value, row),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row)
+          ? formatContractGridNumber(value)
+          : formatContractGridAreaWithUnit(value, row),
     },
     {
       id: "vaArea",
       Header: "CA Area",
       accessor: (row) => getContractGridValue(row, ["vaArea", "VaArea"]),
-      align: "right",
+      align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value, row }) => formatContractGridAreaWithUnit(value, row),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row)
+          ? formatContractGridNumber(value)
+          : formatContractGridAreaWithUnit(value, row),
     },
     {
       id: "contractStartDate",
@@ -8191,7 +8371,7 @@ export default function Contracts() {
       filter: "contractsDateCompare",
       Filter: ContractsDateColumnFilter,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatContractGridDate(value),
+      Cell: ({ value, row }) => (isContractGridGroupRow(row) ? "" : formatContractGridDate(value)),
     },
     {
       id: "commercialOperationDate",
@@ -8202,7 +8382,7 @@ export default function Contracts() {
       filter: "contractsDateCompare",
       Filter: ContractsDateColumnFilter,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatContractGridDate(value),
+      Cell: ({ value, row }) => (isContractGridGroupRow(row) ? "" : formatContractGridDate(value)),
     },
     {
       id: "contractEndDate",
@@ -8212,14 +8392,20 @@ export default function Contracts() {
       filter: "contractsDateCompare",
       Filter: ContractsDateColumnFilter,
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatContractGridDate(value),
+      Cell: ({ value, row }) => (isContractGridGroupRow(row) ? "" : formatContractGridDate(value)),
     },
     makeContractGridColumn({
       id: "fiscal",
       Header: "FY",
       keys: ["FY"],
     }),
-    { ...findContractColumn("contractState") },
+    {
+      ...findContractColumn("contractState"),
+      Cell: ({ row, ...rest }) =>
+        isContractGridGroupRow(row)
+          ? ""
+          : findContractColumn("contractState").Cell?.({ row, ...rest }),
+    },
     makeContractGridColumn({ id: "term", Header: "Term", keys: ["term", "Term"] }),
     makeContractGridColumn({
       id: "initialRentPM",
@@ -8243,7 +8429,8 @@ export default function Contracts() {
       accessor: (row) => getContractGridValue(row, ["paymentTermMonths", "PaymentTermMonths"]),
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatContractPaymentTermDisplay(value) || "-",
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : formatContractPaymentTermDisplay(value) || "-",
     },
     {
       id: "sdRateMonths",
@@ -8252,7 +8439,8 @@ export default function Contracts() {
         getContractGridValue(row, ["sdRateMonths", "SdRateMonths", "SDRateMonths"]),
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => formatContractSdRateDisplay(value) || "-",
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : formatContractSdRateDisplay(value) || "-",
     },
     makeContractGridColumn({
       id: "increaseRatePercent",
@@ -8270,7 +8458,7 @@ export default function Contracts() {
       id: "riseRatePercent",
       Header: "Rise Rate (%)",
       accessor: firstRiseRateAccessor,
-      align: "right",
+      align: "center",
       Cell: ({ value }) => formatContractGridNumber(value, "%"),
     },
     makeContractGridColumn({
@@ -8287,7 +8475,12 @@ export default function Contracts() {
       align: "right",
       type: "number",
     }),
-    { ...findContractColumn("feasible"), Header: "Viability" },
+    {
+      ...findContractColumn("feasible"),
+      Header: "Viability",
+      Cell: ({ row, ...rest }) =>
+        isContractGridGroupRow(row) ? "" : findContractColumn("feasible").Cell?.({ row, ...rest }),
+    },
     makeContractGridColumn({
       id: "percentRate",
       Header: "RV Rate",
@@ -8318,6 +8511,7 @@ export default function Contracts() {
       Filter: ContractsMoneyColumnFilter,
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        if (isContractGridGroupRow(row)) return formatContractGridNumber(value);
         const numericValue = Number(value);
         if (Number.isFinite(numericValue) && numericValue === -99) {
           const grpId = getContractGridValue(row, ["grpId", "GId", "GrpId"]);
@@ -8386,52 +8580,60 @@ export default function Contracts() {
       type: "number",
       moneyCompareFilter: true,
     }),
-    makeContractGridColumn({
+    {
       id: "due",
       Header: "Inv. Due",
-      keys: [
-        "due",
-        "Due",
-        "dueAmount",
-        "DueAmount",
-        "InvDue",
-        "invDue",
-        "InvoiceDue",
-        "invoiceDue",
-      ],
-      align: "right",
-      type: "number",
-    }),
-    makeContractGridColumn({
+      accessor: (row) =>
+        getContractGridValue(row, [
+          "due",
+          "Due",
+          "dueAmount",
+          "DueAmount",
+          "InvDue",
+          "invDue",
+          "InvoiceDue",
+          "invoiceDue",
+        ]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) =>
+        renderContractInvoiceAmountCell({ value, row, target: "agreement-invoices" }),
+    },
+    {
       id: "paid",
       Header: "Inv. Paid",
-      keys: [
-        "paid",
-        "Paid",
-        "paidAmount",
-        "PaidAmount",
-        "InvPaid",
-        "invPaid",
-        "InvoicePaid",
-        "invoicePaid",
-      ],
-      align: "right",
-      type: "number",
-    }),
-    makeContractGridColumn({
+      accessor: (row) =>
+        getContractGridValue(row, [
+          "paid",
+          "Paid",
+          "paidAmount",
+          "PaidAmount",
+          "InvPaid",
+          "invPaid",
+          "InvoicePaid",
+          "invoicePaid",
+        ]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) => renderContractInvoiceAmountCell({ value, row, target: "receipts" }),
+    },
+    {
       id: "rcvable",
       Header: "Inv. Rcvable",
-      keys: [
-        "rcvable",
-        "Rcvable",
-        "receivable",
-        "Receivable",
-        "receivableAmount",
-        "ReceivableAmount",
-      ],
-      align: "right",
-      type: "number",
-    }),
+      accessor: (row) =>
+        getContractGridValue(row, [
+          "rcvable",
+          "Rcvable",
+          "receivable",
+          "Receivable",
+          "receivableAmount",
+          "ReceivableAmount",
+        ]),
+      align: "center",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value, row }) =>
+        renderContractInvoiceAmountCell({ value, row, target: "agreement-invoices" }),
+    },
     {
       id: "invoices",
       Header: "Invoices",
@@ -8448,7 +8650,8 @@ export default function Contracts() {
         ]),
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => renderContractGridInvoices(value),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : renderContractGridInvoices(value),
     },
     {
       id: "status",
@@ -8456,8 +8659,10 @@ export default function Contracts() {
       accessor: (row) => getContractGridValue(row, ["status", "Status"]),
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) =>
-        isContractGridBlank(value) ? "" : renderContractsStatusLightPill(value),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) || isContractGridBlank(value)
+          ? ""
+          : renderContractsStatusLightPill(value),
     },
     {
       id: "approvalStatus",
@@ -8466,7 +8671,8 @@ export default function Contracts() {
         getContractGridValue(row, ["ApprovalStatus", "approvalStatus", "ApprovedStatus"]),
       align: "center",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => renderContractGridApproval(value),
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : renderContractGridApproval(value),
     },
     {
       id: "remarks",
@@ -8474,9 +8680,20 @@ export default function Contracts() {
       accessor: (row) => getContractGridValue(row, ["remarks", "Remarks"]),
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ value }) => <ContractGridLongTextCell value={value} />,
+      Cell: ({ value, row }) =>
+        isContractGridGroupRow(row) ? "" : <ContractGridLongTextCell value={value} />,
     },
-    { ...findContractColumn("contractAttachments"), Header: "Attach" },
+    {
+      ...findContractColumn("contractAttachments"),
+      Header: "Attach",
+      Cell: (props) => {
+        // eslint-disable-next-line react/prop-types
+        const { row } = props;
+        return isContractGridGroupRow(row)
+          ? ""
+          : findContractColumn("contractAttachments").Cell?.(props);
+      },
+    },
     { ...findContractColumn("contractAnnotations"), Header: "Annotation" },
   ];
 
@@ -8590,6 +8807,226 @@ export default function Contracts() {
       return resolveClassNameById(classList, asNum) || text;
     }
     return text;
+  };
+
+  const pickContractGroupNumericValue = (row, ...keys) => {
+    for (let i = 0; i < keys.length; i += 1) {
+      const value = row?.[keys[i]];
+      if (value === null || value === undefined || value === "") continue;
+      const numericValue = Number(value);
+      if (Number.isFinite(numericValue)) return numericValue;
+    }
+    return 0;
+  };
+
+  const sumContractGroupNumericValue = (groupRows, ...keys) =>
+    groupRows.reduce((sum, row) => sum + pickContractGroupNumericValue(row, ...keys), 0);
+
+  const assignContractGroupNumericPair = (target, camelKey, pascalKey, total) => {
+    if (camelKey) target[camelKey] = total;
+    if (pascalKey) target[pascalKey] = total;
+  };
+
+  const buildContractGroupNumericSums = (groupRows) => {
+    const sums = {};
+    const setPair = (camel, pascal, ...keys) =>
+      assignContractGroupNumericPair(
+        sums,
+        camel,
+        pascal,
+        sumContractGroupNumericValue(groupRows, ...keys)
+      );
+
+    setPair("totalArea", "TotalArea", "totalArea", "TotalArea", "Area");
+    setPair("vaArea", "VaArea", "vaArea", "VaArea");
+    setPair("initialRentPM", "InitialRentPM", "initialRentPM", "InitialRentPM");
+    setPair("initialRentPA", "InitialRentPA", "initialRentPA", "InitialRentPA");
+    setPair(
+      "increaseRatePercent",
+      "IncreaseRatePercent",
+      "increaseRatePercent",
+      "IncreaseRatePercent"
+    );
+    setPair("profitRate", "ProfitRate", "profitRate", "ProfitRate");
+    setPair(
+      "securityDepositAmount",
+      "SecurityDepositAmount",
+      "securityDepositAmount",
+      "SecurityDepositAmount"
+    );
+    setPair("rentalValue", "RentalValue", "rentalValue", "RentalValue");
+    setPair("govtShare", "GovtShare", "govtShare", "GovtShare");
+    setPair("pafShare", "PAFShare", "pafShare", "PAFShare");
+    setPair("ahqShare", "AHQShare", "ahqShare", "AHQShare");
+    setPair("racShare", "RACShare", "racShare", "RACShare");
+    setPair("baseShare", "BaseShare", "baseShare", "BaseShare");
+
+    const currentRentPA = sumContractGroupNumericValue(
+      groupRows,
+      "CurrRentPA",
+      "currentRentPA",
+      "CurrentRentPA"
+    );
+    sums.CurrRentPA = currentRentPA;
+    sums.currentRentPA = currentRentPA;
+    sums.CurrentRentPA = currentRentPA;
+
+    const due = sumContractGroupNumericValue(
+      groupRows,
+      "due",
+      "Due",
+      "dueAmount",
+      "DueAmount",
+      "InvDue",
+      "invDue",
+      "InvoiceDue",
+      "invoiceDue"
+    );
+    sums.due = due;
+    sums.Due = due;
+    sums.dueAmount = due;
+    sums.DueAmount = due;
+
+    const paid = sumContractGroupNumericValue(
+      groupRows,
+      "paid",
+      "Paid",
+      "paidAmount",
+      "PaidAmount",
+      "InvPaid",
+      "invPaid",
+      "InvoicePaid",
+      "invoicePaid"
+    );
+    sums.paid = paid;
+    sums.Paid = paid;
+    sums.paidAmount = paid;
+    sums.PaidAmount = paid;
+
+    const rcvable = sumContractGroupNumericValue(
+      groupRows,
+      "rcvable",
+      "Rcvable",
+      "receivable",
+      "Receivable",
+      "receivableAmount",
+      "ReceivableAmount"
+    );
+    sums.rcvable = rcvable;
+    sums.Rcvable = rcvable;
+    sums.receivableAmount = rcvable;
+    sums.ReceivableAmount = rcvable;
+
+    const rvRate = sumContractGroupNumericValue(
+      groupRows,
+      "RentalValueRate",
+      "rentalValueRate",
+      "RentalValueRatePercent",
+      "rentalValueRatePercent"
+    );
+    sums.RentalValueRate = rvRate;
+    sums.rentalValueRate = rvRate;
+    sums.RentalValueRatePercent = rvRate;
+    sums.rentalValueRatePercent = rvRate;
+
+    const groupRate = groupRows.reduce((sum, row) => {
+      const value = pickContractGroupNumericValue(
+        row,
+        "groupRate",
+        "GroupRate",
+        "totalRate",
+        "TotalRate"
+      );
+      if (value === -99) return sum;
+      return sum + value;
+    }, 0);
+    sums.groupRate = groupRate;
+    sums.GroupRate = groupRate;
+    sums.totalRate = groupRate;
+    sums.TotalRate = groupRate;
+
+    const riseRatePercent = groupRows.reduce((sum, row) => {
+      const value = Number(firstRiseRateAccessor(row));
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    sums.riseRatePercent = riseRatePercent;
+    sums.RiseRatePercent = riseRatePercent;
+
+    return sums;
+  };
+
+  const CONTRACT_GROUP_BLANK_TEXT_FIELDS = {
+    cmdName: "",
+    CmdName: "",
+    Cmd: "",
+    cmd: "",
+    Rac: "",
+    rac: "",
+    baseName: "",
+    BaseName: "",
+    Base: "",
+    base: "",
+    className: "",
+    ClassName: "",
+    Class: "",
+    class: "",
+    grpId: "",
+    GId: "",
+    GrpId: "",
+    GrpName: "",
+    grpName: "",
+    location: "",
+    Location: "",
+    tenantNo: "",
+    TenantNo: "",
+    businessName: "",
+    BusinessName: "",
+    natureOfBusiness: "",
+    NatureOfBusiness: "",
+    contractStartDate: "",
+    ContractStartDate: "",
+    contractEndDate: "",
+    ContractEndDate: "",
+    commercialOperationDate: "",
+    CommercialOperationDate: "",
+    paymentTermMonths: "",
+    PaymentTermMonths: "",
+    sdRateMonths: "",
+    SdRateMonths: "",
+    SDRateMonths: "",
+    riseTermType: "",
+    RiseTermType: "",
+    term: "",
+    Term: "",
+    FY: "",
+    RRFY: "",
+    Rrfy: "",
+    rrfy: "",
+    remarks: "",
+    Remarks: "",
+    status: "",
+    Status: "",
+    feasible: "",
+    Feasible: "",
+    Viability: "",
+    viability: "",
+    contractState: "",
+    ContractState: "",
+    ContractStatus: "",
+    contractStatus: "",
+    approvalStatus: "",
+    ApprovalStatus: "",
+    ApprovedStatus: "",
+    invoices: "",
+    Invoices: "",
+    InvoicePaymentStatus: "",
+    invoicePaymentStatus: "",
+    unitName: "",
+    UnitName: "",
+    UoM: "",
+    uoM: "",
+    increaseIntervalMonths: "",
+    IncreaseIntervalMonths: "",
   };
 
   // Group contracts by selected grouping columns.
@@ -8994,152 +9431,21 @@ export default function Contracts() {
     groups.forEach((group, groupKey) => {
       const isExpanded = expandedGroups.has(groupKey);
       const groupRows = group.rows;
-
-      // Calculate sums for numeric fields
-      const numericSums = {
-        totalArea: 0,
-        totalRate: 0,
-        groupRate: 0,
-        initialRentPM: 0,
-        initialRentPA: 0,
-        paymentTermMonths: 0,
-        sdRateMonths: 0,
-        increaseRatePercent: 0,
-        increaseIntervalMonths: 0,
-        securityDepositAmount: 0,
-        rentalValue: 0,
-        govtShare: 0,
-        pafShare: 0,
-        vaArea: 0,
-        // PascalCase versions
-        TotalArea: 0,
-        TotalRate: 0,
-        GroupRate: 0,
-        InitialRentPM: 0,
-        InitialRentPA: 0,
-        PaymentTermMonths: 0,
-        SDRateMonths: 0,
-        IncreaseRatePercent: 0,
-        IncreaseIntervalMonths: 0,
-        SecurityDepositAmount: 0,
-        RentalValue: 0,
-        GovtShare: 0,
-        PAFShare: 0,
-        VaArea: 0,
-      };
-
-      groupRows.forEach((row) => {
-        // Sum numeric fields
-        numericSums.totalArea += Number(row.totalArea || row.TotalArea || 0);
-        numericSums.totalRate += Number(row.totalRate || row.TotalRate || 0);
-        numericSums.groupRate += Number(row.groupRate || row.GroupRate || 0);
-        numericSums.initialRentPM += Number(row.initialRentPM || row.InitialRentPM || 0);
-        numericSums.initialRentPA += Number(row.initialRentPA || row.InitialRentPA || 0);
-        numericSums.paymentTermMonths += Number(
-          row.paymentTermMonths || row.PaymentTermMonths || 0
-        );
-        numericSums.sdRateMonths += Number(row.sdRateMonths || row.SDRateMonths || 0);
-        numericSums.increaseRatePercent += Number(
-          row.increaseRatePercent || row.IncreaseRatePercent || 0
-        );
-        numericSums.increaseIntervalMonths += Number(
-          row.increaseIntervalMonths || row.IncreaseIntervalMonths || 0
-        );
-        numericSums.securityDepositAmount += Number(
-          row.securityDepositAmount || row.SecurityDepositAmount || 0
-        );
-        numericSums.rentalValue += Number(row.rentalValue || row.RentalValue || 0);
-        numericSums.govtShare += Number(row.govtShare || row.GovtShare || 0);
-        numericSums.pafShare += Number(row.pafShare || row.PAFShare || 0);
-        numericSums.vaArea += Number(row.vaArea || row.VaArea || 0);
-
-        // PascalCase versions
-        numericSums.TotalArea += Number(row.TotalArea || row.totalArea || 0);
-        numericSums.TotalRate += Number(row.TotalRate || row.totalRate || 0);
-        numericSums.GroupRate += Number(row.GroupRate || row.groupRate || 0);
-        numericSums.InitialRentPM += Number(row.InitialRentPM || row.initialRentPM || 0);
-        numericSums.InitialRentPA += Number(row.InitialRentPA || row.initialRentPA || 0);
-        numericSums.PaymentTermMonths += Number(
-          row.PaymentTermMonths || row.paymentTermMonths || 0
-        );
-        numericSums.SDRateMonths += Number(row.SDRateMonths || row.sdRateMonths || 0);
-        numericSums.IncreaseRatePercent += Number(
-          row.IncreaseRatePercent || row.increaseRatePercent || 0
-        );
-        numericSums.IncreaseIntervalMonths += Number(
-          row.IncreaseIntervalMonths || row.increaseIntervalMonths || 0
-        );
-        numericSums.SecurityDepositAmount += Number(
-          row.SecurityDepositAmount || row.securityDepositAmount || 0
-        );
-        numericSums.RentalValue += Number(row.RentalValue || row.rentalValue || 0);
-        numericSums.GovtShare += Number(row.GovtShare || row.govtShare || 0);
-        numericSums.PAFShare += Number(row.PAFShare || row.pafShare || 0);
-        numericSums.VaArea += Number(row.VaArea || row.vaArea || 0);
-      });
-
-      // Preserve values for grouped columns only
-      const groupedColumnValues = {};
-      groupByColumns.forEach((col) => {
-        const firstRowValue = group.rows[0]?.[col];
-        const firstRowValuePascal = group.rows[0]?.[col.charAt(0).toUpperCase() + col.slice(1)];
-        groupedColumnValues[col] = firstRowValue !== undefined ? firstRowValue : "";
-        // Also set PascalCase version if it exists
-        if (firstRowValuePascal !== undefined) {
-          groupedColumnValues[col.charAt(0).toUpperCase() + col.slice(1)] = firstRowValuePascal;
-        }
-      });
-
-      // Create group row with sums for numeric fields and blank for date/text fields
+      const numericSums = buildContractGroupNumericSums(groupRows);
       const groupedRowCount = groupRows.length;
       const contractNoWithGroupCount = group.groupLabel
         ? `${group.groupLabel} (${groupedRowCount})`
         : `(${groupedRowCount})`;
       const groupRow = {
-        // Start with first row to get structure
-        ...group.rows[0],
-        // Group label in Contract No (both PascalCase and camelCase), with grouped row count
+        id: `group:${groupKey}`,
+        ...CONTRACT_GROUP_BLANK_TEXT_FIELDS,
+        ...numericSums,
         ContractNo: contractNoWithGroupCount,
         contractNo: contractNoWithGroupCount,
-        GrpName: group.grpName,
-        grpName: group.grpName,
-        // Numeric fields - use sums
-        ...numericSums,
-        // Preserve grouped column values
-        ...groupedColumnValues,
-        // Date fields - set to blank
-        contractStartDate: "",
-        contractEndDate: "",
-        commercialOperationDate: "",
-        ContractStartDate: "",
-        ContractEndDate: "",
-        CommercialOperationDate: "",
-        // Text fields - set to blank (except grouped columns which are already set above)
-        tenantNo: "",
-        businessName: "",
-        natureOfBusiness: "",
-        term: "",
-        remarks: "",
-        location: "",
-        unitName: "",
-        TenantNo: "",
-        BusinessName: "",
-        NatureOfBusiness: "",
-        Term: "",
-        Remarks: "",
-        Location: "",
-        UnitName: "",
-        UoM: "",
-        // Status and other non-numeric, non-date fields
-        status: "",
-        Status: "",
-        feasible: "",
-        Feasible: "",
-        __disabledRow: false,
-        // Group metadata
         IsGroupRow: true,
         GroupKey: groupKey,
-        GroupRows: group.rows,
+        GroupRows: groupRows,
+        __disabledRow: false,
         actions: (
           <MDBox
             alignItems="left"

@@ -11,14 +11,12 @@ export const PAYMENTS_LABELS = {
   exportFileName: "Payments",
   addFormTitle: "Add New Payment",
   editFormTitle: "Edit Payment",
+  viewFormTitle: "View Payment",
   deleteConfirm: "Are you sure you want to delete this payment?",
   noAttachments: "No attachments for this payment.",
 };
 
 export const RECEIPTS_LABELS = {
-  month: "Month",
-  monthRequired: "Month is required",
-  gridMonth: "Month",
   paidFrom: "Paid By",
   paidFromRequired: "Paid By is required",
   payeeSection: "Received In",
@@ -31,6 +29,7 @@ export const RECEIPTS_LABELS = {
   exportFileName: "Receipts",
   addFormTitle: "Add New Receipt",
   editFormTitle: "Edit Receipt",
+  viewFormTitle: "View Receipt",
   deleteConfirm: "Are you sure you want to delete this receipt?",
   noAttachments: "No attachments for this receipt.",
   tabPendingAhq: "Pending AHQ approval",

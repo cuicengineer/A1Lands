@@ -98,6 +98,18 @@ export function resolveShareDistributionBaseLabel(row, bases = []) {
   return text;
 }
 
+const WORKBOOK_SERIAL_STORAGE_PREFIX = "shareDistributionWorkbookSerial";
+
+/** UI-only workbook number: YYYY-0001, auto-incremented per calendar year in session storage. */
+export function generateNextWorkbookNumber() {
+  const year = new Date().getFullYear();
+  const storageKey = `${WORKBOOK_SERIAL_STORAGE_PREFIX}_${year}`;
+  const current = Number(sessionStorage.getItem(storageKey) || 0);
+  const next = Number.isFinite(current) && current >= 0 ? current + 1 : 1;
+  sessionStorage.setItem(storageKey, String(next));
+  return `${year}-${String(next).padStart(4, "0")}`;
+}
+
 export function buildShareDistributionRows({ asOfRows, contractRows, tenants, bases = [] }) {
   const contractById = new Map();
   const contractByNo = new Map();
@@ -135,8 +147,10 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       return {
         id: id ?? `${contractNo || "row"}-${index}`,
         base: resolveShareDistributionBaseLabel(row, bases),
-        caId: formatAgreementLabel(row),
-        tenantAndBusiness: formatTenantBusinessLabel(row, tenant),
+        caId: pickField(row, "caId", "CAId") || formatAgreementLabel(row),
+        tenantAndBusiness:
+          pickField(row, "tenantAndBusiness", "TenantAndBusiness") ||
+          formatTenantBusinessLabel(row, tenant),
         caArea1: formatShareDistributionNumber(caArea1),
         caArea2: formatShareDistributionNumber(caArea2),
         revenueRate: formatShareDistributionNumber(
@@ -182,16 +196,8 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
             "PaidAmount"
           )
         ),
-        ratio: formatShareDistributionPercent(
-          pickField(
-            row,
-            "ratio",
-            "Ratio",
-            "shareRatio",
-            "ShareRatio",
-            "rentalValueRatePercent",
-            "RentalValueRatePercent"
-          )
+        ratio: formatShareDistributionNumber(
+          pickField(row, "ratio", "Ratio", "shareRatio", "ShareRatio")
         ),
         govt: formatShareDistributionNumber(
           pickField(
@@ -226,8 +232,11 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
           "WBID"
         ),
         __isFinalized: isFinalizedContract(row),
+        __isFinalizedReceiptShareDistribution: Boolean(
+          pickField(row, "receiptAmount", "ReceiptAmount")
+        ),
       };
     })
-    .filter((row) => row.__isFinalized)
-    .map(({ __isFinalized, ...row }) => row);
+    .filter((row) => row.__isFinalized || row.__isFinalizedReceiptShareDistribution)
+    .map(({ __isFinalized, __isFinalizedReceiptShareDistribution, ...row }) => row);
 }

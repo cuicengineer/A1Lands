@@ -162,6 +162,31 @@ export function formatInvoiceLabel(invoice) {
   return invoiceDate ? `${head}(${invoiceDate})` : head;
 }
 
+/** Collection entry invoice dropdown: invoice no with due/generation dates only (no contract no). */
+export function formatCollectionInvoiceDropdownLabel(invoice) {
+  const invoiceNo = String(pickField(invoice, "invoiceNo", "InvoiceNo") || "").trim();
+  if (!invoiceNo) return "";
+  const dueDate = formatDisplayDateLong(pickField(invoice, "dueDate", "DueDate"));
+  const generationDate = formatDisplayDateLong(
+    pickField(
+      invoice,
+      "invoiceDate",
+      "InvoiceDate",
+      "periodStart",
+      "PeriodStart",
+      "createdAt",
+      "CreatedAt",
+      "Cod",
+      "cod"
+    )
+  );
+  const parts = [];
+  if (dueDate) parts.push(`Due: ${dueDate}`);
+  if (generationDate) parts.push(`Gen: ${generationDate}`);
+  if (!parts.length) return invoiceNo;
+  return `${invoiceNo} (${parts.join(", ")})`;
+}
+
 export function formatTenantBusinessLabel(contract, tenant) {
   const tenantNo = String(
     pickField(contract, "tenantNo", "TenantNo") || pickField(tenant, "tenantNo", "TenantNo") || ""
@@ -217,6 +242,9 @@ export function normalizeCatalogRow(row) {
     subInvoiceNo: pickField(row, "subInvoiceNo", "SubInvoiceNo"),
     invoiceNo: pickField(row, "invoiceNo", "InvoiceNo"),
     invoiceDate: pickField(row, "invoiceDate", "InvoiceDate", "Cod", "cod"),
+    dueDate: pickField(row, "dueDate", "DueDate"),
+    periodStart: pickField(row, "periodStart", "PeriodStart"),
+    createdAt: pickField(row, "createdAt", "CreatedAt"),
     totalRent: row?.totalRent ?? row?.TotalRent ?? row?.amountReceivable ?? row?.AmountReceivable,
     amountReceivable:
       row?.amountReceivable ?? row?.AmountReceivable ?? row?.totalRent ?? row?.TotalRent,
@@ -498,10 +526,14 @@ export function buildCollectionGroupKey(row) {
 export function computeCollectionGroupAmounts(invoiceReceivable, items = []) {
   const receivable = parseAmount(invoiceReceivable);
   const totalPaid = sumCollectionReceiptLineAmounts(items);
-  if (totalPaid < receivable) {
-    return { due: receivable - totalPaid, balance: 0 };
-  }
-  return { due: 0, balance: totalPaid - receivable };
+  const currentDue = Math.max(0, receivable - totalPaid);
+  const balance = totalPaid > receivable ? totalPaid - receivable : 0;
+  return {
+    due: receivable,
+    currentDue,
+    balance,
+    totalPaid,
+  };
 }
 
 export function getValidCollectionReceiptLines(items = []) {
@@ -625,7 +657,10 @@ export function buildCollectionGroupParentFields(
         }).find((item) => buildInvoiceKey(item) === String(group.invoiceKey || "").trim())
       : null);
   const invoiceReceivable = selectedInvoice ? computeInvoiceDue(selectedInvoice) : 0;
-  const { due, balance } = computeCollectionGroupAmounts(invoiceReceivable, group.items);
+  const { due, currentDue, balance, totalPaid } = computeCollectionGroupAmounts(
+    invoiceReceivable,
+    group.items
+  );
 
   return {
     ...group,
@@ -639,7 +674,9 @@ export function buildCollectionGroupParentFields(
     coaId: group.coaId || tenantAccount.coaId || coa?.id || "",
     invoiceReceivable,
     due,
+    currentDue,
     balance,
+    totalPaid,
     selectedContract: contract || null,
     selectedInvoice: selectedInvoice || null,
   };

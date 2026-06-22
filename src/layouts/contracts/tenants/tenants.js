@@ -1598,47 +1598,46 @@ export default function Tenants() {
 
   const computedRows = rows.map((row) => {
     const coaId = row.coaId ?? row.CoaId ?? "";
-    const accountLabel =
-      coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
+    const accountLabel = coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
 
     return {
       ...row,
       accountLabel,
       actions: (
-      <MDBox
-        alignItems="left"
-        justifyContent="left"
-        sx={{
-          backgroundColor: "#f8f9fa",
-          gap: "2px",
-          padding: "1px 2px",
-          borderRadius: "2px",
-        }}
-      >
-        {canEdit && (
-          <IconButton
-            size="small"
-            color="info"
-            onClick={() => handleEditTenant(row.id)}
-            title="Edit"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>edit</Icon>
-          </IconButton>
-        )}
-        {canDelete && (
-          <IconButton
-            size="small"
-            color="error"
-            onClick={() => handleDeleteTenant(row.id)}
-            title="Delete"
-            sx={{ padding: "1px" }}
-          >
-            <Icon>delete</Icon>
-          </IconButton>
-        )}
-      </MDBox>
-    ),
+        <MDBox
+          alignItems="left"
+          justifyContent="left"
+          sx={{
+            backgroundColor: "#f8f9fa",
+            gap: "2px",
+            padding: "1px 2px",
+            borderRadius: "2px",
+          }}
+        >
+          {canEdit && (
+            <IconButton
+              size="small"
+              color="info"
+              onClick={() => handleEditTenant(row.id)}
+              title="Edit"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>edit</Icon>
+            </IconButton>
+          )}
+          {canDelete && (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteTenant(row.id)}
+              title="Delete"
+              sx={{ padding: "1px" }}
+            >
+              <Icon>delete</Icon>
+            </IconButton>
+          )}
+        </MDBox>
+      ),
     };
   });
 

@@ -667,16 +667,19 @@ function loggedInUserHasCategoryToken(token) {
     .includes(want);
 }
 
-/** True when user may add contract annotation remarks (superuser or supervisor category). */
-function canAddContractAnnotations() {
-  if (isSuperuserUser()) return true;
-  if (loggedInUserHasCategoryToken("category supervisor")) return true;
+function loggedInUserHasSupervisorCategory() {
   const raw = getLoggedInUserCategoryRaw();
   if (!raw) return false;
   return raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
-    .some((token) => token.includes("supervisor"));
+    .some((token) => token === "category supervisor" || token.includes("supervisor"));
+}
+
+/** True when user may add contract annotation remarks (superuser or supervisor category). */
+function canAddContractAnnotations() {
+  if (isSuperuserUser()) return true;
+  return loggedInUserHasSupervisorCategory();
 }
 
 /** True for superuser or Category Supervisor assigned to AHQ command/base. */
@@ -687,12 +690,18 @@ function isSuperuserOrAhqSupervisorUser() {
 /** True when Contracts grid should ignore ApprovalStatus for Edit/Delete visibility (superuser OR Category Supervisor with AHQ RAC/base). */
 function contractsApprovalActionsBypassUser() {
   if (isSuperuserUser()) return true;
-  if (!loggedInUserHasCategoryToken("category supervisor")) return false;
+  if (!loggedInUserHasSupervisorCategory()) return false;
   try {
     const raw = localStorage.getItem("auth");
     if (!raw) return false;
     const o = JSON.parse(raw);
+    const levelId = o?.levelId ?? o?.LevelId ?? o?.levelID ?? o?.LevelID;
+    if (Number(levelId) === 1) return true;
     const parts = [
+      o?.levelName,
+      o?.LevelName,
+      o?.level,
+      o?.Level,
       o?.cmdName,
       o?.CmdName,
       o?.commandName,

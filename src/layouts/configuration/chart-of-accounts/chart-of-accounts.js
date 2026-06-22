@@ -45,7 +45,21 @@ import {
   DUPLICATE_ACCT_ROW_STYLE,
   getDuplicateAcctRowIds,
 } from "layouts/configuration/utils/coaDuplicateHighlight";
-import { coaPanelColumnSx, coaPanelTableBodySx, coaSplitBodySx } from "utils/coaPanelTableSx";
+import {
+  coaActionControlsSx,
+  coaCloneIconButtonSx,
+  coaCloneIconSx,
+  coaDeleteIconButtonSx,
+  coaDeleteIconSx,
+  coaEditIconButtonSx,
+  coaEditIconSx,
+  coaPanelColumnSx,
+  coaPanelInnerSx,
+  coaPanelTableBodySx,
+  coaSortControlsSx,
+  coaSplitBodySx,
+  coaWorkspaceSx,
+} from "utils/coaPanelTableSx";
 
 const SHOW_ATTACHMENTS = false;
 const MAX_ATTACHMENT_FILES = 2;
@@ -215,6 +229,29 @@ function buildApiPayload(draft) {
 function displayCell(value) {
   const text = String(value ?? "").trim();
   return text || "—";
+}
+
+function displayAccountCell(row) {
+  const acctId = String(row?.acctId ?? "").trim();
+  const acctName = String(row?.acctName ?? "").trim();
+  const accountText =
+    acctId && acctName ? `${acctId} - ${acctName}` : displayCell(acctId || acctName);
+  return (
+    <MDBox
+      component="span"
+      sx={{
+        display: "block",
+        width: "100%",
+        maxWidth: "100%",
+        whiteSpace: "normal !important",
+        wordBreak: "break-word !important",
+        overflowWrap: "anywhere !important",
+        lineHeight: 1.1,
+      }}
+    >
+      {accountText}
+    </MDBox>
+  );
 }
 
 export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
@@ -668,17 +705,30 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
 
   const columns = useMemo(
     () => [
-      { Header: "Order", accessor: "sortOrderControls", align: "center", width: "9%" },
-      { Header: "Actions", accessor: "actions", align: "center", width: "12%" },
+      {
+        Header: "Sort",
+        accessor: "sortOrderControls",
+        align: "right",
+        width: "36px",
+        disableFilters: true,
+      },
+      { Header: "Actions", accessor: "actions", align: "center", width: "9%" },
       ...(SHOW_ATTACHMENTS
-        ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "6%" }]
+        ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "5%" }]
         : []),
-      { Header: "S.No", accessor: "sno", align: "center", width: "6%" },
-      { Header: "Acct ID", accessor: "acctId", align: "left", width: "10%" },
-      { Header: "Acct Name", accessor: "acctName", align: "left", width: "19%" },
-      { Header: "Group", accessor: "groupName", align: "left", width: "12%" },
-      { Header: "Sub-Group", accessor: "subGroup", align: "left", width: "15%" },
-      { Header: "Control Account", accessor: "controlAccount", align: "left", width: "17%" },
+      { Header: "Acc ID - Acc Name", accessor: "account", align: "left", width: "28%" },
+      { Header: "Group", accessor: "groupName", align: "left", width: "14%" },
+      {
+        Header: (
+          <MDBox component="span" sx={{ whiteSpace: "nowrap !important" }}>
+            Sub Group
+          </MDBox>
+        ),
+        accessor: "subGroup",
+        align: "left",
+        width: "17%",
+      },
+      { Header: "Control Account", accessor: "controlAccount", align: "left", width: "26%" },
     ],
     []
   );
@@ -692,20 +742,19 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
 
         return {
           id: row.id,
-          sno: index + 1,
           ...(duplicateAcctRowIds.has(row.id) ? { __rowStyle: DUPLICATE_ACCT_ROW_STYLE } : {}),
           sortOrderControls: (
-            <MDBox display="flex" justifyContent="center" gap={0.25}>
+            <MDBox sx={coaSortControlsSx}>
               <Tooltip title="Move up">
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => handleMoveRow(row.id, "up")}
                     disabled={!canEdit || !canMoveUp || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px", ...GRID_DARK_ARROW_ICON_SX }}
+                    sx={GRID_DARK_ARROW_ICON_SX}
                   >
                     {isReordering ? (
-                      <CurrencyLoading size={16} />
+                      <CurrencyLoading size={12} />
                     ) : (
                       <Icon fontSize="small">keyboard_arrow_up</Icon>
                     )}
@@ -718,7 +767,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
                     size="small"
                     onClick={() => handleMoveRow(row.id, "down")}
                     disabled={!canEdit || !canMoveDown || formDialogOpen || reorderingId != null}
-                    sx={{ padding: "2px", ...GRID_DARK_ARROW_ICON_SX }}
+                    sx={GRID_DARK_ARROW_ICON_SX}
                   >
                     <Icon fontSize="small">keyboard_arrow_down</Icon>
                   </IconButton>
@@ -726,8 +775,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
               </Tooltip>
             </MDBox>
           ),
-          acctId: displayCell(row.acctId),
-          acctName: displayCell(row.acctName),
+          account: displayAccountCell(row),
           groupName: displayCell(row.groupName),
           subGroup: displayCell(row.subGroup),
           controlAccount: displayCell(row.controlAccount),
@@ -747,35 +795,44 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
               }
             : {}),
           actions: (
-            <MDBox display="flex" gap={0.25}>
+            <MDBox sx={coaActionControlsSx}>
               {canCreate && (
                 <IconButton
                   size="small"
-                  color="secondary"
+                  className="coa-grid-action-icon"
                   onClick={() => handleClone(row.id)}
                   title="Clone"
                   disabled={formDialogOpen}
+                  sx={coaCloneIconButtonSx}
                 >
-                  <Icon fontSize="small">content_copy</Icon>
+                  <Icon fontSize="small" sx={coaCloneIconSx}>
+                    content_copy
+                  </Icon>
                 </IconButton>
               )}
               <IconButton
                 size="small"
-                color="info"
+                className="coa-grid-action-icon"
                 onClick={() => handleEdit(row.id)}
                 title="Edit"
                 disabled={!canEdit || formDialogOpen}
+                sx={coaEditIconButtonSx}
               >
-                <Icon fontSize="small">edit</Icon>
+                <Icon fontSize="small" sx={coaEditIconSx}>
+                  edit
+                </Icon>
               </IconButton>
               <IconButton
                 size="small"
-                color="error"
+                className="coa-grid-action-icon"
                 onClick={() => handleDelete(row.id)}
                 title="Delete"
                 disabled={!canDelete || formDialogOpen}
+                sx={coaDeleteIconButtonSx}
               >
-                <Icon fontSize="small">delete</Icon>
+                <Icon fontSize="small" sx={coaDeleteIconSx}>
+                  delete
+                </Icon>
               </IconButton>
             </MDBox>
           ),
@@ -801,7 +858,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
   );
 
   return (
-    <MDBox sx={{ ...coaPanelColumnSx, ...coaPanelTableBodySx }}>
+    <MDBox sx={{ ...coaPanelInnerSx, ...coaPanelTableBodySx }}>
       <MDBox
         display="flex"
         alignItems="center"
@@ -1291,16 +1348,18 @@ function ChartOfAccounts() {
         title="Chart of Accounts"
         subtitle={`${COA_SECTION_TYPE} & Income Statement`}
         tabs={<ConfigurationModuleTabs />}
+        pageClassName="coa-split-workspace-page"
+        sx={coaWorkspaceSx}
         bodySx={coaSplitBodySx}
       >
-        <MDBox sx={{ ...coaPanelColumnSx, pr: { xs: 0, md: 1 } }}>
+        <MDBox sx={coaPanelColumnSx}>
           <ChartOfAccountsPanel panelTitle="Balance Sheet" />
         </MDBox>
         <MDBox
           sx={{
             ...coaPanelColumnSx,
-            pl: { xs: 0, md: 1 },
-            borderLeft: { xs: "none", md: "1px solid #e0e0e0" },
+            pl: 0,
+            borderLeft: "none",
             pt: { xs: 2, md: 0 },
           }}
         >

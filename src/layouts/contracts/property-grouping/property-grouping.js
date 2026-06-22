@@ -2743,6 +2743,7 @@ export default function PropertyGrouping() {
   const [availablePropertiesForLinking, setAvailablePropertiesForLinking] = useState([]);
   const [currentGroupCmdId, setCurrentGroupCmdId] = useState(null);
   const [currentGroupBaseId, setCurrentGroupBaseId] = useState(null);
+  const [linkedPropertyRevenueRates, setLinkedPropertyRevenueRates] = useState(new Map());
 
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [gridPageNumber, setGridPageNumber] = useState(1);
@@ -2897,6 +2898,7 @@ export default function PropertyGrouping() {
     setLoadingLinkedProperties(true);
     setLinkedProperties([]);
     setLinkingSelection([]);
+    setLinkedPropertyRevenueRates(new Map());
     setLinkedPropertiesPageNumber(page);
     setLinkedPropertiesPageSize(size);
 
@@ -2966,16 +2968,20 @@ export default function PropertyGrouping() {
 
     try {
       const response = await propertyGroupingApi.getByGroup(recordId, page, size);
+      let nextLinkedProperties = [];
       if (response && response.pagination) {
-        setLinkedProperties(response.data || []);
+        nextLinkedProperties = response.data || [];
+        setLinkedProperties(nextLinkedProperties);
         setLinkedPropertiesTotalCount(response.pagination.totalCount || 0);
         setLinkedPropertiesPageNumber(response.pagination.pageNumber || page);
         setLinkedPropertiesPageSize(response.pagination.pageSize || size);
       } else {
         // Fallback for non-paginated response
-        setLinkedProperties(Array.isArray(response) ? response : []);
-        setLinkedPropertiesTotalCount(Array.isArray(response) ? response.length : 0);
+        nextLinkedProperties = Array.isArray(response) ? response : [];
+        setLinkedProperties(nextLinkedProperties);
+        setLinkedPropertiesTotalCount(nextLinkedProperties.length);
       }
+      hydrateLinkedPropertyRevenueRates(nextLinkedProperties);
     } catch (error) {
       console.error("Error fetching linked properties:", error);
       alert("Failed to load linked properties.");
@@ -3014,6 +3020,7 @@ export default function PropertyGrouping() {
     setLinkedPropertiesPageSize(1000);
     setLinkedPropertiesTotalCount(0);
     setAvailablePropertiesForLinking([]);
+    setLinkedPropertyRevenueRates(new Map());
     setCurrentGroupCmdId(null);
     setCurrentGroupBaseId(null);
   };
@@ -3048,6 +3055,114 @@ export default function PropertyGrouping() {
     }
     return id ? Number(id) : null;
   };
+
+  const getLinkedPropertyRentalRecord = (item) => {
+    const propertyId = getLinkedPropertyId(item);
+    if (propertyId && Number.isFinite(Number(propertyId))) {
+      const byId = rentalPropertyById.get(Number(propertyId));
+      if (byId) return byId;
+    }
+
+    const linkedLabel = getLinkedPropertyLabel(item).trim().toLowerCase();
+    if (!linkedLabel) return null;
+
+    return (
+      rentalProperties.find((rp) => {
+        const rentalLabel = getRentalPropertyLabel(rp).trim().toLowerCase();
+        return rentalLabel && rentalLabel === linkedLabel;
+      }) || null
+    );
+  };
+
+  const isLinkedPropertyValuePresent = (value) => {
+    if (value === null || value === undefined) return false;
+    const text = String(value).trim();
+    return text !== "" && text.toLowerCase() !== "null" && text.toLowerCase() !== "undefined";
+  };
+
+  const getFirstLinkedPropertyValue = (item, rentalRecord, keys) => {
+    const sources = [item, item?.Property, item?.PropertyId, rentalRecord];
+    for (let i = 0; i < sources.length; i += 1) {
+      const source = sources[i];
+      if (!source || typeof source !== "object") continue;
+      for (let j = 0; j < keys.length; j += 1) {
+        const value = source[keys[j]];
+        if (isLinkedPropertyValuePresent(value)) return value;
+      }
+    }
+    return "";
+  };
+
+  const formatLinkedPropertyNumber = (value, options = {}) => {
+    if (!isLinkedPropertyValuePresent(value)) return "—";
+    const numericValue =
+      typeof value === "number" ? value : Number(String(value).replace(/,/g, ""));
+    if (!Number.isFinite(numericValue)) return String(value);
+    return numericValue.toLocaleString(undefined, {
+      minimumFractionDigits: options.minimumFractionDigits ?? 0,
+      maximumFractionDigits: options.maximumFractionDigits ?? 4,
+    });
+  };
+
+  async function hydrateLinkedPropertyRevenueRates(properties) {
+    const propertyIds = Array.from(
+      new Set(
+        (properties || [])
+          .map((property) => {
+            const linkedId = getLinkedPropertyId(property);
+            if (linkedId && Number.isFinite(Number(linkedId))) return Number(linkedId);
+            const rentalRecord = getLinkedPropertyRentalRecord(property);
+            const rentalId = rentalRecord?.Id ?? rentalRecord?.PropertyId ?? rentalRecord?.id;
+            return rentalId && Number.isFinite(Number(rentalId)) ? Number(rentalId) : null;
+          })
+          .filter((id) => id !== null && Number.isFinite(Number(id)))
+      )
+    );
+    if (propertyIds.length === 0) return;
+
+    try {
+      const rates = await fetchRevenueRatesCatalog();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const nextRates = new Map();
+      propertyIds.forEach((propertyId) => {
+        const validRates = (rates || [])
+          .filter((rate) => {
+            const ratePropertyId = rate.PropertyId || rate.propertyId;
+            if (!ratePropertyId || Number(ratePropertyId) !== Number(propertyId)) return false;
+            const isActive = rate.Status === true || rate.Status === 1 || rate.Status === "1";
+            const isNotDeleted = !(
+              rate.IsDeleted === true ||
+              rate.IsDeleted === 1 ||
+              rate.IsDeleted === "1"
+            );
+            if (!isActive || !isNotDeleted) return false;
+            const applicableDate = rate.ApplicableDate || rate.applicableDate;
+            if (!applicableDate) return false;
+            const date = new Date(applicableDate);
+            if (!Number.isFinite(date.getTime())) return false;
+            date.setHours(0, 0, 0, 0);
+            return date <= today;
+          })
+          .sort((a, b) => {
+            const dateA = new Date(a.ApplicableDate || a.applicableDate || 0);
+            const dateB = new Date(b.ApplicableDate || b.applicableDate || 0);
+            return dateB - dateA;
+          });
+
+        const latestRate = validRates[0];
+        if (latestRate) {
+          const rateValue = latestRate.Rate ?? latestRate.rate;
+          if (isLinkedPropertyValuePresent(rateValue)) nextRates.set(Number(propertyId), rateValue);
+        }
+      });
+
+      setLinkedPropertyRevenueRates(nextRates);
+    } catch (error) {
+      console.error("Error fetching linked property revenue rates:", error);
+    }
+  }
 
   const getLinkedPropertyNameSet = () => {
     const set = new Set();
@@ -4325,32 +4440,42 @@ export default function PropertyGrouping() {
                     }
                   }
 
-                  const rawArea =
-                    property.Area ??
-                    property.area ??
-                    property.Property?.Area ??
-                    property.Property?.area;
-                  const uoMCompact =
-                    property.UoM ??
-                    property.uoM ??
-                    property.Property?.UoM ??
-                    property.Property?.uoM ??
-                    "";
-                  const areaDisplay =
-                    rawArea !== null && rawArea !== undefined && rawArea !== ""
-                      ? `${Number(rawArea).toLocaleString(undefined, {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 4,
-                        })}${uoMCompact ? ` (${uoMCompact})` : ""}`
-                      : "—";
-                  const locDisplayRaw =
-                    property.Location ??
-                    property.location ??
-                    property.Property?.Location ??
-                    property.Property?.location ??
-                    "";
-                  const locDisplay = String(locDisplayRaw).trim()
-                    ? String(locDisplayRaw).trim()
+                  const rentalRecord = getLinkedPropertyRentalRecord(property);
+                  if (propertyName === "Unknown Property" && rentalRecord) {
+                    propertyName = getRentalPropertyLabel(rentalRecord) || propertyName;
+                  }
+
+                  const linkedPropertyId =
+                    getLinkedPropertyId(property) ||
+                    rentalRecord?.Id ||
+                    rentalRecord?.PropertyId ||
+                    rentalRecord?.id;
+                  const rawPrice = getFirstLinkedPropertyValue(property, rentalRecord, [
+                    "Price",
+                    "price",
+                    "Rate",
+                    "rate",
+                  ]);
+                  const revenueRatePrice =
+                    linkedPropertyId && linkedPropertyRevenueRates.has(Number(linkedPropertyId))
+                      ? linkedPropertyRevenueRates.get(Number(linkedPropertyId))
+                      : "";
+                  const rawArea = getFirstLinkedPropertyValue(property, rentalRecord, [
+                    "Area",
+                    "area",
+                  ]);
+                  const uoMCompact = getFirstLinkedPropertyValue(property, rentalRecord, [
+                    "UoM",
+                    "uoM",
+                    "uom",
+                  ]);
+                  const priceDisplay = formatLinkedPropertyNumber(
+                    isLinkedPropertyValuePresent(rawPrice) ? rawPrice : revenueRatePrice
+                  );
+                  const areaDisplay = isLinkedPropertyValuePresent(rawArea)
+                    ? `${formatLinkedPropertyNumber(rawArea)}${
+                        uoMCompact ? ` (${uoMCompact})` : ""
+                      }`
                     : "—";
 
                   return (
@@ -4365,7 +4490,7 @@ export default function PropertyGrouping() {
                         }}
                       >
                         <ListItemText
-                          primary={`${propertyName} · Area: ${areaDisplay} · Location: ${locDisplay}`}
+                          primary={`${propertyName} · Price (Rs): ${priceDisplay} · Area: ${areaDisplay}`}
                           primaryTypographyProps={{
                             sx: {
                               fontSize: "1rem",

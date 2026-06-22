@@ -810,6 +810,11 @@ function DataTable({
     "Rental-Value-Rate",
     "Govt-Share-Rate",
     "Sharing-Formula",
+    "Chart-of-Accounts",
+    "Income-Statement",
+    "Receipts",
+    "Receipts-Finalized",
+    "Receipts-Pending",
   ];
   const shouldExcludeSNo = useMemo(() => {
     if (!exportFileName) return false;
@@ -1228,8 +1233,10 @@ function DataTable({
     if (
       header === "actions" ||
       header === "action" ||
+      header === "sort" ||
       accessor === "actions" ||
-      accessor === "action"
+      accessor === "action" ||
+      accessor === "sortordercontrols"
     )
       return false;
     // Skip columns without an id (should be rare)

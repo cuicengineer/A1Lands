@@ -637,7 +637,9 @@ function AssetCard({
             gap={0.5}
           >
             <span>Income</span>
-            <span className="erp-kpi-card__detail-value">{formatKpiMoneyLabel(m.incomePA)}</span>
+            <span className="erp-kpi-card__detail-value">
+              {formatKpiMoneyLabel(m.incomePA, { fixedDecimals: 2 })}
+            </span>
           </MDBox>
           {SHARE_MIL_ROWS.map((row) => (
             <MDBox
@@ -654,7 +656,9 @@ function AssetCard({
               gap={0.5}
             >
               <span>{row.label}</span>
-              <span className="erp-kpi-card__detail-value">{formatKpiMoneyLabel(m[row.key])}</span>
+              <span className="erp-kpi-card__detail-value">
+                {formatKpiMoneyLabel(m[row.key], { fixedDecimals: 2 })}
+              </span>
             </MDBox>
           ))}
         </div>
@@ -968,7 +972,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
                   {s.label}
                 </MDTypography>
                 <MDTypography variant="h5" fontWeight="bold" color={darkMode ? "white" : "dark"}>
-                  {s.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  {formatKpiMoneyLabel(s.value)}
                 </MDTypography>
               </Card>
             </Grid>

@@ -30,6 +30,23 @@ async function createRank(rankName) {
   });
 }
 
+async function updateRank(id, rankName) {
+  const actionBy = await getActionBy();
+  return api.request("PUT", `/api/CustomerRanks/${id}`, {
+    Id: id,
+    id,
+    RankName: rankName,
+    rankName,
+    Action: "Update",
+    ActionBy: actionBy,
+    ActionDate: new Date().toISOString(),
+  });
+}
+
+function deleteRank(id) {
+  return api.remove("CustomerRanks", id);
+}
+
 function listCustomers() {
   return api.request("GET", "/api/Customer");
 }
@@ -51,6 +68,8 @@ const customerApi = {
   normalizeRankRow,
   getRanks,
   createRank,
+  updateRank,
+  deleteRank,
   listCustomers,
   createCustomer,
   updateCustomer,

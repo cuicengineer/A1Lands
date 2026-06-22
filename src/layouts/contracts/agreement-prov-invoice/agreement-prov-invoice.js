@@ -4025,10 +4025,24 @@ export default function AgreementProvInvoice() {
 
     const contractNoParam = urlDeepLink.contractNo;
     const contractNoFilter = { ContractNo: contractNoParam, contractNo: contractNoParam };
+    const filterSnapshot = { ...buildInitialAgreementProvFilters(), contractNo: contractNoFilter };
+
     setFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
-    setAppliedFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
-    setSearchApplied(true);
-  }, [urlDeepLink.contractNo]);
+    setAppliedFilters(filterSnapshot);
+    setInvoiceKeysWithItemRecords(new Set());
+    setLoading(true);
+    executeFinalizedInvoiceSearch(filterSnapshot, { invoiceNo: urlDeepLink.invoiceNo })
+      .then(() => {
+        setSearchApplied(true);
+      })
+      .catch((error) => {
+        console.error("Error searching finalized invoices from deep link:", error);
+        setSearchResultRows([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [executeFinalizedInvoiceSearch, urlDeepLink.contractNo, urlDeepLink.invoiceNo]);
 
   useEffect(() => {
     if (!urlDeepLink.contractNo || !contractNoFilterOptions.length) return;

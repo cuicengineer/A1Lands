@@ -16,8 +16,10 @@ import {
   resolveCollectionInvoiceContext,
   resolveCollectionTenantNo,
 } from "./collectionsUtils";
+import { openCollectionInvoicePdf } from "./collectionInvoicePdf";
 
 const COLLECTIONS_COLUMNS = [
+  { label: "View", key: "view", align: "center", width: "52px" },
   { label: "S.No", key: "sno", align: "center", width: "48px" },
   { label: "Class", key: "class", align: "left", width: "minmax(90px, 1fr)" },
   { label: "Agreement", key: "agreement", align: "left", width: "minmax(180px, 1.4fr)" },
@@ -155,6 +157,15 @@ function CollectionGroupRow({
     openAppRouteInNewTab(buildTenantConfigDeepLink(tenantNo));
   };
 
+  const handleViewPdf = async () => {
+    try {
+      await openCollectionInvoicePdf(parent);
+    } catch (error) {
+      console.error("Failed to generate collection PDF:", error);
+      window.alert(error?.message || "Failed to generate collection PDF.");
+    }
+  };
+
   return (
     <MDBox
       sx={{
@@ -162,6 +173,29 @@ function CollectionGroupRow({
         "&:hover": { bgcolor: "rgba(0,0,0,0.02)" },
       }}
     >
+      <MDBox
+        sx={{
+          ...bodyCellSx,
+          textAlign: "center",
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <Tooltip title="View as PDF">
+          <span>
+            <IconButton
+              size="small"
+              color="error"
+              disabled={saving}
+              onClick={handleViewPdf}
+              sx={{ padding: "2px" }}
+            >
+              <Icon fontSize="small">picture_as_pdf</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+      </MDBox>
+
       <MDBox sx={{ ...bodyCellSx, textAlign: "center", fontWeight: 600 }}>{index + 1}</MDBox>
 
       <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
@@ -299,7 +333,7 @@ function CollectionsGrid({
     width: "100%",
     alignItems: "center",
     columnGap: 0,
-    minWidth: "1100px",
+    minWidth: "1150px",
   };
 
   const cellBaseSx = {
