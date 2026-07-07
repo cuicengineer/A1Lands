@@ -30,8 +30,11 @@ function AgreementProvPdfPreviewDialog({
   generatePdfBlob,
   title = "PDF Preview",
   previewTitle = "PDF Preview",
+  defaultMargins = AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
+  loadMargins = loadAgreementProvPdfMargins,
+  saveMargins = saveAgreementProvPdfMargins,
 }) {
-  const [marginsIn, setMarginsIn] = useState(() => loadAgreementProvPdfMargins());
+  const [marginsIn, setMarginsIn] = useState(() => loadMargins());
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const previewUrlRef = useRef(null);
@@ -49,7 +52,7 @@ function AgreementProvPdfPreviewDialog({
       if (!rowData || typeof generatePdfBlob !== "function") return;
       setLoading(true);
       try {
-        saveAgreementProvPdfMargins(margins);
+        saveMargins(margins);
         const pdfBlob = await generatePdfBlob(rowData, margins);
         revokePreviewObjectUrl();
         const nextUrl = URL.createObjectURL(pdfBlob);
@@ -62,16 +65,16 @@ function AgreementProvPdfPreviewDialog({
         setLoading(false);
       }
     },
-    [generatePdfBlob, revokePreviewObjectUrl]
+    [generatePdfBlob, revokePreviewObjectUrl, saveMargins]
   );
 
   useEffect(() => {
     if (!open) return undefined;
-    const margins = loadAgreementProvPdfMargins();
+    const margins = loadMargins();
     setMarginsIn(margins);
     regeneratePreview(data, margins);
     return () => revokePreviewObjectUrl();
-  }, [open, data, regeneratePreview, revokePreviewObjectUrl]);
+  }, [open, data, regeneratePreview, revokePreviewObjectUrl, loadMargins]);
 
   const handleClose = () => {
     revokePreviewObjectUrl();
@@ -223,7 +226,7 @@ function AgreementProvPdfPreviewDialog({
               variant="outlined"
               color="dark"
               size="small"
-              onClick={() => setMarginsIn({ ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS })}
+              onClick={() => setMarginsIn({ ...defaultMargins })}
               disabled={loading}
             >
               Reset
@@ -298,6 +301,15 @@ AgreementProvPdfPreviewDialog.propTypes = {
   generatePdfBlob: PropTypes.func.isRequired,
   title: PropTypes.string,
   previewTitle: PropTypes.string,
+  defaultMargins: PropTypes.shape({
+    topIn: PropTypes.number,
+    bottomIn: PropTypes.number,
+    leftIn: PropTypes.number,
+    rightIn: PropTypes.number,
+    contentScale: PropTypes.number,
+  }),
+  loadMargins: PropTypes.func,
+  saveMargins: PropTypes.func,
 };
 
 export default AgreementProvPdfPreviewDialog;

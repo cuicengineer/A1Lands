@@ -20,16 +20,22 @@ import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
 import MDTypography from "components/MDTypography";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
-import api from "services/api.service";
-import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
+import contractApi from "services/api.contract.service";
+import api, { canDeleteCurrentMenu } from "services/api.service";
+import uploadApi from "services/api.upload.service";
+import CurrencyLoading from "components/CurrencyLoading";
+import chartOfAccountsApi from "services/api.chartofaccounts.service";
 import customerApi from "services/api.customer.service";
 import supplierApi from "services/api.supplier.service";
 import collectionsApi from "services/api.collections.service";
-import contractApi from "services/api.contract.service";
+import receiptsApi from "services/api.receipts.service";
+import paymentsApi from "services/api.payments.service";
 import {
   buildInvoiceKey,
   computeInvoiceBalance,
-  formatInvoiceLabel,
+  formatTransactionLockDateValidationMessage,
+  getMinCollectionReceiptDateAfterLock,
+  isDateLockedByLockDate,
   normalizeCollectionEntryRow,
   pickField as pickCollectionField,
 } from "layouts/income-agreements/collections/collectionsUtils";
@@ -38,23 +44,85 @@ import {
   PAID_FROM_ACCOUNTS,
   PAYEE_CONTACT_TYPES,
   applyReceiptLineInvoiceSelection,
-  buildLineAccountOptions,
+  applyReceiptLinePartyFromCollectionEntry,
+  buildReceiptCollectionEntryOptionValue,
+  buildReceiptCollectionEntryUpdatePayload,
+  buildReceiptLineCollectionInvoiceOptions,
+  buildReceiptLineCollectionTenantOptions,
+  buildCollectionStyleLineAccountOptions,
+  buildSyntheticPartyFromCollectionEntry,
+  collectReceiptLinkedCollectionEntries,
+  normalizeReceiptLineForForm,
+  parseReceiptCollectionEntryOptionValue,
+  buildReceivedInCashAndBankOptions,
   buildReceiptContractOptions,
   buildReceiptFormState,
   computeGrandTotal,
   computeLineTotal,
+  computeNextReceiptReference,
+  computeReceiptGrandTotal,
   createLineRow,
+  enrichTenantPartyOptionsWithContracts,
+  fetchReceiptProductOptions,
+  fetchReceiptReferences,
+  filterReceiptLineAccountOptions,
+  filterReceiptLineEntityPartyOptions,
+  filterReceiptPartyControlAccountOptions,
+  filterPaymentLinePartyOptions,
   findLineAccountOption,
   formatAmount,
-  isReceiptLineComplete,
+  formatLineAccountDropdownLabel,
+  getReceiptLineMode,
+  getReceiptLineModeFromAccountOption,
+  getReceiptPartyTypeFromAccountOption,
+  getReceiptYearFromDate,
+  getReceivedInSelectValue,
   inputValueToMonthYear,
+  isCollectionAccountCoaOption,
+  isReceiptCollectionEntryRow,
+  isReceiptInvoiceMode,
+  isReceiptLayoutLineComplete,
+  isReceiptLineComplete,
   isValidMonthYear,
+  mergePartyCoaOption,
   monthYearToInputValue,
-  normalizeReceiptInvoiceKey,
+  normalizePartyCoaOption,
   normalizeReceiptLineNumericDefaults,
   parseAmount,
+  RECEIPT_LINE_MODES,
+  RECEIPT_PARTY_TYPES,
+  RECEIPT_REFERENCE_PREFIX,
+  resolveReceiptProductAccountOption,
+  syncReceiptLineAmount,
 } from "./receiptUtils";
+import PaymentLinesGrid from "./PaymentLinesGrid";
+import {
+  fetchTransactionUploadedFiles,
+  PAYMENT_UPLOAD_FORM_NAME,
+  RECEIPT_UPLOAD_FORM_NAME,
+  TRANSACTION_ATTACHMENT_MAX_BYTES,
+  uploadTransactionAttachments,
+} from "./receiptAttachmentUtils";
 import ReceiptLinesGrid from "./ReceiptLinesGrid";
+import {
+  buildPaymentFormState,
+  computeNextPaymentVrNo,
+  computePaymentGrandTotal,
+  fetchPaymentProductOptions,
+  fetchPaymentVrNos,
+  getPaymentYearFromDate,
+  isPaymentInvoiceMode,
+  isPaymentLineComplete,
+  isPaymentSimplifiedLineComplete,
+  PAYMENT_VR_NO_PREFIX,
+  resolveCashAndBankAccountIdFromSelection,
+  resolveProductAccountOption,
+  syncPaymentLineAmount,
+  normalizePaymentLineFromApi,
+  validatePaymentForm,
+} from "./paymentUtils";
+import { fetchCashAndBankAccountsForDropdown } from "layouts/cash-fund-flow/inter-acc-transfer/interAccTransferUtils";
+import { isCashOrBankCashAndBankMode } from "layouts/cash-fund-flow/cash-and-bank/cashAndBankUtils";
 import { PAYMENTS_LABELS } from "./transactionLabels";
 
 const textFieldSx = {
@@ -62,7 +130,26 @@ const textFieldSx = {
   "& .MuiInputLabel-root": { top: 0 },
 };
 
-function ReceiptDateField({ value, onChange, disabled, readOnly, error, helperText }) {
+function scaleGridColumns(columns, factor = 0.7) {
+  return Math.max(1, Math.round(Number(columns) * factor));
+}
+
+const paymentVrNoFieldSx = {
+  ...textFieldSx,
+  "& .MuiInputBase-input": {
+    color: "#000",
+    WebkitTextFillColor: "#000",
+  },
+  "& .MuiInputBase-input.Mui-disabled": {
+    color: "#000",
+    WebkitTextFillColor: "#000",
+    opacity: 1,
+  },
+};
+
+const readOnlyDarkTextFieldSx = paymentVrNoFieldSx;
+
+function ReceiptDateField({ value, onChange, disabled, readOnly, error, helperText, min }) {
   const inputRef = useRef(null);
   const dateValue = value || "";
 
@@ -95,6 +182,7 @@ function ReceiptDateField({ value, onChange, disabled, readOnly, error, helperTe
         type="date"
         ref={inputRef}
         value={dateValue}
+        min={min || undefined}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         tabIndex={-1}
@@ -137,6 +225,7 @@ ReceiptDateField.propTypes = {
   readOnly: PropTypes.bool,
   error: PropTypes.bool,
   helperText: PropTypes.string,
+  min: PropTypes.string,
 };
 
 ReceiptDateField.defaultProps = {
@@ -145,6 +234,7 @@ ReceiptDateField.defaultProps = {
   readOnly: false,
   error: false,
   helperText: "",
+  min: "",
 };
 
 function unwrapList(response) {
@@ -213,23 +303,35 @@ function normalizeCollectionEntry(row) {
 }
 
 function isActiveCollectionEntry(row) {
-  const deleted = row?.isDeleted;
-  if (deleted === true || deleted === 1 || deleted === "1") return false;
-  if (typeof deleted === "string" && deleted.trim().toLowerCase() === "true") return false;
-  return Boolean(String(row?.invoiceNo || "").trim());
-}
-
-function partyMatchesCollectionEntry(party, entry) {
-  if (!party || !entry) return false;
-  if (party.coaId && entry.coaId && Number(party.coaId) === Number(entry.coaId)) return true;
-  const haystack = String(entry.tenantBusiness || "").toLowerCase();
-  return [party.code, party.name]
-    .filter(Boolean)
-    .some((value) => haystack.includes(String(value).trim().toLowerCase()));
+  return isReceiptCollectionEntryRow(row) && Boolean(String(row?.invoiceNo || "").trim());
 }
 
 function findByValue(options, value) {
   return (options || []).find((option) => String(option.value) === String(value)) || null;
+}
+
+async function syncReceiptLinkedCollectionEntries({
+  receiptId,
+  reference,
+  date,
+  lines,
+  collectionRows,
+}) {
+  const entries = collectReceiptLinkedCollectionEntries(lines, collectionRows);
+  if (!entries.length) return;
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const id = entry?.id ?? entry?.Id;
+      if (!id) return;
+      const payload = buildReceiptCollectionEntryUpdatePayload(entry, {
+        receiptId,
+        reference,
+        date,
+      });
+      await collectionsApi.updateCollection(id, payload);
+    })
+  );
 }
 
 function getCollectionEntryOpenAmount(entry, invoice) {
@@ -263,25 +365,45 @@ function validateReceiptForm(
   labels,
   showMonthField,
   receiptLayout = false,
-  unavailableInvoiceKeySet = new Set()
+  lineAccountOptions = [],
+  activeLockDate = ""
 ) {
   const errors = {};
   if (!form.date) errors.date = "Date is required";
+  else if (isDateLockedByLockDate(form.date, activeLockDate)) {
+    errors.date = formatTransactionLockDateValidationMessage(activeLockDate);
+  }
   if (showMonthField && !isValidMonthYear(form.month)) {
     errors.month = labels.monthRequired || "Month is required";
   }
-  if (!form.paidFrom) errors.paidFrom = labels.paidFromRequired;
-  if (!form.payeeName?.trim()) errors.payeeName = labels.payeeRequired;
+  if (!String(form.paidFrom || "").trim()) errors.paidFrom = labels.paidFromRequired;
+  if (receiptLayout) {
+    if (!form.receivedInCoaId && form.receivedInCoaId !== 0 && !form.payeePartyId) {
+      errors.receivedInCoaId = labels.payeeRequired;
+    }
+  } else if (!form.payeeName?.trim()) {
+    errors.payeeName = labels.payeeRequired;
+  }
   const lines = form.lines || [];
   if (!lines.length) errors.lines = "At least one line item is required";
   lines.forEach((line, idx) => {
     if (!receiptLayout && !line.item) errors[`line-${idx}-item`] = "Item is required";
-    if (!line.account) errors[`line-${idx}-account`] = "Account is required";
-    const invoiceKey = normalizeReceiptInvoiceKey(line).toLowerCase();
-    if (receiptLayout && invoiceKey && unavailableInvoiceKeySet.has(invoiceKey)) {
-      errors[`line-${idx}-invoice`] = "This invoice already has an active receipt";
+    if (!receiptLayout && !line.account) errors[`line-${idx}-account`] = "Account is required";
+    if (receiptLayout && !String(line.account || "").trim()) {
+      errors[`line-${idx}-account`] = "Account is required";
     }
-    if (parseAmount(line.amount) <= 0) errors[`line-${idx}-amount`] = "Amount is required";
+    if (receiptLayout) {
+      const account = findLineAccountOption(lineAccountOptions, line);
+      const partyType = getReceiptPartyTypeFromAccountOption(account);
+      const lineMode = partyType ? getReceiptLineMode(partyType) : null;
+      if (lineMode && isReceiptInvoiceMode(lineMode)) {
+        if (parseAmount(line.amount) <= 0) {
+          errors[`line-${idx}-amount`] = "Amount is required";
+        }
+      }
+    } else if (parseAmount(line.amount) <= 0) {
+      errors[`line-${idx}-amount`] = "Amount is required";
+    }
   });
   return errors;
 }
@@ -294,23 +416,98 @@ export default function ReceiptForm({
   labels = PAYMENTS_LABELS,
   showMonthField = false,
   receiptLayout = false,
+  paymentLayout = false,
   readOnly = false,
-  unavailableInvoiceKeys = [],
+  onUploadSuccess,
+  activeLockDate = "",
 }) {
-  const [form, setForm] = useState(() => buildReceiptFormState());
+  const [form, setForm] = useState(() =>
+    paymentLayout ? buildPaymentFormState() : buildReceiptFormState()
+  );
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [existingFiles, setExistingFiles] = useState([]);
+  const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [lineAccountOptions, setLineAccountOptions] = useState([]);
+  const [receivedInAccountOptions, setReceivedInAccountOptions] = useState([]);
   const [partyOptions, setPartyOptions] = useState([]);
   const [invoiceRows, setInvoiceRows] = useState([]);
   const [collectionRows, setCollectionRows] = useState([]);
   const [contractRows, setContractRows] = useState([]);
+  const [cashAndBankOptions, setCashAndBankOptions] = useState([]);
+  const [coaById, setCoaById] = useState(() => new Map());
+  const [productOptions, setProductOptions] = useState([]);
+  const [existingReferences, setExistingReferences] = useState([]);
+  const [referencesLoaded, setReferencesLoaded] = useState(false);
+  const [existingPaymentVrNos, setExistingPaymentVrNos] = useState([]);
+  const [paymentVrNosLoaded, setPaymentVrNosLoaded] = useState(false);
   const fileInputRef = useRef(null);
 
+  const paymentLineMode = useMemo(
+    () => (paymentLayout ? getReceiptLineMode(form.receiptPartyType) : null),
+    [paymentLayout, form.receiptPartyType]
+  );
+
+  const paymentSimplifiedLines = paymentLayout;
+
+  const showPaymentLinesGrid = Boolean(paymentLayout && getReceivedInSelectValue(form));
+
+  const selectedPaymentReceivedFromAccount = useMemo(() => {
+    if (!paymentLayout) return null;
+    const selectedValue = getReceivedInSelectValue(form);
+    if (!selectedValue) return null;
+    return findLineAccountOption(receivedInAccountOptions, selectedValue);
+  }, [paymentLayout, receivedInAccountOptions, form.receivedInCoaId]);
+
+  const selectedReceivedInAccount = useMemo(() => {
+    if (!receiptLayout) return null;
+    const selectedValue = getReceivedInSelectValue(form);
+    if (!selectedValue) return null;
+    return findLineAccountOption(receivedInAccountOptions, selectedValue);
+  }, [receiptLayout, receivedInAccountOptions, form.receivedInCoaId, form.payeePartyId]);
+
   const isEditMode = Boolean(initialData?.id);
-  const unavailableInvoiceKeySet = useMemo(
-    () => new Set((unavailableInvoiceKeys || []).map((key) => String(key || "").toLowerCase())),
-    [unavailableInvoiceKeys]
+  const receiptSimplifiedLines = receiptLayout;
+  const minDateAfterLock = useMemo(
+    () => getMinCollectionReceiptDateAfterLock(activeLockDate),
+    [activeLockDate]
+  );
+  const isFormLockedByDate = useMemo(
+    () => Boolean(form.date) && isDateLockedByLockDate(form.date, activeLockDate),
+    [activeLockDate, form.date]
+  );
+  const formReadOnly = readOnly || isFormLockedByDate;
+
+  const receiptLineMode = useMemo(() => {
+    if (!receiptLayout) return null;
+    if (receiptSimplifiedLines) return RECEIPT_LINE_MODES.TENANT_INVOICE;
+    return getReceiptLineMode(form.receiptPartyType);
+  }, [receiptLayout, receiptSimplifiedLines, form.receiptPartyType]);
+
+  const showReceiptLinesGrid =
+    !receiptLayout ||
+    (receiptSimplifiedLines
+      ? Boolean(selectedReceivedInAccount)
+      : Boolean(selectedReceivedInAccount) && Boolean(String(form.receiptPartyType || "").trim()));
+
+  const uploadFormName = paymentLayout ? PAYMENT_UPLOAD_FORM_NAME : RECEIPT_UPLOAD_FORM_NAME;
+  const fetchExistingFiles = useCallback(
+    async (id) => {
+      if (id == null) return;
+      setLoadingExistingFiles(true);
+      try {
+        const files = await fetchTransactionUploadedFiles(id, uploadFormName);
+        setExistingFiles(files);
+      } catch (error) {
+        console.error("Error fetching transaction attachments:", error);
+        setExistingFiles([]);
+      } finally {
+        setLoadingExistingFiles(false);
+      }
+    },
+    [uploadFormName]
   );
 
   useEffect(() => {
@@ -327,7 +524,7 @@ export default function ReceiptForm({
         invoiceResult,
         collectionResult,
       ] = await Promise.allSettled([
-        chartOfAccountsApi.getAll(COA_SECTION_TYPE),
+        chartOfAccountsApi.getAll(),
         customerApi.listCustomers(),
         supplierApi.listSuppliers(),
         api.list("tenant"),
@@ -351,15 +548,55 @@ export default function ReceiptForm({
           collectionResult.status === "fulfilled" ? collectionResult.value : [];
 
         const coaRows = chartOfAccountsApi.unwrapList(coaResponse);
-        const coaById = new Map(
+        const coaByIdMap = new Map(
           coaRows
             .map((row) => [Number(row?.id ?? row?.Id), row])
             .filter(([id]) => Number.isFinite(id))
         );
+        const coaByIdLocal = coaByIdMap;
+        setCoaById(coaByIdMap);
         const savedAccounts = (initialData?.lines || [])
           .map((line) => line?.account)
           .filter(Boolean);
-        const options = buildLineAccountOptions(coaRows, savedAccounts);
+        const savedCoaIds = new Set(
+          [
+            ...(initialData?.lines || []).map((line) => line?.accountCoaId),
+            ...(collectionsApi.unwrapList(collectionResponse) || []).map(
+              (row) => row?.coaId ?? row?.CoaId
+            ),
+          ]
+            .filter((id) => id !== "" && id != null)
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id))
+        );
+
+        let filteredCoaRows = coaRows
+          .map(normalizePartyCoaOption)
+          .filter((row) => row.id != null && isCollectionAccountCoaOption(row));
+
+        for (const coaId of savedCoaIds) {
+          if (filteredCoaRows.some((row) => Number(row.id) === Number(coaId))) continue;
+          const savedRow = coaByIdMap.get(coaId) || (await api.get("ChartOfAccounts", coaId));
+          const option = normalizePartyCoaOption(savedRow);
+          if (option.id != null) {
+            filteredCoaRows = mergePartyCoaOption(filteredCoaRows, option);
+          }
+        }
+
+        const options = buildCollectionStyleLineAccountOptions(
+          filteredCoaRows.map((row) => ({
+            id: row.id,
+            Id: row.id,
+            acctId: row.acctId,
+            acctName: row.acctName,
+            controlAccount: row.controlAccount,
+            groupName: row.groupName,
+          })),
+          savedAccounts
+        );
+        if (!receiptLayout && !paymentLayout) {
+          setReceivedInAccountOptions([]);
+        }
         const parties = [
           ...customerApi
             .unwrapList(customerResponse)
@@ -374,7 +611,7 @@ export default function ReceiptForm({
             .filter(Boolean),
         ]
           .map((party) => {
-            const coa = coaById.get(Number(party.coaId));
+            const coa = coaByIdLocal.get(Number(party.coaId));
             return {
               ...party,
               coaControlAccount: pickField(coa, "controlAccount", "ControlAccount"),
@@ -386,7 +623,7 @@ export default function ReceiptForm({
         const collections = collectionsApi
           .unwrapList(collectionResponse)
           .map(normalizeCollectionEntry)
-          .filter(isActiveCollectionEntry);
+          .filter(isReceiptCollectionEntryRow);
         setLineAccountOptions(options);
         setPartyOptions(parties);
         setInvoiceRows(invoices);
@@ -394,7 +631,9 @@ export default function ReceiptForm({
       } catch (error) {
         console.error("Error fetching receipt form catalogs:", error);
         setLineAccountOptions([]);
+        setReceivedInAccountOptions([]);
         setPartyOptions([]);
+        setCoaById(new Map());
         setInvoiceRows([]);
         setCollectionRows([]);
       }
@@ -402,13 +641,60 @@ export default function ReceiptForm({
 
     fetchFormCatalogs();
 
+    if (paymentLayout || receiptLayout) {
+      fetchCashAndBankAccountsForDropdown()
+        .then((options) => {
+          if (cancelled) return;
+          const ledgerOptions = options.filter(isCashOrBankCashAndBankMode);
+          setCashAndBankOptions(ledgerOptions);
+          const savedCoaId = initialData?.receivedInCoaId ?? initialData?.payeePartyId;
+          const savedLedgerId = initialData?.cashAndBankAccountId;
+          const savedLabel = [initialData?.payeePartyCode, initialData?.payeeName]
+            .map((part) => String(part || "").trim())
+            .filter(Boolean)
+            .join(" - ");
+          if (receiptLayout || paymentLayout) {
+            setReceivedInAccountOptions(
+              buildReceivedInCashAndBankOptions(options, {
+                includeCoaIds: [savedCoaId],
+                includeLedgerIds: [savedLedgerId],
+                savedLabelByCoaId:
+                  savedCoaId != null && savedCoaId !== "" && savedLabel
+                    ? { [Number(savedCoaId)]: savedLabel }
+                    : {},
+                modeFilter: isCashOrBankCashAndBankMode,
+              })
+            );
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching cash and bank accounts:", error);
+          if (!cancelled) {
+            setCashAndBankOptions([]);
+            if (receiptLayout || paymentLayout) setReceivedInAccountOptions([]);
+          }
+        });
+    }
+
+    if (paymentLayout || receiptLayout) {
+      const fetchProducts = paymentLayout ? fetchPaymentProductOptions : fetchReceiptProductOptions;
+      fetchProducts()
+        .then((options) => {
+          if (!cancelled) setProductOptions(options);
+        })
+        .catch((error) => {
+          console.error("Error fetching product options:", error);
+          if (!cancelled) setProductOptions([]);
+        });
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [open, initialData]);
+  }, [open, initialData, paymentLayout, receiptLayout]);
 
   useEffect(() => {
-    if (!open || !receiptLayout) {
+    if (!open || (!receiptLayout && !paymentLayout)) {
       setContractRows([]);
       return undefined;
     }
@@ -432,50 +718,221 @@ export default function ReceiptForm({
     return () => {
       cancelled = true;
     };
-  }, [open, receiptLayout]);
+  }, [open, receiptLayout, paymentLayout]);
 
   useEffect(() => {
     if (!open) return;
     if (initialData) {
+      const buildState = paymentLayout ? buildPaymentFormState : buildReceiptFormState;
       setForm(
-        buildReceiptFormState({
+        buildState({
           ...initialData,
           lines:
             Array.isArray(initialData.lines) && initialData.lines.length
               ? initialData.lines.map((line) =>
-                  normalizeReceiptLineNumericDefaults({
-                    ...createLineRow(),
-                    ...line,
-                  })
+                  paymentLayout
+                    ? normalizePaymentLineFromApi(line)
+                    : normalizeReceiptLineForForm(line)
                 )
               : [],
-          attachments: Array.isArray(initialData.attachments) ? [...initialData.attachments] : [],
         })
       );
     } else {
-      setForm(buildReceiptFormState());
+      setForm(paymentLayout ? buildPaymentFormState() : buildReceiptFormState());
     }
     setErrors({});
-  }, [open, initialData]);
+    setSelectedFiles([]);
+    if (initialData?.id) {
+      fetchExistingFiles(initialData.id);
+    } else {
+      setExistingFiles([]);
+    }
+  }, [open, initialData, paymentLayout, receiptLayout, fetchExistingFiles]);
 
-  const grandTotal = useMemo(() => computeGrandTotal(form.lines), [form.lines]);
+  useEffect(() => {
+    if (!open) {
+      setExistingReferences([]);
+      setReferencesLoaded(false);
+      return undefined;
+    }
+    if (!receiptLayout || isEditMode) return undefined;
+
+    let cancelled = false;
+
+    const loadExistingReferences = async () => {
+      try {
+        const references = await fetchReceiptReferences(receiptsApi);
+        if (!cancelled) {
+          setExistingReferences(references);
+          setReferencesLoaded(true);
+        }
+      } catch (error) {
+        console.error("Error loading receipt references:", error);
+        if (!cancelled) {
+          setExistingReferences([]);
+          setReferencesLoaded(true);
+        }
+      }
+    };
+
+    loadExistingReferences();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, receiptLayout, isEditMode]);
+
+  useEffect(() => {
+    if (!open || !receiptLayout || isEditMode || !referencesLoaded || !form.referenceAutomatic) {
+      return;
+    }
+    setForm((prev) => {
+      const nextReference = computeNextReceiptReference(existingReferences, prev.date);
+      if (prev.reference === nextReference) return prev;
+      return { ...prev, reference: nextReference };
+    });
+  }, [
+    open,
+    receiptLayout,
+    isEditMode,
+    referencesLoaded,
+    existingReferences,
+    form.referenceAutomatic,
+    form.date,
+  ]);
+
+  useEffect(() => {
+    if (!open) {
+      setExistingPaymentVrNos([]);
+      setPaymentVrNosLoaded(false);
+      return undefined;
+    }
+    if (!paymentLayout || isEditMode) return undefined;
+
+    let cancelled = false;
+
+    const loadExistingPaymentVrNos = async () => {
+      try {
+        const vrNos = await fetchPaymentVrNos(paymentsApi);
+        if (!cancelled) {
+          setExistingPaymentVrNos(vrNos);
+          setPaymentVrNosLoaded(true);
+        }
+      } catch (error) {
+        console.error("Error loading payment Vr Nos:", error);
+        if (!cancelled) {
+          setExistingPaymentVrNos([]);
+          setPaymentVrNosLoaded(true);
+        }
+      }
+    };
+
+    loadExistingPaymentVrNos();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, paymentLayout, isEditMode]);
+
+  useEffect(() => {
+    if (!open || !paymentLayout || isEditMode || !paymentVrNosLoaded) return;
+    setForm((prev) => {
+      const nextVrNo = computeNextPaymentVrNo(existingPaymentVrNos, prev.date);
+      if (prev.vrNo === nextVrNo) return prev;
+      return { ...prev, vrNo: nextVrNo };
+    });
+  }, [open, paymentLayout, isEditMode, paymentVrNosLoaded, existingPaymentVrNos, form.date]);
+
+  useEffect(() => {
+    if (!open || !paymentLayout || !initialData) return;
+    if (form.receivedInCoaId !== "" && form.receivedInCoaId != null) return;
+    const ledgerId = form.cashAndBankAccountId || initialData.cashAndBankAccountId;
+    if (ledgerId === "" || ledgerId == null) return;
+    const ledger = cashAndBankOptions.find((option) => Number(option.id) === Number(ledgerId));
+    if (!ledger) return;
+    const coaId = ledger?.coaId ?? ledger?.CoaId;
+    if (coaId == null || coaId === "") return;
+    setForm((prev) => ({
+      ...prev,
+      cashAndBankAccountId: String(ledgerId),
+      receivedInCoaId: String(coaId),
+    }));
+  }, [
+    open,
+    paymentLayout,
+    initialData,
+    cashAndBankOptions,
+    form.cashAndBankAccountId,
+    form.receivedInCoaId,
+  ]);
+
+  useEffect(() => {
+    if (!open || !receiptLayout || !initialData) return;
+    if (form.cashAndBankAccountId !== "" && form.cashAndBankAccountId != null) return;
+    const savedCoaId = initialData.receivedInCoaId ?? initialData.payeePartyId;
+    if (savedCoaId === "" || savedCoaId == null) return;
+    const ledger = cashAndBankOptions.find((option) => Number(option.coaId) === Number(savedCoaId));
+    if (!ledger?.id) return;
+    setForm((prev) => ({
+      ...prev,
+      cashAndBankAccountId: String(ledger.id),
+      receivedInCoaId: String(savedCoaId),
+    }));
+  }, [open, receiptLayout, initialData, cashAndBankOptions, form.cashAndBankAccountId]);
+
+  const grandTotal = useMemo(() => {
+    if (paymentLayout && paymentSimplifiedLines) {
+      return (form.lines || []).reduce((sum, line) => {
+        const account = findLineAccountOption(lineAccountOptions, line);
+        const mode = getReceiptLineModeFromAccountOption(account) || RECEIPT_LINE_MODES.ACCOUNT_QTY;
+        return sum + computePaymentGrandTotal([line], mode);
+      }, 0);
+    }
+    if (paymentLayout) return computePaymentGrandTotal(form.lines, paymentLineMode);
+    if (receiptLayout && receiptSimplifiedLines) {
+      return (form.lines || []).reduce((sum, line) => {
+        const account = findLineAccountOption(lineAccountOptions, line);
+        const mode = getReceiptLineModeFromAccountOption(account) || RECEIPT_LINE_MODES.ACCOUNT_QTY;
+        return sum + computeReceiptGrandTotal([line], mode);
+      }, 0);
+    }
+    if (receiptLayout && receiptLineMode && receiptLineMode !== RECEIPT_LINE_MODES.LEGACY) {
+      return computeReceiptGrandTotal(form.lines, receiptLineMode);
+    }
+    return computeGrandTotal(form.lines);
+  }, [
+    form.lines,
+    paymentLayout,
+    paymentSimplifiedLines,
+    paymentLineMode,
+    receiptLayout,
+    receiptSimplifiedLines,
+    receiptLineMode,
+    lineAccountOptions,
+  ]);
 
   const receiptContractOptions = useMemo(
     () => buildReceiptContractOptions(contractRows),
     [contractRows]
   );
 
+  const displayPartyOptions = useMemo(
+    () => enrichTenantPartyOptionsWithContracts(partyOptions, contractRows),
+    [partyOptions, contractRows]
+  );
+
   const selectedPayeeOptions = useMemo(() => {
-    if (receiptLayout) return partyOptions;
+    if (receiptLayout) return [];
     const contactType = normalizeContactType(form.payeeContactType);
     return partyOptions.filter((option) => option.type === contactType || contactType === "Other");
   }, [partyOptions, form.payeeContactType, receiptLayout]);
 
   const allPartyOptionsByKey = useMemo(() => {
     const map = new Map();
-    partyOptions.forEach((option) => map.set(option.value, option));
+    displayPartyOptions.forEach((option) => map.set(option.value, option));
+    partyOptions.forEach((option) => {
+      if (!map.has(option.value)) map.set(option.value, option);
+    });
     return map;
-  }, [partyOptions]);
+  }, [displayPartyOptions, partyOptions]);
 
   const invoiceRowsByKey = useMemo(() => {
     const map = new Map();
@@ -491,6 +948,17 @@ export default function ReceiptForm({
     collectionRows.forEach((entry) => {
       const key = buildInvoiceKey(entry);
       if (key && !map.has(key)) map.set(key, entry);
+    });
+    return map;
+  }, [collectionRows]);
+
+  const collectionEntriesById = useMemo(() => {
+    const map = new Map();
+    collectionRows.forEach((entry) => {
+      const id = String(entry?.id ?? entry?.Id ?? "").trim();
+      if (!id) return;
+      map.set(id, entry);
+      map.set(buildReceiptCollectionEntryOptionValue(id), entry);
     });
     return map;
   }, [collectionRows]);
@@ -540,81 +1008,235 @@ export default function ReceiptForm({
   );
 
   useEffect(() => {
-    if (!open || !selectedPayeeParty || !selectedPayeeAccount) return;
+    if (!open || paymentLayout || receiptLayout || !selectedPayeeParty || !selectedPayeeAccount)
+      return;
     setForm((prev) => ({
       ...prev,
       lines: applyPayeeAccountToLines(selectedPayeeParty, selectedPayeeAccount, prev.lines),
     }));
-  }, [open, selectedPayeeParty, selectedPayeeAccount, applyPayeeAccountToLines]);
+  }, [
+    open,
+    paymentLayout,
+    receiptLayout,
+    selectedPayeeParty,
+    selectedPayeeAccount,
+    applyPayeeAccountToLines,
+  ]);
 
-  const getLinePartyOptions = (line) => {
-    const account = findLineAccountOption(lineAccountOptions, line);
-    const selectedControlAccount = String(account?.controlAccount || "")
-      .trim()
-      .toLowerCase();
-    const linked = partyOptions.filter(
-      (party) =>
-        selectedControlAccount &&
-        String(party.coaControlAccount || "")
-          .trim()
-          .toLowerCase() === selectedControlAccount
-    );
-    return linked.length ? linked : [];
-  };
+  const getLineAccountOptions = useCallback(
+    (line) => {
+      if (paymentSimplifiedLines) {
+        return filterReceiptPartyControlAccountOptions(lineAccountOptions);
+      }
+      if (receiptSimplifiedLines) {
+        return filterReceiptPartyControlAccountOptions(lineAccountOptions);
+      }
+      if ((!receiptLayout && !paymentLayout) || !form.receiptPartyType) return lineAccountOptions;
+      return filterReceiptLineAccountOptions(lineAccountOptions, form.receiptPartyType);
+    },
+    [
+      receiptSimplifiedLines,
+      paymentSimplifiedLines,
+      receiptLayout,
+      paymentLayout,
+      form.receiptPartyType,
+      lineAccountOptions,
+    ]
+  );
 
-  const getLineInvoiceOptions = (line) => {
-    const party = allPartyOptionsByKey.get(line?.partyKey);
-    if (!party) return [];
-    const selectedInvoiceKey = normalizeReceiptInvoiceKey(line).toLowerCase();
-    const byKey = new Map();
-    collectionRows.forEach((entry) => {
-      if (!partyMatchesCollectionEntry(party, entry)) return;
-      const key = buildInvoiceKey(entry);
-      if (key && !byKey.has(key)) byKey.set(key, entry);
-    });
-    return Array.from(byKey.values())
-      .filter((entry) => {
-        const lineContractNo = String(line?.contractNo || "").trim();
-        if (!lineContractNo) return true;
-        const entryContractNo = String(
-          pickCollectionField(entry, "contractNo", "ContractNo") || ""
-        ).trim();
-        return entryContractNo.toLowerCase() === lineContractNo.toLowerCase();
-      })
-      .filter((entry) => {
-        const key = buildInvoiceKey(entry);
-        const normalizedKey = String(key || "").toLowerCase();
-        return (
-          !normalizedKey ||
-          normalizedKey === selectedInvoiceKey ||
-          !unavailableInvoiceKeySet.has(normalizedKey)
-        );
-      })
-      .map((entry) => {
-        const key = buildInvoiceKey(entry);
-        const invoice = invoiceRowsByKey.get(key);
-        const openAmount = getCollectionEntryOpenAmount(entry, invoice);
-        const label = invoice
-          ? formatInvoiceLabel(invoice)
-          : [entry.invoiceNo, entry.contractNo].filter(Boolean).join("-");
-        return {
-          value: key,
-          label: openAmount > 0 ? `${label} - Balance ${formatAmount(openAmount)}` : label,
-        };
+  const unavailableCollectionEntryIds = useMemo(() => new Set(), []);
+
+  const buildCollectionPartyOptions = useCallback(
+    (line) => {
+      const account = findLineAccountOption(lineAccountOptions, line);
+      if (!account || !isCollectionAccountCoaOption(account)) return null;
+
+      const selectedCollectionEntryId =
+        parseReceiptCollectionEntryOptionValue(line.partyKey) ||
+        String(line.collectionEntryId || "").trim();
+
+      const selectedOnOtherLines = new Set(
+        (form.lines || [])
+          .filter((row) => row.id !== line.id)
+          .map(
+            (row) =>
+              parseReceiptCollectionEntryOptionValue(row.partyKey) ||
+              String(row.collectionEntryId || "").trim()
+          )
+          .filter(Boolean)
+          .map(String)
+      );
+
+      return buildReceiptLineCollectionTenantOptions(collectionRows, account, {
+        selectedCollectionEntryId,
+        unavailableCollectionEntryIds: new Set([
+          ...unavailableCollectionEntryIds,
+          ...selectedOnOtherLines,
+        ]),
       });
-  };
+    },
+    [collectionRows, form.lines, lineAccountOptions, unavailableCollectionEntryIds]
+  );
+
+  const getLinePartyOptions = useCallback(
+    (line) => {
+      if (!String(line?.account || "").trim() && !String(line?.accountCoaId || "").trim()) {
+        return [];
+      }
+
+      const collectionPartyOptions = buildCollectionPartyOptions(line);
+      if (collectionPartyOptions) return collectionPartyOptions;
+
+      if (paymentSimplifiedLines || receiptSimplifiedLines) {
+        return filterPaymentLinePartyOptions(displayPartyOptions, line, lineAccountOptions);
+      }
+
+      const account = findLineAccountOption(lineAccountOptions, line);
+      const partyType = form.receiptPartyType;
+
+      if (receiptLayout || paymentLayout) {
+        if (!partyType) return [];
+        const mode = getReceiptLineMode(partyType);
+        if (!isReceiptInvoiceMode(mode)) return [];
+        return filterReceiptLineEntityPartyOptions(displayPartyOptions, partyType, account);
+      }
+      const selectedControlAccount = String(account?.controlAccount || "")
+        .trim()
+        .toLowerCase();
+      let linked = partyOptions.filter(
+        (party) =>
+          selectedControlAccount &&
+          String(party.coaControlAccount || "")
+            .trim()
+            .toLowerCase() === selectedControlAccount
+      );
+      return linked.length ? linked : [];
+    },
+    [
+      buildCollectionPartyOptions,
+      receiptSimplifiedLines,
+      paymentSimplifiedLines,
+      receiptLayout,
+      paymentLayout,
+      form.receiptPartyType,
+      lineAccountOptions,
+      displayPartyOptions,
+      partyOptions,
+    ]
+  );
+
+  const getLineInvoiceOptions = useCallback(
+    (line) => {
+      if (!String(line?.account || "").trim() && !String(line?.accountCoaId || "").trim()) {
+        return [];
+      }
+      if (!line?.partyKey) return [];
+
+      const selectedCollectionEntryId =
+        parseReceiptCollectionEntryOptionValue(line.partyKey) ||
+        parseReceiptCollectionEntryOptionValue(line.invoiceKey) ||
+        String(line.collectionEntryId || "").trim();
+
+      const selectedOnOtherLines = new Set(
+        (form.lines || [])
+          .filter((row) => row.id !== line.id)
+          .map(
+            (row) =>
+              parseReceiptCollectionEntryOptionValue(row.invoiceKey) ||
+              parseReceiptCollectionEntryOptionValue(row.partyKey) ||
+              String(row.collectionEntryId || "").trim()
+          )
+          .filter(Boolean)
+          .map(String)
+      );
+
+      const collectionPartyEntry = collectionEntriesById.get(line.partyKey);
+      if (collectionPartyEntry) {
+        const party = buildSyntheticPartyFromCollectionEntry(collectionPartyEntry);
+        return buildReceiptLineCollectionInvoiceOptions(collectionRows, party, {
+          selectedCollectionEntryId,
+          unavailableCollectionEntryIds: new Set([
+            ...unavailableCollectionEntryIds,
+            ...selectedOnOtherLines,
+          ]),
+        }).map(({ value, label }) => ({ value, label }));
+      }
+
+      const party = allPartyOptionsByKey.get(line.partyKey);
+      if (!party || String(party?.type || line?.partyType || "").trim() !== "Tenant") return [];
+
+      return buildReceiptLineCollectionInvoiceOptions(collectionRows, party, {
+        selectedCollectionEntryId,
+        unavailableCollectionEntryIds: new Set([
+          ...unavailableCollectionEntryIds,
+          ...selectedOnOtherLines,
+        ]),
+      }).map(({ value, label }) => ({ value, label }));
+    },
+    [
+      allPartyOptionsByKey,
+      collectionEntriesById,
+      collectionRows,
+      form.lines,
+      unavailableCollectionEntryIds,
+    ]
+  );
 
   const updateHeader = (field, value) => {
+    if (paymentLayout && !isEditMode && field === "vrNo") return;
+    if (receiptLayout && field === "reference") {
+      setForm((prev) => {
+        if (prev.referenceAutomatic) return prev;
+        return { ...prev, reference: value };
+      });
+      return;
+    }
     setForm((prev) => {
       const next = { ...prev, [field]: value };
       if (field === "referenceAutomatic") {
-        next.reference = value ? "Automatic" : "";
+        if (receiptLayout) {
+          next.reference = value ? computeNextReceiptReference(existingReferences, prev.date) : "";
+        } else {
+          next.reference = value ? "Automatic" : "";
+        }
       }
-      if (field === "payeeContactType" && !receiptLayout) {
-        next.payeePartyKey = "";
-        next.payeePartyId = "";
-        next.payeePartyCode = "";
-        next.payeeName = "";
+      if (field === "payeeContactType") {
+        if (paymentLayout) {
+          next.lines = [];
+        } else if (!receiptLayout) {
+          next.payeePartyKey = "";
+          next.payeePartyId = "";
+          next.payeePartyCode = "";
+          next.payeeName = "";
+        }
+      }
+      if (field === "receivedInCoaId") {
+        const account = findLineAccountOption(receivedInAccountOptions, value);
+        const ledgerId = account?.cashAndBankAccountId ?? account?.id ?? value;
+        const coaId = account?.coaId ?? value;
+        next.cashAndBankAccountId = ledgerId !== "" && ledgerId != null ? String(ledgerId) : "";
+        next.receivedInCoaId = coaId !== "" && coaId != null ? String(coaId) : "";
+        if (receiptLayout) {
+          next.payeePartyId = coaId !== "" && coaId != null ? String(coaId) : "";
+          next.payeePartyCode = account?.acctId ?? "";
+          next.payeeName = account?.label || account?.acctName || "";
+          next.payeeContactType = "";
+          next.payeePartyKey = "";
+          next.lines = [];
+        }
+        if (paymentLayout) {
+          next.receivedFromAccountLabel = account?.label || "";
+          next.paidFrom = account?.label || "";
+          next.cashAndBankAccountId =
+            ledgerId !== "" && ledgerId != null
+              ? String(ledgerId)
+              : String(resolveCashAndBankAccountIdFromSelection(value, cashAndBankOptions) ?? "");
+          next.lines = [];
+        }
+      }
+      if (field === "receiptPartyType") {
+        next.receiptPartyType = value;
+        next.lines = [];
       }
       if (field === "payeePartyKey") {
         const party = allPartyOptionsByKey.get(value);
@@ -641,7 +1263,24 @@ export default function ReceiptForm({
 
   const updateLine = (lineId, field, value) => {
     setForm((prev) => {
-      if (field === "invoiceKey" && receiptLayout) {
+      const targetLine = prev.lines.find((line) => line.id === lineId);
+      const resolvePaymentMode = (line, accountValue) => {
+        if (!paymentLayout) return null;
+        if (paymentSimplifiedLines) {
+          const lookupLine =
+            field === "account" ? { accountCoaId: accountValue, account: accountValue } : line;
+          return getReceiptLineModeFromAccountOption(
+            findLineAccountOption(lineAccountOptions, lookupLine)
+          );
+        }
+        return getReceiptLineMode(prev.receiptPartyType);
+      };
+      const mode = resolvePaymentMode(targetLine, value);
+
+      if (
+        field === "invoiceKey" &&
+        (receiptLayout || (paymentLayout && isPaymentInvoiceMode(mode)))
+      ) {
         return {
           ...prev,
           lines: applyReceiptLineInvoiceSelection(prev.lines, lineId, value, {
@@ -657,11 +1296,11 @@ export default function ReceiptForm({
         ...prev,
         lines: prev.lines.map((line) => {
           if (line.id !== lineId) return line;
-          const updated = { ...line, [field]: value };
+          let updated = { ...line, [field]: value };
           if (field === "account") {
             const account = findLineAccountOption(lineAccountOptions, value);
             updated.accountCoaId = String(account?.coaId || account?.id || "");
-            updated.account = account?.label || "";
+            updated.account = formatLineAccountDropdownLabel(account) || account?.label || "";
             updated.partyKey = "";
             updated.partyType = "";
             updated.partyId = "";
@@ -673,20 +1312,36 @@ export default function ReceiptForm({
             updated.contractNo = "";
             updated.invoiceNo = "";
             updated.collectionEntryId = "";
+            updated.amount = "";
+            updated.tinTrn = "";
           }
           if (field === "partyKey") {
+            const collectionEntryId = parseReceiptCollectionEntryOptionValue(value);
+            if (collectionEntryId) {
+              const entry = collectionEntriesById.get(collectionEntryId);
+              if (entry) {
+                return applyReceiptLinePartyFromCollectionEntry(updated, entry, {
+                  duplicateTenantBusiness: true,
+                });
+              }
+            }
             const party = allPartyOptionsByKey.get(value);
             updated.partyType = party?.type || "";
             updated.partyId = party?.id || "";
             updated.partyCode = party?.code || "";
             updated.partyName = party?.name || "";
             updated.partyLabel = party?.label || "";
+            if (party?.type === "Account" && party?.coaId) {
+              updated.partyId = String(party.coaId);
+            }
             if (!updated.tinTrn && party?.tinTrn) updated.tinTrn = party.tinTrn;
-            updated.contractId = "";
+            updated.contractId = party?.contractId || "";
+            updated.contractNo = party?.contractNo || "";
             updated.invoiceKey = "";
-            updated.contractNo = "";
             updated.invoiceNo = "";
             updated.collectionEntryId = "";
+            updated.amount = "";
+            updated.tinTrn = "";
           }
           if (field === "contractId") {
             const contract = receiptContractOptions.find(
@@ -700,7 +1355,8 @@ export default function ReceiptForm({
           }
           if (field === "invoiceKey") {
             const invoice = invoiceRowsByKey.get(value);
-            const collectionEntry = collectionRowsByKey.get(value);
+            const collectionEntry =
+              collectionEntriesById.get(value) || collectionRowsByKey.get(value);
             updated.contractNo =
               pickCollectionField(invoice, "contractNo", "ContractNo") ||
               pickCollectionField(collectionEntry, "contractNo", "ContractNo");
@@ -712,7 +1368,76 @@ export default function ReceiptForm({
               updated.amount = balance > 0 ? String(balance) : updated.amount;
             }
           }
-          if (["amount", "quantity", "discount", "tax", "invoiceKey"].includes(field)) {
+          if (field === "productKey" && (paymentLayout || receiptLayout)) {
+            const product = productOptions.find((option) => option.value === value);
+            updated.productKey = value;
+            updated.productType = product?.productType || "";
+            updated.productId = product?.productId || "";
+            updated.item = product?.label || "";
+            const defaultPrice =
+              product?.defaultUnitPrice != null && product.defaultUnitPrice !== ""
+                ? String(product.defaultUnitPrice)
+                : "";
+            if (defaultPrice) {
+              if (
+                receiptLayout &&
+                (receiptLineMode === RECEIPT_LINE_MODES.ACCOUNT_QTY ||
+                  receiptLineMode === RECEIPT_LINE_MODES.ITEM_BASED)
+              ) {
+                updated.unitPrice = defaultPrice;
+              } else if (!String(updated.amount || "").trim()) {
+                updated.amount = defaultPrice;
+              }
+            }
+            const resolveAccount = paymentLayout
+              ? resolveProductAccountOption
+              : resolveReceiptProductAccountOption;
+            const account = resolveAccount(product, lineAccountOptions);
+            if (account) {
+              updated.account = account.label || "";
+              updated.accountCoaId = String(account.coaId || account.id || "");
+            }
+          }
+          if (paymentLayout && mode) {
+            const lineMode =
+              paymentSimplifiedLines && field === "account"
+                ? getReceiptLineModeFromAccountOption(
+                    findLineAccountOption(lineAccountOptions, updated)
+                  ) || mode
+                : mode;
+            if (
+              ["quantity", "unitPrice", "productKey", "amount", "invoiceKey", "account"].includes(
+                field
+              )
+            ) {
+              updated = syncPaymentLineAmount(updated, lineMode);
+            }
+          } else if (
+            receiptLayout &&
+            receiptLineMode &&
+            receiptLineMode !== RECEIPT_LINE_MODES.LEGACY
+          ) {
+            const lineMode = receiptSimplifiedLines
+              ? getReceiptLineModeFromAccountOption(
+                  findLineAccountOption(lineAccountOptions, updated)
+                )
+              : receiptLineMode;
+            if (
+              lineMode &&
+              [
+                "quantity",
+                "unitPrice",
+                "amount",
+                "discount",
+                "tax",
+                "invoiceKey",
+                "productKey",
+                "account",
+              ].includes(field)
+            ) {
+              updated = syncReceiptLineAmount(updated, lineMode);
+            }
+          } else if (["amount", "quantity", "discount", "tax", "invoiceKey"].includes(field)) {
             updated.total = computeLineTotal(updated);
           }
           return updated;
@@ -721,17 +1446,46 @@ export default function ReceiptForm({
     });
   };
 
+  const isPaymentFormLineComplete = useCallback(
+    (line) => {
+      if (paymentSimplifiedLines) {
+        return isPaymentSimplifiedLineComplete(line);
+      }
+      return isPaymentLineComplete(line, paymentLineMode);
+    },
+    [paymentSimplifiedLines, lineAccountOptions, paymentLineMode]
+  );
+
+  const isReceiptFormLineComplete = useCallback(
+    (line) => {
+      if (receiptSimplifiedLines) {
+        const account = findLineAccountOption(lineAccountOptions, line);
+        const mode = getReceiptLineModeFromAccountOption(account);
+        if (!mode) return Boolean(String(line.account || "").trim());
+        return isReceiptLayoutLineComplete(line, mode);
+      }
+      if (receiptLayout && receiptLineMode && receiptLineMode !== RECEIPT_LINE_MODES.LEGACY) {
+        return isReceiptLayoutLineComplete(line, receiptLineMode);
+      }
+      return isReceiptLineComplete(line, {
+        requireItem: !receiptLayout,
+        requireAccount: !receiptLayout,
+      });
+    },
+    [receiptSimplifiedLines, lineAccountOptions, receiptLayout, receiptLineMode]
+  );
+
   const handleAddLine = () => {
     setForm((prev) => {
       const { lines } = prev;
-      if (
-        lines.length > 0 &&
-        !lines.every((line) => isReceiptLineComplete(line, { requireItem: !receiptLayout }))
-      ) {
+      const lineCompleteCheck = paymentLayout
+        ? (line) => isPaymentFormLineComplete(line)
+        : (line) => isReceiptFormLineComplete(line);
+      if (lines.length > 0 && !lines.every(lineCompleteCheck)) {
         return prev;
       }
       const nextLine =
-        selectedPayeeParty && selectedPayeeAccount
+        !paymentLayout && selectedPayeeParty && selectedPayeeAccount
           ? applyPayeeAccountToLines(selectedPayeeParty, selectedPayeeAccount, [createLineRow()])[0]
           : createLineRow();
       return { ...prev, lines: [...lines, nextLine] };
@@ -741,7 +1495,10 @@ export default function ReceiptForm({
   const handleDuplicateLine = (lineId) => {
     setForm((prev) => {
       const source = prev.lines.find((line) => line.id === lineId);
-      if (!source || !isReceiptLineComplete(source, { requireItem: !receiptLayout })) return prev;
+      const lineCompleteCheck = paymentLayout
+        ? (line) => isPaymentFormLineComplete(line)
+        : (line) => isReceiptFormLineComplete(line);
+      if (!source || !lineCompleteCheck(source)) return prev;
       const duplicate = normalizeReceiptLineNumericDefaults({
         ...source,
         id: createLineRow().id,
@@ -760,62 +1517,171 @@ export default function ReceiptForm({
     }));
   };
 
+  const totalAttachmentSlots = existingFiles.length + selectedFiles.length;
+
   const handleFileSelect = (event) => {
     const list = event.target?.files ? Array.from(event.target.files) : [];
     if (!list.length) return;
-    setForm((prev) => {
-      const existing = prev.attachments || [];
-      const remaining = MAX_ATTACHMENT_FILES - existing.length;
-      if (remaining <= 0) {
-        window.alert(`Maximum ${MAX_ATTACHMENT_FILES} files allowed.`);
-        return prev;
+
+    const remaining = MAX_ATTACHMENT_FILES - totalAttachmentSlots;
+    if (remaining <= 0) {
+      window.alert(
+        `Maximum ${MAX_ATTACHMENT_FILES} files allowed. Please delete some existing files before uploading new ones.`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    if (list.length > remaining) {
+      window.alert(
+        `You can only upload ${remaining} more file(s). Maximum ${MAX_ATTACHMENT_FILES} files allowed (${existingFiles.length} already uploaded).`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    const validFiles = list.filter((file) => {
+      if (file.size > TRANSACTION_ATTACHMENT_MAX_BYTES) {
+        window.alert(`File "${file.name}" exceeds 10MB limit and will be skipped.`);
+        return false;
       }
-      const accepted = list.slice(0, remaining).map((file) => ({
-        id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name,
-        size: file.size,
-        file,
-      }));
-      return { ...prev, attachments: [...existing, ...accepted] };
+      return true;
     });
-    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (totalAttachmentSlots + validFiles.length > MAX_ATTACHMENT_FILES) {
+      const allowedCount = MAX_ATTACHMENT_FILES - totalAttachmentSlots;
+      window.alert(
+        `You can only upload ${allowedCount} more file(s). Maximum ${MAX_ATTACHMENT_FILES} files allowed (${existingFiles.length} already uploaded).`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    setSelectedFiles((prev) => [...prev, ...validFiles]);
+    event.target.value = "";
   };
 
-  const handleRemoveAttachment = (fileId) => {
-    setForm((prev) => ({
-      ...prev,
-      attachments: (prev.attachments || []).filter((f) => f.id !== fileId),
-    }));
+  const handleRemoveSelectedFile = (index) => {
+    setSelectedFiles((prev) => {
+      const next = [...prev];
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
+  const handleDeleteExistingFile = async (file) => {
+    const fileId = file?.id || file?.fileId;
+    if (!fileId) {
+      window.alert("File ID is not available. Cannot delete this file.");
+      return;
+    }
+    if (!window.confirm(`Delete "${file.fileName || file.name || "this file"}"?`)) return;
+    try {
+      await uploadApi.deleteUploadedFile(fileId);
+      if (initialData?.id) await fetchExistingFiles(initialData.id);
+      onUploadSuccess?.(initialData?.id);
+    } catch (error) {
+      console.error("Failed to delete attachment:", error);
+      window.alert(error?.message || "Failed to delete file.");
+    }
   };
 
   const handleSave = async () => {
-    const validationErrors = validateReceiptForm(
-      form,
-      labels,
-      showMonthField,
-      receiptLayout,
-      unavailableInvoiceKeySet
-    );
+    let formForSave = form;
+    if (receiptLayout && !isEditMode && form.referenceAutomatic) {
+      try {
+        const freshReferences = await fetchReceiptReferences(receiptsApi);
+        const nextReference = computeNextReceiptReference(freshReferences, form.date);
+        formForSave = { ...form, reference: nextReference };
+        setExistingReferences(freshReferences);
+        setForm(formForSave);
+      } catch (error) {
+        console.error("Error refreshing receipt references:", error);
+      }
+    }
+    if (paymentLayout && !isEditMode) {
+      try {
+        const freshVrNos = await fetchPaymentVrNos(paymentsApi);
+        const nextVrNo = computeNextPaymentVrNo(freshVrNos, form.date);
+        formForSave = { ...form, vrNo: nextVrNo };
+        setExistingPaymentVrNos(freshVrNos);
+        setForm(formForSave);
+      } catch (error) {
+        console.error("Error refreshing payment Vr Nos:", error);
+      }
+    }
+
+    const formForValidation = paymentLayout
+      ? {
+          ...formForSave,
+          cashAndBankOptions,
+          cashAndBankAccountId:
+            resolveCashAndBankAccountIdFromSelection(
+              formForSave.cashAndBankAccountId || formForSave.receivedInCoaId,
+              cashAndBankOptions
+            ) ?? formForSave.cashAndBankAccountId,
+        }
+      : formForSave;
+    const validationErrors = paymentLayout
+      ? validatePaymentForm(formForValidation, labels, lineAccountOptions, activeLockDate)
+      : validateReceiptForm(
+          formForSave,
+          labels,
+          showMonthField,
+          receiptLayout,
+          lineAccountOptions,
+          activeLockDate
+        );
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
-      const hasDuplicateInvoice = Object.keys(validationErrors).some((key) =>
-        key.endsWith("-invoice")
-      );
-      window.alert(
-        hasDuplicateInvoice
-          ? "One or more selected invoices already have an active receipt."
-          : "Please complete all required fields before saving."
-      );
+      window.alert("Please complete all required fields before saving.");
       return;
     }
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        grandTotal,
-        lines: form.lines.map((line) => normalizeReceiptLineNumericDefaults(line)),
-      };
-      await onSubmit?.(payload);
+      const payload = paymentLayout
+        ? {
+            ...formForValidation,
+            grandTotal,
+            lines: form.lines.map((line) => normalizeReceiptLineNumericDefaults(line)),
+          }
+        : {
+            ...formForSave,
+            grandTotal,
+            lines: formForSave.lines.map((line) => normalizeReceiptLineNumericDefaults(line)),
+          };
+      const result = await onSubmit?.(payload);
+      const savedId = initialData?.id ?? result?.id;
+      if (receiptLayout && savedId) {
+        try {
+          await syncReceiptLinkedCollectionEntries({
+            receiptId: savedId,
+            reference: formForSave.reference,
+            date: formForSave.date,
+            lines: formForSave.lines,
+            collectionRows,
+          });
+        } catch (error) {
+          console.error("Failed to update linked collection entries:", error);
+          window.alert(
+            "Receipt saved, but failed to update linked collection invoice records (Vr No / Vr Date / Status)."
+          );
+        }
+      }
+      if (savedId && selectedFiles.length > 0) {
+        setIsUploading(true);
+        try {
+          await uploadTransactionAttachments(savedId, uploadFormName, selectedFiles);
+          setSelectedFiles([]);
+          onUploadSuccess?.(savedId);
+        } catch (error) {
+          console.error("Error uploading files:", error);
+          window.alert(`Failed to upload files: ${error.message}`);
+          return;
+        } finally {
+          setIsUploading(false);
+        }
+      }
       onClose?.();
     } finally {
       setSaving(false);
@@ -837,7 +1703,7 @@ export default function ReceiptForm({
         helperText={errors.payeeName}
         sx={{ flex: 1, minWidth: 200, ...textFieldSx }}
       />
-    ) : (
+    ) : !receiptLayout ? (
       <FormControl
         size="small"
         error={Boolean(errors.payeeName)}
@@ -855,9 +1721,7 @@ export default function ReceiptForm({
           disabled={readOnly}
         >
           <MenuItem value="">
-            <em>
-              Select {receiptLayout ? "party" : formatContactTypeLabel(form.payeeContactType)}
-            </em>
+            <em>Select {formatContactTypeLabel(form.payeeContactType)}</em>
           </MenuItem>
           {selectedPayeeOptions.map((option) => (
             <MenuItem key={option.value} value={option.value}>
@@ -871,20 +1735,9 @@ export default function ReceiptForm({
           </Typography>
         ) : null}
       </FormControl>
-    );
+    ) : null;
 
-  const contactTypeField = receiptLayout ? (
-    <TextField
-      label="Contact"
-      value={form.payeeContactType}
-      onChange={(e) => updateHeader("payeeContactType", e.target.value)}
-      disabled={readOnly}
-      size="small"
-      placeholder="Contact"
-      InputLabelProps={{ shrink: true }}
-      sx={{ flex: 1, minWidth: 160, ...textFieldSx }}
-    />
-  ) : (
+  const contactTypeField = !receiptLayout ? (
     <FormControl size="small" sx={{ minWidth: 140, ...textFieldSx }}>
       <InputLabel id="receipt-contact-label">Contact</InputLabel>
       <SearchableSelect
@@ -901,56 +1754,239 @@ export default function ReceiptForm({
         ))}
       </SearchableSelect>
     </FormControl>
+  ) : null;
+
+  const receiptReferenceMd = receiptLayout
+    ? 4
+    : receiptSimplifiedLines
+    ? scaleGridColumns(4)
+    : scaleGridColumns(3);
+  const receiptReceivedInMd = receiptLayout
+    ? 4
+    : receiptSimplifiedLines
+    ? scaleGridColumns(4)
+    : scaleGridColumns(3);
+
+  const referenceSection = (mdCol = 4) => (
+    <Grid item xs={12} sm={receiptLayout ? 4 : 6} md={mdCol}>
+      <MDBox display="flex" alignItems="center" gap={1}>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={Boolean(form.referenceAutomatic)}
+              onChange={(e) => updateHeader("referenceAutomatic", e.target.checked)}
+              size="small"
+              disabled={readOnly}
+            />
+          }
+          label="Reference"
+          sx={{
+            mr: 0,
+            whiteSpace: "nowrap",
+            ...(receiptLayout ? { "& .MuiFormControlLabel-label": { fontSize: "0.8125rem" } } : {}),
+          }}
+        />
+        <TextField
+          fullWidth
+          value={form.reference}
+          onChange={
+            receiptLayout && form.referenceAutomatic
+              ? undefined
+              : (e) => updateHeader("reference", e.target.value)
+          }
+          disabled={readOnly || saving || form.referenceAutomatic}
+          InputProps={{ readOnly: receiptLayout && form.referenceAutomatic }}
+          size="small"
+          placeholder={
+            receiptLayout
+              ? `${RECEIPT_REFERENCE_PREFIX}-1/${getReceiptYearFromDate(form.date)}`
+              : "Reference"
+          }
+          sx={receiptLayout && form.referenceAutomatic ? readOnlyDarkTextFieldSx : textFieldSx}
+        />
+      </MDBox>
+    </Grid>
   );
 
-  const payeeSection = (
+  const partyTypeDropdownSection = (
+    <Grid item xs={12} sm={6} md={paymentLayout ? 3 : receiptLayout ? 2 : 4}>
+      <FormControl fullWidth size="small" error={Boolean(errors.receiptPartyType)}>
+        <InputLabel id="party-type-label" shrink>
+          Party
+        </InputLabel>
+        <SearchableSelect
+          labelId="party-type-label"
+          label="Party"
+          value={form.receiptPartyType || ""}
+          displayEmpty
+          onChange={(e) => updateHeader("receiptPartyType", e.target.value)}
+          disabled={
+            readOnly ||
+            !(paymentLayout ? selectedPaymentReceivedFromAccount : selectedReceivedInAccount)
+          }
+          sx={textFieldSx}
+        >
+          <MenuItem value="">
+            <em>Select party type</em>
+          </MenuItem>
+          {RECEIPT_PARTY_TYPES.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              {option.label}
+            </MenuItem>
+          ))}
+        </SearchableSelect>
+        {errors.receiptPartyType ? (
+          <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+            {errors.receiptPartyType}
+          </Typography>
+        ) : null}
+      </FormControl>
+    </Grid>
+  );
+
+  const receiptReceivedInSection = (
+    <Grid
+      item
+      xs={12}
+      sm={receiptLayout ? 4 : 6}
+      md={receiptLayout ? receiptReceivedInMd : receiptSimplifiedLines ? 4 : 3}
+    >
+      <FormControl
+        fullWidth
+        size="small"
+        error={Boolean(errors.receivedInCoaId || errors.payeeName)}
+      >
+        <InputLabel id="receipt-received-in-label" shrink>
+          {labels.payeeSection || "Received In"}
+        </InputLabel>
+        <SearchableSelect
+          labelId="receipt-received-in-label"
+          label={labels.payeeSection || "Received In"}
+          value={getReceivedInSelectValue(form)}
+          displayEmpty
+          onChange={(e) => updateHeader("receivedInCoaId", e.target.value)}
+          disabled={readOnly}
+          renderValue={(selected) => {
+            const selectedValue = String(selected ?? "");
+            if (!selectedValue) return "";
+            const option = findLineAccountOption(receivedInAccountOptions, selectedValue);
+            return option?.label || selectedValue;
+          }}
+          sx={textFieldSx}
+        >
+          <MenuItem value="">
+            <em>Select account</em>
+          </MenuItem>
+          {receivedInAccountOptions.map((option) => (
+            <MenuItem key={option.value} value={String(option.value)}>
+              {option.label}
+            </MenuItem>
+          ))}
+        </SearchableSelect>
+        {errors.receivedInCoaId || errors.payeeName ? (
+          <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+            {errors.receivedInCoaId || errors.payeeName}
+          </Typography>
+        ) : null}
+      </FormControl>
+    </Grid>
+  );
+
+  const paymentReceivedFromSection = (
+    <Grid item xs={12} sm={6} md={3}>
+      <FormControl fullWidth size="small" error={Boolean(errors.receivedInCoaId)}>
+        <InputLabel id="payment-received-from-label" shrink>
+          {labels.paidFrom}
+        </InputLabel>
+        <SearchableSelect
+          labelId="payment-received-from-label"
+          label={labels.paidFrom}
+          value={getReceivedInSelectValue(form)}
+          displayEmpty
+          onChange={(e) => updateHeader("receivedInCoaId", e.target.value)}
+          disabled={readOnly}
+          renderValue={(selected) => {
+            const selectedValue = String(selected ?? "");
+            if (!selectedValue) return "";
+            const option = findLineAccountOption(receivedInAccountOptions, selectedValue);
+            return option?.label || selectedValue;
+          }}
+          sx={textFieldSx}
+        >
+          <MenuItem value="">
+            <em>Select account</em>
+          </MenuItem>
+          {receivedInAccountOptions.map((option) => (
+            <MenuItem key={option.value} value={String(option.value)}>
+              {option.label}
+            </MenuItem>
+          ))}
+        </SearchableSelect>
+        {errors.receivedInCoaId ? (
+          <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+            {errors.receivedInCoaId}
+          </Typography>
+        ) : null}
+      </FormControl>
+    </Grid>
+  );
+
+  const payeeSection = !receiptLayout ? (
     <Grid item xs={12} md={8}>
       <MDTypography variant="caption" fontWeight="bold" display="block" mb={0.5}>
         {labels.payeeSection}
       </MDTypography>
       <MDBox display="flex" gap={1} flexWrap="wrap">
-        {receiptLayout ? (
-          <>
-            {payeeNameField}
-            {contactTypeField}
-          </>
-        ) : (
-          <>
-            {contactTypeField}
-            {payeeNameField}
-          </>
-        )}
+        {contactTypeField}
+        {payeeNameField}
       </MDBox>
     </Grid>
-  );
+  ) : null;
 
-  const paidFromSection = (
-    <Grid item xs={12} sm={6} md={3}>
-      <FormControl fullWidth size="small" error={Boolean(errors.paidFrom)}>
-        <InputLabel id="receipt-paid-by-label" shrink>
-          {labels.paidFrom}
-        </InputLabel>
-        <SearchableSelect
-          labelId="receipt-paid-by-label"
+  const paidFromSection = (mdCol = receiptLayout ? 2 : 3) =>
+    receiptLayout ? (
+      <Grid item xs={12} sm={6} md={mdCol}>
+        <TextField
+          fullWidth
           label={labels.paidFrom}
           value={form.paidFrom}
-          displayEmpty
           onChange={(e) => updateHeader("paidFrom", e.target.value)}
           disabled={readOnly}
+          size="small"
+          placeholder={labels.paidFrom}
+          InputLabelProps={{ shrink: true }}
+          error={Boolean(errors.paidFrom)}
+          helperText={errors.paidFrom}
           sx={textFieldSx}
-        >
-          <MenuItem value="">
-            <em>Account</em>
-          </MenuItem>
-          {PAID_FROM_ACCOUNTS.map((name) => (
-            <MenuItem key={name} value={name}>
-              {name}
+        />
+      </Grid>
+    ) : (
+      <Grid item xs={12} sm={6} md={mdCol}>
+        <FormControl fullWidth size="small" error={Boolean(errors.paidFrom)}>
+          <InputLabel id="receipt-paid-by-label" shrink>
+            {labels.paidFrom}
+          </InputLabel>
+          <SearchableSelect
+            labelId="receipt-paid-by-label"
+            label={labels.paidFrom}
+            value={form.paidFrom}
+            displayEmpty
+            onChange={(e) => updateHeader("paidFrom", e.target.value)}
+            disabled={readOnly}
+            sx={textFieldSx}
+          >
+            <MenuItem value="">
+              <em>Account</em>
             </MenuItem>
-          ))}
-        </SearchableSelect>
-      </FormControl>
-    </Grid>
-  );
+            {PAID_FROM_ACCOUNTS.map((name) => (
+              <MenuItem key={name} value={name}>
+                {name}
+              </MenuItem>
+            ))}
+          </SearchableSelect>
+        </FormControl>
+      </Grid>
+    );
 
   return (
     <Dialog
@@ -965,19 +2001,22 @@ export default function ReceiptForm({
       <DialogTitle sx={{ color: "#344767", pb: 1 }}>
         {readOnly
           ? labels.viewFormTitle || "View Receipt"
+          : isFormLockedByDate
+          ? labels.viewFormTitle || "View Receipt"
           : isEditMode
           ? labels.editFormTitle
           : labels.addFormTitle}
       </DialogTitle>
       <DialogContent dividers>
         <Grid container spacing={2} sx={{ mb: 2 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            {receiptLayout ? (
+          <Grid item xs={12} sm={receiptLayout ? 4 : 6} md={receiptLayout ? 4 : 3}>
+            {receiptLayout || paymentLayout ? (
               <ReceiptDateField
                 value={form.date}
                 onChange={(nextValue) => updateHeader("date", nextValue)}
-                disabled={readOnly}
-                readOnly={readOnly}
+                disabled={formReadOnly}
+                readOnly={formReadOnly}
+                min={minDateAfterLock}
                 error={Boolean(errors.date)}
                 helperText={errors.date}
               />
@@ -1014,74 +2053,157 @@ export default function ReceiptForm({
               />
             </Grid>
           ) : null}
-          <Grid item xs={12} sm={6} md={4}>
-            <MDBox display="flex" alignItems="center" gap={1}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={Boolean(form.referenceAutomatic)}
-                    onChange={(e) => updateHeader("referenceAutomatic", e.target.checked)}
-                    size="small"
-                    disabled={readOnly}
-                  />
-                }
-                label="Reference"
-                sx={{ mr: 0, whiteSpace: "nowrap" }}
-              />
-              <TextField
-                fullWidth
-                value={form.reference}
-                onChange={(e) => updateHeader("reference", e.target.value)}
-                disabled={readOnly || form.referenceAutomatic}
-                size="small"
-                placeholder="Reference"
-                sx={textFieldSx}
-              />
-            </MDBox>
-          </Grid>
-          {receiptLayout ? (
+          {paymentLayout ? (
             <>
-              {payeeSection}
-              {paidFromSection}
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  fullWidth
+                  label={labels.vrNo || "Vr No"}
+                  value={form.vrNo || ""}
+                  onChange={
+                    paymentLayout && !isEditMode
+                      ? undefined
+                      : (e) => updateHeader("vrNo", e.target.value)
+                  }
+                  disabled={readOnly || saving || (paymentLayout && !isEditMode)}
+                  InputLabelProps={{ shrink: true }}
+                  size="small"
+                  placeholder={`${PAYMENT_VR_NO_PREFIX}-1/${getPaymentYearFromDate(form.date)}`}
+                  InputProps={{ readOnly: paymentLayout && !isEditMode }}
+                  error={Boolean(errors.vrNo)}
+                  helperText={errors.vrNo}
+                  sx={paymentLayout && !isEditMode ? paymentVrNoFieldSx : textFieldSx}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  fullWidth
+                  label={labels.payeePlaceholder || "Paid To"}
+                  value={form.payeeName}
+                  onChange={(e) => updateHeader("payeeName", e.target.value)}
+                  disabled={readOnly}
+                  InputLabelProps={{ shrink: true }}
+                  size="small"
+                  error={Boolean(errors.payeeName)}
+                  helperText={errors.payeeName}
+                  sx={textFieldSx}
+                />
+              </Grid>
+              {paymentReceivedFromSection}
             </>
           ) : (
             <>
-              {paidFromSection}
-              {payeeSection}
+              {receiptLayout ? (
+                <>
+                  {referenceSection(receiptReferenceMd)}
+                  {receiptReceivedInSection}
+                  {!receiptSimplifiedLines ? partyTypeDropdownSection : null}
+                </>
+              ) : (
+                <>
+                  {referenceSection(4)}
+                  {paidFromSection()}
+                  {payeeSection}
+                </>
+              )}
             </>
           )}
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Description"
-              value={form.description}
-              onChange={(e) => updateHeader("description", e.target.value)}
-              disabled={readOnly}
-              size="small"
-              placeholder="Optional"
-              sx={textFieldSx}
-            />
-          </Grid>
+          {receiptLayout ? (
+            <>
+              {paidFromSection(6)}
+              <Grid item xs={12} sm={6} md={6}>
+                <TextField
+                  fullWidth
+                  label="Description"
+                  value={form.description}
+                  onChange={(e) => updateHeader("description", e.target.value)}
+                  disabled={readOnly}
+                  size="small"
+                  placeholder="Optional"
+                  sx={textFieldSx}
+                />
+              </Grid>
+            </>
+          ) : (
+            <Grid item xs={12} md={12}>
+              <TextField
+                fullWidth
+                label="Description"
+                value={form.description}
+                onChange={(e) => updateHeader("description", e.target.value)}
+                disabled={readOnly}
+                size="small"
+                placeholder="Optional"
+                sx={textFieldSx}
+              />
+            </Grid>
+          )}
         </Grid>
 
         <MDBox sx={{ mb: 2 }}>
-          <ReceiptLinesGrid
-            lines={form.lines}
-            accountOptions={lineAccountOptions}
-            getLinePartyOptions={getLinePartyOptions}
-            contractOptions={receiptContractOptions}
-            getLineInvoiceOptions={getLineInvoiceOptions}
-            errors={errors}
-            saving={saving}
-            grandTotal={grandTotal}
-            accountReadOnly={Boolean(selectedPayeeAccount)}
-            readOnly={readOnly}
-            showContractColumn={receiptLayout}
-            onLineChange={updateLine}
-            onAddLine={handleAddLine}
-            onDuplicateLine={handleDuplicateLine}
-            onDeleteLine={handleDeleteLine}
-          />
+          {paymentLayout ? (
+            showPaymentLinesGrid ? (
+              <PaymentLinesGrid
+                lines={form.lines}
+                paymentLineMode={paymentLineMode}
+                partyType={form.receiptPartyType}
+                simplified={paymentSimplifiedLines}
+                accountOptions={lineAccountOptions}
+                getLineAccountOptions={getLineAccountOptions}
+                getLinePartyOptions={getLinePartyOptions}
+                getLineInvoiceOptions={getLineInvoiceOptions}
+                productOptions={productOptions}
+                errors={errors}
+                saving={saving}
+                grandTotal={grandTotal}
+                readOnly={readOnly}
+                onLineChange={updateLine}
+                onAddLine={handleAddLine}
+                onDuplicateLine={handleDuplicateLine}
+                onDeleteLine={handleDeleteLine}
+              />
+            ) : (
+              <MDTypography variant="caption" color="text">
+                Select Received In to load line items.
+              </MDTypography>
+            )
+          ) : showReceiptLinesGrid ? (
+            <ReceiptLinesGrid
+              lines={form.lines}
+              receiptLineMode={
+                receiptLayout && receiptLineMode !== RECEIPT_LINE_MODES.LEGACY
+                  ? receiptLineMode
+                  : undefined
+              }
+              receiptPartyType={form.receiptPartyType}
+              receiptSimplifiedLines={receiptSimplifiedLines}
+              accountOptions={lineAccountOptions}
+              getLineAccountOptions={getLineAccountOptions}
+              getLinePartyOptions={getLinePartyOptions}
+              contractOptions={receiptContractOptions}
+              getLineInvoiceOptions={getLineInvoiceOptions}
+              productOptions={productOptions}
+              errors={errors}
+              saving={saving}
+              grandTotal={grandTotal}
+              accountReadOnly={!receiptLayout && Boolean(selectedPayeeAccount)}
+              readOnly={readOnly}
+              showContractColumn={!receiptLayout}
+              hideAccountColumn={false}
+              requireLineAccount
+              requireLineItem={receiptLayout ? false : undefined}
+              onLineChange={updateLine}
+              onAddLine={handleAddLine}
+              onDuplicateLine={handleDuplicateLine}
+              onDeleteLine={handleDeleteLine}
+            />
+          ) : (
+            <MDTypography variant="caption" color="text">
+              {receiptSimplifiedLines
+                ? "Select Received In to load line items."
+                : "Select Received In and Party to load line items."}
+            </MDTypography>
+          )}
         </MDBox>
 
         <MDBox
@@ -1094,40 +2216,87 @@ export default function ReceiptForm({
           }}
         >
           <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1 }}>
-            Attachments (max {MAX_ATTACHMENT_FILES} files)
+            Attachments (max {MAX_ATTACHMENT_FILES} files total)
           </Typography>
-          <input
-            ref={fileInputRef}
-            accept="*/*"
-            style={{ display: "none" }}
-            id="receipt-attachment-file-input"
-            type="file"
-            multiple
-            onChange={handleFileSelect}
-            disabled={readOnly || (form.attachments || []).length >= MAX_ATTACHMENT_FILES}
-          />
-          {!readOnly ? (
-            <label htmlFor="receipt-attachment-file-input">
-              <MDButton
-                variant="gradient"
-                color="info"
-                component="span"
-                size="small"
-                disabled={(form.attachments || []).length >= MAX_ATTACHMENT_FILES}
-                sx={{ mb: 1 }}
-              >
-                <Icon>cloud_upload</Icon>&nbsp; Add files ({(form.attachments || []).length}/
-                {MAX_ATTACHMENT_FILES})
-              </MDButton>
-            </label>
+
+          {isEditMode ? (
+            loadingExistingFiles ? (
+              <MDBox display="flex" justifyContent="center" py={1}>
+                <CurrencyLoading size={20} />
+              </MDBox>
+            ) : existingFiles.length > 0 ? (
+              <MDBox mb={2}>
+                <Typography variant="caption" color="text" display="block" sx={{ mb: 1 }}>
+                  Already uploaded files ({existingFiles.length}/{MAX_ATTACHMENT_FILES}):
+                </Typography>
+                {existingFiles.map((file, index) => (
+                  <Chip
+                    key={file.id || file.fileName || index}
+                    label={file.fileName || `File ${index + 1}`}
+                    onDelete={
+                      readOnly || !canDeleteCurrentMenu()
+                        ? undefined
+                        : () => handleDeleteExistingFile(file)
+                    }
+                    size="small"
+                    sx={{ mr: 0.5, mb: 0.5 }}
+                    variant="outlined"
+                  />
+                ))}
+              </MDBox>
+            ) : null
           ) : null}
-          {(form.attachments || []).length > 0 && (
+
+          {!readOnly ? (
+            totalAttachmentSlots >= MAX_ATTACHMENT_FILES ? (
+              <Typography variant="caption" color="warning.main" display="block" sx={{ mb: 1 }}>
+                Maximum {MAX_ATTACHMENT_FILES} files already uploaded. Delete existing files to
+                upload new ones.
+              </Typography>
+            ) : (
+              <>
+                <input
+                  ref={fileInputRef}
+                  accept="*/*"
+                  style={{ display: "none" }}
+                  id="receipt-attachment-file-input"
+                  type="file"
+                  multiple
+                  onChange={handleFileSelect}
+                  disabled={saving || isUploading || totalAttachmentSlots >= MAX_ATTACHMENT_FILES}
+                />
+                <label htmlFor="receipt-attachment-file-input">
+                  <MDButton
+                    variant="gradient"
+                    color="info"
+                    component="span"
+                    size="small"
+                    disabled={saving || isUploading || totalAttachmentSlots >= MAX_ATTACHMENT_FILES}
+                    sx={{ mb: 1 }}
+                  >
+                    <Icon>cloud_upload</Icon>&nbsp; Upload Files ({totalAttachmentSlots}/
+                    {MAX_ATTACHMENT_FILES})
+                  </MDButton>
+                </label>
+                {totalAttachmentSlots < MAX_ATTACHMENT_FILES ? (
+                  <Typography variant="caption" color="text" display="block">
+                    You can upload {MAX_ATTACHMENT_FILES - totalAttachmentSlots} more file(s).
+                  </Typography>
+                ) : null}
+              </>
+            )
+          ) : null}
+
+          {selectedFiles.length > 0 ? (
             <Box mt={1}>
-              {(form.attachments || []).map((file) => (
+              <Typography variant="caption" color="text" display="block" sx={{ mb: 0.5 }}>
+                New files to upload:
+              </Typography>
+              {selectedFiles.map((file, index) => (
                 <Chip
-                  key={file.id}
+                  key={`${file.name}-${index}`}
                   label={`${file.name} (${formatFileSize(file.size)})`}
-                  onDelete={readOnly ? undefined : () => handleRemoveAttachment(file.id)}
+                  onDelete={readOnly ? undefined : () => handleRemoveSelectedFile(index)}
                   deleteIcon={<Icon fontSize="small">cancel</Icon>}
                   size="small"
                   sx={{ mr: 0.5, mb: 0.5 }}
@@ -1136,16 +2305,30 @@ export default function ReceiptForm({
                 />
               ))}
             </Box>
-          )}
+          ) : selectedFiles.length === 0 && existingFiles.length === 0 ? (
+            <Typography variant="caption" color="text" display="block" sx={{ mt: 1 }}>
+              No files selected. Click &quot;Upload Files&quot; to add attachments.
+            </Typography>
+          ) : null}
         </MDBox>
       </DialogContent>
       <DialogActions>
-        <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={saving}>
+        <MDButton
+          variant="outlined"
+          color="secondary"
+          onClick={onClose}
+          disabled={saving || isUploading}
+        >
           <Icon>close</Icon>&nbsp;Cancel
         </MDButton>
-        {!readOnly ? (
-          <MDButton variant="gradient" color="info" onClick={handleSave} disabled={saving}>
-            <Icon>save</Icon>&nbsp;{saving ? "Saving…" : "Save"}
+        {!formReadOnly ? (
+          <MDButton
+            variant="gradient"
+            color="info"
+            onClick={handleSave}
+            disabled={saving || isUploading}
+          >
+            <Icon>save</Icon>&nbsp;{saving || isUploading ? "Saving…" : "Save"}
           </MDButton>
         ) : null}
       </DialogActions>
@@ -1161,8 +2344,10 @@ ReceiptForm.propTypes = {
   labels: PropTypes.object,
   showMonthField: PropTypes.bool,
   receiptLayout: PropTypes.bool,
+  paymentLayout: PropTypes.bool,
   readOnly: PropTypes.bool,
-  unavailableInvoiceKeys: PropTypes.arrayOf(PropTypes.string),
+  onUploadSuccess: PropTypes.func,
+  activeLockDate: PropTypes.string,
 };
 
 ReceiptForm.defaultProps = {
@@ -1171,6 +2356,8 @@ ReceiptForm.defaultProps = {
   labels: PAYMENTS_LABELS,
   showMonthField: false,
   receiptLayout: false,
+  paymentLayout: false,
   readOnly: false,
-  unavailableInvoiceKeys: [],
+  onUploadSuccess: undefined,
+  activeLockDate: "",
 };

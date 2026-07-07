@@ -1,3 +1,5 @@
+import { formatPartyStatusLabel, normalizePartyStatus } from "utils/partyStatusUtils";
+
 export const PREFIX_OPTIONS = [
   { value: "M/s", label: "M/s" },
   { value: "Mr", label: "Mr" },
@@ -96,6 +98,8 @@ export function parseSupplierCode(code, prefixOptions = []) {
 
 export function buildSupplierFormState(overrides = {}) {
   return {
+    dealerId: "",
+    dealerName: "",
     code: "",
     codeAlpha: "",
     codeNumeric: "",
@@ -110,9 +114,11 @@ export function buildSupplierFormState(overrides = {}) {
     telNo: "",
     mobileNo: "",
     coaId: "",
+    coaId2: "",
     representative: "",
     bankListsId: "",
     iban: "",
+    status: true,
     ...overrides,
   };
 }
@@ -124,6 +130,8 @@ export function normalizeSupplierRecord(row, prefixOptions = []) {
   const normalizedCode = buildSupplierCode(parsed.codeAlpha, parsed.codeNumeric) || code;
   return buildSupplierFormState({
     id: row.id ?? row.Id,
+    dealerId: row.dealerId ?? row.DealerId ?? "",
+    dealerName: row.dealerName ?? row.DealerName ?? row.name ?? row.Name ?? "",
     code: normalizedCode,
     codeAlpha: parsed.codeAlpha,
     codeNumeric: parsed.codeNumeric,
@@ -138,9 +146,11 @@ export function normalizeSupplierRecord(row, prefixOptions = []) {
     telNo: row.telNo ?? row.TelNo ?? "",
     mobileNo: row.mobileNo ?? row.MobileNo ?? "",
     coaId: row.coaId ?? row.CoaId ?? "",
+    coaId2: row.coaId2 ?? row.CoaId2 ?? "",
     representative: row.representative ?? row.Representative ?? "",
     bankListsId: row.bankListsId ?? row.BankListsId ?? "",
     iban: row.iban ?? row.IBAN ?? "",
+    status: normalizePartyStatus(row.status ?? row.Status),
   });
 }
 
@@ -152,17 +162,16 @@ export function stripSupplierForClone(record, prefixOptions = []) {
 
 export function validateSupplierForm(form) {
   const errors = {};
-  const codeAlpha = String(form.codeAlpha || "").trim();
-  const codeNumeric = String(form.codeNumeric || "").replace(/\D/g, "");
 
-  if (!codeAlpha) errors.codeAlpha = "Code prefix is required";
-  if (!codeNumeric) errors.codeNumeric = "Code number is required";
-  else if (!/^\d{1,6}$/.test(codeNumeric)) {
-    errors.codeNumeric = "Code number must be 1 to 6 digits";
+  if (form.dealerId === "" || form.dealerId == null) {
+    errors.dealerId = "Dealer is required";
+    errors.code = "Select an active dealer";
   }
 
-  const combinedCode = buildSupplierCode(codeAlpha, codeNumeric);
-  if (!combinedCode) errors.code = "Code is required";
+  const combinedCode = buildSupplierCode(form.codeAlpha, form.codeNumeric);
+  if (!combinedCode && !errors.code) {
+    errors.code = "Code is required";
+  }
 
   if (!form.name?.trim()) errors.name = "Name is required";
   if (!form.address?.trim()) errors.address = "Address is required";
@@ -170,7 +179,16 @@ export function validateSupplierForm(form) {
   if (!form.city?.trim()) errors.city = "City is required";
   if (!form.ntnCnic?.trim()) errors.ntnCnic = "NTN / CNIC is required";
   if (form.coaId === "" || form.coaId == null) {
-    errors.coaId = "Control Account is required";
+    errors.coaId = "Payable CA is required";
+  }
+  if (form.coaId2 === "" || form.coaId2 == null) {
+    errors.coaId2 = "Receipt CA is required";
+  } else if (
+    form.coaId !== "" &&
+    form.coaId != null &&
+    Number(form.coaId) === Number(form.coaId2)
+  ) {
+    errors.coaId2 = "Receipt CA must differ from Payable CA";
   }
   return errors;
 }
@@ -180,6 +198,8 @@ export function buildSupplierPayload(form) {
   return {
     Code: code,
     code,
+    DealerId: form.dealerId !== "" && form.dealerId != null ? Number(form.dealerId) : null,
+    dealerId: form.dealerId !== "" && form.dealerId != null ? Number(form.dealerId) : null,
     Prefix: form.prefix || null,
     prefix: form.prefix || null,
     Rank: form.rank || null,
@@ -202,6 +222,8 @@ export function buildSupplierPayload(form) {
     mobileNo: form.mobileNo || null,
     CoaId: form.coaId !== "" && form.coaId != null ? Number(form.coaId) : null,
     coaId: form.coaId !== "" && form.coaId != null ? Number(form.coaId) : null,
+    CoaId2: form.coaId2 !== "" && form.coaId2 != null ? Number(form.coaId2) : null,
+    coaId2: form.coaId2 !== "" && form.coaId2 != null ? Number(form.coaId2) : null,
     Representative: form.representative || null,
     representative: form.representative || null,
     BankListsId:
@@ -210,6 +232,8 @@ export function buildSupplierPayload(form) {
       form.bankListsId !== "" && form.bankListsId != null ? Number(form.bankListsId) : null,
     IBAN: String(form.iban || "").trim() || null,
     iban: String(form.iban || "").trim() || null,
+    Status: normalizePartyStatus(form.status),
+    status: normalizePartyStatus(form.status),
   };
 }
 
@@ -217,6 +241,8 @@ export function flattenSupplierForGrid(record, index, coaLabelById = {}) {
   const normalized = normalizeSupplierRecord(record);
   const coaId = normalized.coaId;
   const coaLabel = coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
+  const coaId2 = normalized.coaId2;
+  const coaLabel2 = coaId2 !== "" && coaId2 != null ? coaLabelById[Number(coaId2)] || "-" : "-";
 
   return {
     id: normalized.id,
@@ -224,6 +250,8 @@ export function flattenSupplierForGrid(record, index, coaLabelById = {}) {
     code: normalized.code || "-",
     prefix: normalized.prefix || "-",
     rank: normalized.rank || "-",
+    status: formatPartyStatusLabel(normalized.status),
+    statusRaw: normalized.status,
     name: normalized.name || "-",
     address: normalized.address || "-",
     province: getProvinceLabel(normalized.province),
@@ -233,6 +261,7 @@ export function flattenSupplierForGrid(record, index, coaLabelById = {}) {
     telNo: normalized.telNo || "-",
     mobileNo: normalized.mobileNo || "-",
     controlAccount: coaLabel,
+    controlAccount2: coaLabel2,
     representative: normalized.representative || "-",
     _record: normalized,
   };

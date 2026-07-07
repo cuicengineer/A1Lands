@@ -44,6 +44,10 @@ import api, {
 import uploadApi from "services/api.upload.service";
 import rentalValueRateApi from "services/api.rentalvaluerate.service";
 import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
+import {
+  getBasePrefix,
+  getRacPrefix,
+} from "layouts/configuration/rental-properties/rentalPropertyId";
 import { format, parseISO, isValid } from "date-fns";
 
 const CONFIG_GRID_APPLICATION_DATE_FALLBACK_KEYS = {
@@ -63,6 +67,22 @@ const RENTAL_VALUE_RATE_GROUPING_COLUMN_OPTIONS = [
   { value: "description", label: "Description" },
   { value: "status", label: "Status" },
 ];
+
+function resolveRentalValueRateRacLabel(commandRow, fallback = "") {
+  if (commandRow) {
+    const rac = getRacPrefix(commandRow);
+    if (rac) return rac;
+  }
+  return String(fallback || "").trim() || "-";
+}
+
+function resolveRentalValueRateBaseShortCode(baseRow, fallback = "") {
+  if (baseRow) {
+    const shortCode = getBasePrefix(baseRow);
+    if (shortCode) return shortCode;
+  }
+  return String(fallback || "").trim() || "-";
+}
 
 function parseConfigGridApplicationDateYyyyMmDd(row, columnId) {
   let raw = row?.values?.[columnId];
@@ -1827,10 +1847,17 @@ export default function RentalValueRate() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
+        // eslint-disable-next-line react/prop-types
+        if (row?.original?.isGroupRow) {
+          return value || "-";
+        }
         const cmdId = row?.original?.cmdId ?? row?.original?.CmdId ?? null;
-        if (!cmdId) return withGridValueChip(value || "-", "rac", { row });
-        const cmdItem = commands.find((c) => Number(c.id) === Number(cmdId));
-        return withGridValueChip(cmdItem ? cmdItem.name : value || "-", "rac", { row });
+        const cmdItem = cmdId ? commands.find((c) => Number(c.id) === Number(cmdId)) : null;
+        const label = resolveRentalValueRateRacLabel(
+          cmdItem,
+          value || row?.original?.cmdName || row?.original?.CmdName || ""
+        );
+        return withGridValueChip(label, "rac", { row });
       },
     },
     {
@@ -1844,9 +1871,12 @@ export default function RentalValueRate() {
           return value || "-";
         }
         const baseId = row?.original?.baseId ?? row?.original?.BaseId ?? null;
-        if (!baseId) return withGridValueChip(value || "-", "base", { row });
-        const baseItem = bases.find((b) => Number(b.id) === Number(baseId));
-        return withGridValueChip(baseItem ? baseItem.name : value || "-", "base", { row });
+        const baseItem = baseId ? bases.find((b) => Number(b.id) === Number(baseId)) : null;
+        const label = resolveRentalValueRateBaseShortCode(
+          baseItem,
+          value || row?.original?.baseName || row?.original?.BaseName || ""
+        );
+        return withGridValueChip(label, "base", { row });
       },
     },
     {
@@ -1990,8 +2020,14 @@ export default function RentalValueRate() {
         cmdId: cmdId,
         baseId: baseId,
         classId: classId,
-        cmdName: cmdItem?.name ?? row.cmdName ?? row.CmdName ?? row.cmdname ?? "",
-        baseName: baseItem?.name ?? row.baseName ?? row.BaseName ?? row.basename ?? "",
+        cmdName: resolveRentalValueRateRacLabel(
+          cmdItem,
+          row.cmdName ?? row.CmdName ?? row.cmdname ?? ""
+        ),
+        baseName: resolveRentalValueRateBaseShortCode(
+          baseItem,
+          row.baseName ?? row.BaseName ?? row.basename ?? ""
+        ),
         className: classItem?.name ?? row.className ?? row.ClassName ?? row.classname ?? "",
         rate: row.rate ?? row.Rate ?? 0,
         description: row.description ?? row.Description ?? "",

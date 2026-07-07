@@ -33,6 +33,19 @@ import PropTypes from "prop-types";
 import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import accountingSysApi from "services/api.accountingsys.service";
+import salesReturnsApi from "services/api.salesReturns.service";
+import {
+  buildInvoiceKey,
+  resolveCollectionTenantAccount,
+} from "layouts/income-agreements/collections/collectionsUtils";
+import SalesReturnForm from "layouts/income-agreements/sales-returns/SalesReturnForm";
+import {
+  buildSalesReturnPrefillFromAgreementProvInvoiceRow,
+  buildSalesReturnTotalsByInvoiceKey,
+  computeSalesReturnGrandTotal,
+  formatAmount,
+} from "layouts/income-agreements/sales-returns/salesReturnUtils";
+import { SALES_RETURNS_LABELS } from "layouts/income-agreements/transactionLabels";
 import AgreementDetailsDialog from "layouts/contracts/components/AgreementDetailsDialog";
 import {
   AGREEMENT_DETAILS_COLUMNS,
@@ -355,22 +368,29 @@ function readAgreementProvInvoiceUrlParams() {
         contractNo: String(params.get("contractNo") || "").trim(),
         invoiceNo: String(params.get("invoiceNo") || "").trim(),
         tenantNo: String(params.get("tenantNo") || "").trim(),
+        view: String(params.get("view") || "")
+          .trim()
+          .toLowerCase(),
       };
     } catch {
-      return { contractNo: "", invoiceNo: "", tenantNo: "" };
+      return { contractNo: "", invoiceNo: "", tenantNo: "", view: "" };
     }
   };
 
-  if (typeof window === "undefined") return { contractNo: "", invoiceNo: "", tenantNo: "" };
+  if (typeof window === "undefined") {
+    return { contractNo: "", invoiceNo: "", tenantNo: "", view: "" };
+  }
 
   const fromSearch = readFromSearch(window.location?.search || "");
-  if (fromSearch.contractNo || fromSearch.invoiceNo || fromSearch.tenantNo) return fromSearch;
+  if (fromSearch.contractNo || fromSearch.invoiceNo || fromSearch.tenantNo || fromSearch.view) {
+    return fromSearch;
+  }
 
   const hash = String(window.location?.hash || "");
   const queryIndex = hash.indexOf("?");
   if (queryIndex >= 0) return readFromSearch(hash.slice(queryIndex));
 
-  return { contractNo: "", invoiceNo: "", tenantNo: "" };
+  return { contractNo: "", invoiceNo: "", tenantNo: "", view: "" };
 }
 
 const EMPTY_AGREEMENT_PROV_FILTERS = {
@@ -461,6 +481,7 @@ function buildAgreementProvSearchApiFilters(filters, extra = {}) {
     ? String(contractNoRaw.contractNo || contractNoRaw.ContractNo || contractNoRaw).trim()
     : "";
   const invoiceNo = String(extra?.invoiceNo || "").trim();
+  const tenantNo = String(extra?.tenantNo || "").trim();
   return {
     ...(contractNo ? { contractNo } : {}),
     ...(filters?.dateFrom ? { fromDate: filters.dateFrom } : {}),
@@ -470,6 +491,7 @@ function buildAgreementProvSearchApiFilters(filters, extra = {}) {
       : {}),
     ...(filters?.base !== "" && filters?.base != null ? { baseId: Number(filters.base) } : {}),
     ...(invoiceNo ? { invoiceNo } : {}),
+    ...(tenantNo ? { tenantNo } : {}),
     isFinalized: true,
   };
 }
@@ -583,6 +605,18 @@ function isMainInvoiceScheduleRow(lineRow) {
 function findMainInvoiceScheduleRow(lines) {
   if (!Array.isArray(lines)) return null;
   return lines.find(isMainInvoiceScheduleRow) || null;
+}
+
+/** Tenant chart-of-account label (AcctId-AcctName) for agreement invoice Acc Head. */
+export function resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions) {
+  const { accountLabel } = resolveCollectionTenantAccount(contractRow, tenants, coaOptions);
+  return String(accountLabel || "").trim();
+}
+
+export function withInvoiceScheduleAccHead(payload, accHead) {
+  const value = String(accHead || "").trim();
+  if (!value) return payload || {};
+  return { ...(payload || {}), AccHead: value, accHead: value };
 }
 
 /** Header-level Description on invoice schedule (not line-item Desc). */
@@ -780,22 +814,40 @@ function buildEmptyDraftInvoiceAddForm(parentForm, parentRow, invoiceLinesRows) 
     parentForm?.dueDate ||
     toScheduleDateInputValue(pickScheduleRowField(parentRow || {}, "DueDate", "dueDate")) ||
     (invoiceDate ? addDaysToYyyyMmDd(invoiceDate, 9) : "");
-  const months =
-    parentForm?.months ?? pickScheduleRowField(parentRow || {}, "Months", "months") ?? "";
-  const desc = pickAgreementProvHeaderDescription(parentRow || {});
   return {
     invoiceDate,
     dueDate,
     sortOrder: String(suggestNextInvoiceSortOrder(invoiceLinesRows || [])),
     itemCode: "",
-    desc,
+    desc: "",
     accHead: "",
-    months: months === "" ? "" : String(months),
+    months: "",
     calculatedRentPM: "",
-    discountPercent: "",
+    discountPercent: "0",
     total: "",
     pendingSubInvoiceNo: suggestNextSubInvoiceNo(parentRow, parentForm, invoiceLinesRows || []),
   };
+}
+
+function buildDefaultMandatoryInvoiceLineDraft(parentForm, parentRow, invoiceLinesRows) {
+  const scheduleLines = mergeAllDraftsIntoWorkingInvoiceLines(
+    invoiceLinesRows || [],
+    [],
+    null,
+    parentForm,
+    parentRow
+  );
+  const base = buildEmptyDraftInvoiceAddForm(parentForm, parentRow, scheduleLines);
+  return {
+    ...base,
+    discountPercent: "0",
+    __draftId: createNewLineDraftId(),
+    __isDefaultMandatory: true,
+  };
+}
+
+function getInvoiceItemRecordRows(invoiceLinesRows) {
+  return (invoiceLinesRows || []).filter((row) => !isMainInvoiceScheduleRow(row));
 }
 
 function buildDuplicateDraftInvoiceAddForm(sourceLine, parentForm, parentRow, invoiceLinesRows) {
@@ -816,7 +868,9 @@ function buildDuplicateDraftInvoiceAddForm(sourceLine, parentForm, parentRow, in
     invoiceLinesRows || []
   );
   const discountPercent =
-    discountRaw === "" || discountRaw == null ? "" : sanitizeIntegerInputValue(String(discountRaw));
+    discountRaw === "" || discountRaw == null
+      ? "0"
+      : sanitizeIntegerInputValue(String(discountRaw));
   const monthsStr =
     months === "" || months == null ? "" : sanitizeIntegerInputValue(String(months));
   const calculatedRentPMStr =
@@ -840,6 +894,15 @@ function buildDuplicateDraftInvoiceAddForm(sourceLine, parentForm, parentRow, in
 
 function pickInvoiceLineSubInvoiceNo(lineRow) {
   return String(pickScheduleRowField(lineRow, "SubInvoiceNo", "subInvoiceNo") || "").trim();
+}
+
+function pickInvoiceLineDraftSubInvoiceNo(draftForm) {
+  return String(draftForm?.pendingSubInvoiceNo ?? draftForm?.editingSubInvoiceNo ?? "").trim();
+}
+
+function isInvoiceLineSubInvoiceOneOptionalFields(draftForm) {
+  if (draftForm?.__isDefaultMandatory) return true;
+  return pickInvoiceLineDraftSubInvoiceNo(draftForm) === "1";
 }
 
 /** Stable key for main-grid invoice rows (contract + invoice). */
@@ -873,14 +936,7 @@ function isInvoiceLineDraftEditing(lineRow, editingLineDraft) {
 
 function isInvoiceLineDraftEmpty(draft) {
   if (!draft) return true;
-  const fields = [
-    draft.itemCode,
-    draft.desc,
-    draft.accHead,
-    draft.months,
-    draft.calculatedRentPM,
-    draft.discountPercent,
-  ];
+  const fields = [draft.itemCode, draft.desc, draft.accHead, draft.months, draft.calculatedRentPM];
   return fields.every((v) => v === null || v === undefined || String(v).trim() === "");
 }
 
@@ -927,14 +983,16 @@ function validateInvoiceLineDraftTotal(draftForm) {
 function validateInvoiceLineDraftForm(draftForm, parentForm) {
   const invoiceDate = String(draftForm?.invoiceDate || parentForm?.invoiceDate || "").trim();
   if (!invoiceDate) return "Invoice Date is required.";
-  if (!isInvoiceLineDraftFieldFilled(draftForm?.itemCode)) {
-    return "Item with Code is required.";
+  if (!isInvoiceLineSubInvoiceOneOptionalFields(draftForm)) {
+    if (!isInvoiceLineDraftFieldFilled(draftForm?.itemCode)) {
+      return "Item with Code is required.";
+    }
+    if (!isInvoiceLineDraftFieldFilled(draftForm?.accHead)) {
+      return "Acc Head is required.";
+    }
   }
   if (!isInvoiceLineDraftFieldFilled(draftForm?.desc)) {
     return "Particular is required.";
-  }
-  if (!isInvoiceLineDraftFieldFilled(draftForm?.accHead)) {
-    return "Acc Head is required.";
   }
   if (!isInvoiceLineDraftFieldFilled(draftForm?.months)) {
     return "Quantity is required.";
@@ -942,10 +1000,7 @@ function validateInvoiceLineDraftForm(draftForm, parentForm) {
   if (!isInvoiceLineDraftFieldFilled(draftForm?.calculatedRentPM)) {
     return "Unit Price is required.";
   }
-  if (!isInvoiceLineDraftFieldFilled(draftForm?.discountPercent)) {
-    return "Discount % is required.";
-  }
-  const sub = String(draftForm?.pendingSubInvoiceNo ?? "").trim();
+  const sub = String(draftForm?.pendingSubInvoiceNo ?? draftForm?.editingSubInvoiceNo ?? "").trim();
   if (!sub) return "Sub Invoice is required.";
   const totalErr = validateInvoiceLineDraftTotal(draftForm);
   if (totalErr) return totalErr;
@@ -986,7 +1041,7 @@ function buildLocalLineRowFromDraft(draftForm, parentForm, parentRow) {
   const accHead = String(draftForm.accHead ?? "").trim();
   const months = toScheduleIntOrNull(draftForm.months);
   const calculatedRentPM = toScheduleNumberOrNull(draftForm.calculatedRentPM);
-  const discount = toScheduleIntOrNull(draftForm.discountPercent);
+  const discount = normalizeInvoiceLineDiscount(draftForm.discountPercent);
   const lineTotal =
     totalVal ??
     toScheduleNumberOrNull(draftForm.total) ??
@@ -1156,7 +1211,11 @@ function captureOriginalInvoiceLinePayloadSnapshots(lines, parentForm, parentRow
     if (!sub) return;
     const lineKey = getInvoiceLineDraftRowKey(line, idx);
     const addForm = buildInvoiceLineAddFormFromLine(line, parentForm, parentRow, lineKey);
-    const payload = buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm);
+    const payload = {
+      ...buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm),
+      SubInvoiceNo: sub,
+      subInvoiceNo: sub,
+    };
     snapshots.set(sub, JSON.stringify(payload));
   });
   return snapshots;
@@ -1195,6 +1254,35 @@ function mergeAllDraftsIntoWorkingInvoiceLines(
   return [...mainRows, ...itemRows];
 }
 
+function willPersistInvoiceItemLines({
+  invoiceLines,
+  pendingDeleteSubs,
+  newLineDrafts,
+  editingLineDraft,
+}) {
+  if ((pendingDeleteSubs || []).some((sub) => String(sub || "").trim())) return true;
+
+  if (editingLineDraft && !isInvoiceLineDraftEmpty(editingLineDraft)) {
+    if (pickInvoiceLineDraftSubInvoiceNo(editingLineDraft)) return true;
+  }
+
+  if (
+    (newLineDrafts || []).some(
+      (draft) => !isInvoiceLineDraftEmpty(draft) && pickInvoiceLineDraftSubInvoiceNo(draft)
+    )
+  ) {
+    return true;
+  }
+
+  const existingItemRows = (invoiceLines || []).filter((r) => !isMainInvoiceScheduleRow(r));
+  return existingItemRows.some((line) => {
+    const sub = pickInvoiceLineSubInvoiceNo(line);
+    if (!sub) return false;
+    if (line.__isNewLocal) return true;
+    return Boolean(line.__dirtyLocal);
+  });
+}
+
 async function persistAllInvoiceScheduleLines({
   rowData,
   form,
@@ -1202,7 +1290,6 @@ async function persistAllInvoiceScheduleLines({
   pendingDeleteSubs,
   newLineDrafts,
   editingLineDraft,
-  originalServerSubs,
   originalLinePayloadSnapshots,
 }) {
   const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form);
@@ -1218,11 +1305,20 @@ async function persistAllInvoiceScheduleLines({
     rowData,
   });
 
-  await contractApi.updateInvoiceSchedule(
-    contractNo,
-    invoiceNo,
-    buildInvoiceSchedulePutPayload(rowData, form)
-  );
+  const persistingItemLines = willPersistInvoiceItemLines({
+    invoiceLines,
+    pendingDeleteSubs,
+    newLineDrafts,
+    editingLineDraft,
+  });
+
+  if (!persistingItemLines) {
+    await contractApi.updateInvoiceSchedule(
+      contractNo,
+      invoiceNo,
+      buildInvoiceSchedulePutPayload(rowData, form)
+    );
+  }
 
   const deleteSubs = [
     ...new Set((pendingDeleteSubs || []).map((s) => String(s).trim()).filter(Boolean)),
@@ -1233,38 +1329,33 @@ async function persistAllInvoiceScheduleLines({
 
   const persistedSubs = new Set();
 
-  const persistLine = async (sub, addForm, isNew) => {
-    if (!sub || persistedSubs.has(sub)) return;
-    const payload = buildInvoiceScheduleCreatePayload(rowData, form, addForm);
-    if (isNew) {
-      await contractApi.createInvoiceSchedule(contractNo, invoiceNo, sub, payload);
-    } else {
-      const baselineKey = originalLinePayloadSnapshots?.get?.(sub);
-      if (baselineKey && baselineKey === JSON.stringify(payload)) return;
-      await contractApi.updateInvoiceScheduleSub(contractNo, invoiceNo, sub, payload);
-    }
-    persistedSubs.add(sub);
+  const persistLine = async (sub, addForm) => {
+    const normalizedSub = String(sub || "").trim();
+    if (!normalizedSub || persistedSubs.has(normalizedSub)) return;
+    const payload = {
+      ...buildInvoiceScheduleCreatePayload(rowData, form, addForm),
+      SubInvoiceNo: normalizedSub,
+      subInvoiceNo: normalizedSub,
+    };
+    const baselineKey = originalLinePayloadSnapshots?.get?.(normalizedSub);
+    if (baselineKey && baselineKey === JSON.stringify(payload)) return;
+    await contractApi.updateInvoiceScheduleSub(contractNo, invoiceNo, normalizedSub, payload);
+    persistedSubs.add(normalizedSub);
   };
 
   for (const draft of newLineDrafts || []) {
     if (isInvoiceLineDraftEmpty(draft)) continue;
-    const sub = String(draft.pendingSubInvoiceNo ?? draft.editingSubInvoiceNo ?? "").trim();
+    const sub = pickInvoiceLineDraftSubInvoiceNo(draft);
     if (!sub) continue;
-    await persistLine(sub, buildInvoiceLinePersistSourceFromDraft(draft, form, rowData), true);
+    await persistLine(sub, buildInvoiceLinePersistSourceFromDraft(draft, form, rowData));
   }
 
   if (editingLineDraft && !isInvoiceLineDraftEmpty(editingLineDraft)) {
-    const sub = String(
-      editingLineDraft.editingSubInvoiceNo ?? editingLineDraft.pendingSubInvoiceNo ?? ""
-    ).trim();
+    const sub = pickInvoiceLineDraftSubInvoiceNo(editingLineDraft);
     if (sub) {
-      const isNew =
-        Boolean(editingLineDraft.editingLineRow?.__isNewLocal) ||
-        !(originalServerSubs && originalServerSubs.has(sub));
       await persistLine(
         sub,
-        buildInvoiceLinePersistSourceFromDraft(editingLineDraft, form, rowData),
-        isNew
+        buildInvoiceLinePersistSourceFromDraft(editingLineDraft, form, rowData)
       );
     }
   }
@@ -1280,7 +1371,7 @@ async function persistAllInvoiceScheduleLines({
 
     const lineKey = getInvoiceLineDraftRowKey(line, idx);
     const addForm = buildInvoiceLineAddFormFromLine(line, form, rowData, lineKey);
-    await persistLine(sub, addForm, false);
+    await persistLine(sub, addForm);
   }
 }
 
@@ -1291,7 +1382,9 @@ function buildDraftInvoiceEditFormFromLine(lineRow, parentForm, parentRow, lineK
     pickScheduleRowField(lineRow, "Discount", "discount") ||
     pickScheduleRowField(lineRow, "DiscountPercent", "discountPercent");
   const discountPercent =
-    discountRaw === "" || discountRaw == null ? "" : sanitizeIntegerInputValue(String(discountRaw));
+    discountRaw === "" || discountRaw == null
+      ? "0"
+      : sanitizeIntegerInputValue(String(discountRaw));
   const monthsStr =
     months === "" || months == null ? "" : sanitizeIntegerInputValue(String(months));
   const calculatedRentPMStr =
@@ -1346,6 +1439,7 @@ function AgreementProvInvoiceLineDraftRow({
   onDraftCancel,
   onDuplicateLine,
   hasIncompleteNewLineDrafts,
+  disableCancel,
   saving,
 }) {
   const subLabel = draftForm.pendingSubInvoiceNo || "—";
@@ -1480,7 +1574,7 @@ function AgreementProvInvoiceLineDraftRow({
             <IconButton
               size="small"
               color="secondary"
-              disabled={saving}
+              disabled={saving || disableCancel}
               onClick={onDraftCancel}
               sx={{ padding: "2px" }}
             >
@@ -1503,6 +1597,7 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
   onDraftCancel: PropTypes.func.isRequired,
   onDuplicateLine: PropTypes.func,
   hasIncompleteNewLineDrafts: PropTypes.bool,
+  disableCancel: PropTypes.bool,
   saving: PropTypes.bool,
 };
 
@@ -1631,6 +1726,7 @@ function AgreementProvInvoiceLinesGrid({
               onDraftCancel={() => onDraftCancel?.(draftForm.__draftId)}
               onDuplicateLine={onDuplicateLine}
               hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+              disableCancel={Boolean(draftForm.__isDefaultMandatory)}
               saving={saving}
             />
           ))}
@@ -2491,6 +2587,7 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     src.discountPercent ??
     pickScheduleRowField(src, "DiscountPercent", "discountPercent") ??
     pickScheduleRowField(src, "Discount", "discount");
+  const discount = normalizeInvoiceLineDiscount(discountRaw);
   const itemCode = String(
     src.itemCode ??
       pickScheduleRowField(src, "ItemwithCode", "itemwithCode") ??
@@ -2517,11 +2614,17 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     computeInvoiceRecordLineTotal(
       src.months ?? pickScheduleRowField(src, "Months", "months"),
       src.calculatedRentPM ?? pickScheduleRowField(src, "CalculatedRentPM", "calculatedRentPM"),
-      discountRaw
+      discount
     );
   const totalRent =
     toScheduleNumberOrNull(pickScheduleRowField(src, "TotalRent", "totalRent") ?? src.totalRent) ??
     lineTotal;
+  const subInvoiceNo = String(
+    src.pendingSubInvoiceNo ??
+      src.editingSubInvoiceNo ??
+      pickScheduleRowField(src, "SubInvoiceNo", "subInvoiceNo") ??
+      ""
+  ).trim();
 
   return {
     ContractId: pickRowNumberField(parentRow, "ContractId", "contractId"),
@@ -2542,6 +2645,8 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
       ) ||
       null,
     InvoiceNo: invoiceNo,
+    SubInvoiceNo: subInvoiceNo || null,
+    subInvoiceNo: subInvoiceNo || null,
     PeriodStart: periodStart,
     PeriodEnd: periodEnd,
     DueDate:
@@ -2552,7 +2657,7 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     ItemwithCode: itemCode || null,
     Description: desc || null,
     AccHead: accHead || null,
-    Discount: toScheduleIntOrNull(discountRaw),
+    Discount: discount,
     SortOrder: sortOrder,
     Remarks: pickScheduleRowField(parentRow, "Remarks", "remarks") || "",
     AmountReceived: 0,
@@ -2584,6 +2689,10 @@ function toScheduleIntOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = parseInt(String(value).trim(), 10);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeInvoiceLineDiscount(value) {
+  return toScheduleIntOrNull(value) ?? 0;
 }
 
 function sanitizeIntegerInputValue(raw) {
@@ -3061,13 +3170,12 @@ function buildAgreementProvEditForm(row) {
 /** Lock/unlock PUT — bypasses configured lock-date validation (icon only). */
 function buildInvoiceScheduleLockPayload(rowData, nextLocked) {
   const form = buildAgreementProvEditForm(rowData);
-  return {
-    ...buildInvoiceSchedulePutPayload(rowData, form),
-    IsLocked: Boolean(nextLocked),
-    isLocked: Boolean(nextLocked),
-    IgnoreLockDate: true,
-    ignoreLockDate: true,
-  };
+  const payload = buildInvoiceSchedulePutPayload(rowData, form);
+  delete payload.IsLocked;
+  delete payload.isLocked;
+  payload.IsLocked = nextLocked === true;
+  payload.IgnoreLockDate = true;
+  return payload;
 }
 
 function AgreementProvInvoiceEditDialog({
@@ -3080,6 +3188,7 @@ function AgreementProvInvoiceEditDialog({
   onInvoiceLinesLoaded,
   viewMode,
   createMode,
+  onAddSaleReturn,
 }) {
   const isCreateMode = Boolean(createMode);
   const editInvoiceHeaderFields = isCreateMode || !viewMode;
@@ -3099,6 +3208,7 @@ function AgreementProvInvoiceEditDialog({
   const pendingDeleteSubsRef = useRef([]);
   const invoiceDateInputRef = useRef(null);
   const dueDateInputRef = useRef(null);
+  const loadedInvoiceKeyRef = useRef("");
 
   useEffect(() => {
     newLineDraftsRef.current = newLineDrafts;
@@ -3136,62 +3246,69 @@ function AgreementProvInvoiceEditDialog({
     originalServerSubsRef.current = new Set(subs);
   }, []);
 
-  const reloadInvoiceLines = useCallback(async () => {
-    if (!rowData) return [];
-    const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
-    if (!invoiceNo) {
-      setInvoiceLinesRows([]);
-      setForm(
-        mergeAgreementProvEditFormContractHeaderFields(
-          buildAgreementProvEditForm(rowData),
-          rowData,
-          null
-        )
-      );
-      originalServerSubsRef.current = new Set();
-      originalLinePayloadSnapshotsRef.current = new Map();
-      return [];
-    }
-    setInvoiceLinesLoading(true);
-    setInvoiceLinesError("");
-    try {
-      const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
-      const lines = unwrapContractInvoiceScheduleList(response);
-      const sorted = sortInvoiceLinesByOrder(lines);
-      setInvoiceLinesRows(sorted);
-      syncOriginalServerSubs(sorted);
-      setPendingDeleteSubs([]);
-      setNewLineDrafts([]);
-      setEditingLineDraft(null);
-      setForm((prev) => {
-        const next = applyInvoiceLinesToForm(rowData, lines, prev);
-        originalLinePayloadSnapshotsRef.current = captureOriginalInvoiceLinePayloadSnapshots(
-          sorted,
-          next,
-          rowData
+  const reloadInvoiceLines = useCallback(
+    async (rowDataOverride, options = {}) => {
+      const activeRow = rowDataOverride || rowData;
+      const freshForm = Boolean(options?.freshForm);
+      if (!activeRow) return [];
+      const invoiceNo = String(
+        pickScheduleRowField(activeRow, "InvoiceNo", "invoiceNo") || ""
+      ).trim();
+      if (!invoiceNo) {
+        setInvoiceLinesRows([]);
+        setForm(
+          mergeAgreementProvEditFormContractHeaderFields(
+            buildAgreementProvEditForm(activeRow),
+            activeRow,
+            null
+          )
         );
-        return next;
-      });
-      if (!viewMode) {
-        onInvoiceLinesLoaded?.(sorted, rowData);
+        originalServerSubsRef.current = new Set();
+        originalLinePayloadSnapshotsRef.current = new Map();
+        return [];
       }
-      return lines;
-    } catch (error) {
-      console.error("Error loading invoice records by invoice no:", error);
-      setInvoiceLinesRows([]);
-      setInvoiceLinesError(getAgreementProvSaveErrorMessage(error));
-      setForm(
-        mergeAgreementProvEditFormContractHeaderFields(
-          buildAgreementProvEditForm(rowData),
-          rowData,
-          null
-        )
-      );
-      return [];
-    } finally {
-      setInvoiceLinesLoading(false);
-    }
-  }, [rowData, syncOriginalServerSubs, viewMode, onInvoiceLinesLoaded]);
+      setInvoiceLinesLoading(true);
+      setInvoiceLinesError("");
+      try {
+        const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+        const lines = unwrapContractInvoiceScheduleList(response);
+        const sorted = sortInvoiceLinesByOrder(lines);
+        setInvoiceLinesRows(sorted);
+        syncOriginalServerSubs(sorted);
+        setPendingDeleteSubs([]);
+        setNewLineDrafts([]);
+        setEditingLineDraft(null);
+        setForm((prev) => {
+          const next = applyInvoiceLinesToForm(activeRow, lines, freshForm ? {} : prev);
+          originalLinePayloadSnapshotsRef.current = captureOriginalInvoiceLinePayloadSnapshots(
+            sorted,
+            next,
+            activeRow
+          );
+          return next;
+        });
+        if (!viewMode) {
+          onInvoiceLinesLoaded?.(sorted, activeRow);
+        }
+        return lines;
+      } catch (error) {
+        console.error("Error loading invoice records by invoice no:", error);
+        setInvoiceLinesRows([]);
+        setInvoiceLinesError(getAgreementProvSaveErrorMessage(error));
+        setForm(
+          mergeAgreementProvEditFormContractHeaderFields(
+            buildAgreementProvEditForm(activeRow),
+            activeRow,
+            null
+          )
+        );
+        return [];
+      } finally {
+        setInvoiceLinesLoading(false);
+      }
+    },
+    [rowData, syncOriginalServerSubs, viewMode, onInvoiceLinesLoaded]
+  );
 
   useEffect(() => {
     if (!open || !rowData) {
@@ -3204,10 +3321,12 @@ function AgreementProvInvoiceEditDialog({
       setPendingDeleteSubs([]);
       originalServerSubsRef.current = new Set();
       originalLinePayloadSnapshotsRef.current = new Map();
+      loadedInvoiceKeyRef.current = "";
       return undefined;
     }
 
     if (isCreateMode) {
+      loadedInvoiceKeyRef.current = "";
       const base = buildAgreementProvEditForm(rowData);
       const invoiceDate =
         toScheduleDateInputValue(rowData.__draftInvoiceDate) || base.invoiceDate || "";
@@ -3231,25 +3350,6 @@ function AgreementProvInvoiceEditDialog({
       return undefined;
     }
 
-    if (viewMode) {
-      setForm(
-        mergeAgreementProvEditFormContractHeaderFields(
-          buildAgreementProvEditForm(rowData),
-          rowData,
-          null
-        )
-      );
-      setInvoiceLinesRows([]);
-      setInvoiceLinesError("");
-      setInvoiceLinesLoading(false);
-      setNewLineDrafts([]);
-      setEditingLineDraft(null);
-      setPendingDeleteSubs([]);
-      originalServerSubsRef.current = new Set();
-      originalLinePayloadSnapshotsRef.current = new Map();
-      return undefined;
-    }
-
     setForm(
       mergeAgreementProvEditFormContractHeaderFields(
         buildAgreementProvEditForm(rowData),
@@ -3264,6 +3364,12 @@ function AgreementProvInvoiceEditDialog({
     originalServerSubsRef.current = new Set();
     originalLinePayloadSnapshotsRef.current = new Map();
 
+    const invoiceKey = getAgreementProvInvoiceActionKey(rowData) || String(rowData?.id ?? "");
+    if (loadedInvoiceKeyRef.current === invoiceKey) {
+      return undefined;
+    }
+    loadedInvoiceKeyRef.current = invoiceKey;
+
     let cancelled = false;
     const load = async () => {
       if (!cancelled) await reloadInvoiceLines();
@@ -3273,6 +3379,22 @@ function AgreementProvInvoiceEditDialog({
       cancelled = true;
     };
   }, [open, rowData, isCreateMode, viewMode, reloadInvoiceLines]);
+
+  useEffect(() => {
+    if (!open || isCreateMode || viewMode || invoiceLinesLoading) return undefined;
+
+    const itemRows = getInvoiceItemRecordRows(invoiceLinesRows);
+    if (itemRows.length > 0) return undefined;
+
+    setNewLineDrafts((prev) => {
+      const drafts = prev || [];
+      if (drafts.some((draft) => draft.__isDefaultMandatory)) return drafts;
+      if (drafts.some((draft) => !isInvoiceLineDraftEmpty(draft))) return drafts;
+      return [buildDefaultMandatoryInvoiceLineDraft(form, rowData, invoiceLinesRows)];
+    });
+
+    return undefined;
+  }, [open, isCreateMode, viewMode, invoiceLinesLoading, invoiceLinesRows, rowData]);
 
   useEffect(() => {
     if (!registerReloadInvoiceLines || isCreateMode) return undefined;
@@ -3302,7 +3424,7 @@ function AgreementProvInvoiceEditDialog({
 
   const handleSave = async () => {
     if (!onSave) return;
-    await onSave(form, rowData, {
+    const refreshedRow = await onSave(form, rowData, {
       invoiceLines: invoiceLinesRowsRef.current,
       pendingDeleteSubs: pendingDeleteSubsRef.current,
       newLineDrafts: newLineDraftsRef.current,
@@ -3310,6 +3432,8 @@ function AgreementProvInvoiceEditDialog({
       originalServerSubs: originalServerSubsRef.current,
       originalLinePayloadSnapshots: originalLinePayloadSnapshotsRef.current,
     });
+    if (!refreshedRow) return;
+    await reloadInvoiceLines(refreshedRow, { freshForm: true });
   };
 
   const canAddRecord = Boolean(
@@ -3462,6 +3586,16 @@ function AgreementProvInvoiceEditDialog({
 
   const handleDraftCancel = (draftId) => {
     if (saving) return;
+    if (draftId != null) {
+      const draft = newLineDrafts.find((row) => row.__draftId === draftId);
+      if (draft?.__isDefaultMandatory) {
+        const itemRows = getInvoiceItemRecordRows(invoiceLinesRows);
+        const otherDrafts = newLineDrafts.filter(
+          (row) => row.__draftId !== draftId && !isInvoiceLineDraftEmpty(row)
+        );
+        if (itemRows.length === 0 && otherDrafts.length === 0) return;
+      }
+    }
     if (draftId == null) {
       setEditingLineDraft(null);
       return;
@@ -3492,8 +3626,41 @@ function AgreementProvInvoiceEditDialog({
         },
       }}
     >
-      <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 600, pb: 1, flexShrink: 0 }}>
-        {isCreateMode ? "Create Agreement Invoice" : "Edit Agreement Invoice"}
+      <DialogTitle
+        sx={{
+          fontSize: "1.25rem",
+          fontWeight: 600,
+          pb: 1,
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 1,
+        }}
+      >
+        <span>
+          {isCreateMode
+            ? "Create Agreement Invoice"
+            : viewMode
+            ? "View Agreement Invoice"
+            : "Edit Agreement Invoice"}
+        </span>
+        {!isCreateMode &&
+        !viewMode &&
+        onAddSaleReturn &&
+        !pickScheduleRowIsLocked(rowData) &&
+        String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim() ? (
+          <MDButton
+            variant="outlined"
+            color="info"
+            size="small"
+            onClick={onAddSaleReturn}
+            sx={{ flexShrink: 0 }}
+          >
+            <Icon sx={{ fontSize: "1rem !important", mr: 0.5 }}>add</Icon>
+            Add Sale Return
+          </MDButton>
+        ) : null}
       </DialogTitle>
       <DialogContent
         sx={{
@@ -3801,6 +3968,7 @@ AgreementProvInvoiceEditDialog.propTypes = {
   onInvoiceLinesLoaded: PropTypes.func,
   viewMode: PropTypes.bool,
   createMode: PropTypes.bool,
+  onAddSaleReturn: PropTypes.func,
 };
 
 function normalizeAgreementProvInvoiceRow(row) {
@@ -3911,6 +4079,9 @@ export default function AgreementProvInvoice() {
   );
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const [salesReturnTotalsByInvoiceKey, setSalesReturnTotalsByInvoiceKey] = useState({});
+  const [salesReturnFormOpen, setSalesReturnFormOpen] = useState(false);
+  const [salesReturnFormRecord, setSalesReturnFormRecord] = useState(null);
   const pdfPreviewUrlRef = useRef(null);
   const reloadInvoiceLinesRef = useRef(null);
   const urlDeepLink = useMemo(() => readAgreementProvInvoiceUrlParams(), []);
@@ -4002,6 +4173,23 @@ export default function AgreementProvInvoice() {
     };
   }, [reloadAllScheduleRows]);
 
+  const refreshSalesReturnTotals = useCallback(async () => {
+    try {
+      const response = await salesReturnsApi.listSalesReturns();
+      const rows = salesReturnsApi
+        .unwrapList(response)
+        .map(salesReturnsApi.normalizeSalesReturnRow);
+      setSalesReturnTotalsByInvoiceKey(buildSalesReturnTotalsByInvoiceKey(rows));
+    } catch (error) {
+      console.error("Error loading sales return totals:", error);
+      setSalesReturnTotalsByInvoiceKey({});
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSalesReturnTotals();
+  }, [refreshSalesReturnTotals]);
+
   useEffect(() => {
     if (!allScheduleRows.length) return;
     const oldestContractStartDate = getOldestContractStartDateInput(allScheduleRows);
@@ -4020,18 +4208,31 @@ export default function AgreementProvInvoice() {
   }, [allScheduleRows, searchResultRows, searchApplied]);
 
   useEffect(() => {
-    if (urlDeepLinkAppliedRef.current || !urlDeepLink.contractNo) return;
+    if (urlDeepLinkAppliedRef.current) return;
+    const contractNoParam = urlDeepLink.contractNo;
+    const invoiceNoParam = urlDeepLink.invoiceNo;
+    const tenantNoParam = urlDeepLink.tenantNo;
+    const wantsGridView =
+      urlDeepLink.view === "grid" || contractNoParam || invoiceNoParam || tenantNoParam;
+    if (!wantsGridView) return;
+    if (!contractNoParam && !invoiceNoParam && !tenantNoParam) return;
+
     urlDeepLinkAppliedRef.current = true;
 
-    const contractNoParam = urlDeepLink.contractNo;
-    const contractNoFilter = { ContractNo: contractNoParam, contractNo: contractNoParam };
-    const filterSnapshot = { ...buildInitialAgreementProvFilters(), contractNo: contractNoFilter };
+    const filterSnapshot = { ...buildInitialAgreementProvFilters() };
+    if (contractNoParam) {
+      const contractNoFilter = { ContractNo: contractNoParam, contractNo: contractNoParam };
+      filterSnapshot.contractNo = contractNoFilter;
+      setFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
+    }
 
-    setFilters((prev) => ({ ...prev, contractNo: contractNoFilter }));
     setAppliedFilters(filterSnapshot);
     setInvoiceKeysWithItemRecords(new Set());
     setLoading(true);
-    executeFinalizedInvoiceSearch(filterSnapshot, { invoiceNo: urlDeepLink.invoiceNo })
+    executeFinalizedInvoiceSearch(filterSnapshot, {
+      invoiceNo: invoiceNoParam,
+      tenantNo: tenantNoParam,
+    })
       .then(() => {
         setSearchApplied(true);
       })
@@ -4042,7 +4243,13 @@ export default function AgreementProvInvoice() {
       .finally(() => {
         setLoading(false);
       });
-  }, [executeFinalizedInvoiceSearch, urlDeepLink.contractNo, urlDeepLink.invoiceNo]);
+  }, [
+    executeFinalizedInvoiceSearch,
+    urlDeepLink.contractNo,
+    urlDeepLink.invoiceNo,
+    urlDeepLink.tenantNo,
+    urlDeepLink.view,
+  ]);
 
   useEffect(() => {
     if (!urlDeepLink.contractNo || !contractNoFilterOptions.length) return;
@@ -4152,11 +4359,9 @@ export default function AgreementProvInvoice() {
     const key = `${contractNo}|${invoiceNo}`;
     setInvoiceLockSavingKey(key);
     try {
-      await contractApi.updateInvoiceSchedule(
-        contractNo,
-        invoiceNo,
-        buildInvoiceScheduleLockPayload(rowData, nextLocked)
-      );
+      const lockPayload = buildInvoiceScheduleLockPayload(rowData, nextLocked);
+      lockPayload.IsLocked = nextLocked === true;
+      await contractApi.updateInvoiceSchedule(contractNo, invoiceNo, lockPayload);
       await refreshScheduleGrid();
     } catch (error) {
       console.error("Error updating invoice lock:", error);
@@ -4388,14 +4593,14 @@ export default function AgreementProvInvoice() {
 
     const drawBodyTableHeader = () => {
       const rowTop = yPos;
-      drawBodyText("Description", marginLeft, rowTop, { bold: true });
+      drawBodyText("Particular", marginLeft, rowTop, { bold: true });
       drawBodyText("Qty", pdfBodyColQtyX, rowTop, { bold: true });
       drawBodyText("Unit price", pdfBodyColUnitPriceX, rowTop, { bold: true });
       drawBodyText("Total", contentRight, rowTop, { bold: true, textOptions: { align: "right" } });
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(sf(bodyFont));
-      const headerTextHeight = doc.getTextDimensions("Description").h;
+      const headerTextHeight = doc.getTextDimensions("Particular").h;
       const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
       drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
       yPos = underlineY + lineHeight;
@@ -4740,6 +4945,27 @@ export default function AgreementProvInvoice() {
     navigate(`/income-agreements/collections?${params.toString()}`);
   };
 
+  const handleOpenSalesReturnForInvoice = (rowData) => {
+    if (pickScheduleRowIsLocked(rowData)) return;
+    const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "").trim();
+    if (!invoiceNo) return;
+    setSalesReturnFormRecord(buildSalesReturnPrefillFromAgreementProvInvoiceRow(rowData));
+    setSalesReturnFormOpen(true);
+  };
+
+  const handleCloseSalesReturnForm = () => {
+    setSalesReturnFormOpen(false);
+    setSalesReturnFormRecord(null);
+  };
+
+  const handleSubmitSalesReturn = async (payload) => {
+    const grandTotal = computeSalesReturnGrandTotal(payload.lines);
+    const apiPayload = salesReturnsApi.buildSalesReturnApiPayload(payload, grandTotal);
+    const created = await salesReturnsApi.createSalesReturn(apiPayload);
+    await refreshSalesReturnTotals();
+    return { id: created?.id ?? created?.Id };
+  };
+
   const handleDeleteInvoiceRow = async (rowData) => {
     if (!canDeleteInvoiceFromGrid) return;
     if (pickScheduleRowIsLocked(rowData)) {
@@ -4777,11 +5003,11 @@ export default function AgreementProvInvoice() {
     const { contractNo, invoiceNo } = getInvoiceScheduleRouteKeys(rowData, form);
     if (!contractNo || !invoiceNo) {
       alert("Cannot update: Contract No and Invoice ID are required.");
-      return;
+      return null;
     }
     if (pickScheduleRowIsLocked(rowData)) {
       alert("This invoice is locked. Unlock it before editing.");
-      return;
+      return null;
     }
 
     setSavingEdit(true);
@@ -4796,13 +5022,22 @@ export default function AgreementProvInvoice() {
         originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
         originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
       });
-      const savedLines = lineSaveContext.invoiceLines ?? [];
-      syncInvoiceItemRecordKeyFromLines(rowData, savedLines);
-      handleCloseEditRow();
       await refreshScheduleGrid();
+
+      const response = await contractApi.getInvoiceScheduleByInvoiceNo(invoiceNo);
+      const refreshedLines = sortInvoiceLinesByOrder(unwrapContractInvoiceScheduleList(response));
+      const refreshedMainRow = findMainInvoiceScheduleRow(refreshedLines) || rowData;
+      const updatedEditRow = enrichAgreementProvRowWithContractHeaderFields(
+        refreshedMainRow,
+        refreshedLines
+      );
+      setEditRowData(updatedEditRow);
+      syncInvoiceItemRecordKeyFromLines(updatedEditRow, refreshedLines);
+      return updatedEditRow;
     } catch (error) {
       console.error("Error updating contract invoice schedule:", error);
       alert(getAgreementProvSaveErrorMessage(error));
+      throw error;
     } finally {
       setSavingEdit(false);
     }
@@ -5348,6 +5583,40 @@ export default function AgreementProvInvoice() {
     },
   };
 
+  const saleReturnColumn = {
+    id: "saleReturn",
+    Header: "Sale Return",
+    accessor: "saleReturn",
+    align: "center",
+    width: "96px",
+    disableSortBy: true,
+    // eslint-disable-next-line react/prop-types
+    Cell: ({ row }) => {
+      // eslint-disable-next-line react/prop-types
+      const rowData = row?.original || {};
+      if (isAgreementProvContractBasicInfoRow(rowData)) return null;
+      if (rowData.isGroupRow || rowData.IsGroupRow) return "";
+      const contractNo = String(
+        pickScheduleRowField(rowData, "ContractNo", "contractNo") || ""
+      ).trim();
+      const invoiceNo = String(
+        pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || ""
+      ).trim();
+      if (!invoiceNo) return "-";
+      const invoiceKey = buildInvoiceKey({ contractNo, invoiceNo });
+      const returnTotal = Number(salesReturnTotalsByInvoiceKey[invoiceKey] || 0);
+      return (
+        <MDTypography
+          component="span"
+          variant="caption"
+          sx={{ fontSize: "0.72rem", fontWeight: 700, lineHeight: 1, whiteSpace: "nowrap" }}
+        >
+          {returnTotal > 0 ? formatAmount(returnTotal) : "-"}
+        </MDTypography>
+      );
+    },
+  };
+
   // Primary column order, then remaining API fields
   const columns = [
     viewPdfColumn,
@@ -5375,6 +5644,7 @@ export default function AgreementProvInvoice() {
       handleOpenCollectionsForInvoice
     ),
     scheduleNumberColumn("amountPending", "Balance", "AmountPending", "amountPending", true),
+    saleReturnColumn,
 
     descriptionColumn,
     scheduleNumberColumn("daysToDue", "Days to due", "DaysToDue", "daysToDue"),
@@ -6322,6 +6592,15 @@ export default function AgreementProvInvoice() {
         viewMode={editDialogViewMode}
         registerReloadInvoiceLines={registerReloadInvoiceLines}
         onInvoiceLinesLoaded={syncInvoiceItemRecordKeyFromLines}
+        onAddSaleReturn={() => handleOpenSalesReturnForInvoice(editRowData)}
+      />
+
+      <SalesReturnForm
+        open={salesReturnFormOpen}
+        onClose={handleCloseSalesReturnForm}
+        onSubmit={handleSubmitSalesReturn}
+        initialData={salesReturnFormRecord}
+        labels={SALES_RETURNS_LABELS}
       />
 
       <AgreementDetailsDialog

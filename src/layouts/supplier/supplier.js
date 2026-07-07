@@ -28,6 +28,8 @@ import {
   renderCollectionsGridSno,
   renderCollectionsGridText,
 } from "utils/collectionsGridTableSx";
+import PurchasesModuleTabs from "layouts/purchases/components/PurchasesModuleTabs";
+import { usePartyGridBulkStatus } from "layouts/shared/partyGridBulkStatus";
 import SupplierForm from "./SupplierForm";
 import {
   buildSupplierPayload,
@@ -56,6 +58,14 @@ function getCoaLabel(row) {
   return acctId || acctName || "";
 }
 
+function formatGridDisplayName(prefix, name) {
+  return [prefix, name]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value && value !== "-")
+    .join(" ")
+    .trim();
+}
+
 export default function Supplier() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -65,6 +75,7 @@ export default function Supplier() {
   const [isClone, setIsClone] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
+  const [paginationHost, setPaginationHost] = useState(null);
 
   const txt = (v) => renderCollectionsGridText(v);
 
@@ -175,8 +186,21 @@ export default function Supplier() {
     return { id: existingId };
   };
 
-  const columns = useMemo(
-    () => [
+  const canEdit = canEditCurrentMenu();
+
+  const { buildStatusColumn, buildSelectColumn } = usePartyGridBulkStatus({
+    canEdit,
+    bulkUpdateStatus: supplierApi.bulkUpdateStatus,
+    onRefresh: fetchSuppliers,
+  });
+
+  const columns = useMemo(() => {
+    const allRowIds = records.map((row) => row.id ?? row.Id).filter((id) => id != null);
+    const statusColumns = [buildSelectColumn(allRowIds), buildStatusColumn(allRowIds)].filter(
+      Boolean
+    );
+
+    return [
       {
         id: "actions",
         Header: "Action",
@@ -201,25 +225,20 @@ export default function Supplier() {
         Cell: ({ value }) => txt(value),
       },
       {
-        id: "prefix",
-        Header: "Prefix",
-        accessor: "prefix",
-        align: "left",
-        Cell: ({ value }) => txt(value),
-      },
-      {
         id: "rank",
         Header: "Rank",
         accessor: "rank",
         align: "left",
         Cell: ({ value }) => txt(value),
       },
+      ...statusColumns,
       {
         id: "name",
         Header: "Name",
         accessor: "name",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ row }) =>
+          txt(formatGridDisplayName(row?.original?.prefix, row?.original?.name) || "-"),
       },
       {
         id: "address",
@@ -278,15 +297,21 @@ export default function Supplier() {
         Cell: ({ value }) => txt(value),
       },
       {
+        id: "controlAccount2",
+        Header: "Control Account 2",
+        accessor: "controlAccount2",
+        align: "left",
+        Cell: ({ value }) => txt(value),
+      },
+      {
         id: "representative",
         Header: "Representative",
         accessor: "representative",
         align: "left",
         Cell: ({ value }) => txt(value),
       },
-    ],
-    []
-  );
+    ];
+  }, [buildSelectColumn, buildStatusColumn, records]);
 
   const computedRows = useMemo(
     () =>
@@ -297,17 +322,6 @@ export default function Supplier() {
           ...flat,
           actions: (
             <MDBox sx={COLLECTIONS_GRID_ACTION_BOX_SX}>
-              {canCreateCurrentMenu() && (
-                <IconButton
-                  size="small"
-                  color="success"
-                  onClick={() => handleCloneRecord(recordId)}
-                  title="Clone"
-                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
-                >
-                  <Icon fontSize="small">content_copy</Icon>
-                </IconButton>
-              )}
               {canEditCurrentMenu() && (
                 <IconButton
                   size="small"
@@ -349,6 +363,7 @@ export default function Supplier() {
         title="Supplier"
         subtitle="Manage supplier records"
         metadata={workspaceMetadata}
+        tabs={<PurchasesModuleTabs />}
         actions={
           canCreateCurrentMenu() ? (
             <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
@@ -363,22 +378,43 @@ export default function Supplier() {
             <CurrencyLoading size={36} />
           </MDBox>
         ) : (
-          <DataTable
-            table={{ columns, rows: computedRows }}
-            isSorted={false}
-            stickyToolbarAndHeader
-            entriesPerPage={{
-              defaultValue: 20,
-              entries: [10, 25, 50, 100],
+          <MDBox
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+              position: "relative",
             }}
-            pagination={{ variant: "gradient", color: "info" }}
-            showTotalEntries
-            noEndBorder
-            canSearch
-            exportFileName="Supplier"
-            contentFitTable
-            disableHeaderMetrics
-          />
+          >
+            <MDBox
+              ref={setPaginationHost}
+              className="saas-settings-table-pagination-top"
+              sx={{
+                display: "flex",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                flexShrink: 0,
+                width: "100%",
+              }}
+            />
+            <DataTable
+              table={{ columns, rows: computedRows }}
+              isSorted={false}
+              stickyToolbarAndHeader
+              entriesPerPage={{
+                defaultValue: 20,
+                entries: [10, 25, 50, 100],
+              }}
+              pagination={{ variant: "gradient", color: "info" }}
+              showTotalEntries={false}
+              noEndBorder
+              canSearch
+              exportFileName="Supplier"
+              contentFitTable
+              paginationHost={paginationHost}
+            />
+          </MDBox>
         )}
       </EnterpriseWorkspace>
 
@@ -388,6 +424,7 @@ export default function Supplier() {
         onSubmit={handleSubmit}
         initialData={currentRecord}
         isClone={isClone}
+        existingRecords={records}
       />
 
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>

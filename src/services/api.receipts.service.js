@@ -65,8 +65,6 @@ export function normalizeReceiptRow(row) {
       ...line,
     })
   );
-  const attachments = parseJsonArray(pickField(row, "attachmentsJson", "AttachmentsJson"), []);
-
   return buildReceiptFormState({
     id: row?.id ?? row?.Id,
     date: toDateInputValue(pickField(row, "date", "Date")),
@@ -74,7 +72,10 @@ export function normalizeReceiptRow(row) {
     referenceAutomatic: Boolean(row?.referenceAutomatic ?? row?.ReferenceAutomatic ?? false),
     reference: pickField(row, "reference", "Reference"),
     paidFrom: pickField(row, "paidFrom", "PaidFrom"),
-    payeeContactType: pickField(row, "payeeContactType", "PayeeContactType") || "Supplier",
+    receivedInCoaId: pickField(row, "payeePartyId", "PayeePartyId"),
+    cashAndBankAccountId: row?.cashAndBankAccountId ?? row?.CashAndBankAccountId ?? "",
+    receiptPartyType: pickField(row, "payeeContactType", "PayeeContactType"),
+    payeeContactType: pickField(row, "payeeContactType", "PayeeContactType"),
     payeePartyId: pickField(row, "payeePartyId", "PayeePartyId"),
     payeePartyCode: pickField(row, "payeePartyCode", "PayeePartyCode"),
     payeePartyKey: [
@@ -90,7 +91,6 @@ export function normalizeReceiptRow(row) {
     finalizedByAhq: pickBoolean(row, "finalizedByAhq", "FinalizedByAhq"),
     grandTotal: Number(pickField(row, "grandTotal", "GrandTotal")) || 0,
     lines,
-    attachments,
   });
 }
 
@@ -103,21 +103,18 @@ export function buildReceiptApiPayload(form, grandTotal, { includeFinalizedByAhq
     ReferenceAutomatic: Boolean(form.referenceAutomatic),
     Reference: form.reference || null,
     PaidFrom: form.paidFrom || null,
-    PayeeContactType: form.payeeContactType || null,
+    PayeeContactType: form.receiptPartyType || form.payeeContactType || null,
     PayeePartyId:
-      form.payeePartyId !== "" && form.payeePartyId != null ? Number(form.payeePartyId) : null,
+      form.receivedInCoaId !== "" && form.receivedInCoaId != null
+        ? Number(form.receivedInCoaId)
+        : form.payeePartyId !== "" && form.payeePartyId != null
+        ? Number(form.payeePartyId)
+        : null,
     PayeePartyCode: form.payeePartyCode || null,
     PayeeName: form.payeeName || null,
     Description: form.description || null,
     GrandTotal: grandTotal,
     LinesJson: JSON.stringify(form.lines || []),
-    AttachmentsJson: JSON.stringify(
-      (form.attachments || []).map((file) => ({
-        id: file.id,
-        name: file.name,
-        size: file.size,
-      }))
-    ),
   };
 
   if (includeFinalizedByAhq) {

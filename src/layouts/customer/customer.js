@@ -28,6 +28,8 @@ import {
   renderCollectionsGridSno,
   renderCollectionsGridText,
 } from "utils/collectionsGridTableSx";
+import SalesModuleTabs from "layouts/sales/components/SalesModuleTabs";
+import { usePartyGridBulkStatus } from "layouts/shared/partyGridBulkStatus";
 import CustomerForm from "./CustomerForm";
 import {
   buildCustomerPayload,
@@ -41,6 +43,14 @@ import {
   stripCustomerForClone,
 } from "./customerUtils";
 
+function formatGridDisplayName(prefix, name) {
+  return [prefix, name]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value && value !== "-")
+    .join(" ")
+    .trim();
+}
+
 export default function Customer() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -50,6 +60,7 @@ export default function Customer() {
   const [isClone, setIsClone] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState(null);
+  const [paginationHost, setPaginationHost] = useState(null);
 
   const txt = (v) => renderCollectionsGridText(v);
 
@@ -160,8 +171,21 @@ export default function Customer() {
     return { id: existingId };
   };
 
-  const columns = useMemo(
-    () => [
+  const canEdit = canEditCurrentMenu();
+
+  const { buildStatusColumn, buildSelectColumn } = usePartyGridBulkStatus({
+    canEdit,
+    bulkUpdateStatus: customerApi.bulkUpdateStatus,
+    onRefresh: fetchCustomers,
+  });
+
+  const columns = useMemo(() => {
+    const allRowIds = records.map((row) => row.id ?? row.Id).filter((id) => id != null);
+    const statusColumns = [buildSelectColumn(allRowIds), buildStatusColumn(allRowIds)].filter(
+      Boolean
+    );
+
+    return [
       {
         id: "actions",
         Header: "Action",
@@ -186,25 +210,20 @@ export default function Customer() {
         Cell: ({ value }) => txt(value),
       },
       {
-        id: "prefix",
-        Header: "Prefix",
-        accessor: "prefix",
-        align: "left",
-        Cell: ({ value }) => txt(value),
-      },
-      {
         id: "rank",
         Header: "Rank",
         accessor: "rank",
         align: "left",
         Cell: ({ value }) => txt(value),
       },
+      ...statusColumns,
       {
         id: "name",
         Header: "Name",
         accessor: "name",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ row }) =>
+          txt(formatGridDisplayName(row?.original?.prefix, row?.original?.name) || "-"),
       },
       {
         id: "address",
@@ -257,8 +276,15 @@ export default function Customer() {
       },
       {
         id: "controlAccount",
-        Header: "Control Account",
+        Header: "Receipt CA",
         accessor: "controlAccount",
+        align: "left",
+        Cell: ({ value }) => txt(value),
+      },
+      {
+        id: "controlAccount2",
+        Header: "Payable CA",
+        accessor: "controlAccount2",
         align: "left",
         Cell: ({ value }) => txt(value),
       },
@@ -269,9 +295,8 @@ export default function Customer() {
         align: "left",
         Cell: ({ value }) => txt(value),
       },
-    ],
-    []
-  );
+    ];
+  }, [buildSelectColumn, buildStatusColumn, records]);
 
   const computedRows = useMemo(
     () =>
@@ -282,17 +307,6 @@ export default function Customer() {
           ...flat,
           actions: (
             <MDBox sx={COLLECTIONS_GRID_ACTION_BOX_SX}>
-              {canCreateCurrentMenu() && (
-                <IconButton
-                  size="small"
-                  color="success"
-                  onClick={() => handleCloneRecord(recordId)}
-                  title="Clone"
-                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
-                >
-                  <Icon fontSize="small">content_copy</Icon>
-                </IconButton>
-              )}
               {canEditCurrentMenu() && (
                 <IconButton
                   size="small"
@@ -334,6 +348,7 @@ export default function Customer() {
         title="Customer"
         subtitle="Manage customer records"
         metadata={workspaceMetadata}
+        tabs={<SalesModuleTabs />}
         actions={
           canCreateCurrentMenu() ? (
             <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
@@ -348,22 +363,43 @@ export default function Customer() {
             <CurrencyLoading size={36} />
           </MDBox>
         ) : (
-          <DataTable
-            table={{ columns, rows: computedRows }}
-            isSorted={false}
-            stickyToolbarAndHeader
-            entriesPerPage={{
-              defaultValue: 20,
-              entries: [10, 25, 50, 100],
+          <MDBox
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+              position: "relative",
             }}
-            pagination={{ variant: "gradient", color: "info" }}
-            showTotalEntries
-            noEndBorder
-            canSearch
-            exportFileName="Customer"
-            contentFitTable
-            disableHeaderMetrics
-          />
+          >
+            <MDBox
+              ref={setPaginationHost}
+              className="saas-settings-table-pagination-top"
+              sx={{
+                display: "flex",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                flexShrink: 0,
+                width: "100%",
+              }}
+            />
+            <DataTable
+              table={{ columns, rows: computedRows }}
+              isSorted={false}
+              stickyToolbarAndHeader
+              entriesPerPage={{
+                defaultValue: 20,
+                entries: [10, 25, 50, 100],
+              }}
+              pagination={{ variant: "gradient", color: "info" }}
+              showTotalEntries={false}
+              noEndBorder
+              canSearch
+              exportFileName="Customer"
+              contentFitTable
+              paginationHost={paginationHost}
+            />
+          </MDBox>
         )}
       </EnterpriseWorkspace>
 
@@ -373,6 +409,7 @@ export default function Customer() {
         onSubmit={handleSubmit}
         initialData={currentRecord}
         isClone={isClone}
+        existingRecords={records}
       />
 
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>

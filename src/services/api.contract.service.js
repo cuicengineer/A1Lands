@@ -265,13 +265,17 @@ async function deleteInvoiceScheduleInvoice(contractNo, invoiceNo) {
  */
 async function updateInvoiceSchedule(contractNo, invoiceNo, data) {
   const actionBy = await getActionBy();
+  const input = data || {};
   const payload = {
-    ...(data || {}),
+    ...input,
     Action: "Update",
     ActionBy: actionBy,
     ActionDate: new Date().toISOString(),
     IsDeleted: false,
   };
+  if (Object.prototype.hasOwnProperty.call(input, "IsLocked")) {
+    payload.IsLocked = input.IsLocked === true;
+  }
   const encodedContractNo = encodeURIComponent(String(contractNo ?? "").trim());
   const encodedInvoiceNo = encodeURIComponent(String(invoiceNo ?? "").trim());
   return requestWithPagination(
@@ -294,6 +298,15 @@ function getShareDistributionByAsOfDate(asOfDateYyyyMmDd) {
     asOfDate: asOfDateYyyyMmDd,
   }).toString();
   return requestWithPagination("GET", `/api/Contracts/ShareDistribution?${params}`);
+}
+
+function createShareDistributionWorkbook(contractIds = []) {
+  const payload = {
+    contractIds: [
+      ...new Set(contractIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)),
+    ],
+  };
+  return requestWithPagination("POST", "/api/Contracts/ShareDistribution/Workbooks", payload);
 }
 
 // Backwards-compatible alias
@@ -401,6 +414,7 @@ const contractApi = {
   updateInvoiceSchedule,
   getActiveByAsOfDate,
   getShareDistributionByAsOfDate,
+  createShareDistributionWorkbook,
   list,
   searchByGrpName,
   create,

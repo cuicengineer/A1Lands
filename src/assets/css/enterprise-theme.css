@@ -178,7 +178,7 @@ body.enterprise-ui .MuiTableContainer-root [class*="MDPagination"] {
 /* First data column reads as the primary record label (reference look). */
 body.enterprise-ui .MuiTableBody-root td:first-of-type {
   font-weight: 600;
-  color: var(--ent-text);
+  color: #111111 !important;
 }
 
 /* =====================================================================

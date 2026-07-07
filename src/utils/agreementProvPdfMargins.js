@@ -1,4 +1,6 @@
 export const AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY = "agreement-prov-invoice-pdf-margins";
+export const RECEIPT_PDF_MARGIN_STORAGE_KEY = "receipt-pdf-margins";
+export const SHARE_DIST_WORKBOOK_PDF_MARGIN_STORAGE_KEY = "share-dist-workbook-pdf-margins";
 
 export const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
   topIn: 0.5,
@@ -6,6 +8,16 @@ export const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
   leftIn: 1.3,
   rightIn: 0.5,
   contentScale: 1,
+};
+
+export const RECEIPT_PDF_DEFAULT_MARGINS = {
+  ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
+  leftIn: 0.5,
+};
+
+export const SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS = {
+  ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
+  leftIn: 0.5,
 };
 
 export const AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN = 0.5;
@@ -62,31 +74,69 @@ export function agreementProvPdfMarginsInchesToMm(marginsIn) {
 }
 
 export function loadAgreementProvPdfMargins() {
-  try {
-    const raw = localStorage.getItem(AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY);
-    if (!raw) return { ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS };
-    const parsed = JSON.parse(raw);
-    return {
-      topIn: Number(parsed?.topIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.topIn,
-      bottomIn: Number(parsed?.bottomIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.bottomIn,
-      leftIn: Number(parsed?.leftIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.leftIn,
-      rightIn: Number(parsed?.rightIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.rightIn,
-      contentScale: normalizeAgreementProvPdfContentScale(parsed?.contentScale),
-    };
-  } catch {
-    return { ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS };
-  }
+  return loadPdfMarginsFromStorage(
+    AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY,
+    AGREEMENT_PROV_PDF_DEFAULT_MARGINS
+  );
 }
 
 export function saveAgreementProvPdfMargins(margins) {
+  savePdfMarginsToStorage(
+    AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY,
+    margins,
+    AGREEMENT_PROV_PDF_DEFAULT_MARGINS
+  );
+}
+
+export function loadReceiptPdfMargins() {
+  return loadPdfMarginsFromStorage(RECEIPT_PDF_MARGIN_STORAGE_KEY, RECEIPT_PDF_DEFAULT_MARGINS);
+}
+
+export function saveReceiptPdfMargins(margins) {
+  savePdfMarginsToStorage(RECEIPT_PDF_MARGIN_STORAGE_KEY, margins, RECEIPT_PDF_DEFAULT_MARGINS);
+}
+
+export function loadShareDistributionWorkbookPdfMargins() {
+  return loadPdfMarginsFromStorage(
+    SHARE_DIST_WORKBOOK_PDF_MARGIN_STORAGE_KEY,
+    SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS
+  );
+}
+
+export function saveShareDistributionWorkbookPdfMargins(margins) {
+  savePdfMarginsToStorage(
+    SHARE_DIST_WORKBOOK_PDF_MARGIN_STORAGE_KEY,
+    margins,
+    SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS
+  );
+}
+
+function loadPdfMarginsFromStorage(storageKey, defaultMargins) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return { ...defaultMargins };
+    const parsed = JSON.parse(raw);
+    return {
+      topIn: Number(parsed?.topIn) || defaultMargins.topIn,
+      bottomIn: Number(parsed?.bottomIn) || defaultMargins.bottomIn,
+      leftIn: Number(parsed?.leftIn) || defaultMargins.leftIn,
+      rightIn: Number(parsed?.rightIn) || defaultMargins.rightIn,
+      contentScale: normalizeAgreementProvPdfContentScale(parsed?.contentScale),
+    };
+  } catch {
+    return { ...defaultMargins };
+  }
+}
+
+function savePdfMarginsToStorage(storageKey, margins, defaultMargins) {
   try {
     localStorage.setItem(
-      AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY,
+      storageKey,
       JSON.stringify({
-        topIn: Number(margins?.topIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.topIn,
-        bottomIn: Number(margins?.bottomIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.bottomIn,
-        leftIn: Number(margins?.leftIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.leftIn,
-        rightIn: Number(margins?.rightIn) || AGREEMENT_PROV_PDF_DEFAULT_MARGINS.rightIn,
+        topIn: Number(margins?.topIn) || defaultMargins.topIn,
+        bottomIn: Number(margins?.bottomIn) || defaultMargins.bottomIn,
+        leftIn: Number(margins?.leftIn) || defaultMargins.leftIn,
+        rightIn: Number(margins?.rightIn) || defaultMargins.rightIn,
         contentScale: normalizeAgreementProvPdfContentScale(margins?.contentScale),
       })
     );

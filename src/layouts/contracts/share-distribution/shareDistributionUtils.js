@@ -50,9 +50,84 @@ export function formatShareDistributionPercent(value) {
   return `${pct.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 }
 
+export function formatShareDistributionRatioDisplay(value) {
+  if (value == null || value === "") return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.includes("%")) return raw;
+
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      const formatted = formatShareDistributionNumber(part);
+      return formatted ? `${formatted}%` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function formatShareDistributionDate(value) {
   if (!value) return "";
   return formatDateDDMMMYYYY(value);
+}
+
+export const SHARE_DIST_GRID_NUMERIC_TOTAL_COLUMNS = [
+  "booArea",
+  "revenueRate",
+  "govtSharePA",
+  "currentRentPA",
+  "receiptAmount",
+  "govt",
+  "paf",
+  "ahq",
+  "rac",
+  "baseShare",
+];
+
+export function sumShareDistributionGridRows(
+  rows = [],
+  columnKeys = SHARE_DIST_GRID_NUMERIC_TOTAL_COLUMNS
+) {
+  return columnKeys.reduce((totals, key) => {
+    const sum = rows.reduce((acc, row) => {
+      const n = parseNumber(row?.[key]);
+      return n == null ? acc : acc + n;
+    }, 0);
+    totals[key] = sum ? formatShareDistributionNumber(sum) : "";
+    return totals;
+  }, {});
+}
+
+export function buildShareDistributionGridTotalRow(totals = {}) {
+  return {
+    id: "__share-dist-grid-total__",
+    workbook: "",
+    sn: "",
+    racName: "",
+    base: "Total",
+    className: "",
+    agreement: "",
+    tenantAndBusiness: "",
+    booArea: totals.booArea ?? "",
+    rrFy: "",
+    revenueRate: totals.revenueRate ?? "",
+    govtSharePA: totals.govtSharePA ?? "",
+    currentRentPA: totals.currentRentPA ?? "",
+    receiptDate: "",
+    receiptAmount: totals.receiptAmount ?? "",
+    ratio: "",
+    govt: totals.govt ?? "",
+    paf: totals.paf ?? "",
+    ahq: totals.ahq ?? "",
+    rac: totals.rac ?? "",
+    baseShare: totals.baseShare ?? "",
+    __isTotalRow: true,
+    __rowClassName: "share-dist-total-row",
+    __rowStyle: {
+      fontWeight: 700,
+    },
+  };
 }
 
 function findTenant(tenants, row) {
@@ -98,16 +173,311 @@ export function resolveShareDistributionBaseLabel(row, bases = []) {
   return text;
 }
 
-const WORKBOOK_SERIAL_STORAGE_PREFIX = "shareDistributionWorkbookSerial";
+export const SHARE_DIST_WORKBOOK_ROW_BG = "#f2f2f2";
+export const SHARE_DIST_UNASSIGNED_ROW_BG = "#ffffff";
 
-/** UI-only workbook number: YYYY-0001, auto-incremented per calendar year in session storage. */
-export function generateNextWorkbookNumber() {
-  const year = new Date().getFullYear();
-  const storageKey = `${WORKBOOK_SERIAL_STORAGE_PREFIX}_${year}`;
-  const current = Number(sessionStorage.getItem(storageKey) || 0);
-  const next = Number.isFinite(current) && current >= 0 ? current + 1 : 1;
-  sessionStorage.setItem(storageKey, String(next));
-  return `${year}-${String(next).padStart(4, "0")}`;
+export function isShareDistributionWorkbookAssigned(row) {
+  return Boolean(String(row?.workbook || "").trim());
+}
+
+export function getShareDistributionContractId(row = {}) {
+  const contractId = pickField(row, "contractId", "ContractId");
+  if (contractId != null && contractId !== "") {
+    const parsed = Number(contractId);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  const legacyId = pickField(row, "id", "Id");
+  if (legacyId == null || legacyId === "") return null;
+  const parsed = Number(legacyId);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function getShareDistributionRowKey(row = {}) {
+  if (row?.__isTotalRow) {
+    return String(row.id || "__share-dist-grid-total__");
+  }
+  if (row?.isGroupRow) {
+    return String(row.id || row.groupKey || "");
+  }
+  if (row?.selectionKey != null && row.selectionKey !== "") {
+    return String(row.selectionKey);
+  }
+  const contractId = pickField(row, "contractId", "ContractId") ?? pickField(row, "id", "Id");
+  const sn = pickField(row, "sn", "SN");
+  if (contractId != null && contractId !== "" && sn != null && sn !== "") {
+    return `${contractId}-${sn}`;
+  }
+  return String(row?.id ?? "");
+}
+
+export const SHARE_DIST_WORKBOOK_FILTER = {
+  ALL: "all",
+  ASSIGNED: "assigned",
+  UNASSIGNED: "unassigned",
+};
+
+export const SHARE_DIST_GROUPING_COLUMN_OPTIONS = [
+  { value: "workbook", label: "Workbook" },
+  { value: "racName", label: "RAC Name" },
+  { value: "base", label: "Base" },
+  { value: "className", label: "Class" },
+  { value: "agreement", label: "Agreement" },
+  { value: "tenantAndBusiness", label: "Tenant and Business" },
+  { value: "rrFy", label: "RR FY" },
+  { value: "receiptDate", label: "Receipt Date" },
+];
+
+export const SHARE_DIST_DEFAULT_GROUP_BY_COLUMNS = [];
+
+const SHARE_DIST_NUMERIC_GROUP_SUM_COLUMNS = new Set([
+  "booArea",
+  "revenueRate",
+  "govtSharePA",
+  "currentRentPA",
+  "receiptAmount",
+  "govt",
+  "paf",
+  "ahq",
+  "rac",
+  "baseShare",
+]);
+
+export function filterShareDistributionRowsByWorkbook(
+  rows = [],
+  filter = SHARE_DIST_WORKBOOK_FILTER.ALL
+) {
+  if (filter === SHARE_DIST_WORKBOOK_FILTER.ASSIGNED) {
+    return rows.filter((row) => isShareDistributionWorkbookAssigned(row));
+  }
+  if (filter === SHARE_DIST_WORKBOOK_FILTER.UNASSIGNED) {
+    return rows.filter((row) => !isShareDistributionWorkbookAssigned(row));
+  }
+  return rows;
+}
+
+function getShareDistributionGroupValue(row, columnKey) {
+  const raw = row?.[columnKey];
+  if (raw === null || raw === undefined || String(raw).trim() === "") return "-";
+  return String(raw).trim();
+}
+
+function parseShareDistributionGridNumber(value) {
+  if (value == null || value === "") return 0;
+  const normalized = String(value).replace(/,/g, "").replace(/%/g, "").trim();
+  if (!normalized) return 0;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sumShareDistributionColumn(rows, columnKey) {
+  const total = rows.reduce(
+    (sum, row) => sum + parseShareDistributionGridNumber(row[columnKey]),
+    0
+  );
+  return total ? formatShareDistributionNumber(total) : "";
+}
+
+function joinUniqueShareDistributionValues(rows, columnKey) {
+  const values = new Set();
+  rows.forEach((row) => {
+    const text = String(row?.[columnKey] || "").trim();
+    if (text) values.add(text);
+  });
+  return Array.from(values).sort().join(", ");
+}
+
+function resolveShareDistributionGroupColumnValue({
+  columnKey,
+  groupByColumns,
+  firstRow,
+  groupRows,
+  groupLabel,
+}) {
+  if (groupByColumns.includes(columnKey)) {
+    return firstRow?.[columnKey] ?? "";
+  }
+  if (SHARE_DIST_NUMERIC_GROUP_SUM_COLUMNS.has(columnKey)) {
+    return sumShareDistributionColumn(groupRows, columnKey);
+  }
+  if (columnKey === "ratio") {
+    return "";
+  }
+  if (columnKey === "workbook") {
+    return joinUniqueShareDistributionValues(groupRows, columnKey);
+  }
+  if (columnKey === "base") {
+    return joinUniqueShareDistributionValues(groupRows, columnKey) || groupLabel;
+  }
+  if (columnKey === "racName") {
+    return joinUniqueShareDistributionValues(groupRows, columnKey);
+  }
+  return joinUniqueShareDistributionValues(groupRows, columnKey);
+}
+
+export function buildShareDistributionGroupedRows(
+  rows = [],
+  groupByColumns = [],
+  expandedGroups = new Set()
+) {
+  if (!Array.isArray(groupByColumns) || groupByColumns.length === 0) {
+    return rows.map((row) => ({
+      ...row,
+      isGroupRow: false,
+      isExpandedRow: false,
+    }));
+  }
+
+  const byKey = new Map();
+  rows.forEach((row) => {
+    const groupValues = groupByColumns.map((columnKey) =>
+      getShareDistributionGroupValue(row, columnKey)
+    );
+    const key = groupValues.join(" || ");
+    if (!byKey.has(key)) {
+      const groupLabel = groupByColumns
+        .map((columnKey, idx) => {
+          const label =
+            SHARE_DIST_GROUPING_COLUMN_OPTIONS.find((opt) => opt.value === columnKey)?.label ||
+            columnKey;
+          return `${label}: ${groupValues[idx]}`;
+        })
+        .join(" | ");
+      byKey.set(key, { label: groupLabel, rows: [] });
+    }
+    byKey.get(key).rows.push(row);
+  });
+
+  const sortedKeys = Array.from(byKey.keys()).sort((keyA, keyB) => {
+    const rowA = byKey.get(keyA).rows[0];
+    const rowB = byKey.get(keyB).rows[0];
+    return compareShareDistributionRows(rowA, rowB);
+  });
+
+  const result = [];
+  let topSn = 0;
+
+  sortedKeys.forEach((groupKey) => {
+    const group = byKey.get(groupKey);
+    const groupRows = sortShareDistributionRows(group.rows);
+    const firstRow = groupRows[0];
+    const isExpanded = expandedGroups.has(groupKey);
+    const safeId = groupKey.replace(/[^a-zA-Z0-9_|.-]/g, "_");
+
+    const groupRow = {
+      ...firstRow,
+      id: `group-${safeId}`,
+      sn: ++topSn,
+      isGroupRow: true,
+      isExpandedRow: false,
+      groupKey,
+      groupLabel: group.label,
+      groupRows,
+      __rowClassName: "share-dist-group-row",
+      __rowStyle: {
+        backgroundColor: "#f8f9fa",
+        fontWeight: 600,
+      },
+    };
+
+    SHARE_DIST_GROUPING_COLUMN_OPTIONS.forEach(({ value: columnKey }) => {
+      if (columnKey === "sn") return;
+      groupRow[columnKey] = resolveShareDistributionGroupColumnValue({
+        columnKey,
+        groupByColumns,
+        firstRow,
+        groupRows,
+        groupLabel: group.label,
+      });
+    });
+
+    result.push(groupRow);
+
+    if (isExpanded) {
+      groupRows.forEach((row) => {
+        result.push({
+          ...row,
+          isGroupRow: false,
+          isExpandedRow: true,
+          groupKey,
+          __rowClassName: row.__rowClassName,
+          __rowStyle: row.__rowStyle,
+        });
+      });
+    }
+  });
+
+  return result;
+}
+
+function parseShareDistributionWorkbookSortKey(workbookNo = "") {
+  const raw = String(workbookNo || "")
+    .trim()
+    .toUpperCase();
+  if (!raw) {
+    return { hasWorkbook: false, serial: 0, suffix: "", raw: "" };
+  }
+  const match = /^WB(\d+)-(.+)$/.exec(raw);
+  if (!match) {
+    return { hasWorkbook: true, serial: 0, suffix: "", raw };
+  }
+  return {
+    hasWorkbook: true,
+    serial: Number(match[1]) || 0,
+    suffix: match[2] || "",
+    raw,
+  };
+}
+
+export function compareShareDistributionRows(a, b) {
+  const aWb = parseShareDistributionWorkbookSortKey(a?.workbook);
+  const bWb = parseShareDistributionWorkbookSortKey(b?.workbook);
+
+  if (aWb.hasWorkbook !== bWb.hasWorkbook) {
+    return aWb.hasWorkbook ? -1 : 1;
+  }
+
+  if (aWb.hasWorkbook && bWb.hasWorkbook) {
+    if (aWb.serial !== bWb.serial) {
+      return bWb.serial - aWb.serial;
+    }
+    if (aWb.suffix !== bWb.suffix) {
+      return bWb.suffix.localeCompare(aWb.suffix);
+    }
+    if (aWb.raw !== bWb.raw) {
+      return bWb.raw.localeCompare(aWb.raw);
+    }
+  }
+
+  const dateCmp = String(b?.__sortReceiptDate || "").localeCompare(
+    String(a?.__sortReceiptDate || "")
+  );
+  if (dateCmp !== 0) return dateCmp;
+
+  return String(a?.caId || "").localeCompare(String(b?.caId || ""));
+}
+
+export function sortShareDistributionRows(rows = []) {
+  return [...rows].sort(compareShareDistributionRows);
+}
+
+export function finalizeShareDistributionRows(rows = []) {
+  return sortShareDistributionRows(rows).map((row, index, arr) => {
+    const { __sortReceiptDate, ...rest } = row;
+    const workbook = String(rest.workbook || "").trim();
+    const prevWorkbook = index > 0 ? String(arr[index - 1].workbook || "").trim() : "";
+    const hasWorkbook = Boolean(workbook);
+    const startsNewWorkbookGroup = hasWorkbook && workbook !== prevWorkbook;
+
+    return {
+      ...rest,
+      sn: index + 1,
+      __rowStyle: {
+        backgroundColor: hasWorkbook ? SHARE_DIST_WORKBOOK_ROW_BG : SHARE_DIST_UNASSIGNED_ROW_BG,
+        ...(startsNewWorkbookGroup && index > 0 ? { boxShadow: "inset 0 2px 0 #bdbdbd" } : null),
+      },
+      __rowClassName: hasWorkbook ? "share-dist-workbook-row" : "share-dist-unassigned-row",
+    };
+  });
 }
 
 export function buildShareDistributionRows({ asOfRows, contractRows, tenants, bases = [] }) {
@@ -122,16 +492,21 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
 
   const sourceRows = asOfRows.length > 0 ? asOfRows : contractRows;
 
-  return sourceRows
+  const preparedRows = sourceRows
     .map((raw, index) => {
-      const id = pickField(raw, "id", "Id");
+      const contractId = pickField(raw, "id", "Id");
       const contractNo = String(pickField(raw, "contractNo", "ContractNo") || "").trim();
       const catalog =
-        (id != null && contractById.get(Number(id))) ||
+        (contractId != null && contractById.get(Number(contractId))) ||
         (contractNo && contractByNo.get(contractNo)) ||
         null;
       const row = mergeContractRow(raw, catalog);
       const tenant = findTenant(tenants, row);
+      const sn = pickField(raw, "sn", "SN") || index + 1;
+      const selectionKey =
+        contractId != null && contractId !== ""
+          ? `${contractId}-${sn}`
+          : `${contractNo || "row"}-${index}`;
 
       const caArea1 = pickField(row, "vaArea", "VaArea", "groupArea", "GroupArea");
       const caArea2 = pickField(
@@ -145,12 +520,36 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       );
 
       return {
-        id: id ?? `${contractNo || "row"}-${index}`,
+        id: selectionKey,
+        contractId,
+        selectionKey,
+        sn,
+        racName: String(
+          pickField(
+            row,
+            "racName",
+            "RACName",
+            "cmdName",
+            "CmdName",
+            "commandName",
+            "CommandName"
+          ) || ""
+        ).trim(),
         base: resolveShareDistributionBaseLabel(row, bases),
+        className:
+          pickField(row, "class", "Class", "className", "ClassName", "classCode", "ClassCode") ||
+          "",
+        agreement:
+          pickField(row, "agreement", "Agreement") ||
+          pickField(row, "caId", "CAId") ||
+          formatAgreementLabel(row),
         caId: pickField(row, "caId", "CAId") || formatAgreementLabel(row),
         tenantAndBusiness:
           pickField(row, "tenantAndBusiness", "TenantAndBusiness") ||
           formatTenantBusinessLabel(row, tenant),
+        booArea: formatShareDistributionNumber(
+          pickField(row, "booArea", "BoOArea", "caArea2", "CAArea2", "groupArea", "GroupArea")
+        ),
         caArea1: formatShareDistributionNumber(caArea1),
         caArea2: formatShareDistributionNumber(caArea2),
         revenueRate: formatShareDistributionNumber(
@@ -196,7 +595,7 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
             "PaidAmount"
           )
         ),
-        ratio: formatShareDistributionNumber(
+        ratio: formatShareDistributionRatioDisplay(
           pickField(row, "ratio", "Ratio", "shareRatio", "ShareRatio")
         ),
         govt: formatShareDistributionNumber(
@@ -222,15 +621,12 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
         baseShare: formatShareDistributionNumber(
           pickField(row, "baseShare", "BaseShare", "baseShareAmount", "BaseShareAmount")
         ),
-        workbook: pickField(
-          row,
-          "workbook",
-          "Workbook",
-          "workbookId",
-          "WorkbookId",
-          "wbId",
-          "WBID"
-        ),
+        workbook: String(
+          pickField(row, "workbook", "Workbook", "workbookId", "WorkbookId", "wbId", "WBID") || ""
+        ).trim(),
+        __sortReceiptDate: String(
+          pickField(row, "receiptDate", "ReceiptDate", "lastReceiptDate", "LastReceiptDate") || ""
+        ).slice(0, 10),
         __isFinalized: isFinalizedContract(row),
         __isFinalizedReceiptShareDistribution: Boolean(
           pickField(row, "receiptAmount", "ReceiptAmount")
@@ -238,5 +634,10 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       };
     })
     .filter((row) => row.__isFinalized || row.__isFinalizedReceiptShareDistribution)
-    .map(({ __isFinalized, __isFinalizedReceiptShareDistribution, ...row }) => row);
+    .map(({ __isFinalized, __isFinalizedReceiptShareDistribution, __sortReceiptDate, ...row }) => ({
+      ...row,
+      __sortReceiptDate,
+    }));
+
+  return finalizeShareDistributionRows(preparedRows);
 }

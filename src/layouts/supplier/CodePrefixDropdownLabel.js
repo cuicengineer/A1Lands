@@ -4,7 +4,7 @@ import MDBox from "components/MDBox";
 
 import MDTypography from "components/MDTypography";
 
-export default function CodePrefixDropdownLabel({ item, compact = false }) {
+export default function CodePrefixDropdownLabel({ item }) {
   const prefix = String(item?.prefixAlpha ?? "").trim();
   const description = String(item?.description ?? "").trim();
 
@@ -15,12 +15,14 @@ export default function CodePrefixDropdownLabel({ item, compact = false }) {
       component="span"
       sx={{
         display: "inline-flex",
-        alignItems: compact ? "center" : "flex-start",
-        flexDirection: compact ? "row" : "column",
-        gap: compact ? 0.75 : 0.25,
+        alignItems: "center",
+        flexDirection: "row",
+        gap: 0.75,
         minWidth: 0,
         maxWidth: "100%",
         lineHeight: 1.3,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
       }}
     >
       <MDTypography
@@ -36,12 +38,11 @@ export default function CodePrefixDropdownLabel({ item, compact = false }) {
           variant="caption"
           sx={{
             color: "text.secondary",
-            fontSize: compact ? "0.75rem" : "0.72rem",
-            whiteSpace: compact ? "nowrap" : "normal",
-            overflow: compact ? "hidden" : "visible",
-            textOverflow: compact ? "ellipsis" : "clip",
+            fontSize: "0.75rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
             minWidth: 0,
-            flex: compact ? 1 : undefined,
+            flex: 1,
             userSelect: "text",
             pointerEvents: "none",
           }}
@@ -58,5 +59,4 @@ CodePrefixDropdownLabel.propTypes = {
     prefixAlpha: PropTypes.string,
     description: PropTypes.string,
   }),
-  compact: PropTypes.bool,
 };

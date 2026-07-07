@@ -45,20 +45,23 @@ import { useMaterialUIController } from "context";
 // ReportsBarChart configurations
 import configs from "examples/Charts/BarCharts/ReportsBarChart/configs";
 import { executiveBarConfigs, CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
-import { coerceChartDataValue } from "utils/chartBarDataUtils";
-import { applyKpiZoomBarChartEnhancements } from "layouts/dashboard/kpi-overview/components/kpiZoomChartEnhancements";
-import { formatKpiMoneyLabel } from "layouts/dashboard/kpi-overview/kpiDataUtils";
+import { coerceChartDataValue, roundChartBarNumber } from "utils/chartBarDataUtils";
+import {
+  applyKpiZoomBarChartEnhancements,
+  applyKpiCrosshairBarChartEnhancements,
+} from "layouts/dashboard/kpi-overview/components/kpiZoomChartEnhancements";
+import { formatKpiCrosshairBarValue } from "layouts/dashboard/kpi-overview/kpiDataUtils";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 function formatExecutiveBarValue(value) {
-  const n = coerceChartDataValue(value);
+  const n = roundChartBarNumber(value);
   if (n == null) return "";
   if (Math.abs(n) >= 1000000) {
-    const millions = n / 1000000;
-    return `${millions.toFixed(millions >= 1 ? 1 : 2)}M`;
+    const millions = roundChartBarNumber(n / 1000000);
+    return `${millions.toLocaleString(undefined, { maximumFractionDigits: 2 })}M`;
   }
-  return n.toLocaleString();
+  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function ReportsBarChart({
@@ -71,6 +74,7 @@ function ReportsBarChart({
   flat,
   seriesColor,
   zoomEnhanced,
+  crosshairEnhanced,
   wideBars,
 }) {
   const [controller] = useMaterialUIController();
@@ -92,14 +96,23 @@ function ReportsBarChart({
   const { data, options: baseOptions } = chartConfig;
 
   const options = useMemo(() => {
-    if (!zoomEnhanced) return baseOptions;
-    return applyKpiZoomBarChartEnhancements(baseOptions, {
-      darkMode,
-      formatValue: (value) =>
-        formatKpiMoneyLabel(coerceChartDataValue(value) ?? 0) || formatExecutiveBarValue(value),
-      fontSize: 13,
-    });
-  }, [baseOptions, zoomEnhanced, darkMode]);
+    if (crosshairEnhanced) {
+      return applyKpiCrosshairBarChartEnhancements(baseOptions, {
+        darkMode,
+        formatValue: formatKpiCrosshairBarValue,
+        fontSize: zoomEnhanced ? 12 : 10,
+        labelPlacement: "inside",
+      });
+    }
+    if (zoomEnhanced) {
+      return applyKpiZoomBarChartEnhancements(baseOptions, {
+        darkMode,
+        formatValue: (value) => formatKpiCrosshairBarValue(value) || formatExecutiveBarValue(value),
+        fontSize: 13,
+      });
+    }
+    return baseOptions;
+  }, [baseOptions, zoomEnhanced, crosshairEnhanced, darkMode]);
 
   if (flat) {
     return (
@@ -168,6 +181,7 @@ ReportsBarChart.defaultProps = {
   flat: false,
   seriesColor: null,
   zoomEnhanced: false,
+  crosshairEnhanced: false,
   wideBars: false,
 };
 
@@ -182,6 +196,7 @@ ReportsBarChart.propTypes = {
   flat: PropTypes.bool,
   seriesColor: PropTypes.string,
   zoomEnhanced: PropTypes.bool,
+  crosshairEnhanced: PropTypes.bool,
   wideBars: PropTypes.bool,
 };
 

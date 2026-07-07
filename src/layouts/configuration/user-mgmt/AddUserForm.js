@@ -25,6 +25,43 @@ import {
 } from "./userAppointUtils";
 import { isSuperuserUsername } from "./userMgmtUtils";
 
+function resolveGetInfoPayload(raw, isAirman) {
+  if (!raw || typeof raw !== "object") return {};
+  if (Array.isArray(raw)) {
+    return raw.find((item) => item && typeof item === "object") || {};
+  }
+
+  const nested = raw.data;
+  const nestedRecord = Array.isArray(nested)
+    ? nested.find((item) => item && typeof item === "object")
+    : nested && typeof nested === "object"
+    ? nested
+    : null;
+
+  const hasField = (obj, fieldName) =>
+    Boolean(
+      obj &&
+        typeof obj === "object" &&
+        Object.keys(obj).some((key) => key.toLowerCase() === fieldName.toLowerCase())
+    );
+
+  if (isAirman) {
+    if (hasField(raw, "FULL_NAME")) return raw;
+    if (hasField(nestedRecord, "FULL_NAME")) return nestedRecord;
+    return nestedRecord || raw;
+  }
+
+  if (nestedRecord) return nestedRecord;
+  return raw;
+}
+
+function getPayloadValue(obj, fieldName) {
+  if (!obj || typeof obj !== "object") return "";
+  if (obj[fieldName] != null) return obj[fieldName];
+  const matchKey = Object.keys(obj).find((key) => key.toLowerCase() === fieldName.toLowerCase());
+  return matchKey != null ? obj[matchKey] : "";
+}
+
 function normalizeCategoryArr(value) {
   if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
   return String(value || "")
@@ -315,14 +352,16 @@ function AddUserForm({
         "GET",
         `/api/UserPermissions/GetInfo?pakNo=${encodeURIComponent(pak)}`
       );
-      const d = data && typeof data === "object" ? data : {};
-      const p = d.data && typeof d.data === "object" ? d.data : d;
+      const isAirman = pak.length > 5;
+      const p = resolveGetInfoPayload(data, isAirman);
       const toField = (v) => (v == null ? "" : String(v).trim());
       setNewRowDraft((prev) => ({
         ...prev,
-        name: toField(p.full_NAME),
-        rank: toField(p.currentrank),
-        appoint: toField(p.appment),
+        name: toField(isAirman ? getPayloadValue(p, "FULL_NAME") : getPayloadValue(p, "fulL_NAME")),
+        rank: toField(
+          isAirman ? getPayloadValue(p, "CURRENT_RANK_DECODE") : getPayloadValue(p, "currentrank")
+        ),
+        appoint: isAirman ? "" : toField(getPayloadValue(p, "appment")),
       }));
     } catch (e) {
       console.error("GetInfo failed", e);

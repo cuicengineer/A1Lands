@@ -415,7 +415,9 @@ function A1Login() {
             </form>
 
             <div className="company">
-              Directorate of Central Non Public Fund / Audit & Accounts Sub Branch
+              Directorate of Central Non Public Fund
+              <br />
+              Audit & Accounts Sub Branch
             </div>
           </div>
         </div>

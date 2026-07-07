@@ -17,6 +17,7 @@ export const CONFIGURATION_MODULE_TABS = [
   { label: "Nature", route: "/configuration/nature" },
   { label: "Property Type", route: "/configuration/property-type" },
   { label: "Banks List", route: "/configuration/banks-list" },
+  { label: "Dealers", route: "/configuration/dealers" },
   { label: "Rental Value Rate", route: "/configuration/rental-value-rate" },
   { label: "Govt Share Rate", route: "/configuration/govt-share-rate" },
   { label: "Sharing Formula", route: "/configuration/sharing-formula" },

@@ -2,7 +2,7 @@
  * KPI Overview — data extraction & aggregation (same API as summary dashboard).
  */
 
-import { coerceChartDataValue } from "utils/chartBarDataUtils";
+import { coerceChartDataValue, roundChartBarNumber } from "utils/chartBarDataUtils";
 
 const DATA_SET_PROPERTY_SUMMARY = "PropertySummary";
 const DATA_SET_PROPERTY_GROUP_SUMMARY = "PropertyGroupSummary";
@@ -53,6 +53,68 @@ function groupedAssetRowLabel(key) {
 }
 
 /** Values from API are in millions; display with M or B suffix. */
+export const KPI_MIL_KEYS = ["incomePA", "govt", "paf", "ahq", "rac", "base"];
+
+/** Annual totals are divided by these to show per-period amounts. */
+export const KPI_TENURE_DIVISORS = {
+  Annual: 1,
+  Biannual: 2,
+  Quarterly: 4,
+  Monthly: 12,
+};
+
+export function getKpiTenureDivisor(tenure) {
+  return KPI_TENURE_DIVISORS[tenure] ?? 1;
+}
+
+export function scaleKpiAmountByTenure(value, tenure) {
+  const n = coerceChartDataValue(value);
+  if (n == null) return 0;
+  const divisor = getKpiTenureDivisor(tenure);
+  return divisor > 0 ? n / divisor : n;
+}
+
+export function scaleKpiMilByTenure(mil, tenure) {
+  if (!mil || typeof mil !== "object") return mil;
+  if (getKpiTenureDivisor(tenure) === 1) return mil;
+  const scaled = { ...mil };
+  KPI_MIL_KEYS.forEach((key) => {
+    if (mil[key] != null && mil[key] !== "") {
+      scaled[key] = scaleKpiAmountByTenure(mil[key], tenure);
+    }
+  });
+  return scaled;
+}
+
+export function applyTenureToAssetCards(cards, tenure) {
+  if (getKpiTenureDivisor(tenure) === 1) return cards || [];
+  return (cards || []).map((card) => ({
+    ...card,
+    mil: card.mil ? scaleKpiMilByTenure(card.mil, tenure) : card.mil,
+  }));
+}
+
+export function scaleKpiCellsByTenure(cells, tenure) {
+  if (!cells?.length || getKpiTenureDivisor(tenure) === 1) return cells || [];
+  return cells.map((cell) => ({
+    ...cell,
+    mil: cell.mil ? scaleKpiMilByTenure(cell.mil, tenure) : cell.mil,
+  }));
+}
+
+export function applyTenureToFinancialShares(shares, tenure) {
+  if (getKpiTenureDivisor(tenure) === 1) return shares || [];
+  return (shares || []).map((share) => ({
+    ...share,
+    value: scaleKpiAmountByTenure(share.value, tenure),
+  }));
+}
+
+export function applyTenureToChartData(data, tenure) {
+  if (!Array.isArray(data) || getKpiTenureDivisor(tenure) === 1) return data || [];
+  return data.map((value) => scaleKpiAmountByTenure(value, tenure));
+}
+
 export function formatKpiMoneyAmount(valueInMillions, options = {}) {
   const { fixedDecimals } = options;
   const fractionDigits =
@@ -60,7 +122,8 @@ export function formatKpiMoneyAmount(valueInMillions, options = {}) {
       ? { minimumFractionDigits: fixedDecimals, maximumFractionDigits: fixedDecimals }
       : { minimumFractionDigits: 0, maximumFractionDigits: 2 };
 
-  const n = coerceChartDataValue(valueInMillions);
+  const raw = coerceChartDataValue(valueInMillions);
+  const n = raw == null ? null : roundChartBarNumber(raw, fixedDecimals ?? 2);
   if (n == null) {
     const zeroText =
       fixedDecimals != null ? Number(0).toLocaleString(undefined, fractionDigits) : "0";
@@ -69,7 +132,10 @@ export function formatKpiMoneyAmount(valueInMillions, options = {}) {
   const abs = Math.abs(n);
   if (abs >= 1000) {
     return {
-      text: (n / 1000).toLocaleString(undefined, fractionDigits),
+      text: roundChartBarNumber(n / 1000, fixedDecimals ?? 2).toLocaleString(
+        undefined,
+        fractionDigits
+      ),
       suffix: "B",
     };
   }
@@ -79,9 +145,28 @@ export function formatKpiMoneyAmount(valueInMillions, options = {}) {
   };
 }
 
+/** Y-axis tick labels for KPI bar charts (millions scale, max 2 decimals). */
+export function formatKpiBarAxisTick(value) {
+  const n = roundChartBarNumber(value);
+  if (n == null) return "";
+  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 export function formatKpiMoneyLabel(valueInMillions, options) {
   const { text, suffix } = formatKpiMoneyAmount(valueInMillions, options);
   return `${text} ${suffix}`;
+}
+
+/** Bar/crosshair labels — always includes M or B unit. */
+export function formatKpiBarMoneyLabel(valueInMillions) {
+  const { text, suffix } = formatKpiMoneyAmount(valueInMillions, { fixedDecimals: 2 });
+  return `${text} ${suffix}`;
+}
+
+/** Crosshair Y-axis readout — rounds to 2 decimals before M/B formatting. */
+export function formatKpiCrosshairBarValue(value) {
+  const numeric = roundChartBarNumber(coerceChartDataValue(value) ?? value, 2);
+  return formatKpiBarMoneyLabel(numeric ?? 0);
 }
 
 function getKnownPropertyClassIds() {
@@ -1640,6 +1725,92 @@ export function buildKpiCategoryRacMilMatrix({
   return cells;
 }
 
+export const KPI_GOVT_PAF_UNASSIGNED_BASE_KEY = "__unassigned__";
+
+function sumGovtPafMilFromShareRows(rows) {
+  let govt = 0;
+  let paf = 0;
+  for (const row of rows || []) {
+    if (!isGovtPafShareDataRow(row)) continue;
+    govt += readNumber(row, MIL_FIELDS.govt) || 0;
+    paf += readNumber(row, MIL_FIELDS.paf) || 0;
+  }
+  return { govt, paf };
+}
+
+function sumGovtPafMilFromContractRows(rows) {
+  let govt = 0;
+  let paf = 0;
+  for (const row of rows || []) {
+    if (!isDataSetRow(row, DATA_SET_CONTRACTS_SUMMARY)) continue;
+    govt += readNumber(row, MIL_FIELDS.govt) || 0;
+    paf += readNumber(row, MIL_FIELDS.paf) || 0;
+  }
+  return { govt, paf };
+}
+
+/** Mirrors buildFinancialShares govt/paf source selection (share first, else contract). */
+function resolveGovtPafMilSources(shareRows, contractRows) {
+  const fromShare = sumGovtPafMilFromShareRows(shareRows);
+  const fromContract = sumGovtPafMilFromContractRows(contractRows);
+  const govtSource = fromShare.govt !== 0 ? "share" : "contract";
+  const pafSource = fromShare.paf !== 0 ? "share" : "contract";
+
+  return {
+    govt: govtSource === "share" ? fromShare.govt : fromContract.govt,
+    paf: pafSource === "share" ? fromShare.paf : fromContract.paf,
+    govtSource,
+    pafSource,
+  };
+}
+
+function buildGovtPafMilForScopedRows(shareRows, contractRows, sources) {
+  const govtRows = sources.govtSource === "share" ? shareRows : contractRows;
+  const pafRows = sources.pafSource === "share" ? shareRows : contractRows;
+  const govt =
+    sources.govtSource === "share"
+      ? sumGovtPafMilFromShareRows(govtRows).govt
+      : sumGovtPafMilFromContractRows(govtRows).govt;
+  const paf =
+    sources.pafSource === "share"
+      ? sumGovtPafMilFromShareRows(pafRows).paf
+      : sumGovtPafMilFromContractRows(pafRows).paf;
+  return { govt, paf };
+}
+
+function partitionKpiRowsByBaseId(rows) {
+  const byBase = new Map();
+  const unassigned = [];
+
+  for (const row of rows || []) {
+    const baseId = readKpiRowId(row, KPI_BASE_ID_KEYS);
+    if (!baseId) {
+      unassigned.push(row);
+      continue;
+    }
+    if (!byBase.has(baseId)) byBase.set(baseId, []);
+    byBase.get(baseId).push(row);
+  }
+
+  return { byBase, unassigned };
+}
+
+function resolveKpiBaseLabel(baseId, catalogBases, labelLookups) {
+  const match = (catalogBases || []).find((base) => String(base.id ?? base.Id ?? "") === baseId);
+  if (match) return getKpiOptionName(match) || baseId;
+  return labelLookups?.idToLabel?.get(baseId) || baseId;
+}
+
+function buildKpiBaseGovtPafCell(baseId, chartLabel, shareRows, contractRows, sources) {
+  const baseShare = baseId ? filterKpiRowsByBaseId(shareRows, baseId) : shareRows;
+  const baseContract = baseId ? filterKpiRowsByBaseId(contractRows, baseId) : contractRows;
+  return {
+    key: baseId || "all",
+    chartLabel,
+    mil: buildGovtPafMilForScopedRows(baseShare, baseContract, sources),
+  };
+}
+
 /**
  * Govt / PAF mil per RAC (CmdId), consolidated across all property classes.
  * Used by Govt & PAF bar charts without class-wise breakdown.
@@ -1659,13 +1830,145 @@ export function buildKpiRacGovtPafCells({
     const racLabel = getKpiOptionName(rac) || cmdId || "All";
     const racShare = cmdId ? filterKpiRowsByCmdId(shareRows, cmdId) : shareRows;
     const racContract = cmdId ? filterKpiRowsByCmdId(contractRows, cmdId) : contractRows;
-    const shares = buildFinancialShares(racShare, "all", racContract);
-    const govt = shares.find((s) => s.id === "govt")?.value ?? 0;
-    const paf = shares.find((s) => s.id === "paf")?.value ?? 0;
+    const mil = resolveGovtPafMilSources(racShare, racContract);
     cells.push({
       key: cmdId || "all",
       chartLabel: racLabel,
-      mil: { govt, paf },
+      mil: { govt: mil.govt, paf: mil.paf },
+    });
+  }
+
+  return cells;
+}
+
+function filterKpiRowsByBaseId(rows, baseId) {
+  const id = String(baseId ?? "");
+  if (!id) return rows || [];
+  return (rows || []).filter((row) => readKpiRowId(row, KPI_BASE_ID_KEYS) === id);
+}
+
+function resolveKpiBaseChartOptions(baseOptions, allBases, racCmdId) {
+  const source = (Array.isArray(allBases) && allBases.length ? allBases : baseOptions) || [];
+  const racId = String(racCmdId ?? "");
+  if (!racId) return source;
+  return source.filter((base) => String(base.cmd ?? base.CmdId ?? base.cmdId) === racId);
+}
+
+/**
+ * Govt / PAF mil per Base within a RAC (CmdId).
+ * Used when drilling from RAC-level Govt & PAF bar chart.
+ */
+export function buildKpiBaseGovtPafCells({
+  shareRows = [],
+  contractRows = [],
+  baseOptions = [],
+  allBases = [],
+  racCmdId,
+}) {
+  const catalogBases = resolveKpiBaseChartOptions(baseOptions, allBases, racCmdId);
+  const labelLookups = buildKpiOptionLookups([
+    ...(allBases || []),
+    ...(baseOptions || []),
+    ...catalogBases,
+  ]);
+  const racShare = racCmdId ? filterKpiRowsByCmdId(shareRows, racCmdId) : shareRows;
+  const racContract = racCmdId ? filterKpiRowsByCmdId(contractRows, racCmdId) : contractRows;
+  const sources = resolveGovtPafMilSources(racShare, racContract);
+
+  const govtPartitionRows = sources.govtSource === "share" ? racShare : racContract;
+  const pafPartitionRows = sources.pafSource === "share" ? racShare : racContract;
+  const govtPartition = partitionKpiRowsByBaseId(govtPartitionRows);
+  const pafPartition = partitionKpiRowsByBaseId(pafPartitionRows);
+
+  const orderedBaseIds = [];
+  const seenBaseIds = new Set();
+  const pushBaseId = (baseId) => {
+    const id = String(baseId ?? "").trim();
+    if (!id || seenBaseIds.has(id)) return;
+    seenBaseIds.add(id);
+    orderedBaseIds.push(id);
+  };
+
+  catalogBases.forEach((base) => pushBaseId(base.id ?? base.Id));
+  govtPartition.byBase.forEach((_, baseId) => pushBaseId(baseId));
+  pafPartition.byBase.forEach((_, baseId) => pushBaseId(baseId));
+
+  const cells = orderedBaseIds.map((baseId) =>
+    buildKpiBaseGovtPafCell(
+      baseId,
+      resolveKpiBaseLabel(baseId, catalogBases, labelLookups),
+      racShare,
+      racContract,
+      sources
+    )
+  );
+
+  if (cells.length === 0) {
+    cells.push({
+      key: "all",
+      chartLabel: "All",
+      mil: { govt: sources.govt, paf: sources.paf },
+    });
+  }
+
+  const unassignedMil = buildGovtPafMilForScopedRows(
+    partitionKpiRowsByBaseId(racShare).unassigned,
+    partitionKpiRowsByBaseId(racContract).unassigned,
+    sources
+  );
+
+  if (unassignedMil.govt !== 0 || unassignedMil.paf !== 0) {
+    cells.push({
+      key: KPI_GOVT_PAF_UNASSIGNED_BASE_KEY,
+      chartLabel: "Unassigned",
+      mil: unassignedMil,
+    });
+  }
+
+  return cells;
+}
+
+/**
+ * Govt / PAF mil per land category within a Base (and RAC).
+ * Used when drilling from Base-level Govt & PAF bar chart.
+ */
+export function buildKpiBaseCategoryGovtPafCells({
+  shareRows = [],
+  propertyRows = [],
+  contractRows = [],
+  racCmdId,
+  baseId,
+  categoryKeys,
+}) {
+  const keys =
+    Array.isArray(categoryKeys) && categoryKeys.length
+      ? categoryKeys
+      : KPI_ASSET_CHART_CATEGORY_KEYS;
+  let scopedShare = shareRows || [];
+  let scopedProperty = propertyRows || [];
+  let scopedContract = contractRows || [];
+
+  if (racCmdId) {
+    scopedShare = filterKpiRowsByCmdId(scopedShare, racCmdId);
+    scopedProperty = filterKpiRowsByCmdId(scopedProperty, racCmdId);
+    scopedContract = filterKpiRowsByCmdId(scopedContract, racCmdId);
+  }
+  if (baseId) {
+    scopedShare = filterKpiRowsByBaseId(scopedShare, baseId);
+    scopedProperty = filterKpiRowsByBaseId(scopedProperty, baseId);
+    scopedContract = filterKpiRowsByBaseId(scopedContract, baseId);
+  }
+
+  const cells = [];
+  for (const key of keys) {
+    const meta = PROPERTY_CLASS_STICKERS[key];
+    if (!meta) continue;
+    const catLabel = groupedAssetRowLabel(key) || meta.label;
+    const mil = buildMilForCategory(scopedShare, scopedProperty, meta.classIds, scopedContract);
+    cells.push({
+      key,
+      chartLabel: catLabel,
+      mil: { govt: mil.govt, paf: mil.paf },
     });
   }
 
@@ -1817,4 +2120,245 @@ export function buildFiscalKpiGridRows(propertyRows, contractRows, shareRows, fi
     makeRow("fiscal-receipts", "Receipts", receiptsBase, fmtInt),
     makeRow("fiscal-payments", "Payments", paymentsBase, fmtInt),
   ];
+}
+
+export function buildPropertySummaryApiPath(asOfDate) {
+  const trimmed = String(asOfDate ?? "").trim();
+  if (!trimmed) return "/api/Dashboards/property-summary";
+  const params = new URLSearchParams({ asOfDate: trimmed });
+  return `/api/Dashboards/property-summary?${params.toString()}`;
+}
+
+/** Convert as-of contract amounts (often raw PKR) to dashboard millions. */
+export function asOfAmountToMillions(value) {
+  const n = coerceChartDataValue(value);
+  if (n == null) return 0;
+  if (Math.abs(n) < 1000) return n;
+  return n / 1_000_000;
+}
+
+function readAsOfContractState(row) {
+  return String(readString(row, ["ContractState", "contractState"]) || "")
+    .trim()
+    .toLowerCase();
+}
+
+function readAsOfViability(row) {
+  return String(readString(row, ["Viability", "viability", "Feasible", "feasible"]) || "")
+    .trim()
+    .toLowerCase();
+}
+
+function accumulateAsOfStickerMetrics(bucket, row) {
+  const worth =
+    asOfAmountToMillions(readNumber(row, ["RentalValue", "rentalValue"])) ||
+    asOfAmountToMillions(
+      readNumber(row, ["CurrRentPA", "currRentPA", "CurrentRentPA", "currentRentPA"])
+    ) ||
+    asOfAmountToMillions(readNumber(row, MIL_FIELDS.paf));
+  bucket.count += 1;
+  if (Number.isFinite(worth)) bucket.worth += worth;
+}
+
+/** Contract Health stickers from ActiveByAsOfDate rows (Contracts tab). */
+export function buildContractHealthFromAsOfContracts(asOfRows) {
+  const active = emptyContractStickerMetrics();
+  const premature = emptyContractStickerMetrics();
+  const expiring = emptyContractStickerMetrics();
+  const terminated = emptyContractStickerMetrics();
+  const vacant = emptyContractStickerMetrics();
+
+  for (const row of asOfRows || []) {
+    const state = readAsOfContractState(row);
+    if (state === "valid" || state === "active") accumulateAsOfStickerMetrics(active, row);
+    else if (state === "pre-mature" || state === "premature")
+      accumulateAsOfStickerMetrics(premature, row);
+    else if (state === "expiring") accumulateAsOfStickerMetrics(expiring, row);
+    else if (state === "terminated" || state === "expired")
+      accumulateAsOfStickerMetrics(terminated, row);
+    else if (state === "vacant") accumulateAsOfStickerMetrics(vacant, row);
+    else accumulateAsOfStickerMetrics(active, row);
+  }
+
+  return { active, premature, expiring, terminated, vacant };
+}
+
+/** Contract Status stickers from ActiveByAsOfDate rows. */
+export function buildContractStatusFromAsOfContracts(asOfRows) {
+  const viable = emptyContractStickerMetrics();
+  const unviable = emptyContractStickerMetrics();
+  const active = emptyContractStickerMetrics();
+  const inactive = emptyContractStickerMetrics();
+
+  for (const row of asOfRows || []) {
+    const viability = readAsOfViability(row);
+    const state = readAsOfContractState(row);
+    const isInactive = state === "terminated" || state === "expired";
+
+    if (viability === "viable" || viability === "yes" || viability === "true") {
+      accumulateAsOfStickerMetrics(viable, row);
+    } else if (viability === "unviable" || viability === "no" || viability === "false") {
+      accumulateAsOfStickerMetrics(unviable, row);
+    }
+
+    if (isInactive) accumulateAsOfStickerMetrics(inactive, row);
+    else accumulateAsOfStickerMetrics(active, row);
+  }
+
+  return { viable, unviable, active, inactive };
+}
+
+function resolveAsOfContractClassId(row, contractMetaById) {
+  const id = Number(row?.Id ?? row?.id);
+  const meta = Number.isFinite(id) ? contractMetaById?.get?.(id) : null;
+  const classId = Number(row?.ClassId ?? row?.classId ?? meta?.classId);
+  return Number.isFinite(classId) ? classId : null;
+}
+
+function resolveAsOfContractCmdId(row, contractMetaById) {
+  const id = Number(row?.Id ?? row?.id);
+  const meta = Number.isFinite(id) ? contractMetaById?.get?.(id) : null;
+  const cmdId = row?.CmdId ?? row?.cmdId ?? meta?.cmdId;
+  return cmdId != null && cmdId !== "" ? String(cmdId) : "";
+}
+
+function resolveAsOfContractBaseId(row, contractMetaById) {
+  const id = Number(row?.Id ?? row?.id);
+  const meta = Number.isFinite(id) ? contractMetaById?.get?.(id) : null;
+  const baseId = row?.BaseId ?? row?.baseId ?? meta?.baseId;
+  return baseId != null && baseId !== "" ? String(baseId) : "";
+}
+
+/** AHQ Approval stickers from ActiveByAsOfDate rows. */
+export function buildAhqApprovalFromAsOfContracts(asOfRows) {
+  const approved = emptyContractStickerMetrics();
+  const pending = emptyContractStickerMetrics();
+
+  for (const row of asOfRows || []) {
+    const approvalRaw = row?.ApprovalStatus ?? row?.approvalStatus;
+    const isApproved =
+      approvalRaw === true ||
+      approvalRaw === 1 ||
+      approvalRaw === "1" ||
+      String(approvalRaw ?? "")
+        .trim()
+        .toLowerCase() === "approved";
+
+    if (isApproved) accumulateAsOfStickerMetrics(approved, row);
+    else accumulateAsOfStickerMetrics(pending, row);
+  }
+
+  return { approved, pending };
+}
+
+export function enrichAsOfContractRowsWithMeta(asOfRows, contractMetaById = new Map()) {
+  return (asOfRows || []).map((row) => {
+    const id = Number(row?.Id ?? row?.id);
+    const meta = Number.isFinite(id) ? contractMetaById?.get?.(id) : null;
+    if (!meta) return row;
+    return {
+      ...row,
+      ClassId: row.ClassId ?? row.classId ?? meta.classId,
+      CmdId: row.CmdId ?? row.cmdId ?? meta.cmdId,
+      BaseId: row.BaseId ?? row.baseId ?? meta.baseId,
+    };
+  });
+}
+
+/** Synthetic GovtPAFShare rows for Assets / Financials when using ActiveByAsOfDate fallback. */
+export function buildGovtPafShareRowsFromAsOfContracts(asOfRows, contractMetaById = new Map()) {
+  const byKey = new Map();
+
+  for (const row of asOfRows || []) {
+    const classId = resolveAsOfContractClassId(row, contractMetaById);
+    if (classId == null) continue;
+
+    const cmdId = resolveAsOfContractCmdId(row, contractMetaById);
+    const baseId = resolveAsOfContractBaseId(row, contractMetaById);
+    const key = `${classId}|${cmdId}|${baseId}`;
+
+    const entry = byKey.get(key) || {
+      incomePA: 0,
+      govt: 0,
+      paf: 0,
+      ahq: 0,
+      rac: 0,
+      base: 0,
+      classId,
+      cmdId,
+      baseId,
+    };
+
+    const income =
+      asOfAmountToMillions(readNumber(row, MIL_FIELDS.incomePAShare)) ||
+      asOfAmountToMillions(readNumber(row, MIL_FIELDS.incomePAProperty)) ||
+      asOfAmountToMillions(
+        readNumber(row, ["RentalValue", "rentalValue", "CurrRentPA", "currRentPA"])
+      );
+
+    entry.incomePA += income;
+    entry.govt += asOfAmountToMillions(readNumber(row, MIL_FIELDS.govt));
+    entry.paf += asOfAmountToMillions(readNumber(row, MIL_FIELDS.paf));
+    entry.ahq += asOfAmountToMillions(readNumber(row, MIL_FIELDS.ahq));
+    entry.rac += asOfAmountToMillions(readNumber(row, MIL_FIELDS.rac));
+    entry.base += asOfAmountToMillions(readNumber(row, MIL_FIELDS.base));
+    byKey.set(key, entry);
+  }
+
+  return [...byKey.values()].map((entry) => ({
+    DataSetName: DATA_SET_GOVT_PAF_SHARE,
+    ClassId: entry.classId,
+    CmdId: entry.cmdId || null,
+    BaseId: entry.baseId || null,
+    IncomePA_Million: entry.incomePA,
+    GovtShare_Million: entry.govt,
+    PAFShare_Million: entry.paf,
+    AHQShare_Million: entry.ahq,
+    RACShare_Million: entry.rac,
+    BaseShare_Million: entry.base,
+  }));
+}
+
+/** PropertySummary ClassRevenue overrides for outstanding-rent stickers (fallback). */
+export function buildPropertySummaryWorthFromAsOfContracts(asOfRows, contractMetaById = new Map()) {
+  const byClass = new Map();
+
+  for (const row of asOfRows || []) {
+    const classId = resolveAsOfContractClassId(row, contractMetaById);
+    if (classId == null) continue;
+    const worth =
+      asOfAmountToMillions(readNumber(row, ["RentalValue", "rentalValue"])) ||
+      asOfAmountToMillions(readNumber(row, MIL_FIELDS.paf));
+    byClass.set(classId, (byClass.get(classId) || 0) + worth);
+  }
+
+  return [...byClass.entries()].map(([classId, worth]) => ({
+    DataSetName: DATA_SET_PROPERTY_SUMMARY,
+    ClassId: classId,
+    ClassRevenue_Million: worth,
+  }));
+}
+
+export function buildContractMetaLookup(contracts) {
+  const map = new Map();
+  (contracts || []).forEach((row) => {
+    const id = Number(row?.Id ?? row?.id);
+    if (!Number.isFinite(id)) return;
+    map.set(id, {
+      classId: row?.ClassId ?? row?.classId ?? "",
+      cmdId: row?.CmdId ?? row?.cmdId ?? "",
+      baseId: row?.BaseId ?? row?.baseId ?? "",
+    });
+  });
+  return map;
+}
+
+export function unwrapKpiApiList(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (Array.isArray(response?.resultSets)) return response.resultSets;
+  if (Array.isArray(response?.ResultSets)) return response.ResultSets;
+  return [];
 }

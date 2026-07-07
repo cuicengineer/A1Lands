@@ -16,9 +16,17 @@ export function coerceChartDataValue(value) {
   return null;
 }
 
+/** Round chart numeric values for display (max 2 decimal places). */
+export function roundChartBarNumber(value, decimals = 2) {
+  const n = coerceChartDataValue(value);
+  if (n == null) return null;
+  const factor = 10 ** decimals;
+  return Math.round(n * factor) / factor;
+}
+
 /** Chart.js treats null as "no bar" — avoids empty slots and zero labels. */
 export function nullIfZeroChartBarValue(value) {
-  const n = coerceChartDataValue(value);
+  const n = roundChartBarNumber(value);
   if (n == null || n === 0) return null;
   return n;
 }

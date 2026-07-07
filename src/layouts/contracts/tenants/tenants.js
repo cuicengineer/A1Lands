@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -24,6 +24,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  isSuperuserUser,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -38,6 +39,17 @@ import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import CurrencyLoading from "components/CurrencyLoading";
 import { format, parseISO, isValid } from "date-fns";
 import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
+import {
+  findPartyCoaOption,
+  getPartyCoaDropdownLabel,
+  isTenantPartyCoaOption,
+  isTenantPayableCoaOption,
+  isTenantReceiptCoaOption,
+  isTenantsControlAccount,
+  mergePartyCoaOption,
+  normalizePartyCoaOption,
+  pickCoaField,
+} from "utils/partyCoaUtils";
 
 /** Address column: one line clamp; click … for full text in a popover (same pattern as rental-properties Location). */
 function AddressTableCell({ value }) {
@@ -124,39 +136,32 @@ const TENANTS_HSCROLL_HIDE_MS = 1800;
 const TENANTS_HSCROLL_THUMB_MIN_PX = 28;
 const TENANTS_HSCROLL_RAIL_H = 6;
 
-function pickCoaField(row, ...keys) {
-  for (let i = 0; i < keys.length; i += 1) {
-    const value = row?.[keys[i]];
-    if (value != null && String(value).trim() !== "") return String(value).trim();
-  }
-  return "";
-}
-
 function normalizeTenantCoaOption(row) {
-  const id = row?.Id ?? row?.id;
-  return {
-    id: id != null ? Number(id) : null,
-    acctId: pickCoaField(row, "acctId", "AcctId"),
-    acctName: pickCoaField(row, "acctName", "AcctName"),
-    controlAccount: pickCoaField(row, "controlAccount", "ControlAccount"),
-  };
-}
-
-function isTenantsControlAccount(controlAccount) {
-  return /^tenants$/i.test(String(controlAccount || "").trim());
+  return normalizePartyCoaOption(row);
 }
 
 function getTenantCoaDropdownLabel(option) {
-  if (option == null) return "";
-  const acctId = String(option.acctId ?? "").trim();
-  const acctName = String(option.acctName ?? "").trim();
-  if (acctId && acctName) return `${acctId} - ${acctName}`;
-  return acctId || acctName || "";
+  return getPartyCoaDropdownLabel(option);
 }
 
 function findTenantCoaOption(options, coaId) {
-  if (coaId === "" || coaId == null) return null;
-  return (options || []).find((option) => Number(option.id) === Number(coaId)) ?? null;
+  return findPartyCoaOption(options, coaId);
+}
+
+function mergeTenantCoaOption(options, option) {
+  return mergePartyCoaOption(options, option);
+}
+
+function extractTenantNoDigits(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^T-/i, "")
+    .replace(/\D/g, "");
+}
+
+function normalizeTenantNoForSave(value) {
+  const digits = extractTenantNoDigits(value);
+  return digits ? `T-${digits}` : "";
 }
 
 function findTenantsMainHorizontalScrollEl(root) {
@@ -574,10 +579,19 @@ TenantsTableTopScrollRail.propTypes = {
   darkMode: PropTypes.bool.isRequired,
 };
 
-function TenantsForm({ open, onClose, onSubmit, initialData }) {
+function TenantsForm({
+  open,
+  onClose,
+  onSubmit,
+  initialData,
+  existingTenantNos,
+  canEditTenantNo,
+  readOnly = false,
+}) {
   const isAddMode = !initialData;
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
+  const lockForm = readOnly;
   const [form, setForm] = useState({
     tenantNo: "",
     ownerName: "",
@@ -593,6 +607,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     status: true,
     remarks: "",
     coaId: "",
+    coaId2: "",
   });
   const [errors, setErrors] = useState({});
   const [tenantCoaOptions, setTenantCoaOptions] = useState([]);
@@ -605,19 +620,52 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     const fetchTenantCoaOptions = async () => {
       try {
         const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
-        const options = (chartOfAccountsApi.unwrapList(response) || [])
+        let options = (chartOfAccountsApi.unwrapList(response) || [])
           .map(normalizeTenantCoaOption)
-          .filter((row) => row.id != null && isTenantsControlAccount(row.controlAccount))
-          .sort((a, b) => {
-            const idDiff = String(a.acctId).localeCompare(String(b.acctId), undefined, {
-              numeric: true,
-              sensitivity: "base",
-            });
-            if (idDiff !== 0) return idDiff;
-            return String(a.acctName).localeCompare(String(b.acctName), undefined, {
-              sensitivity: "base",
-            });
+          .filter((row) => row.id != null && isTenantPartyCoaOption(row));
+
+        const savedCoaId = initialData?.coaId ?? initialData?.CoaId;
+        if (savedCoaId !== "" && savedCoaId != null) {
+          const existing = findTenantCoaOption(options, savedCoaId);
+          if (!existing) {
+            try {
+              const savedRow = await api.get("ChartOfAccounts", savedCoaId);
+              const savedOption = normalizeTenantCoaOption(savedRow);
+              if (savedOption.id != null && isTenantReceiptCoaOption(savedOption)) {
+                options = mergeTenantCoaOption(options, savedOption);
+              }
+            } catch (error) {
+              console.error("Error fetching saved tenant receipt CA:", error);
+            }
+          }
+        }
+
+        const savedCoaId2 = initialData?.coaId2 ?? initialData?.CoaId2;
+        if (savedCoaId2 !== "" && savedCoaId2 != null) {
+          const existing2 = findTenantCoaOption(options, savedCoaId2);
+          if (!existing2) {
+            try {
+              const savedRow2 = await api.get("ChartOfAccounts", savedCoaId2);
+              const savedOption2 = normalizeTenantCoaOption(savedRow2);
+              if (savedOption2.id != null && isTenantPayableCoaOption(savedOption2)) {
+                options = mergeTenantCoaOption(options, savedOption2);
+              }
+            } catch (error) {
+              console.error("Error fetching saved tenant payable CA:", error);
+            }
+          }
+        }
+
+        options = options.sort((a, b) => {
+          const idDiff = String(a.acctId).localeCompare(String(b.acctId), undefined, {
+            numeric: true,
+            sensitivity: "base",
           });
+          if (idDiff !== 0) return idDiff;
+          return String(a.acctName).localeCompare(String(b.acctName), undefined, {
+            sensitivity: "base",
+          });
+        });
         if (!cancelled) setTenantCoaOptions(options);
       } catch (error) {
         console.error("Error fetching tenant chart of account options:", error);
@@ -630,13 +678,13 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, initialData?.coaId, initialData?.CoaId, initialData?.coaId2, initialData?.CoaId2]);
 
   useEffect(() => {
     setErrors({});
     if (initialData) {
       setForm({
-        tenantNo: initialData.tenantNo || "",
+        tenantNo: extractTenantNoDigits(initialData.tenantNo || ""),
         ownerName: initialData.ownerName || "",
         prefix: initialData.prefix || "",
         businessName: initialData.businessName || "",
@@ -650,6 +698,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         status: initialData.status !== undefined ? initialData.status : true,
         remarks: initialData.remarks || "",
         coaId: initialData.coaId ?? initialData.CoaId ?? "",
+        coaId2: initialData.coaId2 ?? initialData.CoaId2 ?? "",
       });
     } else {
       setForm({
@@ -667,15 +716,39 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         status: true,
         remarks: "",
         coaId: "",
+        coaId2: "",
       });
     }
   }, [initialData, open]);
 
   const handleChange = (field, value) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: field === "status" ? Boolean(value) : value,
-    }));
+    setForm((prev) => {
+      const normalizedValue = field === "tenantNo" ? extractTenantNoDigits(value) : value;
+      const next = {
+        ...prev,
+        [field]: field === "status" ? Boolean(value) : normalizedValue,
+      };
+
+      if (
+        field === "coaId" &&
+        value !== "" &&
+        value != null &&
+        Number(value) === Number(prev.coaId2)
+      ) {
+        next.coaId2 = "";
+      }
+
+      if (
+        field === "coaId2" &&
+        value !== "" &&
+        value != null &&
+        Number(value) === Number(prev.coaId)
+      ) {
+        next.coaId2 = "";
+      }
+
+      return next;
+    });
     if (errors?.[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
   };
 
@@ -688,6 +761,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
 
   const validateForm = () => {
     const next = {};
+    const normalizedTenantNo = normalizeTenantNoForSave(form?.tenantNo);
     if (isAddMode) {
       const required = [
         { key: "tenantNo", label: "Tenant No" },
@@ -703,10 +777,33 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
         { key: "remarks", label: "Remarks" },
       ];
       required.forEach(({ key, label }) => {
-        if (isEmpty(form?.[key])) next[key] = `${label} is required`;
+        if (isEmpty(key === "tenantNo" ? normalizedTenantNo : form?.[key])) {
+          next[key] = `${label} is required`;
+        }
       });
     }
-    if (isEmpty(form?.coaId)) next.coaId = "Account is required";
+    if (!isAddMode && !isEmpty(form?.tenantNo) && !normalizedTenantNo) {
+      next.tenantNo = "Tenant No must contain digits only";
+    }
+    if (normalizedTenantNo) {
+      const currentTenantNo = normalizeTenantNoForSave(initialData?.tenantNo || "");
+      const duplicate = (existingTenantNos || []).some((tenantNo) => {
+        const normalizedExisting = normalizeTenantNoForSave(tenantNo);
+        if (!normalizedExisting) return false;
+        if (!isAddMode && normalizedExisting === currentTenantNo) return false;
+        return normalizedExisting === normalizedTenantNo;
+      });
+      if (duplicate) next.tenantNo = "Tenant No must be unique";
+    }
+    if (isEmpty(form?.coaId)) next.coaId = "Receipt CA is required";
+    if (isEmpty(form?.coaId2)) next.coaId2 = "Payable CA is required";
+    else if (
+      form.coaId !== "" &&
+      form.coaId != null &&
+      Number(form.coaId) === Number(form.coaId2)
+    ) {
+      next.coaId2 = "Payable CA must differ from Receipt CA";
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -714,8 +811,23 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
   const handleSave = () => {
     const ok = validateForm();
     if (!ok) return;
-    onSubmit(form);
+    onSubmit({
+      ...form,
+      tenantNo: normalizeTenantNoForSave(form.tenantNo),
+    });
   };
+
+  const primaryCoaOptions = tenantCoaOptions.filter(
+    (option) =>
+      isTenantReceiptCoaOption(option) &&
+      (form.coaId2 === "" || form.coaId2 == null || Number(option.id) !== Number(form.coaId2))
+  );
+
+  const secondaryCoaOptions = tenantCoaOptions.filter(
+    (option) =>
+      isTenantPayableCoaOption(option) &&
+      (form.coaId === "" || form.coaId == null || Number(option.id) !== Number(form.coaId))
+  );
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
@@ -731,7 +843,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
           fontWeight: 600,
         }}
       >
-        {initialData ? "Edit Tenant" : "New Tenant"}
+        {lockForm ? "View Tenant" : initialData ? "Edit Tenant" : "New Tenant"}
         <MDInput
           label="Tenant No"
           type="text"
@@ -739,8 +851,20 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
           onChange={(e) => handleChange("tenantNo", e.target.value)}
           size="small"
           required={isAddMode}
+          disabled={lockForm || (!isAddMode && !canEditTenantNo)}
           error={Boolean(errors.tenantNo)}
-          helperText={errors.tenantNo}
+          helperText={
+            errors.tenantNo ||
+            (!isAddMode && !canEditTenantNo
+              ? "Only superuser can edit Tenant No"
+              : form.tenantNo
+              ? `Will save as ${normalizeTenantNoForSave(form.tenantNo)}`
+              : "Enter numeric value only; T- will be added automatically")
+          }
+          inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
+          InputProps={{
+            startAdornment: <InputAdornment position="start">T-</InputAdornment>,
+          }}
           sx={{
             flex: "1 1 240px",
             maxWidth: 400,
@@ -765,6 +889,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.ownerName || errors.prefix)}
               helperText={errors.ownerName || errors.prefix}
               sx={{
@@ -785,6 +910,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                       displayEmpty
                       variant="standard"
                       disableUnderline
+                      disabled={lockForm}
                       renderValue={(selected) => {
                         const value = String(selected || "").trim();
                         return value || "Prefix";
@@ -821,6 +947,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.address)}
               helperText={errors.address}
               sx={{
@@ -857,6 +984,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 value={form.province}
                 label="Province"
                 onChange={(e) => handleChange("province", e.target.value)}
+                disabled={lockForm}
               >
                 <MenuItem value="">Select</MenuItem>
                 <MenuItem value="Capital">Federal</MenuItem>
@@ -881,6 +1009,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.city)}
               helperText={errors.city}
               sx={{
@@ -905,6 +1034,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.telephoneNo)}
               helperText={errors.telephoneNo}
               sx={{
@@ -929,6 +1059,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.cellNo)}
               helperText={errors.cellNo}
               sx={{
@@ -953,6 +1084,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.ntnNo)}
               helperText={errors.ntnNo}
               sx={{
@@ -977,6 +1109,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               fullWidth
               size="small"
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.gstNo)}
               helperText={errors.gstNo}
               sx={{
@@ -1002,6 +1135,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
                 value={form.status !== undefined ? form.status : true}
                 label="Status"
                 onChange={(e) => handleChange("status", e.target.value)}
+                disabled={lockForm}
                 MenuProps={{
                   PaperProps: {
                     style: {
@@ -1042,6 +1176,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               onChange={(e) => handleChange("businessName", e.target.value)}
               fullWidth
               size="small"
+              disabled={lockForm}
               error={Boolean(errors.businessName)}
               helperText={errors.businessName}
               sx={{
@@ -1068,6 +1203,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               multiline
               rows={3}
               required={isAddMode}
+              disabled={lockForm}
               error={Boolean(errors.remarks)}
               helperText={errors.remarks}
               sx={{
@@ -1095,8 +1231,11 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
       >
         <MDBox
           sx={{
-            flex: { xs: "1 1 100%", sm: "0 0 50%" },
+            flex: { xs: "1 1 100%", sm: "1 1 50%" },
             maxWidth: { xs: "100%", sm: "50%" },
+            display: "flex",
+            flexDirection: { xs: "column", sm: "row" },
+            gap: 2,
             pr: { sm: 1 },
           }}
         >
@@ -1104,10 +1243,11 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
             size="small"
             fullWidth
             disableClearable
-            options={tenantCoaOptions}
+            disabled={lockForm}
+            options={primaryCoaOptions}
             getOptionLabel={(option) => getTenantCoaDropdownLabel(option)}
             isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-            value={findTenantCoaOption(tenantCoaOptions, form.coaId)}
+            value={findTenantCoaOption(primaryCoaOptions, form.coaId)}
             onChange={(_, newValue) => handleChange("coaId", newValue != null ? newValue.id : "")}
             ListboxProps={{ style: { maxHeight: 300 } }}
             sx={{
@@ -1124,7 +1264,7 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
             renderInput={(params) => (
               <MDInput
                 {...params}
-                label="Account"
+                label="Receipt CA"
                 required
                 error={Boolean(errors.coaId)}
                 helperText={errors.coaId}
@@ -1136,19 +1276,58 @@ function TenantsForm({ open, onClose, onSubmit, initialData }) {
               />
             )}
           />
+          <Autocomplete
+            size="small"
+            fullWidth
+            disableClearable
+            disabled={lockForm}
+            options={secondaryCoaOptions}
+            getOptionLabel={(option) => getTenantCoaDropdownLabel(option)}
+            isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+            value={findTenantCoaOption(secondaryCoaOptions, form.coaId2)}
+            onChange={(_, newValue) => handleChange("coaId2", newValue != null ? newValue.id : "")}
+            ListboxProps={{ style: { maxHeight: 300 } }}
+            sx={{
+              fontSize: "1.1rem",
+              "& .MuiAutocomplete-inputRoot": {
+                paddingTop: 0,
+                paddingBottom: 0,
+              },
+              "& .MuiInputBase-input": {
+                fontSize: "1.1rem",
+                padding: "12px 14px",
+              },
+            }}
+            renderInput={(params) => (
+              <MDInput
+                {...params}
+                label="Payable CA"
+                required
+                error={Boolean(errors.coaId2)}
+                helperText={errors.coaId2}
+                sx={{
+                  "& .MuiInputLabel-root": {
+                    fontSize: "1.1rem",
+                  },
+                }}
+              />
+            )}
+          />
         </MDBox>
         <MDBox display="flex" gap={1} flexShrink={0} alignSelf={{ xs: "flex-end", sm: "center" }}>
           <MDButton variant="outlined" color="secondary" onClick={onClose}>
-            <Icon>close</Icon>&nbsp;Cancel
+            <Icon>close</Icon>&nbsp;{lockForm ? "Close" : "Cancel"}
           </MDButton>
-          <MDButton
-            variant="gradient"
-            color="info"
-            onClick={handleSave}
-            disabled={isAddMode ? !canCreate : !canEdit}
-          >
-            <Icon>save</Icon>&nbsp;Save
-          </MDButton>
+          {!lockForm ? (
+            <MDButton
+              variant="gradient"
+              color="info"
+              onClick={handleSave}
+              disabled={isAddMode ? !canCreate : !canEdit}
+            >
+              <Icon>save</Icon>&nbsp;Save
+            </MDButton>
+          ) : null}
         </MDBox>
       </DialogActions>
     </Dialog>
@@ -1160,6 +1339,16 @@ TenantsForm.propTypes = {
   onClose: PropTypes.func.isRequired,
   onSubmit: PropTypes.func.isRequired,
   initialData: PropTypes.object,
+  existingTenantNos: PropTypes.arrayOf(PropTypes.string),
+  canEditTenantNo: PropTypes.bool,
+  readOnly: PropTypes.bool,
+};
+
+TenantsForm.defaultProps = {
+  initialData: undefined,
+  existingTenantNos: [],
+  canEditTenantNo: false,
+  readOnly: false,
 };
 
 function readTenantsUrlParams() {
@@ -1169,10 +1358,21 @@ function readTenantsUrlParams() {
     );
     return {
       tenantNo: String(params.get("tenantNo") || "").trim(),
+      view: String(params.get("view") || "")
+        .trim()
+        .toLowerCase(),
     };
   } catch {
-    return { tenantNo: "" };
+    return { tenantNo: "", view: "" };
   }
+}
+
+function formatGridDisplayName(prefix, name) {
+  return [prefix, name]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value && value !== "-")
+    .join(" ")
+    .trim();
 }
 
 function buildTenantFormState(tenant) {
@@ -1192,13 +1392,14 @@ function buildTenantFormState(tenant) {
     status: tenant.status !== undefined ? tenant.status : true,
     remarks: tenant.remarks || "",
     coaId: tenant.coaId ?? tenant.CoaId ?? "",
+    coaId2: tenant.coaId2 ?? tenant.CoaId2 ?? "",
   };
 }
 
 function openAgreementProvInvoiceForTenantInNewTab(tenantNo) {
   const normalized = String(tenantNo || "").trim();
   if (!normalized || typeof window === "undefined") return;
-  const params = new URLSearchParams({ tenantNo: normalized });
+  const params = new URLSearchParams({ view: "grid", tenantNo: normalized });
   const url = `${window.location.origin}/contracts/agreement-prov-invoice?${params.toString()}`;
   window.open(url, "_blank", "noopener,noreferrer");
 }
@@ -1210,6 +1411,7 @@ export default function Tenants() {
   const canCreate = canCreateCurrentMenu();
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
+  const canEditTenantNo = isSuperuserUser();
   const [openForm, setOpenForm] = useState(false);
   const [currentTenant, setCurrentTenant] = useState(null);
   const [rows, setRows] = useState([]);
@@ -1225,16 +1427,7 @@ export default function Tenants() {
   const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(true);
   const [coaLabelById, setCoaLabelById] = useState({});
-  const deepLinkTenantNoRef = useRef(() => {
-    if (typeof window === "undefined") return "";
-    try {
-      const params = new URLSearchParams(String(window.location?.search || ""));
-      return String(params.get("tenantNo") || "").trim();
-    } catch {
-      return "";
-    }
-  });
-  const deepLinkTenantAppliedRef = useRef(false);
+  const urlDeepLink = useMemo(() => readTenantsUrlParams(), []);
 
   const fetchCoaLabels = useCallback(async () => {
     try {
@@ -1353,24 +1546,28 @@ export default function Tenants() {
       status: tenant.status !== undefined ? tenant.status : true,
       remarks: tenant.remarks || "",
       coaId: tenant.coaId ?? tenant.CoaId ?? "",
+      coaId2: tenant.coaId2 ?? tenant.CoaId2 ?? "",
     });
     setOpenForm(true);
   };
 
-  useEffect(() => {
-    if (deepLinkTenantAppliedRef.current) return;
-    const readTenantNo =
-      typeof deepLinkTenantNoRef.current === "function"
-        ? deepLinkTenantNoRef.current()
-        : String(deepLinkTenantNoRef.current || "").trim();
-    if (!readTenantNo || !Array.isArray(rows) || rows.length === 0) return;
-    const tenant = rows.find(
-      (row) => String(row?.tenantNo ?? row?.TenantNo ?? "").trim() === readTenantNo
+  const gridRows = useMemo(() => {
+    const tenantNo = String(urlDeepLink.tenantNo || "")
+      .trim()
+      .toLowerCase();
+    if (!tenantNo) return rows;
+    return rows.filter(
+      (row) =>
+        String(row?.tenantNo ?? row?.TenantNo ?? "")
+          .trim()
+          .toLowerCase() === tenantNo
     );
-    if (!tenant?.id) return;
-    deepLinkTenantAppliedRef.current = true;
-    handleEditTenant(tenant.id);
-  }, [rows]);
+  }, [rows, urlDeepLink.tenantNo]);
+
+  useEffect(() => {
+    if (!urlDeepLink.tenantNo) return;
+    setPageNumber(1);
+  }, [urlDeepLink.tenantNo]);
 
   const handleDeleteTenant = (id) => {
     if (!canDelete) return;
@@ -1439,7 +1636,7 @@ export default function Tenants() {
   const handleSubmit = async (data) => {
     try {
       const formattedData = {
-        tenantNo: data.tenantNo || "",
+        tenantNo: normalizeTenantNoForSave(data.tenantNo),
         ownerName: data.ownerName || "",
         prefix: data.prefix || null,
         businessName: data.businessName || null,
@@ -1453,6 +1650,8 @@ export default function Tenants() {
         status: data.status !== undefined ? Boolean(data.status) : true,
         remarks: data.remarks || null,
         coaId: data.coaId !== "" && data.coaId != null ? Number(data.coaId) : null,
+        coaId2: data.coaId2 !== "" && data.coaId2 != null ? Number(data.coaId2) : null,
+        CoaId2: data.coaId2 !== "" && data.coaId2 != null ? Number(data.coaId2) : null,
       };
       if (currentTenant) {
         if (!canEdit) return;
@@ -1490,8 +1689,14 @@ export default function Tenants() {
     { Header: "Actions", accessor: "actions", align: "center" },
     { Header: "ID", accessor: "id", align: "center" },
     { Header: "Tenant No", accessor: "tenantNo", align: "left" },
-    { Header: "Prefix", accessor: "prefix", align: "left" },
-    { Header: "Particular Name", accessor: "ownerName", align: "left" },
+    {
+      Header: "Name",
+      accessor: "ownerName",
+      align: "left",
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) =>
+        formatGridDisplayName(row?.original?.prefix, row?.original?.ownerName) || "-",
+    },
     {
       Header: "Address",
       accessor: "address",
@@ -1586,7 +1791,8 @@ export default function Tenants() {
       },
     },
     { Header: "Business", accessor: "businessName", align: "left" },
-    { Header: "Account", accessor: "accountLabel", align: "left" },
+    { Header: "Receipt CA", accessor: "accountLabel", align: "left" },
+    { Header: "Payable CA", accessor: "accountLabel2", align: "left" },
     {
       Header: "Status",
       accessor: "status",
@@ -1596,13 +1802,17 @@ export default function Tenants() {
     { Header: "Remarks", accessor: "remarks", align: "left" },
   ];
 
-  const computedRows = rows.map((row) => {
+  const computedRows = gridRows.map((row) => {
     const coaId = row.coaId ?? row.CoaId ?? "";
     const accountLabel = coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
+    const coaId2 = row.coaId2 ?? row.CoaId2 ?? "";
+    const accountLabel2 =
+      coaId2 !== "" && coaId2 != null ? coaLabelById[Number(coaId2)] || "-" : "-";
 
     return {
       ...row,
       accountLabel,
+      accountLabel2,
       actions: (
         <MDBox
           alignItems="left"
@@ -1727,7 +1937,7 @@ export default function Tenants() {
         >
           <TenantsTableTopScrollRail
             gridHostRef={tenantsGridHostRef}
-            syncKey={`${rows.length}-${pageSize}-${pageNumber}`}
+            syncKey={`${gridRows.length}-${pageSize}-${pageNumber}-${urlDeepLink.tenantNo || ""}`}
             darkMode={Boolean(darkMode)}
           />
           <DataTable
@@ -1763,6 +1973,8 @@ export default function Tenants() {
         onClose={handleCloseForm}
         onSubmit={handleSubmit}
         initialData={currentTenant}
+        existingTenantNos={rows.map((row) => String(row?.tenantNo ?? row?.TenantNo ?? "").trim())}
+        canEditTenantNo={canEditTenantNo}
       />
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>
@@ -2434,3 +2646,5 @@ export default function Tenants() {
     </DashboardLayout>
   );
 }
+
+export { TenantsForm };

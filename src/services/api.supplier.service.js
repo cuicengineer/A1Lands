@@ -1,4 +1,5 @@
 import api, { getActionBy } from "services/api.service";
+import partyRankApi from "services/api.partyRank.service";
 
 function unwrapList(response) {
   if (!response) return [];
@@ -9,9 +10,23 @@ function unwrapList(response) {
 }
 
 function normalizeRankRow(row) {
-  const id = row?.id ?? row?.Id;
-  const rankName = String(row?.rankName ?? row?.RankName ?? "").trim();
-  return { id, rankName };
+  return partyRankApi.normalizeRankRow(row);
+}
+
+function getRanks() {
+  return partyRankApi.getRanks();
+}
+
+async function createRank(rankName) {
+  return partyRankApi.createRank(rankName);
+}
+
+async function updateRank(id, rankName) {
+  return partyRankApi.updateRank(id, rankName);
+}
+
+function deleteRank(id) {
+  return partyRankApi.deleteRank(id);
 }
 
 function normalizeCodePrefixRow(row) {
@@ -21,39 +36,6 @@ function normalizeCodePrefixRow(row) {
     .toUpperCase();
   const description = String(row?.description ?? row?.Description ?? "").trim();
   return { id, prefixAlpha, description };
-}
-
-function getRanks() {
-  return api.request("GET", "/api/SupplierRanks");
-}
-
-async function createRank(rankName) {
-  const actionBy = await getActionBy();
-  return api.request("POST", "/api/SupplierRanks", {
-    RankName: rankName,
-    rankName,
-    Action: "Create",
-    ActionBy: actionBy,
-    ActionDate: new Date().toISOString(),
-    IsDeleted: false,
-  });
-}
-
-async function updateRank(id, rankName) {
-  const actionBy = await getActionBy();
-  return api.request("PUT", `/api/SupplierRanks/${id}`, {
-    Id: id,
-    id,
-    RankName: rankName,
-    rankName,
-    Action: "Update",
-    ActionBy: actionBy,
-    ActionDate: new Date().toISOString(),
-  });
-}
-
-function deleteRank(id) {
-  return api.remove("SupplierRanks", id);
 }
 
 function getCodePrefixes() {
@@ -97,6 +79,14 @@ function listSuppliers() {
   return api.request("GET", "/api/Supplier");
 }
 
+function getByCode(code, excludeId) {
+  const params = new URLSearchParams({ code: String(code || "").trim() });
+  if (excludeId != null && excludeId !== "") {
+    params.set("excludeId", String(excludeId));
+  }
+  return api.request("GET", `/api/Supplier/byCode?${params.toString()}`);
+}
+
 async function createSupplier(data) {
   return api.create("Supplier", data);
 }
@@ -107,6 +97,15 @@ async function updateSupplier(id, data) {
 
 function removeSupplier(id) {
   return api.remove("Supplier", id);
+}
+
+async function bulkUpdateStatus(ids, status) {
+  return api.request("PATCH", "/api/Supplier/bulkStatus", {
+    Ids: ids,
+    ids,
+    Status: status,
+    status,
+  });
 }
 
 const supplierApi = {
@@ -122,9 +121,11 @@ const supplierApi = {
   updateCodePrefix,
   deleteCodePrefix,
   listSuppliers,
+  getByCode,
   createSupplier,
   updateSupplier,
   removeSupplier,
+  bulkUpdateStatus,
 };
 
 export default supplierApi;

@@ -49,6 +49,7 @@ import api, {
   getUserIPAddress,
   isSuperuserUser,
   contractsApprovalActionsBypassUser,
+  isSuperuserOrAhqSupervisorUser,
 } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import lockDateApi from "services/api.lockdate.service";
@@ -89,7 +90,10 @@ import {
   buildAgreementProvContractBasicInfoForm,
   getAgreementProvSaveErrorMessage,
   persistAllInvoiceScheduleLines,
+  resolveAgreementProvTenantAccHead,
+  withInvoiceScheduleAccHead,
 } from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
+import chartOfAccountsApi from "services/api.chartofaccounts.service";
 import {
   buildAgreementProvInvoiceDeepLink,
   openAppRouteInNewTab,
@@ -100,6 +104,14 @@ import {
   parseContractNumberFromContractNo,
   sanitizeContractNumberInput,
 } from "./contractNoId";
+
+const AHQ_APPROVAL_CHECKBOX_SX = {
+  p: 0.25,
+  color: "#000000",
+  "&:not(.Mui-checked) .MuiSvgIcon-root": {
+    border: "1px solid #000000 !important",
+  },
+};
 
 /** API contract payload without identity — used to open the form as “New Contract” with prefills (clone). */
 function stripContractForClone(contract) {
@@ -4659,6 +4671,17 @@ function getContractInvoiceFinalizeRowKey(r) {
   return String(r?.__finalizeKey ?? "").trim();
 }
 
+function isContractApprovalPending(row) {
+  const raw =
+    row?.ApprovalStatus ?? row?.approvalStatus ?? row?.ApprovedStatus ?? row?.approvedStatus;
+  return !(raw === true || raw === 1 || raw === "1");
+}
+
+function getContractGridRowId(row) {
+  const id = Number(row?.id ?? row?.Id);
+  return Number.isFinite(id) ? id : null;
+}
+
 function getContractInvoiceFinalizeInvoiceNo(r) {
   return String(r?.InvoiceNo ?? r?.invoiceNo ?? "").trim();
 }
@@ -4854,6 +4877,57 @@ function buildFinalizeInvoiceSchedulePayload(contractRow, sch) {
     IsFinalized: true,
     isFinalized: true,
   };
+}
+
+function pickScheduleSubInvoiceNo(row) {
+  const subRaw = row?.SubInvoiceNo ?? row?.subInvoiceNo;
+  if (subRaw === null || subRaw === undefined) return "";
+  return String(subRaw).trim();
+}
+
+function collectInvoiceScheduleSubNos(scheduleRows, invoiceNo) {
+  const invoiceKey = String(invoiceNo || "").trim();
+  const subs = new Set();
+  (scheduleRows || []).forEach((row) => {
+    if (getContractInvoiceFinalizeInvoiceNo(row) !== invoiceKey) return;
+    const sub = pickScheduleSubInvoiceNo(row);
+    if (sub && sub !== "0") subs.add(sub);
+  });
+  return Array.from(subs);
+}
+
+async function persistFinalizedInvoiceScheduleWithTenantAccHead({
+  contractRow,
+  contractNo,
+  invoiceNo,
+  schRow,
+  scheduleRows,
+  tenants,
+  coaOptions,
+}) {
+  const accHead = resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions);
+  const finalizeFlags = { IsFinalized: true, isFinalized: true };
+  const mainPayload = withInvoiceScheduleAccHead(
+    { ...buildFinalizeInvoiceSchedulePayload(contractRow, schRow), ...finalizeFlags },
+    accHead
+  );
+  await contractApi.updateInvoiceSchedule(contractNo, invoiceNo, mainPayload);
+
+  if (!accHead) return;
+
+  const invoiceKey = String(invoiceNo || "").trim();
+  for (const sub of collectInvoiceScheduleSubNos(scheduleRows, invoiceKey)) {
+    const subRow =
+      (scheduleRows || []).find((row) => {
+        if (getContractInvoiceFinalizeInvoiceNo(row) !== invoiceKey) return false;
+        return pickScheduleSubInvoiceNo(row) === sub;
+      }) || schRow;
+    const subPayload = withInvoiceScheduleAccHead(
+      { ...buildFinalizeInvoiceSchedulePayload(contractRow, subRow), ...finalizeFlags },
+      accHead
+    );
+    await contractApi.updateInvoiceScheduleSub(contractNo, invoiceKey, sub, subPayload);
+  }
 }
 
 function formatSchGridNumber(value) {
@@ -5642,6 +5716,8 @@ ContractInvoiceFinalizeGrid.defaultProps = {
 };
 
 const ANNOTATION_REMARKS_MAX = 500;
+const ANNOTATION_UPLOAD_FORM_NAME = "ContractAnnotations";
+const ANNOTATION_ATTACH_MAX_BYTES = 10 * 1024 * 1024;
 
 function formatAnnotationDateTime(value) {
   if (!value) return "-";
@@ -5692,6 +5768,9 @@ export default function Contracts() {
   const [annotationDraft, setAnnotationDraft] = useState("");
   const [annotationSaving, setAnnotationSaving] = useState(false);
   const [annotationDeletingId, setAnnotationDeletingId] = useState(null);
+  const [annotationDraftFile, setAnnotationDraftFile] = useState(null);
+  const [annotationAttachmentById, setAnnotationAttachmentById] = useState({});
+  const [annotationUploadingId, setAnnotationUploadingId] = useState(null);
   const canAddAnnotations = canAddContractAnnotations();
   const canDeleteAnnotations = isSuperuserUser();
   const [expandedGroups, setExpandedGroups] = useState(new Set());
@@ -5750,6 +5829,8 @@ export default function Contracts() {
   const [invoiceFinalizeSelectedKeys, setInvoiceFinalizeSelectedKeys] = useState(() => new Set());
   const [invoiceFinalizeTab, setInvoiceFinalizeTab] = useState("pending");
   const [invoiceFinalizeBusy, setInvoiceFinalizeBusy] = useState(false);
+  const [ahqApprovalSelectedIds, setAhqApprovalSelectedIds] = useState(() => new Set());
+  const [ahqApprovalSubmitting, setAhqApprovalSubmitting] = useState(false);
   const [agreementProvCreateDialogOpen, setAgreementProvCreateDialogOpen] = useState(false);
   const [agreementProvCreateRowData, setAgreementProvCreateRowData] = useState(null);
   const [agreementProvEditDialogOpen, setAgreementProvEditDialogOpen] = useState(false);
@@ -6553,22 +6634,31 @@ export default function Contracts() {
     ).trim();
     setInvoiceFinalizeBusy(true);
     try {
+      let coaOptions = [];
+      try {
+        coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
+      } catch (coaError) {
+        console.error("Error loading chart of accounts for Acc Head:", coaError);
+      }
+
+      const finalizedInvoiceNos = new Set();
       for (let i = 0; i < selected.length; i += 1) {
         const schRow = selected[i];
         const rowContractNo = String(
           schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
         ).trim();
         const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
-        const subRaw = schRow?.SubInvoiceNo ?? schRow?.subInvoiceNo;
-        const subInvoiceNo = subRaw === null || subRaw === undefined ? "" : String(subRaw).trim();
-        if (rowContractNo && invoiceNo) {
-          const payload = {
-            ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
-            IsFinalized: true,
-            isFinalized: true,
-          };
-          await contractApi.updateInvoiceSchedule(rowContractNo, invoiceNo, payload);
-        }
+        if (!rowContractNo || !invoiceNo || finalizedInvoiceNos.has(invoiceNo)) continue;
+        finalizedInvoiceNos.add(invoiceNo);
+        await persistFinalizedInvoiceScheduleWithTenantAccHead({
+          contractRow: invoiceFinalizeContractRow,
+          contractNo: rowContractNo,
+          invoiceNo,
+          schRow,
+          scheduleRows: invoiceScheduleRows,
+          tenants,
+          coaOptions,
+        });
       }
       if (contractNo) {
         const res = await contractApi.getInvoiceSchedule({ contractNo });
@@ -6589,6 +6679,7 @@ export default function Contracts() {
     invoiceFinalizeSelectedKeys,
     invoiceScheduleRows,
     invoiceFinalizeAllowedPendingKeys,
+    tenants,
   ]);
 
   const handleCloseAgreementProvCreateDialog = useCallback(() => {
@@ -6764,14 +6855,28 @@ export default function Contracts() {
       };
       setInvoiceFinalizeBusy(true);
       try {
-        const payload = {
-          ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
-          Description: periodDescription,
-          IsFinalized: true,
-          isFinalized: true,
-          IsFinalize: true,
-          isFinalize: true,
-        };
+        let coaOptions = [];
+        try {
+          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
+        } catch (coaError) {
+          console.error("Error loading chart of accounts for Acc Head:", coaError);
+        }
+        const accHead = resolveAgreementProvTenantAccHead(
+          invoiceFinalizeContractRow,
+          tenants,
+          coaOptions
+        );
+        const payload = withInvoiceScheduleAccHead(
+          {
+            ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
+            Description: periodDescription,
+            IsFinalized: true,
+            isFinalized: true,
+            IsFinalize: true,
+            isFinalize: true,
+          },
+          accHead
+        );
         await contractApi.createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, payload);
         const res = await contractApi.getInvoiceSchedule({ contractNo });
         setInvoiceScheduleRows(
@@ -6788,7 +6893,7 @@ export default function Contracts() {
         setInvoiceFinalizeBusy(false);
       }
     },
-    [invoiceFinalizeContractRow, invoiceScheduleRows]
+    [invoiceFinalizeContractRow, invoiceScheduleRows, tenants]
   );
 
   const handleUndoFinalizedInvoices = useCallback(async () => {
@@ -6908,6 +7013,52 @@ export default function Contracts() {
     }
   };
 
+  const canApproveContractsByAhq = isSuperuserOrAhqSupervisorUser();
+
+  const toggleAhqApprovalSelection = useCallback((contractId) => {
+    const id = Number(contractId);
+    if (!Number.isFinite(id)) return;
+    setAhqApprovalSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkApproveContractsByAhq = useCallback(async () => {
+    if (!canApproveContractsByAhq || ahqApprovalSelectedIds.size === 0) return;
+    const selectedIds = Array.from(ahqApprovalSelectedIds);
+    if (!window.confirm(`Approve ${selectedIds.length} selected contract(s) by AHQ?`)) {
+      return;
+    }
+
+    setAhqApprovalSubmitting(true);
+    try {
+      for (let i = 0; i < selectedIds.length; i += 1) {
+        const contractId = selectedIds[i];
+        const contract = await api.get("Contracts", contractId);
+        const source = contract?.data ?? contract ?? {};
+        await contractApi.update(contractId, {
+          ...source,
+          Id: contractId,
+          id: contractId,
+          ApprovalStatus: true,
+          approvalStatus: true,
+          ApprovedBy: getLoggedInUsername(),
+          userIPAddress: getUserIPAddress() || "session",
+        });
+      }
+      setAhqApprovalSelectedIds(new Set());
+      await fetchContracts();
+    } catch (error) {
+      console.error("Error approving contracts by AHQ:", error);
+      alert(String(error?.message || "Failed to approve selected contracts."));
+    } finally {
+      setAhqApprovalSubmitting(false);
+    }
+  }, [ahqApprovalSelectedIds, canApproveContractsByAhq, fetchContracts]);
+
   const normalizeFiles = (filesArray) =>
     filesArray.map((f) => {
       if (typeof f === "string") {
@@ -6987,16 +7138,145 @@ export default function Contracts() {
     }));
   };
 
+  const extractCreatedAnnotationId = (response) => {
+    const id = response?.id ?? response?.Id ?? response?.data?.id ?? response?.data?.Id;
+    return id != null && Number.isFinite(Number(id)) ? Number(id) : null;
+  };
+
+  const loadAnnotationAttachments = async (rows) => {
+    const attachmentMap = {};
+    await Promise.all(
+      (rows || []).map(async (row) => {
+        const annotationId = row?.id;
+        if (!annotationId) return;
+        try {
+          const response = await uploadApi.getUploadedFiles(
+            annotationId,
+            ANNOTATION_UPLOAD_FORM_NAME
+          );
+          const filesArray = response?.files || (Array.isArray(response) ? response : []);
+          const files = normalizeFiles(filesArray);
+          if (files[0]) {
+            attachmentMap[annotationId] = files[0];
+          }
+        } catch (error) {
+          console.error("Error loading annotation attachment:", error);
+        }
+      })
+    );
+    return attachmentMap;
+  };
+
+  const refreshAnnotationAttachment = async (annotationId) => {
+    if (!annotationId) return;
+    try {
+      const response = await uploadApi.getUploadedFiles(annotationId, ANNOTATION_UPLOAD_FORM_NAME);
+      const filesArray = response?.files || (Array.isArray(response) ? response : []);
+      const files = normalizeFiles(filesArray);
+      setAnnotationAttachmentById((prev) => {
+        const next = { ...prev };
+        if (files[0]) {
+          next[annotationId] = files[0];
+        } else {
+          delete next[annotationId];
+        }
+        return next;
+      });
+    } catch (error) {
+      console.error("Error refreshing annotation attachment:", error);
+    }
+  };
+
+  const deleteAnnotationAttachments = async (annotationId) => {
+    if (!annotationId) return;
+    try {
+      const response = await uploadApi.getUploadedFiles(annotationId, ANNOTATION_UPLOAD_FORM_NAME);
+      const filesArray = response?.files || (Array.isArray(response) ? response : []);
+      const files = normalizeFiles(filesArray);
+      await Promise.all(
+        files.map((file) => (file?.id ? uploadApi.deleteUploadedFile(file.id) : Promise.resolve()))
+      );
+    } catch (error) {
+      console.error("Error deleting annotation attachments:", error);
+    }
+  };
+
+  const validateAnnotationAttachmentFile = (file) => {
+    if (!file) return "No file selected.";
+    if (file.size > ANNOTATION_ATTACH_MAX_BYTES) {
+      return `File "${file.name}" exceeds 10MB limit.`;
+    }
+    if (!isContractAttachmentFile(file)) {
+      return `File "${file.name}" is not allowed. Use PDF, Excel (.xls, .xlsx), or Word (.doc, .docx) only.`;
+    }
+    return null;
+  };
+
+  const handleAnnotationDraftFileSelect = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const validationError = validateAnnotationAttachmentFile(file);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+    setAnnotationDraftFile(file);
+  };
+
+  const handleAnnotationRowFileSelect = async (annotationId, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !annotationId) return;
+    const validationError = validateAnnotationAttachmentFile(file);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+    setAnnotationUploadingId(annotationId);
+    try {
+      const existing = annotationAttachmentById[annotationId];
+      if (existing?.id) {
+        await uploadApi.deleteUploadedFile(existing.id);
+      }
+      await uploadApi.uploadFiles(annotationId, ANNOTATION_UPLOAD_FORM_NAME, [file]);
+      await refreshAnnotationAttachment(annotationId);
+    } catch (error) {
+      console.error("Error uploading annotation attachment:", error);
+      alert(`Failed to upload file: ${error.message}`);
+    } finally {
+      setAnnotationUploadingId(null);
+    }
+  };
+
+  const handleDownloadAnnotationAttachment = async (attachment) => {
+    if (!attachment) return;
+    try {
+      if (attachment.id) {
+        await uploadApi.downloadFile(attachment, attachment.fileName || "attachment");
+        return;
+      }
+      handleDownloadAttachment(attachment);
+    } catch (error) {
+      console.error("Error downloading annotation attachment:", error);
+      alert(error?.message || "Unable to download file.");
+    }
+  };
+
   const handleOpenAnnotations = async (record) => {
     const contractId = record?.id ?? record?.Id;
     if (!contractId || record?.IsGroupRow) return;
     setAnnotationContract(record);
     setAnnotationDraft("");
+    setAnnotationDraftFile(null);
+    setAnnotationAttachmentById({});
     setAnnotationDialogOpen(true);
     setAnnotationLoading(true);
     try {
       const response = await contractApi.getContractAnnotationsByContractId(contractId);
-      setAnnotationList(normalizeAnnotationRows(response));
+      const rows = normalizeAnnotationRows(response);
+      setAnnotationList(rows);
+      setAnnotationAttachmentById(await loadAnnotationAttachments(rows));
     } catch (error) {
       console.error("Error loading annotations:", error);
       setAnnotationList([]);
@@ -7011,6 +7291,9 @@ export default function Contracts() {
     setAnnotationList([]);
     setAnnotationContract(null);
     setAnnotationDraft("");
+    setAnnotationDraftFile(null);
+    setAnnotationAttachmentById({});
+    setAnnotationUploadingId(null);
   };
 
   const handleSaveAnnotation = async () => {
@@ -7024,14 +7307,28 @@ export default function Contracts() {
     }
     setAnnotationSaving(true);
     try {
-      await contractApi.createContractAnnotation({
+      const created = await contractApi.createContractAnnotation({
         contractId,
         remarks,
         remarksBy: getLoggedInUsername(),
       });
+      const annotationId = extractCreatedAnnotationId(created);
+      if (annotationDraftFile) {
+        if (!annotationId) {
+          throw new Error(
+            "Remark saved but attachment could not be linked. Please upload the file from the remark row."
+          );
+        }
+        await uploadApi.uploadFiles(annotationId, ANNOTATION_UPLOAD_FORM_NAME, [
+          annotationDraftFile,
+        ]);
+      }
       setAnnotationDraft("");
+      setAnnotationDraftFile(null);
       const response = await contractApi.getContractAnnotationsByContractId(contractId);
-      setAnnotationList(normalizeAnnotationRows(response));
+      const rows = normalizeAnnotationRows(response);
+      setAnnotationList(rows);
+      setAnnotationAttachmentById(await loadAnnotationAttachments(rows));
     } catch (error) {
       console.error("Error saving annotation:", error);
       alert("Unable to save annotation.");
@@ -7046,10 +7343,19 @@ export default function Contracts() {
     const contractId = annotationContract?.id ?? annotationContract?.Id;
     setAnnotationDeletingId(annotationId);
     try {
+      await deleteAnnotationAttachments(annotationId);
       await contractApi.deleteContractAnnotation(annotationId);
       if (contractId) {
         const response = await contractApi.getContractAnnotationsByContractId(contractId);
-        setAnnotationList(normalizeAnnotationRows(response));
+        const rows = normalizeAnnotationRows(response);
+        setAnnotationList(rows);
+        setAnnotationAttachmentById(await loadAnnotationAttachments(rows));
+      } else {
+        setAnnotationAttachmentById((prev) => {
+          const next = { ...prev };
+          delete next[annotationId];
+          return next;
+        });
       }
     } catch (error) {
       console.error("Error deleting annotation:", error);
@@ -8666,7 +8972,7 @@ export default function Contracts() {
     },
     {
       id: "approvalStatus",
-      Header: "AHQ Approval",
+      Header: "Apprv By AHQ",
       accessor: (row) =>
         getContractGridValue(row, ["ApprovalStatus", "approvalStatus", "ApprovedStatus"]),
       align: "center",
@@ -9029,6 +9335,64 @@ export default function Contracts() {
     IncreaseIntervalMonths: "",
   };
 
+  const buildContractGridActionsCell = useCallback(
+    (row, showEditDeleteActions) => (
+      <MDBox
+        display="flex"
+        alignItems="center"
+        justifyContent="flex-start"
+        sx={{
+          backgroundColor: "#f8f9fa",
+          gap: "2px",
+          padding: "2px 2px",
+          borderRadius: "2px",
+        }}
+      >
+        {canEditCurrentMenu() && showEditDeleteActions && (
+          <IconButton
+            size="small"
+            color="info"
+            onClick={() => handleEditContract(row.id)}
+            title="Edit"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>edit</Icon>
+          </IconButton>
+        )}
+        {canDeleteCurrentMenu() && showEditDeleteActions && (
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() => handleDeleteContract(row.id)}
+            title="Delete"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>delete</Icon>
+          </IconButton>
+        )}
+        <IconButton
+          size="small"
+          color="success"
+          onClick={() => handleViewDetails(row)}
+          title="View Details"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>visibility</Icon>
+        </IconButton>
+        <IconButton
+          size="small"
+          color="warning"
+          onClick={() => handleOpenContractInvoices(row)}
+          title="Invoices"
+          sx={{ padding: "1px" }}
+        >
+          <Icon>receipt_long</Icon>
+        </IconButton>
+      </MDBox>
+    ),
+    [handleEditContract, handleDeleteContract, handleViewDetails, handleOpenContractInvoices]
+  );
+
   // Group contracts by selected grouping columns.
   const groupedData = useMemo(() => {
     const approvalActionsBypass = contractsApprovalActionsBypassUser();
@@ -9334,59 +9698,7 @@ export default function Contracts() {
         const showEditDeleteActions = approvalActionsBypass || !isApprovedStrict;
         return {
           ...row,
-          actions: (
-            <MDBox
-              alignItems="left"
-              justifyContent="left"
-              sx={{
-                backgroundColor: "#f8f9fa",
-                gap: "2px",
-                padding: "2px 2px",
-                borderRadius: "2px",
-              }}
-            >
-              {canEditCurrentMenu() && showEditDeleteActions && (
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => handleEditContract(row.id)}
-                  title="Edit"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>edit</Icon>
-                </IconButton>
-              )}
-              {canDeleteCurrentMenu() && showEditDeleteActions && (
-                <IconButton
-                  size="small"
-                  color="error"
-                  onClick={() => handleDeleteContract(row.id)}
-                  title="Delete"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>delete</Icon>
-                </IconButton>
-              )}
-              <IconButton
-                size="small"
-                color="success"
-                onClick={() => handleViewDetails(row)}
-                title="View Details"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>visibility</Icon>
-              </IconButton>
-              <IconButton
-                size="small"
-                color="warning"
-                onClick={() => handleOpenContractInvoices(row)}
-                title="Invoices"
-                sx={{ padding: "1px" }}
-              >
-                <Icon>receipt_long</Icon>
-              </IconButton>
-            </MDBox>
-          ),
+          actions: buildContractGridActionsCell(row, showEditDeleteActions),
         };
       });
     }
@@ -9492,59 +9804,7 @@ export default function Contracts() {
             ...row,
             // Keep all original row data - no overrides needed
             IsExpandedRow: true,
-            actions: (
-              <MDBox
-                alignItems="left"
-                justifyContent="left"
-                sx={{
-                  backgroundColor: "#f8f9fa",
-                  gap: "2px",
-                  padding: "2px 2px",
-                  borderRadius: "2px",
-                }}
-              >
-                {canEditCurrentMenu() && showEditDeleteActions && (
-                  <IconButton
-                    size="small"
-                    color="info"
-                    onClick={() => handleEditContract(row.id)}
-                    title="Edit"
-                    sx={{ padding: "1px" }}
-                  >
-                    <Icon>edit</Icon>
-                  </IconButton>
-                )}
-                {canDeleteCurrentMenu() && showEditDeleteActions && (
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={() => handleDeleteContract(row.id)}
-                    title="Delete"
-                    sx={{ padding: "1px" }}
-                  >
-                    <Icon>delete</Icon>
-                  </IconButton>
-                )}
-                <IconButton
-                  size="small"
-                  color="success"
-                  onClick={() => handleViewDetails(row)}
-                  title="View Details"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>visibility</Icon>
-                </IconButton>
-                <IconButton
-                  size="small"
-                  color="warning"
-                  onClick={() => handleOpenContractInvoices(row)}
-                  title="Invoices"
-                  sx={{ padding: "1px" }}
-                >
-                  <Icon>receipt_long</Icon>
-                </IconButton>
-              </MDBox>
-            ),
+            actions: buildContractGridActionsCell(row, showEditDeleteActions),
           });
         });
       }
@@ -9567,9 +9827,76 @@ export default function Contracts() {
     expandedGroups,
     groupByColumns,
     handleOpenContractInvoices,
+    buildContractGridActionsCell,
   ]);
 
   const computedRows = groupedData;
+
+  const contractGridColumnsForTable = useMemo(() => {
+    if (!canApproveContractsByAhq) return contractGridColumns;
+
+    const hasSelection = ahqApprovalSelectedIds.size > 0;
+    const aprvAhqColumn = {
+      id: "aprvAhqSelect",
+      Header: (
+        <MDBox display="flex" alignItems="center" justifyContent="center" gap={0.25}>
+          {hasSelection ? (
+            <Tooltip title="Approve selected (Apprv By AHQ)">
+              <span>
+                <IconButton
+                  size="small"
+                  color="success"
+                  disabled={ahqApprovalSubmitting}
+                  onClick={handleBulkApproveContractsByAhq}
+                  sx={{ p: 0.25 }}
+                >
+                  <Icon fontSize="small">check</Icon>
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
+          Aprv AHQ
+        </MDBox>
+      ),
+      accessor: "aprvAhqSelect",
+      align: "center",
+      width: "80px",
+      disableSortBy: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ row }) => {
+        if (isContractGridGroupRow(row)) return "";
+        // eslint-disable-next-line react/prop-types
+        const data = row?.original || {};
+        const contractId = getContractGridRowId(data);
+        if (contractId == null || !isContractApprovalPending(data)) return "";
+        return (
+          <Checkbox
+            size="small"
+            checked={ahqApprovalSelectedIds.has(contractId)}
+            disabled={ahqApprovalSubmitting}
+            onChange={() => toggleAhqApprovalSelection(contractId)}
+            inputProps={{ "aria-label": "Select for AHQ approval" }}
+            sx={AHQ_APPROVAL_CHECKBOX_SX}
+          />
+        );
+      },
+    };
+
+    const actionIndex = contractGridColumns.findIndex((col) => col.accessor === "actions");
+    if (actionIndex < 0) return [aprvAhqColumn, ...contractGridColumns];
+    return [
+      ...contractGridColumns.slice(0, actionIndex),
+      aprvAhqColumn,
+      ...contractGridColumns.slice(actionIndex),
+    ];
+  }, [
+    ahqApprovalSelectedIds,
+    ahqApprovalSubmitting,
+    canApproveContractsByAhq,
+    contractGridColumns,
+    handleBulkApproveContractsByAhq,
+    toggleAhqApprovalSelection,
+  ]);
 
   // Filter columns to only show those with showInTable: true
   const visibleColumnsBase = columns.filter((col) => col.showInTable !== false);
@@ -10319,6 +10646,94 @@ export default function Contracts() {
         accessor: "remarksBy",
         align: "left",
       },
+      {
+        id: "annotationFile",
+        Header: "File",
+        accessor: "annotationFile",
+        align: "center",
+        disableSortBy: true,
+        // eslint-disable-next-line react/prop-types
+        Cell: ({ row }) => {
+          // eslint-disable-next-line react/prop-types
+          const annotationId = row?.original?.id;
+          const attachment = annotationId ? annotationAttachmentById[annotationId] : null;
+          const uploading = annotationUploadingId === annotationId;
+
+          if (!annotationId) return "—";
+
+          return (
+            <MDBox display="flex" justifyContent="center" alignItems="center" gap={0.25}>
+              {attachment ? (
+                <>
+                  <Tooltip title={attachment.fileName || "Download file"}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="info"
+                        onClick={() => handleDownloadAnnotationAttachment(attachment)}
+                        disabled={uploading}
+                      >
+                        <Icon fontSize="small">download</Icon>
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  {canAddAnnotations ? (
+                    <>
+                      <input
+                        accept=".pdf,.xlsx,.xls,.doc,.docx,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        style={{ display: "none" }}
+                        id={`annotation-file-replace-${annotationId}`}
+                        type="file"
+                        onChange={(event) => handleAnnotationRowFileSelect(annotationId, event)}
+                        disabled={uploading}
+                      />
+                      <Tooltip title="Replace file (max 1 — PDF, Excel, or Word)">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            component="label"
+                            htmlFor={`annotation-file-replace-${annotationId}`}
+                            disabled={uploading}
+                          >
+                            <Icon fontSize="small">upload</Icon>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </>
+                  ) : null}
+                </>
+              ) : canAddAnnotations ? (
+                <>
+                  <input
+                    accept=".pdf,.xlsx,.xls,.doc,.docx,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    style={{ display: "none" }}
+                    id={`annotation-file-upload-${annotationId}`}
+                    type="file"
+                    onChange={(event) => handleAnnotationRowFileSelect(annotationId, event)}
+                    disabled={uploading}
+                  />
+                  <Tooltip title="Upload file (optional, max 1 — PDF, Excel, or Word)">
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="info"
+                        component="label"
+                        htmlFor={`annotation-file-upload-${annotationId}`}
+                        disabled={uploading}
+                      >
+                        <Icon fontSize="small">attach_file</Icon>
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </>
+              ) : (
+                "—"
+              )}
+            </MDBox>
+          );
+        },
+      },
     ];
     if (canDeleteAnnotations) {
       cols.push({
@@ -10346,7 +10761,13 @@ export default function Contracts() {
       });
     }
     return cols;
-  }, [canDeleteAnnotations, annotationDeletingId]);
+  }, [
+    canDeleteAnnotations,
+    canAddAnnotations,
+    annotationDeletingId,
+    annotationAttachmentById,
+    annotationUploadingId,
+  ]);
 
   const annotationGridRows = useMemo(
     () =>
@@ -10480,7 +10901,7 @@ export default function Contracts() {
 
         <DataTable
           table={{
-            columns: contractGridColumns,
+            columns: contractGridColumnsForTable,
             rows: computedRows,
           }}
           isSorted={false}
@@ -10599,6 +11020,43 @@ export default function Contracts() {
                 disabled={annotationSaving}
                 inputProps={{ maxLength: ANNOTATION_REMARKS_MAX }}
               />
+              <MDBox mt={1} display="flex" flexWrap="wrap" alignItems="center" gap={1}>
+                <input
+                  accept=".pdf,.xlsx,.xls,.doc,.docx,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  style={{ display: "none" }}
+                  id="annotation-draft-file-upload"
+                  type="file"
+                  onChange={handleAnnotationDraftFileSelect}
+                  disabled={annotationSaving}
+                />
+                <label htmlFor="annotation-draft-file-upload">
+                  <MDButton
+                    variant="outlined"
+                    color="info"
+                    component="span"
+                    disabled={annotationSaving}
+                    size="small"
+                  >
+                    <Icon fontSize="small">attach_file</Icon>&nbsp;Attach File (optional)
+                  </MDButton>
+                </label>
+                {annotationDraftFile ? (
+                  <Chip
+                    label={`${annotationDraftFile.name} (${formatFileSize(
+                      annotationDraftFile.size
+                    )})`}
+                    onDelete={() => setAnnotationDraftFile(null)}
+                    deleteIcon={<Icon>cancel</Icon>}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                  />
+                ) : (
+                  <MDTypography variant="caption" color="text">
+                    Max 1 file — PDF, Excel, or Word (10 MB)
+                  </MDTypography>
+                )}
+              </MDBox>
               <MDBox mt={0.5} display="flex" justifyContent="space-between" alignItems="center">
                 <MDTypography variant="caption" color="text">
                   {annotationDraft.length}/{ANNOTATION_REMARKS_MAX} characters

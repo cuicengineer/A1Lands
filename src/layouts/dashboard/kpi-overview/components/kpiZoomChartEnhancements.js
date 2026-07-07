@@ -7,13 +7,125 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { coerceChartDataValue } from "utils/chartBarDataUtils";
+import { coerceChartDataValue, roundChartBarNumber } from "utils/chartBarDataUtils";
+import { formatKpiCrosshairBarValue } from "../kpiDataUtils";
+import { KPI_BAR_INSIDE_LABEL_COLOR, KPI_BAR_INSIDE_LABEL_SHADOW } from "../kpiBarChartColors";
 
 export { coerceChartDataValue, nullIfZeroChartBarValue } from "utils/chartBarDataUtils";
 
 ChartJS.register(BarElement, ArcElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 const LABEL_FONT_FAMILY = "Inter, Roboto, Helvetica, Arial, sans-serif";
+
+function isPointInsideChartArea(chart, x, y) {
+  const { chartArea } = chart;
+  if (!chartArea) return false;
+  return x >= chartArea.left && x <= chartArea.right && y >= chartArea.top && y <= chartArea.bottom;
+}
+
+function fillLabelBackground(ctx, x, y, width, height, radius = 4) {
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, radius);
+    ctx.fill();
+    return;
+  }
+  ctx.fillRect(x, y, width, height);
+}
+
+export const kpiBarCrosshairPlugin = {
+  id: "kpiBarCrosshair",
+  afterEvent(chart, args) {
+    const opts = chart.options.plugins?.kpiBarCrosshair;
+    if (!opts?.enabled) return;
+
+    const { event } = args;
+    if (event.type === "mousemove") {
+      if (event.x == null || event.y == null) {
+        chart.$kpiCrosshair = null;
+        args.changed = true;
+        return;
+      }
+      chart.$kpiCrosshair = isPointInsideChartArea(chart, event.x, event.y)
+        ? { x: event.x, y: event.y }
+        : null;
+      args.changed = true;
+      return;
+    }
+
+    if (event.type === "mouseout") {
+      chart.$kpiCrosshair = null;
+      args.changed = true;
+    }
+  },
+  afterDraw(chart) {
+    const opts = chart.options.plugins?.kpiBarCrosshair;
+    const point = chart.$kpiCrosshair;
+    if (!opts?.enabled || !point) return;
+
+    const { ctx, chartArea, scales } = chart;
+    const yScale = scales?.y;
+    if (!yScale) return;
+
+    const { x, y } = point;
+    const formatValue =
+      typeof opts.formatValue === "function"
+        ? opts.formatValue
+        : (value) => formatKpiCrosshairBarValue(value);
+    const rawY = yScale.getValueForPixel(y);
+    const yNumeric = roundChartBarNumber(coerceChartDataValue(rawY) ?? rawY, 2);
+    const label = String(formatValue(yNumeric) ?? "").trim();
+    if (!label) return;
+
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = opts.lineColor || "#000000";
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(chartArea.left, y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    const fontSize = opts.fontSize || 11;
+    const fontWeight = opts.fontWeight || 600;
+    ctx.font = `${fontWeight} ${fontSize}px ${LABEL_FONT_FAMILY}`;
+    const paddingX = 6;
+    const paddingY = 4;
+    const textWidth = ctx.measureText(label).width;
+    const boxWidth = textWidth + paddingX * 2;
+    const boxHeight = fontSize + paddingY * 2;
+    let labelX = x + 10;
+    let labelY = y - boxHeight - 8;
+    if (labelX + boxWidth > chartArea.right) {
+      labelX = x - boxWidth - 10;
+    }
+    if (labelY < chartArea.top) {
+      labelY = y + 10;
+    }
+    if (labelX < chartArea.left) {
+      labelX = chartArea.left + 4;
+    }
+
+    ctx.fillStyle = opts.labelBackgroundColor || "rgba(255, 255, 255, 0.94)";
+    ctx.strokeStyle = opts.lineColor || "#000000";
+    ctx.lineWidth = 1;
+    fillLabelBackground(ctx, labelX, labelY, boxWidth, boxHeight, 4);
+    ctx.strokeRect(labelX, labelY, boxWidth, boxHeight);
+
+    ctx.fillStyle = opts.labelColor || "#111827";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, labelX + paddingX, labelY + boxHeight / 2);
+    ctx.restore();
+  },
+};
 
 function wrapTooltipCallbacks(callbacks) {
   if (!callbacks) return callbacks;
@@ -40,6 +152,13 @@ function getInsideBarLabelCandidates(labelText) {
   if (compactUnitLabel !== normalized) candidates.push(compactUnitLabel);
 
   return candidates;
+}
+
+function ensureBarLabelHasMoneyUnit(labelText) {
+  const text = String(labelText ?? "").trim();
+  if (!text) return text;
+  if (/[MB]\s*$/i.test(text) || /\d[MB]$/i.test(text)) return text;
+  return `${text} M`;
 }
 
 export const kpiZoomPermanentLabelsPlugin = {
@@ -135,9 +254,13 @@ export const kpiZoomPermanentLabelsPlugin = {
             return;
           }
 
+          drawLabelText = ensureBarLabelHasMoneyUnit(drawLabelText);
+          ctx.font = `${fontWeight} ${drawFontSize}px ${LABEL_FONT_FAMILY}`;
+          textWidth = ctx.measureText(drawLabelText).width;
+
           const labelY = (props.y + props.base) / 2;
-          ctx.fillStyle = opts.insideLabelColor || "#ffffff";
-          ctx.shadowColor = opts.insideTextShadowColor || "rgba(0, 0, 0, 0.55)";
+          ctx.fillStyle = opts.insideLabelColor || KPI_BAR_INSIDE_LABEL_COLOR;
+          ctx.shadowColor = opts.insideTextShadowColor || KPI_BAR_INSIDE_LABEL_SHADOW;
           ctx.shadowBlur = 3;
           ctx.fillText(drawLabelText, props.x, labelY);
         } else if (elementType === "bar") {
@@ -161,7 +284,7 @@ let pluginRegistered = false;
 
 export function ensureKpiZoomChartPluginsRegistered() {
   if (pluginRegistered) return;
-  ChartJS.register(kpiZoomPermanentLabelsPlugin);
+  ChartJS.register(kpiZoomPermanentLabelsPlugin, kpiBarCrosshairPlugin);
   pluginRegistered = true;
 }
 
@@ -210,8 +333,8 @@ export function buildKpiZoomPermanentLabelOptions({
     fontSize,
     fontWeight: 700,
     labelPlacement,
-    insideLabelColor: "#ffffff",
-    insideTextShadowColor: "rgba(0, 0, 0, 0.55)",
+    insideLabelColor: KPI_BAR_INSIDE_LABEL_COLOR,
+    insideTextShadowColor: KPI_BAR_INSIDE_LABEL_SHADOW,
   };
 }
 
@@ -262,9 +385,36 @@ export function buildKpiDonutLegendLabelOptions({
   };
 }
 
+export function buildKpiBarCrosshairOptions({ darkMode, formatValue, fontSize = 11 } = {}) {
+  return {
+    enabled: true,
+    lineColor: "#000000",
+    labelColor: darkMode ? "#f9fafb" : "#111827",
+    labelBackgroundColor: darkMode ? "rgba(17, 24, 39, 0.92)" : "rgba(255, 255, 255, 0.94)",
+    fontSize,
+    fontWeight: 600,
+    formatValue: (value) => {
+      const numeric = roundChartBarNumber(coerceChartDataValue(value) ?? value, 2);
+      const formatted = formatValue?.(numeric);
+      const label =
+        formatted != null && String(formatted).trim()
+          ? String(formatted).trim()
+          : formatKpiCrosshairBarValue(numeric);
+      return ensureBarLabelHasMoneyUnit(label);
+    },
+  };
+}
+
 export function applyKpiZoomBarChartEnhancements(
   baseOptions,
-  { darkMode, formatValue, tooltipCallbacks, fontSize = 13, labelPlacement = "above" } = {}
+  {
+    darkMode,
+    formatValue,
+    tooltipCallbacks,
+    fontSize = 13,
+    labelPlacement = "above",
+    crosshair = false,
+  } = {}
 ) {
   ensureKpiZoomChartPluginsRegistered();
 
@@ -273,19 +423,49 @@ export function applyKpiZoomBarChartEnhancements(
     animation: { ...(baseOptions.animation || {}), duration: 0 },
     plugins: {
       ...baseOptions.plugins,
-      tooltip: {
-        ...(baseOptions.plugins?.tooltip || {}),
-        ...buildKpiZoomTooltipOptions(darkMode),
-        ...(tooltipCallbacks ? { callbacks: wrapTooltipCallbacks(tooltipCallbacks) } : {}),
-      },
+      tooltip: crosshair
+        ? {
+            ...(baseOptions.plugins?.tooltip || {}),
+            enabled: false,
+          }
+        : {
+            ...(baseOptions.plugins?.tooltip || {}),
+            ...buildKpiZoomTooltipOptions(darkMode),
+            ...(tooltipCallbacks ? { callbacks: wrapTooltipCallbacks(tooltipCallbacks) } : {}),
+          },
       kpiZoomPermanentLabels: buildKpiZoomPermanentLabelOptions({
         darkMode,
         formatValue,
         fontSize,
         labelPlacement,
       }),
+      ...(crosshair
+        ? {
+            kpiBarCrosshair: buildKpiBarCrosshairOptions({
+              darkMode,
+              formatValue,
+              fontSize: Math.max(fontSize - 1, 10),
+            }),
+          }
+        : {}),
     },
   };
+}
+
+export function applyKpiCrosshairBarChartEnhancements(
+  baseOptions,
+  { darkMode, formatValue, tooltipCallbacks, fontSize = 10, labelPlacement = "inside" } = {}
+) {
+  const formatBarValue = formatValue || formatKpiCrosshairBarValue;
+
+  return applyKpiZoomBarChartEnhancements(baseOptions, {
+    darkMode,
+    formatValue: formatBarValue,
+    tooltipCallbacks,
+    fontSize,
+    labelPlacement,
+    crosshair: true,
+  });
 }
 
 export function applyKpiZoomDonutChartEnhancements(

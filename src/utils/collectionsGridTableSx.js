@@ -1,11 +1,10 @@
-import MDTypography from "components/MDTypography";
-
 const CELL_PADDING_Y = "3px";
 const CELL_PADDING_X = "5px";
 const CELL_FONT_SIZE = "0.75rem";
 const CELL_LINE_HEIGHT = 1.2;
 const HEADER_FONT_SIZE = "0.6875rem";
 const COMPACT_CELL_PADDING = "2px 3px";
+const GRID_CELL_TEXT_COLOR = "#111111";
 
 export const COLLECTIONS_GRID_ICON_BUTTON_SX = {
   padding: "1px",
@@ -27,43 +26,34 @@ export const COLLECTIONS_GRID_TEXT_SX = {
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
+  color: GRID_CELL_TEXT_COLOR,
 };
 
+/** Plain cell text — matches bank-accounts grid so body/td color applies (no MDTypography override). */
+export function formatGridCellText(value, fallback = "-") {
+  return value != null && String(value).trim() !== "" ? String(value) : fallback;
+}
+
 export function renderCollectionsGridText(value, fallback = "-") {
-  const text = value != null && String(value).trim() !== "" ? String(value) : fallback;
-  return (
-    <MDTypography variant="caption" sx={COLLECTIONS_GRID_TEXT_SX}>
-      {text}
-    </MDTypography>
-  );
+  return formatGridCellText(value, fallback);
 }
 
 export function renderCollectionsGridSno(value) {
-  const text = value != null && value !== "" ? value : "-";
-  return (
-    <MDTypography
-      variant="caption"
-      sx={{ ...COLLECTIONS_GRID_TEXT_SX, fontWeight: 600, textAlign: "center" }}
-    >
-      {text}
-    </MDTypography>
-  );
+  return value != null && value !== "" ? value : "-";
 }
 
 export function renderCollectionsGridAmount(value) {
-  return (
-    <MDTypography
-      variant="caption"
-      sx={{
-        ...COLLECTIONS_GRID_TEXT_SX,
-        textAlign: "right",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {value != null && value !== "" ? value : "-"}
-    </MDTypography>
-  );
+  return value != null && value !== "" ? value : "-";
 }
+
+const GRID_BODY_CELL_DESCENDANT_COLOR = {
+  color: `${GRID_CELL_TEXT_COLOR} !important`,
+};
+
+const GRID_BODY_CELL_TEXT_SELECTORS = [
+  "& .MuiTable-root tbody td",
+  "& .MuiTable-root tbody td .MuiTypography-root",
+].join(", ");
 
 const COLLECTIONS_GRID_TABLE_BASE_SX = {
   display: "flex",
@@ -109,7 +99,13 @@ const COLLECTIONS_GRID_TABLE_BASE_SX = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     backgroundColor: "transparent !important",
+    color: `${GRID_CELL_TEXT_COLOR} !important`,
   },
+  [GRID_BODY_CELL_TEXT_SELECTORS]: GRID_BODY_CELL_DESCENDANT_COLOR,
+  "& .MuiTable-root tbody td .MuiIconButton-root, & .MuiTable-root tbody td .MuiChip-root, & .MuiTable-root tbody td .saas-grid-status-chip":
+    {
+      color: "unset",
+    },
   "& .MuiTable-root tbody tr:nth-of-type(even) td": {
     backgroundColor: "transparent !important",
   },

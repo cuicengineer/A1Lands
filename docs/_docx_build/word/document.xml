@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+
+<!-- COVER PAGE -->
+<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="3000"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="56"/><w:color w:val="1E3A5F"/></w:rPr><w:t>A1 Land Activities Management System</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="200"/></w:pPr><w:r><w:rPr><w:sz w:val="32"/><w:color w:val="4A5568"/></w:rPr><w:t>Business Overview Document</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="400"/></w:pPr><w:r><w:rPr><w:sz w:val="22"/><w:color w:val="718096"/></w:rPr><w:t>Pakistan Air Force — Land Assets and Financial Management Platform</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="1200"/></w:pPr><w:r><w:rPr><w:sz w:val="22"/><w:color w:val="718096"/></w:rPr><w:t>Document Version: 1.0</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="22"/><w:color w:val="718096"/></w:rPr><w:t>Date: July 2026</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="22"/><w:color w:val="718096"/></w:rPr><w:t>Classification: Internal Use</w:t></w:r></w:p>
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+
+<!-- TABLE OF CONTENTS -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Table of Contents</w:t></w:r></w:p>
+<w:p><w:r><w:t>1. Executive Summary</w:t></w:r></w:p>
+<w:p><w:r><w:t>2. About the System</w:t></w:r></w:p>
+<w:p><w:r><w:t>3. Business Purpose and Objectives</w:t></w:r></w:p>
+<w:p><w:r><w:t>4. Scope of Assets and Operations</w:t></w:r></w:p>
+<w:p><w:r><w:t>5. Main Functional Areas</w:t></w:r></w:p>
+<w:p><w:r><w:t>6. Key Features and Capabilities</w:t></w:r></w:p>
+<w:p><w:r><w:t>7. Typical Business Workflows</w:t></w:r></w:p>
+<w:p><w:r><w:t>8. User Roles and Organizational Access</w:t></w:r></w:p>
+<w:p><w:r><w:t>9. Usability and User Experience</w:t></w:r></w:p>
+<w:p><w:r><w:t>10. Controls, Governance, and Oversight</w:t></w:r></w:p>
+<w:p><w:r><w:t>11. Key Benefits</w:t></w:r></w:p>
+<w:p><w:r><w:t>12. Conclusion</w:t></w:r></w:p>
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+
+<!-- SECTION 1 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>1. Executive Summary</w:t></w:r></w:p>
+<w:p><w:r><w:t>The </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>A1 Land Activities Management System</w:t></w:r><w:r><w:t> (also referred to as A1 Land Management System or A1 LMS) is a unified enterprise platform developed for the Pakistan Air Force (PAF) to manage land assets, rental agreements, revenue collection, and financial performance across Air Headquarters (AHQ), Regional Air Commands (RAC), and individual air bases.</w:t></w:r></w:p>
+<w:p><w:r><w:t>The system replaces fragmented, manual, or spreadsheet-based processes with a single, centralized solution. It supports the complete lifecycle of PAF-related property—from registering land and commercial assets, through negotiating and tracking lease agreements with tenants, to billing, collecting rent, and distributing revenue fairly among the Government, PAF, AHQ, commands, and bases.</w:t></w:r></w:p>
+<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>In one sentence: </w:t></w:r><w:r><w:t>A1 is a unified solution for land assets and financial excellence—giving leadership visibility into holdings and revenue while enabling bases and commands to manage day-to-day rental operations efficiently and accountably.</w:t></w:r></w:p>
+<w:p><w:r><w:t>This document provides a business-level overview of the system's main areas, features, usability, and key points. It is intended for stakeholders, managers, and users who need to understand what the system does and why it matters—without technical or database detail.</w:t></w:r></w:p>
+
+<!-- SECTION 2 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>2. About the System</w:t></w:r></w:p>
+<w:p><w:r><w:t>A1 consists of two integrated parts that work together as one solution:</w:t></w:r></w:p>
+
+<w:tbl>
+<w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>
+<w:top w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:left w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:right w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+</w:tblBorders></w:tblPr>
+<w:tr>
+<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Component</w:t></w:r></w:p></w:tc>
+<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Role</w:t></w:r></w:p></w:tc>
+</w:tr>
+<w:tr>
+<w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Web Application (Front End)</w:t></w:r></w:p></w:tc>
+<w:tc><w:p><w:r><w:t>The user-facing portal where staff log in, enter data, review dashboards, approve transactions, and run reports. Accessible through a standard web browser.</w:t></w:r></w:p></w:tc>
+</w:tr>
+<w:tr>
+<w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Business Services (Back End)</w:t></w:r></w:p></w:tc>
+<w:tc><w:p><w:r><w:t>The secure processing layer that stores all property, agreement, financial, and user data; enforces business rules; and ensures that each user sees only the information they are authorized to access.</w:t></w:r></w:p></w:tc>
+</w:tr>
+</w:tbl>
+
+<w:p><w:r><w:t>Together, these components deliver a consistent experience: what users see and do in the application reflects the same rules, calculations, and organizational boundaries enforced throughout the system.</w:t></w:r></w:p>
+<w:p><w:r><w:t>The platform is branded and operated within the PAF context, with development and maintenance attributed to No 1 Software Development Unit (No 1 SDU).</w:t></w:r></w:p>
+
+<!-- SECTION 3 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>3. Business Purpose and Objectives</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Primary Purpose</w:t></w:r></w:p>
+<w:p><w:r><w:t>To provide a centralized, auditable platform for managing PAF land and property assets and the revenue they generate—ensuring transparency, accountability, and efficient use of resources across the organization.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Key Objectives</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Centralize land and property records </w:t></w:r><w:r><w:t>— Maintain a single source of truth for rental properties, groupings, classifications, and tenants.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Streamline agreement management </w:t></w:r><w:r><w:t>— Create, track, approve, and monitor lease agreements from start to end, including rent escalation and revenue-sharing terms.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Automate revenue processes </w:t></w:r><w:r><w:t>— Generate invoices from agreements, record collections, and distribute shares among stakeholders according to configured formulas.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Support financial operations </w:t></w:r><w:r><w:t>— Handle receipts, payments, cash and bank accounts, and integration with chart of accounts and accounting structure.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Enable executive oversight </w:t></w:r><w:r><w:t>— Provide dashboards and KPI views so leadership can monitor property counts, contract health, income, and revenue shares by command and base.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Enforce access control </w:t></w:r><w:r><w:t>— Ensure users at AHQ, command, and base levels work only within their authorized scope.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Maintain auditability </w:t></w:r><w:r><w:t>— Track changes, attach supporting documents, and apply period lock controls to protect finalized records.</w:t></w:r></w:p>
+
+<!-- SECTION 4 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>4. Scope of Assets and Operations</w:t></w:r></w:p>
+<w:p><w:r><w:t>A1 is designed to manage a wide range of rentable and income-generating assets under PAF stewardship, including but not limited to:</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Agricultural land (holdings, cultivation agreements, lease contracts)</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Commercial malls and welfare shops</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Petrol station leases</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Bank rental spaces</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>BTS (telecom tower) infrastructure sites</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Billboard locations and advertising contracts</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>Categorized rental properties (Category A, Category B, Category C, and HB holdings)</w:t></w:r></w:p>
+<w:p><w:r><w:t>Properties are classified and grouped so that bases and commands can manage them consistently, apply the correct revenue rates, and report performance in a standardized way across the organization.</w:t></w:r></w:p>
+
+<!-- SECTION 5 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>5. Main Functional Areas</w:t></w:r></w:p>
+<w:p><w:r><w:t>The system is organized into nine primary modules, each supporting a distinct area of business activity.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.1 Dashboard</w:t></w:r></w:p>
+<w:p><w:r><w:t>Provides executive and analytical views of the organization's land and revenue position.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Home Dashboard </w:t></w:r><w:r><w:t>— High-level indicators such as total lands, active contracts, revenue totals, and tenant counts, supported by charts on land holdings, contracts, and income trends.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>KPI Overview </w:t></w:r><w:r><w:t>— Deeper analytics filtered by Regional Air Command and Base, covering assets, contracts, financial performance, and fiscal-year revenue shares.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.2 Sales Agreements</w:t></w:r></w:p>
+<w:p><w:r><w:t>Manages the setup and lifecycle of rental properties and lease agreements.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Rental Properties </w:t></w:r><w:r><w:t>— Register and maintain individual rentable assets.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Revenue Rates </w:t></w:r><w:r><w:t>— Define applicable rental rates for properties over time.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Property Grouping </w:t></w:r><w:r><w:t>— Group related properties for joint leasing, pricing, or reporting.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Agreements </w:t></w:r><w:r><w:t>— Create and manage lease contracts including terms, rent amounts, escalation schedules, security deposits, revenue shares, approval status, and annotations.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.3 Income Agreements</w:t></w:r></w:p>
+<w:p><w:r><w:t>Handles the revenue cycle from billing through collection and distribution.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Agreement Invoices </w:t></w:r><w:r><w:t>— Generate provisional or scheduled invoices from active agreements.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Sales Returns </w:t></w:r><w:r><w:t>— Process adjustments or reversals where needed.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Collections </w:t></w:r><w:r><w:t>— Record payments received against invoices and agreements.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Share Distribution </w:t></w:r><w:r><w:t>— Allocate collected revenue among Government, PAF, AHQ, RAC, and Base according to sharing formulas.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.4 Cash and Fund Flow</w:t></w:r></w:p>
+<w:p><w:r><w:t>Manages day-to-day money movement and voucher-level records.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Payments </w:t></w:r><w:r><w:t>— Record outgoing payments with voucher numbers and supporting attachments.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Receipts </w:t></w:r><w:r><w:t>— Record incoming receipts, including a workflow for AHQ review and finalization.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Cash and Bank </w:t></w:r><w:r><w:t>— Maintain cash and bank ledger accounts.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Inter-Account Transfer </w:t></w:r><w:r><w:t>— Move funds between internal accounts.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.5 Products, Purchases, and Sales</w:t></w:r></w:p>
+<w:p><w:r><w:t>Supports broader commercial and accounting activity alongside property operations.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Services and Goods </w:t></w:r><w:r><w:t>— Product and service catalogs used in transactions.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Suppliers and Purchase Returns </w:t></w:r><w:r><w:t>— Vendor management and purchase adjustments.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Customers </w:t></w:r><w:r><w:t>— Customer records for sales-side activity.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.6 Configuration</w:t></w:r></w:p>
+<w:p><w:r><w:t>Central administration of master data, rates, formulas, and system settings including user roles, property classification, financial reference data, tenant records, lock dates, and accounting setup.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>5.7 Accounts</w:t></w:r></w:p>
+<w:p><w:r><w:t>Maintains institutional bank accounts and currency exchange rates.</w:t></w:r></w:p>
+
+<!-- SECTION 6 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>6. Key Features and Capabilities</w:t></w:r></w:p>
+<w:tbl>
+<w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>
+<w:top w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:left w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:right w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+</w:tblBorders></w:tblPr>
+<w:tr><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Feature Area</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>What It Delivers</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Executive Dashboards</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>At-a-glance KPIs, charts, and summaries for leadership decision-making</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Multi-Level Filtering</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Views scoped by AHQ, Command (RAC), and Base for relevant, focused data</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Agreement Lifecycle</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>End-to-end contract management from creation through approval and monitoring</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Revenue Pipeline</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Invoice, Collection, and Share Distribution workflow tied to agreements</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Revenue Sharing</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Configurable formulas splitting income among Government, PAF, AHQ, RAC, and Base</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>AHQ Approval Workflow</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Headquarters review and finalization of receipts before official share calculations</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Financial Vouchers</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Structured payment and receipt records with voucher numbers and attachments</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Role-Based Access</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Granular permissions (View, Create, Edit, Delete) assigned per user and module</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Audit Trail</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Tracking of changes for accountability and review</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+
+<!-- SECTION 7 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>7. Typical Business Workflows</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>7.1 Property to Lease Workflow</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Register rental properties and assign type, class, and nature of business.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Group properties where appropriate for joint management.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Set revenue rates and rental value / government share rates.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Register tenants and create agreements with rent, term, escalation, deposits, and share terms.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Track approval status and add annotations as needed during the contract life.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>7.2 Billing and Collection Workflow</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Generate invoice schedules from active agreements.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Review and finalize invoices as required.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Record collections when rent is received.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Issue receipts; selected receipts proceed through AHQ finalization.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>Run share distribution to allocate income among all stakeholders.</w:t></w:r></w:p>
+
+<!-- SECTION 8 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>8. User Roles and Organizational Access</w:t></w:r></w:p>
+<w:p><w:r><w:t>A1 is built for a multi-level military organization. Access is determined by both role and organizational level.</w:t></w:r></w:p>
+<w:tbl>
+<w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>
+<w:top w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:left w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:right w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+</w:tblBorders></w:tblPr>
+<w:tr><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Level</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Typical Scope</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>AHQ (Air Headquarters)</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Organization-wide visibility; headquarters-level approvals; broader configuration access</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Command (RAC)</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Regional command-level data and operations within assigned command</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Base</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Base-level property, agreements, and financial activity within assigned base</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+
+<!-- SECTION 9 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>9. Usability and User Experience</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Designed for Daily Operations</w:t></w:r></w:p>
+<w:p><w:r><w:t>The application presents a clear, module-based navigation structure so users can move directly to their area of work. List screens support search, filtering, and standard create/edit actions consistent across modules.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Web-Based Access</w:t></w:r></w:p>
+<w:p><w:r><w:t>Users access the system through a web browser without needing to install desktop software. This supports deployment across headquarters, commands, and bases with centralized updates.</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>Reporting and Export</w:t></w:r></w:p>
+<w:p><w:r><w:t>Charts and summary views can be exported for presentations and offline analysis. PDF output is available for official documents such as receipts and collection invoices.</w:t></w:r></w:p>
+
+<!-- SECTION 10 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>10. Controls, Governance, and Oversight</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Role-based permissions </w:t></w:r><w:r><w:t>— Each user receives only the access needed for their duties.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Organizational data scoping </w:t></w:r><w:r><w:t>— Command and base users see data within their assigned hierarchy.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>AHQ finalization </w:t></w:r><w:r><w:t>— Key receipts require headquarters approval before official share distribution.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Lock dates </w:t></w:r><w:r><w:t>— Closed periods are protected from backdated changes.</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Audit logging </w:t></w:r><w:r><w:t>— System changes are recorded to support review and accountability.</w:t></w:r></w:p>
+
+<!-- SECTION 11 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>11. Key Benefits</w:t></w:r></w:p>
+<w:tbl>
+<w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>
+<w:top w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:left w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:right w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CBD5E0"/>
+</w:tblBorders></w:tblPr>
+<w:tr><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Benefit</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="EDF2F7"/></w:tcPr><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Business Impact</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Single source of truth</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Consistent property, tenant, and agreement records across the organization</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Revenue transparency</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Clear visibility into how rent is billed, collected, and shared</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Operational efficiency</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Reduced manual effort through integrated invoicing, collection, and distribution</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Executive visibility</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Dashboards and KPIs support planning and governance at all levels</w:t></w:r></w:p></w:tc></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>Accountability</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Approval workflows, audit trails, and document attachments support compliance</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+
+<!-- SECTION 12 -->
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>12. Conclusion</w:t></w:r></w:p>
+<w:p><w:r><w:t>The A1 Land Activities Management System is a comprehensive business platform tailored to the Pakistan Air Force's need to manage land and commercial assets responsibly and profitably. It brings together property registration, lease management, revenue billing and collection, multi-party revenue sharing, and financial operations in one unified environment.</w:t></w:r></w:p>
+<w:p><w:r><w:t>For leadership, it delivers the visibility needed to monitor holdings, contract performance, and fiscal revenue shares. For operational staff at commands and bases, it provides practical tools to manage tenants, agreements, invoices, and collections day to day. For administrators, it offers configurable controls over users, rates, formulas, and accounting structure.</w:t></w:r></w:p>
+<w:p><w:r><w:t>By centralizing data, enforcing organizational access, and supporting approval and audit controls, A1 helps PAF achieve its stated goal: a unified solution for land assets and financial excellence.</w:t></w:r></w:p>
+
+<w:p><w:pPr><w:spacing w:before="600"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/><w:color w:val="718096"/></w:rPr><w:t>Document prepared for internal business and stakeholder reference. System: A1 Land Activities Management System (A1 LMS). Organization: Pakistan Air Force — No 1 Software Development Unit. This document describes business capabilities and usage only; it does not include technical architecture, database design, or implementation detail.</w:t></w:r></w:p>
+
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+</w:sectPr>
+</w:body>
+</w:document>

@@ -20,20 +20,36 @@ import {
   formatAmount,
   formatDisplayDate,
   formatCollectionInvoiceDropdownLabel,
+  formatTenantBusinessLabel,
   buildInvoiceKey,
+  formatCollectionLockDateValidationMessage,
   getCollectionAgreementsForClass,
   getCollectionInvoicesForContract,
+  getCollectionInvoicesForTenant,
+  getCollectionTenantOptions,
+  getMinCollectionReceiptDateAfterLock,
   isCollectedCollectionInvoiceKey,
+  isCollectionReceiptDateAfterLockDate,
   parseAmount,
   formatReceiptLineAmount,
   getValidCollectionReceiptLines,
   normalizeCollectionLineAmount,
   normalizeTinTrn,
+  pickActiveLockDateYyyyMmDd,
   resolveCollectionTenantAccount,
+  resolveCollectionTenantSelection,
   sanitizeNumericAmountInput,
   TIN_TRN_MAX_LENGTH,
   toDateInputValue,
+  unwrapLockDateConfigList,
 } from "./collectionsUtils";
+import lockDateApi from "services/api.lockdate.service";
+import {
+  isPersistedCollectionLineId,
+  loadCollectionLineAttachmentMeta,
+  validateCollectionLineAttachmentFile,
+} from "./collectionAttachmentUtils";
+import uploadApi from "services/api.upload.service";
 
 const inputSx = {
   "& .MuiInputBase-root": { fontSize: "0.8125rem", minHeight: 34 },
@@ -68,19 +84,17 @@ const parentFieldsRowSx = {
   gap: 2,
 };
 
-const selectionRowSx = (showCurrentDue = false) => ({
+const selectionRowSx = {
   display: "grid",
   gridTemplateColumns: {
     xs: "1fr",
-    sm: showCurrentDue
-      ? "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)"
-      : "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)",
+    sm: "minmax(72px, 0.3fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(72px, 0.55fr) minmax(72px, 0.55fr)",
   },
   gap: 2,
   alignItems: "start",
-});
+};
 
-function CollectionAmountFields({ amounts, hasInvoiceSelected, showCurrentDue }) {
+function CollectionAmountFields({ amounts, hasInvoiceSelected }) {
   return (
     <>
       <ReadOnlyField
@@ -88,13 +102,6 @@ function CollectionAmountFields({ amounts, hasInvoiceSelected, showCurrentDue })
         value={hasInvoiceSelected ? formatAmount(amounts.due) : "—"}
         valueSx={amountReadOnlySx}
       />
-      {showCurrentDue ? (
-        <ReadOnlyField
-          label="Current Due"
-          value={formatAmount(amounts.currentDue)}
-          valueSx={amountReadOnlySx}
-        />
-      ) : null}
       <ReadOnlyField
         label="Balance"
         value={hasInvoiceSelected ? formatAmount(amounts.balance) : "—"}
@@ -107,12 +114,10 @@ function CollectionAmountFields({ amounts, hasInvoiceSelected, showCurrentDue })
 CollectionAmountFields.propTypes = {
   amounts: PropTypes.shape({
     due: PropTypes.number,
-    currentDue: PropTypes.number,
     balance: PropTypes.number,
     totalPaid: PropTypes.number,
   }).isRequired,
   hasInvoiceSelected: PropTypes.bool.isRequired,
-  showCurrentDue: PropTypes.bool.isRequired,
 };
 
 function ReadOnlyField({ label, value, valueSx }) {
@@ -187,7 +192,7 @@ EditableSelectField.defaultProps = {
   note: "",
 };
 
-function ReceiptLineDateCell({ value, onChange, disabled, readOnly }) {
+function ReceiptLineDateCell({ value, onChange, disabled, readOnly, error, helperText, minDate }) {
   const inputRef = useRef(null);
   const dateValue = toDateInputValue(value);
 
@@ -214,6 +219,7 @@ function ReceiptLineDateCell({ value, onChange, disabled, readOnly }) {
         type="date"
         ref={inputRef}
         value={dateValue}
+        min={minDate || undefined}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         tabIndex={-1}
@@ -236,6 +242,8 @@ function ReceiptLineDateCell({ value, onChange, disabled, readOnly }) {
         size="small"
         disabled={disabled}
         placeholder="dd-MMM-yyyy"
+        error={Boolean(error)}
+        helperText={helperText}
         sx={{
           ...inputSx,
           "& .MuiInputBase-input": { cursor: disabled ? "default" : "pointer" },
@@ -250,12 +258,18 @@ ReceiptLineDateCell.propTypes = {
   onChange: PropTypes.func.isRequired,
   disabled: PropTypes.bool,
   readOnly: PropTypes.bool,
+  error: PropTypes.bool,
+  helperText: PropTypes.string,
+  minDate: PropTypes.string,
 };
 
 ReceiptLineDateCell.defaultProps = {
   value: "",
   disabled: false,
   readOnly: false,
+  error: false,
+  helperText: "",
+  minDate: "",
 };
 
 function ReceiptLineAmountCell({ value, onChange, disabled, readOnly }) {
@@ -304,6 +318,125 @@ ReceiptLineAmountCell.defaultProps = {
   readOnly: false,
 };
 
+const receiptLineGridColumns =
+  "minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr) 72px 96px";
+
+function ReceiptLineAttachmentCell({ line, readOnly, disabled, onSelectFile, onClearPending }) {
+  const inputRef = useRef(null);
+  const hasPending = Boolean(line.pendingAttachmentFile);
+  const hasSaved = Boolean(line.hasAttachment || line.attachmentFileId);
+  const displayName = line.pendingAttachmentFile?.name || line.attachmentFileName || "Image";
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const validationError = validateCollectionLineAttachmentFile(file);
+    if (validationError) {
+      window.alert(validationError);
+      return;
+    }
+    onSelectFile(file);
+  };
+
+  const handleDownload = async () => {
+    if (!line.attachmentFileId) return;
+    try {
+      await uploadApi.downloadFileById(line.attachmentFileId, line.attachmentFileName || "image");
+    } catch (error) {
+      console.error("Failed to download collection line attachment:", error);
+      window.alert(error?.message || "Failed to download image.");
+    }
+  };
+
+  if (readOnly && !hasSaved && !hasPending) {
+    return (
+      <MDTypography variant="caption" sx={{ ...readOnlySx, textAlign: "center", display: "block" }}>
+        —
+      </MDTypography>
+    );
+  }
+
+  return (
+    <MDBox display="flex" alignItems="center" justifyContent="center" gap={0.25}>
+      <input ref={inputRef} type="file" accept="image/*" hidden onChange={handleFileChange} />
+      {!readOnly ? (
+        <Tooltip
+          title={
+            hasPending || hasSaved
+              ? `Replace image: ${displayName} (max 5 MB)`
+              : "Upload image (max 5 MB)"
+          }
+        >
+          <span>
+            <IconButton
+              size="small"
+              color={hasPending || hasSaved ? "success" : "info"}
+              disabled={disabled}
+              onClick={() => inputRef.current?.click()}
+              sx={{ padding: "2px" }}
+            >
+              <Icon fontSize="small">{hasPending || hasSaved ? "image" : "upload"}</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+      ) : null}
+      {(hasSaved || hasPending) && (
+        <>
+          {hasSaved && !hasPending ? (
+            <Tooltip title={`Download ${displayName}`}>
+              <span>
+                <IconButton
+                  size="small"
+                  color="secondary"
+                  disabled={disabled}
+                  onClick={handleDownload}
+                  sx={{ padding: "2px" }}
+                >
+                  <Icon fontSize="small">download</Icon>
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
+          {hasPending && !readOnly ? (
+            <Tooltip title="Remove selected image">
+              <span>
+                <IconButton
+                  size="small"
+                  color="error"
+                  disabled={disabled}
+                  onClick={onClearPending}
+                  sx={{ padding: "2px" }}
+                >
+                  <Icon fontSize="small">close</Icon>
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
+        </>
+      )}
+    </MDBox>
+  );
+}
+
+ReceiptLineAttachmentCell.propTypes = {
+  line: PropTypes.shape({
+    pendingAttachmentFile: PropTypes.object,
+    attachmentFileName: PropTypes.string,
+    attachmentFileId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    hasAttachment: PropTypes.bool,
+  }).isRequired,
+  readOnly: PropTypes.bool,
+  disabled: PropTypes.bool,
+  onSelectFile: PropTypes.func.isRequired,
+  onClearPending: PropTypes.func.isRequired,
+};
+
+ReceiptLineAttachmentCell.defaultProps = {
+  readOnly: false,
+  disabled: false,
+};
+
 export default function CollectionEntryDialog({
   open,
   mode,
@@ -320,6 +453,8 @@ export default function CollectionEntryDialog({
   onAllLinesDeleted,
 }) {
   const [draftItems, setDraftItems] = useState([]);
+  const [lineDateErrors, setLineDateErrors] = useState({});
+  const [activeLockDate, setActiveLockDate] = useState("");
   const [draftParent, setDraftParent] = useState({
     classId: "",
     contractId: "",
@@ -331,23 +466,75 @@ export default function CollectionEntryDialog({
   });
 
   const isCreateMode = mode === "create";
+  const minReceiptDateAfterLock = useMemo(
+    () => getMinCollectionReceiptDateAfterLock(activeLockDate),
+    [activeLockDate]
+  );
+  const lockDateValidationMessage = useMemo(
+    () => formatCollectionLockDateValidationMessage(activeLockDate),
+    [activeLockDate]
+  );
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    lockDateApi
+      .getAll()
+      .then((response) => {
+        if (!cancelled) {
+          setActiveLockDate(pickActiveLockDateYyyyMmDd(unwrapLockDateConfigList(response)));
+        }
+      })
+      .catch((error) => {
+        console.error("Error fetching lock date for collection validation:", error);
+        if (!cancelled) setActiveLockDate("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    const items =
-      Array.isArray(group?.items) && group.items.length > 0
-        ? group.items.map((item) => ({ ...item }))
-        : [];
-    setDraftItems(items);
-    setDraftParent({
-      classId: group?.classId || "",
-      contractId: group?.contractId || "",
-      invoiceKey: group?.invoiceKey || "",
-      tenantNo: group?.tenantNo || "",
-      tenantBusiness: group?.tenantBusiness || "",
-      coaId: group?.coaId || "",
-      accountLabel: group?.accountLabel || "",
-    });
+    let cancelled = false;
+
+    (async () => {
+      const baseItems =
+        Array.isArray(group?.items) && group.items.length > 0
+          ? group.items.map((item) => ({
+              ...item,
+              pendingAttachmentFile: null,
+            }))
+          : [];
+
+      const loadedItems = await Promise.all(
+        baseItems.map(async (item) => {
+          if (!isPersistedCollectionLineId(item.id)) {
+            return item;
+          }
+          const meta = await loadCollectionLineAttachmentMeta(item.id);
+          return { ...item, ...meta, pendingAttachmentFile: null };
+        })
+      );
+
+      if (cancelled) return;
+
+      setDraftItems(loadedItems);
+      setLineDateErrors({});
+      setDraftParent({
+        classId: group?.classId || "",
+        contractId: group?.contractId || "",
+        invoiceKey: group?.invoiceKey || "",
+        tenantNo: group?.tenantNo || "",
+        tenantBusiness: group?.tenantBusiness || "",
+        coaId: group?.coaId || "",
+        accountLabel: group?.accountLabel || "",
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, group]);
 
   const effectiveGroup = useMemo(
@@ -400,10 +587,15 @@ export default function CollectionEntryDialog({
   }, [isCreateMode, contracts, draftParent.classId, draftParent.contractId]);
 
   const invoiceOptions = useMemo(() => {
-    if (!isCreateMode || !selectedAgreement) return [];
-    return getCollectionInvoicesForContract(invoices, selectedAgreement, {
-      includeInvoiceKey: draftParent.invoiceKey,
-    }).map((option) => {
+    if (!isCreateMode) return [];
+    const invoiceRows = selectedAgreement
+      ? getCollectionInvoicesForContract(invoices, selectedAgreement, {
+          includeInvoiceKey: draftParent.invoiceKey,
+        })
+      : getCollectionInvoicesForTenant(invoices, contracts, draftParent.tenantNo, {
+          includeInvoiceKey: draftParent.invoiceKey,
+        });
+    return invoiceRows.map((option) => {
       const key = buildInvoiceKey(option);
       const isCollected = isCollectedCollectionInvoiceKey(key, collectedInvoiceKeys);
       return (
@@ -426,7 +618,24 @@ export default function CollectionEntryDialog({
         </MenuItem>
       );
     });
-  }, [isCreateMode, invoices, selectedAgreement, draftParent.invoiceKey, collectedInvoiceKeys]);
+  }, [
+    isCreateMode,
+    invoices,
+    contracts,
+    selectedAgreement,
+    draftParent.invoiceKey,
+    draftParent.tenantNo,
+    collectedInvoiceKeys,
+  ]);
+
+  const tenantOptions = useMemo(() => {
+    if (!isCreateMode) return [];
+    return getCollectionTenantOptions(tenants).map((tenant) => (
+      <MenuItem key={tenant.tenantNo} value={tenant.tenantNo}>
+        {formatTenantBusinessLabel(null, tenant)}
+      </MenuItem>
+    ));
+  }, [isCreateMode, tenants]);
 
   const readOnly = mode === "view";
   const title =
@@ -435,7 +644,15 @@ export default function CollectionEntryDialog({
     ? formatAgreementLabel(parent.selectedContract)
     : "";
   const hasInvoiceSelected = Boolean(isCreateMode ? draftParent.invoiceKey : parent.invoiceKey);
-  const showCurrentDue = !readOnly && hasInvoiceSelected && parseAmount(amounts.totalPaid) > 0;
+
+  const getReceiptLineDateError = (dateValue) => {
+    if (!isCreateMode || !activeLockDate) return "";
+    if (!toDateInputValue(dateValue)) return "";
+    if (!isCollectionReceiptDateAfterLockDate(dateValue, activeLockDate)) {
+      return lockDateValidationMessage;
+    }
+    return "";
+  };
 
   const handleParentChange = (field, value) => {
     setDraftParent((prev) => {
@@ -451,20 +668,34 @@ export default function CollectionEntryDialog({
       if (field === "contractId") {
         next.invoiceKey = "";
         if (!value) {
-          next.tenantNo = "";
-          next.tenantBusiness = "";
-          next.coaId = "";
-          next.accountLabel = "";
+          if (!prev.tenantNo) {
+            next.tenantBusiness = "";
+            next.coaId = "";
+            next.accountLabel = "";
+          }
         } else {
           const contract =
             getCollectionAgreementsForClass(contracts, prev.classId).find(
               (option) => Number(option.id) === Number(value)
             ) || null;
           const tenantAccount = resolveCollectionTenantAccount(contract, tenants, coaOptions);
-          next.tenantNo = tenantAccount.tenantNo;
-          next.tenantBusiness = tenantAccount.tenantBusiness;
-          next.coaId = tenantAccount.coaId;
-          next.accountLabel = tenantAccount.accountLabel;
+          next.tenantNo = tenantAccount.tenantNo || prev.tenantNo;
+          next.tenantBusiness = tenantAccount.tenantBusiness || prev.tenantBusiness;
+          next.coaId = tenantAccount.coaId || prev.coaId;
+          next.accountLabel = tenantAccount.accountLabel || prev.accountLabel;
+        }
+      }
+      if (field === "tenantNo") {
+        const tenant = getCollectionTenantOptions(tenants).find(
+          (option) => String(option.tenantNo) === String(value)
+        );
+        const tenantAccount = resolveCollectionTenantSelection(tenant, coaOptions);
+        next.tenantNo = tenantAccount.tenantNo;
+        next.tenantBusiness = tenantAccount.tenantBusiness;
+        next.coaId = tenantAccount.coaId;
+        next.accountLabel = tenantAccount.accountLabel;
+        if (!prev.contractId) {
+          next.invoiceKey = "";
         }
       }
       return next;
@@ -487,11 +718,24 @@ export default function CollectionEntryDialog({
         return { ...line, [field]: value };
       })
     );
+    if (field === "date" && isCreateMode) {
+      const dateError = getReceiptLineDateError(value);
+      setLineDateErrors((prev) => {
+        const next = { ...prev };
+        if (dateError) next[lineId] = dateError;
+        else delete next[lineId];
+        return next;
+      });
+    }
   };
 
   const handleAddLine = () => {
-    if (!hasInvoiceSelected) return;
-    setDraftItems((prev) => [...prev, createEmptyCollectionLineItem()]);
+    const today = new Date().toISOString().slice(0, 10);
+    const defaultDate =
+      minReceiptDateAfterLock && !isCollectionReceiptDateAfterLockDate(today, activeLockDate)
+        ? minReceiptDateAfterLock
+        : today;
+    setDraftItems((prev) => [...prev, createEmptyCollectionLineItem({ date: defaultDate })]);
   };
 
   const handleDuplicateLine = (lineId) => {
@@ -518,16 +762,57 @@ export default function CollectionEntryDialog({
     }
   };
 
+  const handleLineAttachmentSelect = (lineId, file) => {
+    setDraftItems((prev) =>
+      prev.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              pendingAttachmentFile: file,
+              attachmentFileName: file.name,
+            }
+          : line
+      )
+    );
+  };
+
+  const handleClearPendingAttachment = (lineId) => {
+    setDraftItems((prev) =>
+      prev.map((line) =>
+        line.id === lineId
+          ? {
+              ...line,
+              pendingAttachmentFile: null,
+              attachmentFileName: line.hasAttachment ? line.attachmentFileName : "",
+            }
+          : line
+      )
+    );
+  };
+
   const handleSave = () => {
     const validItems = getValidCollectionReceiptLines(draftItems);
     const saveAmounts = computeCollectionGroupAmounts(parent.invoiceReceivable, validItems);
-    if (!parent.classId || !parent.contractId || !parent.invoiceKey) {
-      window.alert("Please select Class, CA No, and Invoice.");
+    if (!String(parent.tenantNo || parent.tenantBusiness || "").trim()) {
+      window.alert("Please select Tenant and Business.");
+      return;
+    }
+    if (!String(parent.coaId || "").trim()) {
+      window.alert("Please select Account.");
       return;
     }
     if (validItems.length === 0) {
       window.alert("Add at least one receipt line with Date and Amount.");
       return;
+    }
+    if (isCreateMode && activeLockDate) {
+      const invalidLine = validItems.find(
+        (line) => !isCollectionReceiptDateAfterLockDate(line.date, activeLockDate)
+      );
+      if (invalidLine) {
+        window.alert(lockDateValidationMessage);
+        return;
+      }
     }
     onSave?.({
       ...parent,
@@ -562,7 +847,7 @@ export default function CollectionEntryDialog({
         >
           {isCreateMode ? (
             <>
-              <MDBox sx={selectionRowSx(showCurrentDue)}>
+              <MDBox sx={selectionRowSx}>
                 <EditableSelectField
                   label="Class"
                   value={draftParent.classId}
@@ -580,32 +865,35 @@ export default function CollectionEntryDialog({
                   value={draftParent.contractId}
                   onChange={(e) => handleParentChange("contractId", e.target.value)}
                   disabled={saving || !draftParent.classId}
-                  placeholder="Select CA No"
+                  placeholder="Select CA No (optional)"
                   options={agreementOptions}
+                />
+                <EditableSelectField
+                  label="Tenant and Business"
+                  value={draftParent.tenantNo}
+                  onChange={(e) => handleParentChange("tenantNo", e.target.value)}
+                  disabled={saving}
+                  placeholder="Select Tenant"
+                  options={tenantOptions}
                 />
                 <EditableSelectField
                   label="Invoice"
                   value={draftParent.invoiceKey}
                   onChange={(e) => handleParentChange("invoiceKey", e.target.value)}
-                  disabled={saving || !draftParent.contractId}
-                  placeholder="Select Invoice"
+                  disabled={saving || (!draftParent.contractId && !draftParent.tenantNo)}
+                  placeholder="Select Invoice (optional)"
                   options={invoiceOptions}
-                  note="Unlocked invoices for the selected CA No are listed. Invoices already in collections appear dimmed and cannot be selected."
+                  note="Unlocked invoices for the selected agreement or tenant are listed."
                 />
-                <CollectionAmountFields
-                  amounts={amounts}
-                  hasInvoiceSelected={hasInvoiceSelected}
-                  showCurrentDue={showCurrentDue}
-                />
+                <CollectionAmountFields amounts={amounts} hasInvoiceSelected={hasInvoiceSelected} />
               </MDBox>
               <MDBox sx={parentFieldsRowSx}>
-                <ReadOnlyField label="Tenant and Business" value={parent.tenantBusiness} />
                 <ReadOnlyField label="Account" value={parent.accountLabel} />
               </MDBox>
             </>
           ) : (
             <>
-              <MDBox sx={selectionRowSx(showCurrentDue)}>
+              <MDBox sx={selectionRowSx}>
                 <ReadOnlyField label="Class" value={parent.className || parent.classId} />
                 <ReadOnlyField label="Agreement" value={agreementLabel} />
                 <ReadOnlyField
@@ -616,11 +904,7 @@ export default function CollectionEntryDialog({
                       : parent.invoiceKey
                   }
                 />
-                <CollectionAmountFields
-                  amounts={amounts}
-                  hasInvoiceSelected={hasInvoiceSelected}
-                  showCurrentDue={showCurrentDue}
-                />
+                <CollectionAmountFields amounts={amounts} hasInvoiceSelected={hasInvoiceSelected} />
               </MDBox>
               <MDBox sx={parentFieldsRowSx}>
                 <ReadOnlyField label="Tenant and Business" value={parent.tenantBusiness} />
@@ -635,12 +919,12 @@ export default function CollectionEntryDialog({
             Receipt Lines
           </MDTypography>
           {!readOnly && (
-            <Tooltip title={hasInvoiceSelected ? "Add line" : "Select an Invoice first"}>
+            <Tooltip title="Add line">
               <span>
                 <IconButton
                   size="small"
                   color="info"
-                  disabled={saving || !hasInvoiceSelected}
+                  disabled={saving}
                   onClick={handleAddLine}
                   sx={{ border: "1px solid", borderColor: "info.main", borderRadius: 1, p: 0.35 }}
                 >
@@ -654,7 +938,7 @@ export default function CollectionEntryDialog({
         <MDBox sx={{ border: "1px solid #e0e0e0", borderRadius: 1, overflow: "hidden" }}>
           <MDBox
             display="grid"
-            gridTemplateColumns="minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr) 96px"
+            gridTemplateColumns={receiptLineGridColumns}
             sx={{
               bgcolor: "#c8e6c9",
               color: "#1b5e20",
@@ -665,6 +949,7 @@ export default function CollectionEntryDialog({
             <MDBox sx={{ px: 1, py: 0.75 }}>Date</MDBox>
             <MDBox sx={{ px: 1, py: 0.75 }}>TIN-TRN</MDBox>
             <MDBox sx={{ px: 1, py: 0.75, textAlign: "right" }}>Amount</MDBox>
+            <MDBox sx={{ px: 1, py: 0.75, textAlign: "center" }}>Receipt</MDBox>
             <MDBox sx={{ px: 1, py: 0.75, textAlign: "center" }}>Action</MDBox>
           </MDBox>
 
@@ -673,7 +958,7 @@ export default function CollectionEntryDialog({
               <MDTypography variant="caption" color="text">
                 {hasInvoiceSelected
                   ? "No receipt lines yet. Use Add to create one."
-                  : "Select an Invoice to add receipt lines."}
+                  : "No receipt lines yet. Use Add to create one."}
               </MDTypography>
             </MDBox>
           ) : (
@@ -681,7 +966,7 @@ export default function CollectionEntryDialog({
               <MDBox
                 key={line.id}
                 display="grid"
-                gridTemplateColumns="minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr) 96px"
+                gridTemplateColumns={receiptLineGridColumns}
                 alignItems="center"
                 sx={{ borderTop: "1px solid #e0e0e0" }}
               >
@@ -691,6 +976,9 @@ export default function CollectionEntryDialog({
                     onChange={(nextValue) => updateLine(line.id, "date", nextValue)}
                     disabled={saving}
                     readOnly={readOnly}
+                    error={Boolean(isCreateMode && lineDateErrors[line.id])}
+                    helperText={isCreateMode ? lineDateErrors[line.id] || "" : ""}
+                    minDate={isCreateMode ? minReceiptDateAfterLock : ""}
                   />
                 </MDBox>
                 <MDBox sx={{ p: 0.5 }}>
@@ -719,6 +1007,15 @@ export default function CollectionEntryDialog({
                     onChange={(nextValue) => updateLine(line.id, "amount", nextValue)}
                     disabled={saving}
                     readOnly={readOnly}
+                  />
+                </MDBox>
+                <MDBox sx={{ p: 0.5 }}>
+                  <ReceiptLineAttachmentCell
+                    line={line}
+                    readOnly={readOnly}
+                    disabled={saving}
+                    onSelectFile={(file) => handleLineAttachmentSelect(line.id, file)}
+                    onClearPending={() => handleClearPendingAttachment(line.id)}
                   />
                 </MDBox>
                 <MDBox

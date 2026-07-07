@@ -28,7 +28,7 @@ import MDTypography from "components/MDTypography";
 import DashboardPageShell from "layouts/dashboard/components/DashboardPageShell";
 import DashboardKpiCard from "components/DashboardKpiCard";
 import ReportsBarChart from "examples/Charts/BarCharts/ReportsBarChart";
-import { CHART_PRIMARY, CHART_SECONDARY } from "utils/executiveChartConfigs";
+import { KPI_BAR_CHART_PRIMARY, KPI_BAR_CHART_SECONDARY } from "./kpiBarChartColors";
 import { mergeKpiCardSx } from "utils/kpiCardSx";
 import { useMaterialUIController } from "context";
 import api from "services/api.service";
@@ -39,17 +39,28 @@ import ChartExportButton from "./components/ChartExportButton";
 import FiscalKpiGrid from "./components/FiscalKpiGrid";
 import { exportSingleSeriesBarChartToExcel } from "utils/kpiChartExcelExport";
 import propertyGroupingApi from "services/api.propertygrouping.service";
+import contractApi from "services/api.contract.service";
 import {
   buildAssetCards,
   buildGroupedAssetCards,
   buildAhqApproval,
+  buildAhqApprovalFromAsOfContracts,
   buildContractHealth,
+  buildContractHealthFromAsOfContracts,
   buildContractStatus,
+  buildContractStatusFromAsOfContracts,
   buildExecutiveKpis,
   buildFinancialShares,
   buildOutstandingRentsStickers,
   buildFiscalKpiGridRows,
   buildKpiCommandFinancialBarChart,
+  buildPropertySummaryApiPath,
+  buildGovtPafShareRowsFromAsOfContracts,
+  buildContractMetaLookup,
+  enrichAsOfContractRowsWithMeta,
+  applyTenureToAssetCards,
+  applyTenureToChartData,
+  applyTenureToFinancialShares,
   extractContractsSummaryRows,
   extractGovtPafShareRows,
   extractPropertyGroupSummaryRows,
@@ -57,6 +68,7 @@ import {
   filterKpiRowsByRacBase,
   formatKpiMoneyLabel,
   getFiscalYearPeriods,
+  unwrapKpiApiList,
 } from "./kpiDataUtils";
 import { getBaseDropdownLabel } from "./kpiOverviewNavigation";
 function TabPanel({ children, value, index }) {
@@ -111,6 +123,12 @@ const TENURE_OPTIONS = [
   { value: "Quarterly", label: "Quarterly" },
   { value: "Monthly", label: "Monthly" },
 ];
+
+function getKpiTenureLabel(tenure) {
+  const match = TENURE_OPTIONS.find((option) => option.value === tenure);
+  return match?.label || tenure || "Annual";
+}
+
 const KPI_FILTER_ALL_VALUE = "__all__";
 
 const KPI_DATE_FILTER_WIDTH = "9.5rem";
@@ -195,6 +213,60 @@ const KPI_COMPACT_LIST_TEXT_PROPS = {
     whiteSpace: "normal",
     wordBreak: "break-word",
     lineHeight: 1.35,
+  },
+};
+
+const KPI_BASE_FILTER_MENU_PAPER_SX = {
+  width: "max-content",
+  minWidth: KPI_DATE_FILTER_WIDTH,
+  maxWidth: "min(28rem, 92vw)",
+  "& .MuiMenuItem-root": {
+    minHeight: 28,
+    py: 0.35,
+    px: 1,
+    fontSize: "0.8125rem",
+    display: "flex",
+    alignItems: "center",
+    whiteSpace: "nowrap",
+  },
+  "& .MuiListItemText-root": {
+    margin: 0,
+    minWidth: 0,
+    flex: 1,
+  },
+  "& .MuiListItemText-primary": {
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    lineHeight: 1.25,
+    wordBreak: "normal",
+  },
+};
+
+const KPI_BASE_MULTI_SELECT_MENU_PROPS = {
+  MenuProps: {
+    sx: { zIndex: KPI_HEADER_Z_INDEX + 1 },
+    PaperProps: {
+      sx: KPI_BASE_FILTER_MENU_PAPER_SX,
+    },
+  },
+};
+
+const KPI_BASE_CHECKBOX_SX = {
+  p: 0.15,
+  mr: 0.25,
+  flexShrink: 0,
+  alignSelf: "center",
+  "& .MuiSvgIcon-root": { fontSize: "1rem" },
+};
+
+const KPI_BASE_LIST_TEXT_PROPS = {
+  primaryTypographyProps: {
+    fontSize: "0.8125rem",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    lineHeight: 1.25,
   },
 };
 
@@ -432,7 +504,15 @@ AssetCardCornerBadge.defaultProps = {
   compact: false,
 };
 
-function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick, compact = false }) {
+function AssetCardsScroller({
+  cards,
+  loading,
+  darkMode,
+  cardSx,
+  onCardClick,
+  compact = false,
+  tenure,
+}) {
   const scrollRef = useRef(null);
   const [canScrollBack, setCanScrollBack] = useState(false);
   const [canScrollForward, setCanScrollForward] = useState(false);
@@ -533,6 +613,7 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick, com
             }}
           >
             <AssetCard
+              cardKey={a.key}
               label={a.label}
               count={a.count}
               areaLine={a.areaLine}
@@ -541,6 +622,7 @@ function AssetCardsScroller({ cards, loading, darkMode, cardSx, onCardClick, com
               cardSx={cardSx}
               primary={cardIndex === 0}
               compact={compact}
+              tenureLabel={getKpiTenureLabel(tenure)}
               onClick={onCardClick ? () => onCardClick(a) : undefined}
             />
             {compact && ASSET_CARD_STICKER_KEYWORDS[a.key] ? (
@@ -574,13 +656,16 @@ AssetCardsScroller.propTypes = {
   cardSx: PropTypes.object.isRequired,
   onCardClick: PropTypes.func,
   compact: PropTypes.bool,
+  tenure: PropTypes.oneOf(["Annual", "Biannual", "Quarterly", "Monthly"]),
 };
 
 AssetCardsScroller.defaultProps = {
   compact: false,
+  tenure: "Annual",
 };
 
 function AssetCard({
+  cardKey,
   label,
   count,
   areaLine,
@@ -589,6 +674,7 @@ function AssetCard({
   cardSx,
   primary,
   compact = false,
+  tenureLabel,
   onClick,
 }) {
   const displayCount = Number(count) || 0;
@@ -641,6 +727,17 @@ function AssetCard({
               {formatKpiMoneyLabel(m.incomePA, { fixedDecimals: 2 })}
             </span>
           </MDBox>
+          {cardKey === "total" ? (
+            <MDTypography
+              component="p"
+              variant="caption"
+              color="text"
+              className="erp-kpi-card__tenure-caption"
+              sx={{ textAlign: "right", mt: 0.25, mb: 0.5, lineHeight: 1.3 }}
+            >
+              Tenure: {tenureLabel}
+            </MDTypography>
+          ) : null}
           {SHARE_MIL_ROWS.map((row) => (
             <MDBox
               key={row.key}
@@ -668,6 +765,7 @@ function AssetCard({
 }
 
 AssetCard.propTypes = {
+  cardKey: PropTypes.string,
   label: PropTypes.string.isRequired,
   count: PropTypes.number.isRequired,
   areaLine: PropTypes.string.isRequired,
@@ -683,13 +781,16 @@ AssetCard.propTypes = {
   cardSx: PropTypes.object.isRequired,
   primary: PropTypes.bool,
   compact: PropTypes.bool,
+  tenureLabel: PropTypes.string,
   onClick: PropTypes.func,
 };
 
 AssetCard.defaultProps = {
+  cardKey: "",
   mil: DEFAULT_MIL,
   primary: false,
   compact: false,
+  tenureLabel: "Annual",
   onClick: undefined,
 };
 
@@ -751,6 +852,11 @@ function KpiOverview({ embedded = false, onShellProps }) {
   const [racIds, setRacIds] = useState([]);
   const [baseIds, setBaseIds] = useState([]);
   const [asOfDate, setAsOfDate] = useState(getTodayDateInputValue);
+  const [asOfRefreshToken, setAsOfRefreshToken] = useState(0);
+  const [asOfApplied, setAsOfApplied] = useState(false);
+  const [asOfRefreshing, setAsOfRefreshing] = useState(false);
+  const [asOfContractRows, setAsOfContractRows] = useState([]);
+  const [contractMetaById, setContractMetaById] = useState(() => new Map());
   const [tenure, setTenure] = useState("Annual");
   const [racOptions, setRacOptions] = useState([]);
   const [allBases, setAllBases] = useState([]);
@@ -759,6 +865,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
   const [loadingBaseOptions, setLoadingBaseOptions] = useState(false);
   const [financialZoomChart, setFinancialZoomChart] = useState(null);
   const asOfDateInputRef = useRef(null);
+  const asOfFetchGenRef = useRef(0);
 
   const fiscalPeriods = useMemo(() => getFiscalYearPeriods(6), []);
   const cardSx = useMemo(() => getEnterpriseCardSx(), []);
@@ -791,23 +898,99 @@ function KpiOverview({ embedded = false, onShellProps }) {
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
-        const [summaryData, groups] = await Promise.all([
-          api.request("GET", "/api/Dashboards/property-summary"),
-          propertyGroupingApi.getAllRecords(),
+        const summaryData = await api.request("GET", buildPropertySummaryApiPath(""));
+        if (cancelled) return;
+
+        setPropertyRows(extractPropertySummaryRows(summaryData));
+        setPropertyGroupSummaryRows(extractPropertyGroupSummaryRows(summaryData));
+        setContractRows(extractContractsSummaryRows(summaryData));
+        setShareRows(extractGovtPafShareRows(summaryData));
+        setAsOfContractRows([]);
+        setContractMetaById(new Map());
+        setAsOfApplied(false);
+      } catch (e) {
+        if (!cancelled) console.error("KPI Overview initial load:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!asOfRefreshToken) return;
+
+    let cancelled = false;
+    const myGen = ++asOfFetchGenRef.current;
+
+    const finishAsOfRefreshUi = () => {
+      if (myGen !== asOfFetchGenRef.current || cancelled) return;
+      setAsOfRefreshing(false);
+    };
+
+    (async () => {
+      try {
+        const summaryPath = buildPropertySummaryApiPath(asOfDate);
+        const summaryPromise = api.request("GET", summaryPath);
+        const asOfPromise =
+          asOfDate && String(asOfDate).trim()
+            ? contractApi.getActiveByAsOfDate(asOfDate)
+            : Promise.resolve(null);
+        const metaPromise =
+          asOfDate && String(asOfDate).trim()
+            ? contractApi.getAllRecords().catch(() => [])
+            : Promise.resolve([]);
+
+        const [summaryData, asOfResponse, contractRecords] = await Promise.all([
+          summaryPromise,
+          asOfPromise,
+          metaPromise,
         ]);
+
+        if (cancelled) return;
+
+        setPropertyRows(extractPropertySummaryRows(summaryData));
+        setPropertyGroupSummaryRows(extractPropertyGroupSummaryRows(summaryData));
+        setContractRows(extractContractsSummaryRows(summaryData));
+        setShareRows(extractGovtPafShareRows(summaryData));
+        setAsOfApplied(true);
+
+        if (asOfDate && String(asOfDate).trim()) {
+          setAsOfContractRows(unwrapKpiApiList(asOfResponse));
+          setContractMetaById(buildContractMetaLookup(unwrapKpiApiList(contractRecords)));
+        } else {
+          setAsOfContractRows([]);
+          setContractMetaById(new Map());
+        }
+      } catch (e) {
+        if (!cancelled) console.error("KPI Overview as-of refresh:", e);
+      } finally {
+        finishAsOfRefreshUi();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // asOfDate is read when refresh token bumps (contracts.js pattern), not as a dep.
+  }, [asOfRefreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const groups = await propertyGroupingApi.getAllRecords();
         if (!cancelled) {
-          setPropertyRows(extractPropertySummaryRows(summaryData));
-          setPropertyGroupSummaryRows(extractPropertyGroupSummaryRows(summaryData));
-          setContractRows(extractContractsSummaryRows(summaryData));
-          setShareRows(extractGovtPafShareRows(summaryData));
           setPropertyGroups(Array.isArray(groups) ? groups : []);
         }
       } catch (e) {
         if (!cancelled) console.error(e);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -881,6 +1064,25 @@ function KpiOverview({ embedded = false, onShellProps }) {
 
   const racId = racIds.length === 1 ? racIds[0] : "";
   const baseId = baseIds.length === 1 ? baseIds[0] : "";
+  const hasAsOfContext = Boolean(
+    asOfApplied && asOfDate && String(asOfDate).trim() && asOfContractRows.length > 0
+  );
+  const dataBusy = loading || asOfRefreshing;
+
+  const enrichedAsOfContractRows = useMemo(
+    () => enrichAsOfContractRowsWithMeta(asOfContractRows, contractMetaById),
+    [asOfContractRows, contractMetaById]
+  );
+
+  const asOfDerivedShareRows = useMemo(() => {
+    if (!hasAsOfContext) return null;
+    return buildGovtPafShareRowsFromAsOfContracts(enrichedAsOfContractRows, contractMetaById);
+  }, [hasAsOfContext, enrichedAsOfContractRows, contractMetaById]);
+
+  const effectiveShareRows = useMemo(() => {
+    if (asOfDerivedShareRows?.length) return asOfDerivedShareRows;
+    return shareRows;
+  }, [shareRows, asOfDerivedShareRows]);
 
   const filteredPropertyRows = useMemo(
     () => filterKpiRowsByRacBase(propertyRows, racIds, baseIds),
@@ -891,8 +1093,12 @@ function KpiOverview({ embedded = false, onShellProps }) {
     [contractRows, racIds, baseIds]
   );
   const filteredShareRows = useMemo(
-    () => filterKpiRowsByRacBase(shareRows, racIds, baseIds),
-    [shareRows, racIds, baseIds]
+    () => filterKpiRowsByRacBase(effectiveShareRows, racIds, baseIds),
+    [effectiveShareRows, racIds, baseIds]
+  );
+  const filteredAsOfContractRows = useMemo(
+    () => filterKpiRowsByRacBase(enrichedAsOfContractRows, racIds, baseIds),
+    [enrichedAsOfContractRows, racIds, baseIds]
   );
 
   const executive = useMemo(
@@ -921,20 +1127,34 @@ function KpiOverview({ embedded = false, onShellProps }) {
       baseIds,
     ]
   );
-  const health = useMemo(() => buildContractHealth(filteredContractRows), [filteredContractRows]);
-  const contractStatus = useMemo(
-    () => buildContractStatus(filteredContractRows),
-    [filteredContractRows]
+  const tenureScaledGroupedAssetCards = useMemo(
+    () => applyTenureToAssetCards(groupedAssetCards, tenure),
+    [groupedAssetCards, tenure]
   );
-  const ahqApproval = useMemo(() => buildAhqApproval(filteredContractRows), [filteredContractRows]);
+  const health = useMemo(() => {
+    if (hasAsOfContext) return buildContractHealthFromAsOfContracts(filteredAsOfContractRows);
+    return buildContractHealth(filteredContractRows);
+  }, [hasAsOfContext, filteredAsOfContractRows, filteredContractRows]);
+  const contractStatus = useMemo(() => {
+    if (hasAsOfContext) return buildContractStatusFromAsOfContracts(filteredAsOfContractRows);
+    return buildContractStatus(filteredContractRows);
+  }, [hasAsOfContext, filteredAsOfContractRows, filteredContractRows]);
+  const ahqApproval = useMemo(() => {
+    if (hasAsOfContext) return buildAhqApprovalFromAsOfContracts(filteredAsOfContractRows);
+    return buildAhqApproval(filteredContractRows);
+  }, [hasAsOfContext, filteredAsOfContractRows, filteredContractRows]);
   const shares = useMemo(
     () => buildFinancialShares(filteredShareRows, "all", filteredContractRows),
     [filteredShareRows, filteredContractRows]
   );
+  const tenureScaledShares = useMemo(
+    () => applyTenureToFinancialShares(shares, tenure),
+    [shares, tenure]
+  );
   const financialShareStickersRow = useMemo(
     () => (
       <Grid container spacing={1.5} mt={1} className="erp-kpi-financial-share-stickers">
-        {shares.map((s) => (
+        {tenureScaledShares.map((s) => (
           <Grid item xs={6} sm={4} md={2.4} key={s.id}>
             <Card sx={{ ...cardSx, p: 1.5, textAlign: "center" }}>
               <MDTypography variant="caption" color="text">
@@ -948,7 +1168,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
         ))}
       </Grid>
     ),
-    [shares, cardSx, darkMode]
+    [tenureScaledShares, cardSx, darkMode]
   );
   const outstandingRentsStickers = useMemo(
     () => buildOutstandingRentsStickers(filteredPropertyRows),
@@ -1071,7 +1291,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
 
   const overviewContent = (
     <>
-      {loading ? (
+      {dataBusy ? (
         <MDBox
           display="flex"
           justifyContent="center"
@@ -1084,31 +1304,36 @@ function KpiOverview({ embedded = false, onShellProps }) {
       ) : (
         <MDBox className="erp-asset-cards-stack">
           <AssetCardsScroller
-            cards={groupedAssetCards}
-            loading={loading}
+            cards={tenureScaledGroupedAssetCards}
+            loading={dataBusy}
             darkMode={darkMode}
             cardSx={cardSx}
+            tenure={tenure}
           />
           <AssetCardsScroller
             cards={assetCards}
-            loading={loading}
+            loading={dataBusy}
             darkMode={darkMode}
             cardSx={cardSx}
             compact
+            tenure={tenure}
           />
         </MDBox>
       )}
 
       <MDBox mt={1}>
         <KpiCharts
-          shareRows={shareRows}
+          shareRows={effectiveShareRows}
           contractRows={contractRows}
           propertyRows={propertyRows}
           racOptions={racOptions}
           racIds={racIds}
+          baseOptions={baseOptions}
+          allBases={allBases}
           assetCards={assetCards}
-          loading={loading}
+          loading={dataBusy}
           chartZoomOnClick
+          tenure={tenure}
         />
       </MDBox>
     </>
@@ -1184,9 +1409,9 @@ function KpiOverview({ embedded = false, onShellProps }) {
     });
     return {
       labels: chart.labels,
-      datasets: { label: "Annual Rent", data: chart.data },
+      datasets: { label: "Annual Rent", data: applyTenureToChartData(chart.data, tenure) },
     };
-  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds]);
+  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds, tenure]);
 
   const govtShareChart = useMemo(() => {
     const chart = buildKpiCommandFinancialBarChart({
@@ -1201,9 +1426,9 @@ function KpiOverview({ embedded = false, onShellProps }) {
     });
     return {
       labels: chart.labels,
-      datasets: { label: "Govt Share", data: chart.data },
+      datasets: { label: "Govt Share", data: applyTenureToChartData(chart.data, tenure) },
     };
-  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds]);
+  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds, tenure]);
 
   const financialZoomConfig = useMemo(() => {
     const configs = {
@@ -1235,72 +1460,46 @@ function KpiOverview({ embedded = false, onShellProps }) {
           </MDTypography>
         </MDBox>
         <ChartExportButton
-          disabled={loading}
+          disabled={dataBusy}
           ariaLabel={`Export ${title} to Excel`}
           onExport={() => exportSingleSeriesBarChartToExcel(title, chart)}
         />
       </MDBox>
       <MDBox
         role="button"
-        tabIndex={loading ? -1 : 0}
+        tabIndex={dataBusy ? -1 : 0}
         onClick={() => {
-          if (!loading) setFinancialZoomChart(zoomKey);
+          if (!dataBusy) setFinancialZoomChart(zoomKey);
         }}
         onKeyDown={(e) => {
-          if (!loading && (e.key === "Enter" || e.key === " ")) {
+          if (!dataBusy && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             setFinancialZoomChart(zoomKey);
           }
         }}
         sx={{
           height: "100%",
-          cursor: loading ? "default" : "zoom-in",
+          cursor: dataBusy ? "default" : "crosshair",
           borderRadius: 2,
           position: "relative",
           outline: "none",
           "&:focus-visible": {
             boxShadow: (theme) => `0 0 0 2px ${theme.palette.info.main}`,
           },
-          "&:hover .kpi-financial-chart-zoom-hint": {
-            opacity: loading ? 0 : 1,
-          },
         }}
-        aria-label={`Click to enlarge ${title} chart`}
+        aria-label={`${title} chart`}
       >
         <ReportsBarChart
           flat
           wideBars
-          seriesColor={color === "dark" ? CHART_SECONDARY : CHART_PRIMARY}
+          crosshairEnhanced
+          seriesColor={color === "dark" ? KPI_BAR_CHART_SECONDARY : KPI_BAR_CHART_PRIMARY}
           title={title}
           description={description}
           date="Updated just now"
           chart={chart}
           chartHeight="220px"
         />
-        <MDBox
-          className="kpi-financial-chart-zoom-hint"
-          display="flex"
-          alignItems="center"
-          gap={0.25}
-          sx={{
-            position: "absolute",
-            top: 6,
-            right: 6,
-            opacity: 0,
-            transition: "opacity 0.2s ease",
-            px: 0.75,
-            py: 0.25,
-            borderRadius: 1,
-            bgcolor: darkMode ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.92)",
-            boxShadow: 1,
-            pointerEvents: "none",
-          }}
-        >
-          <Icon sx={{ fontSize: "1rem", color: "info.main" }}>zoom_in</Icon>
-          <MDTypography variant="caption" color="text" sx={{ lineHeight: 1.2 }}>
-            Click to enlarge
-          </MDTypography>
-        </MDBox>
       </MDBox>
     </Card>
   );
@@ -1330,10 +1529,16 @@ function KpiOverview({ embedded = false, onShellProps }) {
       <KpiCharts
         shareRows={filteredShareRows}
         contractRows={filteredContractRows}
+        propertyRows={filteredPropertyRows}
+        racOptions={racOptions}
+        racIds={racIds}
+        baseOptions={baseOptions}
+        allBases={allBases}
         assetCards={assetCards}
-        loading={loading}
+        loading={dataBusy}
         chartZoomOnClick
         chartLayout="financials"
+        tenure={tenure}
       />
       {financialShareStickersRow}
     </>
@@ -1345,7 +1550,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
       fiscalPeriods={fiscalPeriods}
       expanded={analyticsExpanded}
       onToggleExpanded={() => setAnalyticsExpanded((e) => !e)}
-      loading={loading}
+      loading={dataBusy}
       chartZoomOnClick
     />
   );
@@ -1413,7 +1618,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
           multiple
           value={baseIds}
           onChange={handleBaseChange}
-          MenuProps={KPI_COMPACT_MULTI_SELECT_MENU_PROPS.MenuProps}
+          MenuProps={KPI_BASE_MULTI_SELECT_MENU_PROPS.MenuProps}
           renderValue={(selected) =>
             selected.length > 1
               ? `${selected.length} selected`
@@ -1428,17 +1633,17 @@ function KpiOverview({ embedded = false, onShellProps }) {
           }
         >
           <MenuItem value={KPI_FILTER_ALL_VALUE}>
-            <Checkbox checked={baseIds.length === 0} size="small" sx={KPI_COMPACT_CHECKBOX_SX} />
-            <ListItemText primary="All" {...KPI_COMPACT_LIST_TEXT_PROPS} />
+            <Checkbox checked={baseIds.length === 0} size="small" sx={KPI_BASE_CHECKBOX_SX} />
+            <ListItemText primary="All" {...KPI_BASE_LIST_TEXT_PROPS} />
           </MenuItem>
           {baseOptions.map((o) => (
             <MenuItem key={o.id ?? o.Id} value={String(o.id ?? o.Id)}>
               <Checkbox
                 checked={baseIds.includes(String(o.id ?? o.Id))}
                 size="small"
-                sx={KPI_COMPACT_CHECKBOX_SX}
+                sx={KPI_BASE_CHECKBOX_SX}
               />
-              <ListItemText primary={getBaseDropdownLabel(o)} {...KPI_COMPACT_LIST_TEXT_PROPS} />
+              <ListItemText primary={getBaseDropdownLabel(o)} {...KPI_BASE_LIST_TEXT_PROPS} />
             </MenuItem>
           ))}
         </SearchableSelect>
@@ -1488,6 +1693,19 @@ function KpiOverview({ embedded = false, onShellProps }) {
           fullWidth
         />
       </MDBox>
+      <IconButton
+        size="small"
+        color="info"
+        title="Refresh as-of values"
+        disabled={dataBusy}
+        onClick={() => {
+          setAsOfRefreshing(true);
+          setAsOfRefreshToken((t) => t + 1);
+        }}
+        sx={{ flexShrink: 0 }}
+      >
+        <Icon fontSize="small">send</Icon>
+      </IconButton>
       <FormControl size="small" sx={tenureFilterControlSx}>
         <InputLabel id="kpi-filter-tenure-label">Tenure</InputLabel>
         <SearchableSelect
@@ -1520,6 +1738,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
     racIds,
     baseIds,
     asOfDate,
+    asOfRefreshing,
     tenure,
     loadingRacOptions,
     loadingBaseOptions,
@@ -1559,10 +1778,10 @@ function KpiOverview({ embedded = false, onShellProps }) {
 
       <TabPanel value={tab} index={0}>
         <KpiHomeSection title="Assets">{overviewContent}</KpiHomeSection>
-        <KpiHomeSection title="Contracts">{contractsSectionContent}</KpiHomeSection>
         <KpiHomeSection title="Financials">
           <MDBox mt={2}>{financialsSectionContent}</MDBox>
         </KpiHomeSection>
+        <KpiHomeSection title="Contracts">{contractsSectionContent}</KpiHomeSection>
         <KpiHomeSection title="Fiscal Year Shares">{fiscalSectionContent}</KpiHomeSection>
       </TabPanel>
 
@@ -1589,7 +1808,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
               variant="primary"
               icon="inventory"
               label="Active Projects"
-              value={loading ? "—" : executive.activeProjects.toLocaleString()}
+              value={dataBusy ? "—" : executive.activeProjects.toLocaleString()}
               trend="From contracts & property summary datasets"
             />
           </Grid>
@@ -1600,7 +1819,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
               </MDTypography>
               <MDTypography variant="body2" sx={{ color: "#6b7280", fontSize: "14px" }}>
                 Latest fiscal period ({fiscalPeriods[fiscalPeriods.length - 1]?.headerLabel ?? "—"}
-                ): {loading ? "—" : executive.activeProjects.toLocaleString()} active projects
+                ): {dataBusy ? "—" : executive.activeProjects.toLocaleString()} active projects
               </MDTypography>
             </Card>
           </Grid>
@@ -1638,7 +1857,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
           <MDBox display="flex" alignItems="center" gap={0.5}>
             {financialZoomConfig ? (
               <ChartExportButton
-                disabled={loading}
+                disabled={dataBusy}
                 ariaLabel={`Export ${financialZoomConfig.title} to Excel`}
                 onExport={() =>
                   exportSingleSeriesBarChartToExcel(
@@ -1678,7 +1897,12 @@ function KpiOverview({ embedded = false, onShellProps }) {
                 flat
                 wideBars
                 zoomEnhanced
-                seriesColor={financialZoomConfig.color === "dark" ? CHART_SECONDARY : CHART_PRIMARY}
+                crosshairEnhanced
+                seriesColor={
+                  financialZoomConfig.color === "dark"
+                    ? KPI_BAR_CHART_SECONDARY
+                    : KPI_BAR_CHART_PRIMARY
+                }
                 title={financialZoomConfig.title}
                 description={financialZoomConfig.description}
                 date="Updated just now"

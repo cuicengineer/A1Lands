@@ -30,37 +30,32 @@ import InputAdornment from "@mui/material/InputAdornment";
 
 import Icon from "@mui/material/Icon";
 
-import IconButton from "@mui/material/IconButton";
-
 import MDBox from "components/MDBox";
 
 import MDButton from "components/MDButton";
-
-import MDInput from "components/MDInput";
 
 import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
 
 import { fetchBankListsForDropdown } from "services/api.bankAccount.service";
 
-import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
+import api from "services/api.service";
 
-import customerApi from "services/api.customer.service";
+import dealerApi from "services/api.dealer.service";
 
-import supplierApi from "services/api.supplier.service";
-
-import { validateCodePrefixDescription } from "../supplier/supplierUtils";
-import CodePrefixDropdownLabel from "../supplier/CodePrefixDropdownLabel";
+import { getDealerCodeOptionLabel, normalizeDealerFormOption } from "utils/dealerOptionUtils";
+import { partyDealerBiodataFieldSx } from "utils/partyDealerBiodataFieldSx";
+import { normalizePartyStatus } from "utils/partyStatusUtils";
 
 import {
-  PREFIX_OPTIONS,
   PROVINCE_OPTIONS,
   buildCustomerCode,
   buildCustomerFormState,
   findCustomerCoaOption,
   getCustomerCoaDropdownLabel,
-  isCustomersControlAccount,
+  isCustomerPartyCoaOption,
+  isCustomerPayableCoaOption,
+  isCustomerReceiptCoaOption,
   mergeCustomerCoaOption,
-  normalizeCodePrefixRow,
   normalizeCustomerCoaOption,
   normalizeCustomerRecord,
   validateCustomerForm,
@@ -70,65 +65,27 @@ const textFieldSx = {
   "& .MuiInputBase-root": { minHeight: 40 },
 };
 
-async function reloadCodePrefixOptions() {
-  const response = await supplierApi.getCodePrefixes();
+const dealerFieldSx = partyDealerBiodataFieldSx;
 
-  return (supplierApi.unwrapList(response) || [])
-
-    .map(normalizeCodePrefixRow)
-
-    .filter((row) => row.prefixAlpha);
-}
-
-async function reloadRankOptions() {
-  const response = await customerApi.getRanks();
-
-  return (customerApi.unwrapList(response) || [])
-
-    .map(customerApi.normalizeRankRow)
-
-    .filter((row) => row.rankName);
-}
-
-export default function CustomerForm({ open, onClose, onSubmit, initialData, isClone }) {
+export default function CustomerForm({
+  open,
+  onClose,
+  onSubmit,
+  initialData,
+  isClone,
+  existingRecords,
+}) {
   const [form, setForm] = useState(() => buildCustomerFormState());
 
   const [errors, setErrors] = useState({});
 
   const [saving, setSaving] = useState(false);
 
-  const [rankOptions, setRankOptions] = useState([]);
-
-  const [codePrefixOptions, setCodePrefixOptions] = useState([]);
-
   const [customerCoaOptions, setCustomerCoaOptions] = useState([]);
 
   const [bankOptions, setBankOptions] = useState([]);
 
-  const [addRankOpen, setAddRankOpen] = useState(false);
-
-  const [addRankName, setAddRankName] = useState("");
-
-  const [editRankOpen, setEditRankOpen] = useState(false);
-
-  const [editingRank, setEditingRank] = useState(null);
-
-  const [addCodePrefixOpen, setAddCodePrefixOpen] = useState(false);
-
-  const [addCodePrefixName, setAddCodePrefixName] = useState("");
-
-  const [addCodePrefixDescription, setAddCodePrefixDescription] = useState("");
-
-  const [editCodePrefixOpen, setEditCodePrefixOpen] = useState(false);
-
-  const [editingCodePrefix, setEditingCodePrefix] = useState(null);
-
-  const canManageCodePrefixes = isSuperuserOrAhqSupervisorUser();
-  const canDeleteCodePrefixes = isSuperuserOrAhqSupervisorUser();
-  const canManageRanks = isSuperuserOrAhqSupervisorUser();
-  const canDeleteRanks = isSuperuserOrAhqSupervisorUser();
-  const showCodePrefixActions = canManageCodePrefixes || canDeleteCodePrefixes;
-  const showRankActions = canManageRanks || canDeleteRanks;
+  const [dealerOptions, setDealerOptions] = useState([]);
 
   const isEditMode = Boolean(initialData?.id) && !isClone;
 
@@ -137,37 +94,13 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
     let cancelled = false;
 
-    const fetchRanks = async () => {
-      try {
-        const options = await reloadRankOptions();
-
-        if (!cancelled) setRankOptions(options);
-      } catch (error) {
-        console.error("Error fetching customer ranks:", error);
-
-        if (!cancelled) setRankOptions([]);
-      }
-    };
-
-    const fetchCodePrefixes = async () => {
-      try {
-        const options = await reloadCodePrefixOptions();
-
-        if (!cancelled) setCodePrefixOptions(options);
-      } catch (error) {
-        console.error("Error fetching code prefixes:", error);
-
-        if (!cancelled) setCodePrefixOptions([]);
-      }
-    };
-
     const fetchCustomerCoaOptions = async () => {
       try {
         const response = await chartOfAccountsApi.getAll(COA_SECTION_TYPE);
 
         let options = (chartOfAccountsApi.unwrapList(response) || [])
           .map(normalizeCustomerCoaOption)
-          .filter((row) => row.id != null && isCustomersControlAccount(row.controlAccount));
+          .filter((row) => row.id != null && isCustomerPartyCoaOption(row));
 
         const savedCoaId = initialData?.coaId ?? initialData?.CoaId;
         if (savedCoaId !== "" && savedCoaId != null) {
@@ -176,11 +109,27 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
             try {
               const savedRow = await api.get("ChartOfAccounts", savedCoaId);
               const savedOption = normalizeCustomerCoaOption(savedRow);
-              if (savedOption.id != null && isCustomersControlAccount(savedOption.controlAccount)) {
+              if (savedOption.id != null && isCustomerReceiptCoaOption(savedOption)) {
                 options = mergeCustomerCoaOption(options, savedOption);
               }
             } catch (error) {
-              console.error("Error fetching saved customer control account:", error);
+              console.error("Error fetching saved customer receipt CA:", error);
+            }
+          }
+        }
+
+        const savedCoaId2 = initialData?.coaId2 ?? initialData?.CoaId2;
+        if (savedCoaId2 !== "" && savedCoaId2 != null) {
+          const existing2 = findCustomerCoaOption(options, savedCoaId2);
+          if (!existing2) {
+            try {
+              const savedRow2 = await api.get("ChartOfAccounts", savedCoaId2);
+              const savedOption2 = normalizeCustomerCoaOption(savedRow2);
+              if (savedOption2.id != null && isCustomerPayableCoaOption(savedOption2)) {
+                options = mergeCustomerCoaOption(options, savedOption2);
+              }
+            } catch (error) {
+              console.error("Error fetching saved customer payable CA:", error);
             }
           }
         }
@@ -214,30 +163,39 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
       }
     };
 
-    fetchRanks();
-
-    fetchCodePrefixes();
+    const fetchDealerOptions = async () => {
+      try {
+        const response = await dealerApi.listActiveDealers();
+        const options = (dealerApi.unwrapList(response) || []).map(normalizeDealerFormOption);
+        if (!cancelled) setDealerOptions(options);
+      } catch (error) {
+        console.error("Error fetching dealer options:", error);
+        if (!cancelled) setDealerOptions([]);
+      }
+    };
 
     fetchCustomerCoaOptions();
 
     fetchBankOptions();
 
+    fetchDealerOptions();
+
     return () => {
       cancelled = true;
     };
-  }, [open, initialData?.coaId, initialData?.CoaId]);
+  }, [open, initialData?.coaId, initialData?.CoaId, initialData?.coaId2, initialData?.CoaId2]);
 
   useEffect(() => {
     if (!open) return;
 
     if (initialData) {
-      setForm(normalizeCustomerRecord(initialData, codePrefixOptions));
+      setForm(normalizeCustomerRecord(initialData));
     } else {
       setForm(buildCustomerFormState());
     }
 
     setErrors({});
-  }, [open, initialData, codePrefixOptions]);
+  }, [open, initialData]);
 
   useEffect(() => {
     if (!open || !initialData || !bankOptions.length) return;
@@ -248,16 +206,133 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
     setBankOptions((options) => [{ id: savedId, label: idStr, name: idStr }, ...options]);
   }, [open, initialData, bankOptions]);
 
+  useEffect(() => {
+    if (!open || !initialData) return;
+    const savedDealerId = initialData.dealerId ?? initialData.DealerId;
+    if (savedDealerId === "" || savedDealerId == null) return;
+    const idStr = String(savedDealerId);
+    if (dealerOptions.some((option) => String(option.id) === idStr)) return;
+    setDealerOptions((options) => [
+      normalizeDealerFormOption({
+        id: savedDealerId,
+        code: initialData.code ?? initialData.Code,
+        prefix: initialData.prefix ?? initialData.Prefix,
+        rank: initialData.rank ?? initialData.Rank,
+        name: initialData.name ?? initialData.Name,
+        address: initialData.address ?? initialData.Address,
+        province: initialData.province ?? initialData.Province,
+        city: initialData.city ?? initialData.City,
+        ntnCnic: initialData.ntnCnic ?? initialData.NtnCnic,
+        gstNo: initialData.gstNo ?? initialData.GSTNo,
+        telNo: initialData.telNo ?? initialData.TelNo,
+        mobileNo: initialData.mobileNo ?? initialData.MobileNo,
+        representative: initialData.representative ?? initialData.Representative,
+        bankListsId: initialData.bankListsId ?? initialData.BankListsId,
+        iban: initialData.iban ?? initialData.IBAN,
+        status: initialData.status ?? initialData.Status,
+      }),
+      ...options,
+    ]);
+  }, [open, initialData, dealerOptions]);
+
+  const applyDealerSelection = (dealer) => {
+    if (!dealer) return;
+    const code = dealer.code || buildCustomerCode(dealer.codeAlpha, dealer.codeNumeric);
+    setForm((prev) => ({
+      ...prev,
+      dealerId: dealer.id,
+      dealerName: dealer.label,
+      code,
+      codeAlpha: dealer.codeAlpha || "",
+      codeNumeric: dealer.codeNumeric || "",
+      prefix: dealer.prefix || "",
+      rank: dealer.rank || "",
+      name: dealer.name || "",
+      address: dealer.address || "",
+      province: dealer.province || "",
+      city: dealer.city || "",
+      ntnCnic: dealer.ntnCnic || "",
+      gstNo: dealer.gstNo || "",
+      telNo: dealer.telNo || "",
+      mobileNo: dealer.mobileNo || "",
+      representative: dealer.representative || "",
+      bankListsId: dealer.bankListsId ?? "",
+      iban: dealer.iban || "",
+      status: normalizePartyStatus(dealer.status),
+    }));
+    if (dealer.bankListsId !== "" && dealer.bankListsId != null) {
+      const idStr = String(dealer.bankListsId);
+      setBankOptions((options) => {
+        if (options.some((option) => String(option.id) === idStr)) return options;
+        return [{ id: dealer.bankListsId, label: idStr, name: idStr }, ...options];
+      });
+    }
+    setErrors((prev) => ({
+      ...prev,
+      dealerId: undefined,
+      code: undefined,
+      name: undefined,
+    }));
+  };
+
+  const handleDealerCodeChange = (_, newValue) => {
+    if (!newValue) {
+      setForm((prev) =>
+        buildCustomerFormState({
+          coaId: prev.coaId,
+          coaId2: prev.coaId2,
+        })
+      );
+      setErrors((prev) => ({ ...prev, dealerId: undefined, code: undefined }));
+      return;
+    }
+    applyDealerSelection(newValue);
+  };
+
+  const selectedDealer = dealerOptions.find(
+    (option) => String(option.id) === String(form.dealerId ?? "")
+  );
+  const selectableDealerOptions = dealerOptions
+    .filter((option) => {
+      const optionId = Number(option?.id);
+      if (!Number.isFinite(optionId)) return false;
+      const currentDealerId = Number(form?.dealerId);
+      if (Number.isFinite(currentDealerId) && optionId === currentDealerId) return true;
+      return !(existingRecords || []).some((record) => {
+        const recordId = Number(record?.id ?? record?.Id);
+        const dealerId = Number(record?.dealerId ?? record?.DealerId);
+        if (!Number.isFinite(dealerId) || dealerId !== optionId) return false;
+        if (!isClone && form?.id != null && Number(form.id) === recordId) return false;
+        return true;
+      });
+    })
+    .filter((option) => Boolean(option.code))
+    .sort((a, b) =>
+      getDealerCodeOptionLabel(a).localeCompare(getDealerCodeOptionLabel(b), undefined, {
+        sensitivity: "base",
+      })
+    );
+
   const updateField = (field, value) => {
     setForm((prev) => {
       const next = { ...prev, [field]: value };
 
-      if (field === "codeAlpha" || field === "codeNumeric") {
-        next.code = buildCustomerCode(
-          field === "codeAlpha" ? value : prev.codeAlpha,
+      if (
+        field === "coaId" &&
+        value !== "" &&
+        value != null &&
+        Number(value) === Number(prev.coaId2)
+      ) {
+        next.coaId2 = "";
+      }
 
-          field === "codeNumeric" ? value : prev.codeNumeric
-        );
+      if (
+        field === "coaId2" &&
+        value !== "" &&
+        value != null &&
+        Number(value) === Number(prev.coaId)
+      ) {
+        next.coaId2 = "";
       }
 
       return next;
@@ -266,144 +341,23 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
     if (errors?.[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
-
-    if ((field === "codeAlpha" || field === "codeNumeric") && errors?.code) {
-      setErrors((prev) => ({ ...prev, code: undefined }));
-    }
-  };
-
-  const handleSaveRank = async () => {
-    const rankName = String(addRankName || "").trim();
-
-    if (!rankName) {
-      window.alert("Enter a rank name.");
-
-      return;
-    }
-
-    try {
-      if (editingRank?.id) {
-        await customerApi.updateRank(editingRank.id, rankName);
-      } else {
-        await customerApi.createRank(rankName);
-      }
-
-      const options = await reloadRankOptions();
-
-      setRankOptions(options);
-
-      updateField("rank", rankName);
-
-      setAddRankOpen(false);
-
-      setEditRankOpen(false);
-
-      setAddRankName("");
-
-      setEditingRank(null);
-    } catch (error) {
-      window.alert(error?.message || "Failed to save rank.");
-    }
-  };
-
-  const handleEditRank = (item, event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (!canManageRanks || !item?.id) return;
-    setEditingRank(item);
-    setAddRankName(item.rankName || "");
-    setEditRankOpen(true);
-  };
-
-  const handleDeleteRank = async (item, event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (!canDeleteRanks || !item?.id) return;
-    const label = item.rankName || "this rank";
-    if (!window.confirm(`Delete rank "${label}"?`)) return;
-    try {
-      await customerApi.deleteRank(item.id);
-      const options = await reloadRankOptions();
-      setRankOptions(options);
-      if (String(form.rank) === String(item.rankName)) {
-        updateField("rank", "");
-      }
-    } catch (error) {
-      window.alert(error?.message || "Failed to delete rank.");
-    }
-  };
-
-  const handleSaveCodePrefix = async () => {
-    const prefixAlpha = String(addCodePrefixName || "")
-      .trim()
-      .toUpperCase();
-    const description = String(addCodePrefixDescription || "").trim();
-    if (!prefixAlpha) {
-      window.alert("Enter a code prefix.");
-      return;
-    }
-    if (!/^[A-Z]+$/.test(prefixAlpha)) {
-      window.alert("Code prefix must contain letters only.");
-      return;
-    }
-    const descriptionError = validateCodePrefixDescription(description);
-    if (descriptionError) {
-      window.alert(descriptionError);
-      return;
-    }
-    try {
-      if (editingCodePrefix?.id) {
-        await supplierApi.updateCodePrefix(editingCodePrefix.id, prefixAlpha, description);
-      } else {
-        await supplierApi.createCodePrefix(prefixAlpha, description);
-      }
-      const options = await reloadCodePrefixOptions();
-      setCodePrefixOptions(options);
-      updateField("codeAlpha", prefixAlpha);
-      setAddCodePrefixOpen(false);
-      setEditCodePrefixOpen(false);
-      setAddCodePrefixName("");
-      setAddCodePrefixDescription("");
-      setEditingCodePrefix(null);
-    } catch (error) {
-      window.alert(error?.message || "Failed to save code prefix.");
-    }
-  };
-
-  const handleEditCodePrefix = (item, event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (!canManageCodePrefixes || !item?.id) return;
-    setEditingCodePrefix(item);
-    setAddCodePrefixName(item.prefixAlpha || "");
-    setAddCodePrefixDescription(item.description || "");
-    setEditCodePrefixOpen(true);
-  };
-
-  const handleDeleteCodePrefix = async (item, event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    if (!canDeleteCodePrefixes || !item?.id) return;
-    const label = item.prefixAlpha || "this code prefix";
-    if (!window.confirm(`Delete code prefix "${label}"?`)) return;
-    try {
-      await supplierApi.deleteCodePrefix(item.id);
-      const options = await reloadCodePrefixOptions();
-      setCodePrefixOptions(options);
-      if (String(form.codeAlpha).toUpperCase() === String(item.prefixAlpha).toUpperCase()) {
-        updateField("codeAlpha", "");
-      }
-    } catch (error) {
-      window.alert(error?.message || "Failed to delete code prefix.");
-    }
   };
 
   const handleSave = async () => {
     const validationErrors = validateCustomerForm(form);
+    const mergedErrors = {
+      ...validationErrors,
+      ...(errors.code ? { code: errors.code } : {}),
+    };
 
-    setErrors(validationErrors);
+    setErrors(mergedErrors);
 
-    if (Object.keys(validationErrors).length > 0) {
+    if (mergedErrors.code) {
+      window.alert(mergedErrors.code);
+      return;
+    }
+
+    if (Object.keys(mergedErrors).length > 0) {
       window.alert("Please complete all required fields before saving.");
 
       return;
@@ -422,7 +376,21 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
     }
   };
 
-  const codeHasError = Boolean(errors.codeAlpha || errors.codeNumeric || errors.code);
+  const codeHasError = Boolean(errors.dealerId || errors.code);
+
+  const primaryCoaOptions = customerCoaOptions.filter(
+    (option) =>
+      isCustomerReceiptCoaOption(option) &&
+      (form.coaId2 === "" || form.coaId2 == null || Number(option.id) !== Number(form.coaId2))
+  );
+
+  const secondaryCoaOptions = customerCoaOptions.filter(
+    (option) =>
+      isCustomerPayableCoaOption(option) &&
+      (form.coaId === "" || form.coaId == null || Number(option.id) !== Number(form.coaId))
+  );
+
+  const dealerBiodataReadOnly = true;
 
   return (
     <>
@@ -434,219 +402,65 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
         <DialogContent dividers>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={4}>
-              <TextField
-                fullWidth
-                label="Code"
-                value={form.codeNumeric}
-                onChange={(e) => {
-                  const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
-                  updateField("codeNumeric", digits);
-                }}
-                size="small"
-                required
-                error={codeHasError}
-                helperText={
-                  errors.codeNumeric ||
-                  errors.codeAlpha ||
-                  errors.code ||
-                  (form.code
-                    ? `Generated: ${form.code}`
-                    : "Select prefix and enter up to 6 digits (PREFIX/123)")
-                }
-                inputProps={{ inputMode: "numeric", maxLength: 6 }}
-                sx={textFieldSx}
-                InputProps={{
-                  startAdornment: (
-                    <>
-                      <InputAdornment position="start" sx={{ mr: 0 }}>
-                        <SearchableSelect
-                          value={form.codeAlpha}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (value === "__add__") {
-                              setEditingCodePrefix(null);
-                              setAddCodePrefixName("");
-                              setAddCodePrefixDescription("");
-                              setAddCodePrefixOpen(true);
-                              return;
-                            }
-                            updateField("codeAlpha", value);
-                          }}
-                          displayEmpty
-                          variant="standard"
-                          disableUnderline
-                          renderValue={(selected) => {
-                            const value = String(selected || "").trim();
-                            if (!value) return "Prefix";
-                            const item = codePrefixOptions.find((row) => row.prefixAlpha === value);
-                            if (!item) return value;
-                            return <CodePrefixDropdownLabel item={item} compact />;
-                          }}
-                          sx={{
-                            minWidth: 96,
-                            maxWidth: 220,
-                            fontSize: "0.875rem",
-                            "& .MuiSelect-select": { py: 0.25, pr: "24px !important" },
-                          }}
-                          MenuProps={{ PaperProps: { sx: { maxHeight: 320, minWidth: 320 } } }}
-                        >
-                          <MenuItem value="">
-                            <em>Select</em>
-                          </MenuItem>
-                          {codePrefixOptions.map((item) => (
-                            <MenuItem
-                              key={item.id || item.prefixAlpha}
-                              value={item.prefixAlpha}
-                              sx={showCodePrefixActions ? { pr: 1 } : undefined}
-                            >
-                              <MDBox
-                                display="flex"
-                                alignItems="center"
-                                justifyContent="space-between"
-                                width="100%"
-                                gap={0.5}
-                              >
-                                <CodePrefixDropdownLabel item={item} />
-                                {showCodePrefixActions && (
-                                  <MDBox
-                                    display="flex"
-                                    alignItems="center"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                  >
-                                    {canManageCodePrefixes && (
-                                      <IconButton
-                                        size="small"
-                                        color="info"
-                                        title="Edit code prefix"
-                                        onClick={(e) => handleEditCodePrefix(item, e)}
-                                        sx={{ padding: "2px" }}
-                                      >
-                                        <Icon fontSize="small">edit</Icon>
-                                      </IconButton>
-                                    )}
-                                    {canDeleteCodePrefixes && (
-                                      <IconButton
-                                        size="small"
-                                        color="error"
-                                        title="Delete code prefix"
-                                        onClick={(e) => handleDeleteCodePrefix(item, e)}
-                                        sx={{ padding: "2px" }}
-                                      >
-                                        <Icon fontSize="small">delete</Icon>
-                                      </IconButton>
-                                    )}
-                                  </MDBox>
-                                )}
-                              </MDBox>
-                            </MenuItem>
-                          ))}
-                          {canManageCodePrefixes && (
-                            <MenuItem
-                              value="__add__"
-                              sx={{ fontStyle: "italic", color: "info.main" }}
-                            >
-                              + Add code prefix...
-                            </MenuItem>
-                          )}
-                        </SearchableSelect>
-                      </InputAdornment>
-                      {form.codeAlpha ? (
-                        <InputAdornment position="start" sx={{ mx: 0.25, color: "text.secondary" }}>
-                          /
-                        </InputAdornment>
-                      ) : null}
-                    </>
-                  ),
-                }}
-              />
-              {codeHasError && !errors.codeNumeric && !errors.codeAlpha && !errors.code && (
-                <FormHelperText error sx={{ mt: 0.5, ml: 1.75 }}>
-                  Code prefix and number are required
-                </FormHelperText>
+              {isEditMode ? (
+                <TextField
+                  fullWidth
+                  label="Code"
+                  value={form.code || buildCustomerCode(form.codeAlpha, form.codeNumeric)}
+                  size="small"
+                  sx={textFieldSx}
+                  InputProps={{ readOnly: true }}
+                />
+              ) : (
+                <Autocomplete
+                  size="small"
+                  fullWidth
+                  options={selectableDealerOptions}
+                  getOptionLabel={getDealerCodeOptionLabel}
+                  isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                  value={selectedDealer || null}
+                  onChange={handleDealerCodeChange}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Code"
+                      required
+                      error={codeHasError}
+                      helperText={
+                        errors.dealerId ||
+                        errors.code ||
+                        "Select an active dealer to auto-fill details"
+                      }
+                      sx={textFieldSx}
+                    />
+                  )}
+                />
               )}
             </Grid>
 
             <Grid item xs={12} sm={4} md={3}>
-              <FormControl fullWidth size="small" sx={textFieldSx}>
-                <InputLabel>Rank</InputLabel>
+              <TextField
+                fullWidth
+                label="Rank"
+                value={form.rank}
+                size="small"
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
+                InputProps={{ readOnly: dealerBiodataReadOnly }}
+              />
+            </Grid>
 
+            <Grid item xs={12} sm={4} md={3}>
+              <FormControl fullWidth size="small" sx={dealerFieldSx}>
+                <InputLabel>Status</InputLabel>
                 <SearchableSelect
-                  label="Rank"
-                  value={form.rank}
-                  onChange={(e) => {
-                    if (e.target.value === "__add__") {
-                      setEditingRank(null);
-
-                      setAddRankName("");
-
-                      setAddRankOpen(true);
-
-                      return;
-                    }
-
-                    updateField("rank", e.target.value);
-                  }}
-                  MenuProps={{ PaperProps: { sx: { maxHeight: 320, minWidth: 280 } } }}
+                  label="Status"
+                  value={form.status}
+                  disabled={dealerBiodataReadOnly}
+                  onChange={(e) => updateField("status", normalizePartyStatus(e.target.value))}
                 >
-                  <MenuItem value="">
-                    <em>Select</em>
-                  </MenuItem>
-
-                  {rankOptions.map((item) => (
-                    <MenuItem
-                      key={item.id || item.rankName}
-                      value={item.rankName}
-                      sx={showRankActions ? { pr: 1 } : undefined}
-                    >
-                      <MDBox
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="space-between"
-                        width="100%"
-                        gap={0.5}
-                      >
-                        <span>{item.rankName}</span>
-                        {showRankActions && (
-                          <MDBox
-                            display="flex"
-                            alignItems="center"
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            {canManageRanks && (
-                              <IconButton
-                                size="small"
-                                color="info"
-                                title="Edit rank"
-                                onClick={(e) => handleEditRank(item, e)}
-                                sx={{ padding: "2px" }}
-                              >
-                                <Icon fontSize="small">edit</Icon>
-                              </IconButton>
-                            )}
-                            {canDeleteRanks && (
-                              <IconButton
-                                size="small"
-                                color="error"
-                                title="Delete rank"
-                                onClick={(e) => handleDeleteRank(item, e)}
-                                sx={{ padding: "2px" }}
-                              >
-                                <Icon fontSize="small">delete</Icon>
-                              </IconButton>
-                            )}
-                          </MDBox>
-                        )}
-                      </MDBox>
-                    </MenuItem>
-                  ))}
-
-                  {canManageRanks && (
-                    <MenuItem value="__add__" sx={{ fontStyle: "italic", color: "info.main" }}>
-                      + Add rank...
-                    </MenuItem>
-                  )}
+                  <MenuItem value={true}>Active</MenuItem>
+                  <MenuItem value={false}>Inactive</MenuItem>
                 </SearchableSelect>
               </FormControl>
             </Grid>
@@ -656,41 +470,17 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 fullWidth
                 label="Name"
                 value={form.name}
-                onChange={(e) => updateField("name", e.target.value)}
                 size="small"
                 required
+                disabled={dealerBiodataReadOnly}
                 error={Boolean(errors.name)}
                 helperText={errors.name}
-                sx={textFieldSx}
+                sx={dealerFieldSx}
                 InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start" sx={{ mr: 0 }}>
-                      <SearchableSelect
-                        value={form.prefix}
-                        onChange={(e) => updateField("prefix", e.target.value)}
-                        displayEmpty
-                        variant="standard"
-                        disableUnderline
-                        sx={{
-                          minWidth: 72,
-
-                          fontSize: "0.875rem",
-
-                          "& .MuiSelect-select": { py: 0.25, pr: "24px !important" },
-                        }}
-                      >
-                        <MenuItem value="">
-                          <em>Prefix</em>
-                        </MenuItem>
-
-                        {PREFIX_OPTIONS.map((opt) => (
-                          <MenuItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </MenuItem>
-                        ))}
-                      </SearchableSelect>
-                    </InputAdornment>
-                  ),
+                  readOnly: dealerBiodataReadOnly,
+                  startAdornment: form.prefix ? (
+                    <InputAdornment position="start">{form.prefix}</InputAdornment>
+                  ) : null,
                 }}
               />
             </Grid>
@@ -705,9 +495,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 required
                 multiline
                 minRows={2}
+                disabled={dealerBiodataReadOnly}
                 error={Boolean(errors.address)}
                 helperText={errors.address}
-                sx={textFieldSx}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -717,13 +508,14 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 size="small"
                 required
                 error={Boolean(errors.province)}
-                sx={textFieldSx}
+                sx={dealerFieldSx}
               >
                 <InputLabel>Province</InputLabel>
 
                 <SearchableSelect
                   label="Province"
                   value={form.province}
+                  disabled={dealerBiodataReadOnly}
                   onChange={(e) => updateField("province", e.target.value)}
                 >
                   <MenuItem value="">
@@ -749,9 +541,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 onChange={(e) => updateField("city", e.target.value)}
                 size="small"
                 required
+                disabled={dealerBiodataReadOnly}
                 error={Boolean(errors.city)}
                 helperText={errors.city}
-                sx={textFieldSx}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -763,9 +556,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 onChange={(e) => updateField("ntnCnic", e.target.value)}
                 size="small"
                 required
+                disabled={dealerBiodataReadOnly}
                 error={Boolean(errors.ntnCnic)}
                 helperText={errors.ntnCnic}
-                sx={textFieldSx}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -776,7 +570,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 value={form.gstNo}
                 onChange={(e) => updateField("gstNo", e.target.value)}
                 size="small"
-                sx={textFieldSx}
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -787,7 +582,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 value={form.telNo}
                 onChange={(e) => updateField("telNo", e.target.value)}
                 size="small"
-                sx={textFieldSx}
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -798,7 +594,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 value={form.mobileNo}
                 onChange={(e) => updateField("mobileNo", e.target.value)}
                 size="small"
-                sx={textFieldSx}
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -807,10 +604,10 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 size="small"
                 fullWidth
                 disableClearable
-                options={customerCoaOptions}
+                options={primaryCoaOptions}
                 getOptionLabel={(option) => getCustomerCoaDropdownLabel(option)}
                 isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                value={findCustomerCoaOption(customerCoaOptions, form.coaId)}
+                value={findCustomerCoaOption(primaryCoaOptions, form.coaId)}
                 onChange={(_, newValue) =>
                   updateField("coaId", newValue != null ? newValue.id : "")
                 }
@@ -818,7 +615,7 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Control Account"
+                    label="Receipt CA"
                     required
                     error={Boolean(errors.coaId)}
                     helperText={errors.coaId}
@@ -829,18 +626,44 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
             </Grid>
 
             <Grid item xs={12} sm={6} md={4}>
-              <FormControl fullWidth size="small">
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={secondaryCoaOptions}
+                getOptionLabel={(option) => getCustomerCoaDropdownLabel(option)}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={findCustomerCoaOption(secondaryCoaOptions, form.coaId2)}
+                onChange={(_, newValue) =>
+                  updateField("coaId2", newValue != null ? newValue.id : "")
+                }
+                ListboxProps={{ style: { maxHeight: 300 } }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Payable CA"
+                    required
+                    error={Boolean(errors.coaId2)}
+                    helperText={errors.coaId2}
+                    sx={textFieldSx}
+                  />
+                )}
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth size="small" sx={dealerFieldSx}>
                 <InputLabel id="customer-bank-label">Bank</InputLabel>
                 <SearchableSelect
                   labelId="customer-bank-label"
                   label="Bank"
+                  disabled={dealerBiodataReadOnly}
                   value={
                     form.bankListsId === "" || form.bankListsId == null
                       ? ""
                       : String(form.bankListsId)
                   }
                   onChange={(e) => updateField("bankListsId", e.target.value)}
-                  sx={textFieldSx}
                 >
                   {bankOptions.map((option) => (
                     <MenuItem key={option.id} value={String(option.id)}>
@@ -858,7 +681,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 value={form.iban}
                 onChange={(e) => updateField("iban", e.target.value)}
                 size="small"
-                sx={textFieldSx}
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
               />
             </Grid>
 
@@ -869,7 +693,8 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
                 value={form.representative}
                 onChange={(e) => updateField("representative", e.target.value)}
                 size="small"
-                sx={textFieldSx}
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
               />
             </Grid>
           </Grid>
@@ -882,109 +707,6 @@ export default function CustomerForm({ open, onClose, onSubmit, initialData, isC
 
           <MDButton variant="gradient" color="info" onClick={handleSave} disabled={saving}>
             <Icon>save</Icon>&nbsp;{saving ? "Saving…" : "Save"}
-          </MDButton>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={addRankOpen || editRankOpen}
-        onClose={() => {
-          setAddRankOpen(false);
-          setEditRankOpen(false);
-          setEditingRank(null);
-          setAddRankName("");
-        }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>{editingRank ? "Edit Rank" : "Add Rank"}</DialogTitle>
-
-        <DialogContent>
-          <MDInput
-            autoFocus
-            label="Rank name"
-            fullWidth
-            value={addRankName}
-            onChange={(e) => setAddRankName(e.target.value)}
-            sx={{ mt: 1 }}
-          />
-        </DialogContent>
-
-        <DialogActions>
-          <MDButton
-            color="secondary"
-            variant="outlined"
-            onClick={() => {
-              setAddRankOpen(false);
-              setEditRankOpen(false);
-              setEditingRank(null);
-              setAddRankName("");
-            }}
-          >
-            Cancel
-          </MDButton>
-
-          <MDButton color="info" variant="gradient" onClick={handleSaveRank}>
-            {editingRank ? "Save" : "Add"}
-          </MDButton>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={addCodePrefixOpen || editCodePrefixOpen}
-        onClose={() => {
-          setAddCodePrefixOpen(false);
-          setEditCodePrefixOpen(false);
-          setEditingCodePrefix(null);
-          setAddCodePrefixName("");
-          setAddCodePrefixDescription("");
-        }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>{editingCodePrefix ? "Edit Code Prefix" : "Add Code Prefix"}</DialogTitle>
-        <DialogContent>
-          <MDInput
-            autoFocus
-            label="Code prefix (letters only)"
-            fullWidth
-            value={addCodePrefixName}
-            onChange={(e) =>
-              setAddCodePrefixName(
-                e.target.value
-                  .replace(/[^A-Za-z]/g, "")
-                  .toUpperCase()
-                  .slice(0, 20)
-              )
-            }
-            sx={{ mt: 1 }}
-          />
-          <MDInput
-            label="Description (required, up to 20 words)"
-            fullWidth
-            multiline
-            minRows={3}
-            value={addCodePrefixDescription}
-            onChange={(e) => setAddCodePrefixDescription(e.target.value)}
-            sx={{ mt: 2 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <MDButton
-            color="secondary"
-            variant="outlined"
-            onClick={() => {
-              setAddCodePrefixOpen(false);
-              setEditCodePrefixOpen(false);
-              setEditingCodePrefix(null);
-              setAddCodePrefixName("");
-              setAddCodePrefixDescription("");
-            }}
-          >
-            Cancel
-          </MDButton>
-          <MDButton color="info" variant="gradient" onClick={handleSaveCodePrefix}>
-            {editingCodePrefix ? "Save" : "Add"}
           </MDButton>
         </DialogActions>
       </Dialog>
@@ -1002,6 +724,8 @@ CustomerForm.propTypes = {
   initialData: PropTypes.object,
 
   isClone: PropTypes.bool,
+
+  existingRecords: PropTypes.array,
 };
 
 CustomerForm.defaultProps = {
@@ -1010,4 +734,6 @@ CustomerForm.defaultProps = {
   initialData: undefined,
 
   isClone: false,
+
+  existingRecords: [],
 };

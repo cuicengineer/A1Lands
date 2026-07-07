@@ -1,3 +1,9 @@
+import {
+  isCustomersControlAccount,
+  isSupplierOrSuppliersControlAccount,
+  isTenantOrTenantsControlAccount,
+} from "utils/partyCoaUtils";
+
 export function pickField(row, ...keys) {
   for (let i = 0; i < keys.length; i += 1) {
     const value = row?.[keys[i]];
@@ -46,7 +52,7 @@ export function parseAmount(value) {
 
 export function formatAmount(value) {
   const n = parseAmount(value);
-  if (!n && n !== 0) return "-";
+  if (n !== 0 && !n) return "-";
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
@@ -110,6 +116,86 @@ export function toDateInputValue(raw) {
   return `${y}-${m}-${day}`;
 }
 
+export function unwrapLockDateConfigList(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (response && typeof response === "object") return [response];
+  return [];
+}
+
+export function pickActiveLockDateYyyyMmDd(lockDateRows) {
+  const rows = lockDateRows || [];
+  const active =
+    rows.find((r) => r?.IsActive === true || r?.IsActive === 1 || r?.isActive === true) || rows[0];
+  if (!active) return "";
+  const raw =
+    active?.LockingDate ?? active?.lockingDate ?? active?.LockDate ?? active?.lockDate ?? "";
+  return toDateInputValue(raw);
+}
+
+/** Receipt line date must be strictly after the configured lock date. */
+export function isCollectionReceiptDateAfterLockDate(receiptDate, lockDateYyyyMmDd) {
+  const lockStr = String(lockDateYyyyMmDd || "").trim();
+  if (!lockStr) return true;
+  const lineStr = toDateInputValue(receiptDate);
+  if (!lineStr) return false;
+  const lockTs = Date.parse(lockStr);
+  const lineTs = Date.parse(lineStr);
+  if (!Number.isFinite(lockTs) || !Number.isFinite(lineTs)) return true;
+  return lineTs > lockTs;
+}
+
+/** True when date is on or before the configured lock date. */
+export function isDateLockedByLockDate(date, lockDateYyyyMmDd) {
+  const dateStr = toDateInputValue(date);
+  if (!dateStr) return false;
+  const lockStr = String(lockDateYyyyMmDd || "").trim();
+  if (!lockStr) return false;
+  return !isCollectionReceiptDateAfterLockDate(date, lockDateYyyyMmDd);
+}
+
+export function formatCollectionLockDateValidationMessage(lockDateYyyyMmDd) {
+  const formatted = formatDisplayDate(lockDateYyyyMmDd);
+  return formatted
+    ? `Receipt date must be after the lock date (${formatted}).`
+    : "Receipt date must be after the lock date.";
+}
+
+export function formatTransactionLockDateValidationMessage(lockDateYyyyMmDd) {
+  const formatted = formatDisplayDate(lockDateYyyyMmDd);
+  return formatted
+    ? `Date must be after the lock date (${formatted}).`
+    : "Date must be after the lock date.";
+}
+
+export function isCollectionRowLockedByVrDate(row, lockDateYyyyMmDd) {
+  const vrDate = pickField(row, "vrDate", "VrDate");
+  if (!String(vrDate || "").trim()) return false;
+  return isDateLockedByLockDate(vrDate, lockDateYyyyMmDd);
+}
+
+export function formatCollectionVrDateLockMessage(lockDateYyyyMmDd) {
+  const formatted = formatDisplayDate(lockDateYyyyMmDd);
+  return formatted
+    ? `This record cannot be edited because Vr Date is on or before the lock date (${formatted}).`
+    : "This record cannot be edited because Vr Date is on or before the lock date.";
+}
+
+export function getMinCollectionReceiptDateAfterLock(lockDateYyyyMmDd) {
+  const lockStr = String(lockDateYyyyMmDd || "").trim();
+  if (!lockStr) return "";
+  const lockTs = Date.parse(lockStr);
+  if (!Number.isFinite(lockTs)) return "";
+  const next = new Date(lockTs);
+  next.setDate(next.getDate() + 1);
+  const y = next.getFullYear();
+  const m = String(next.getMonth() + 1).padStart(2, "0");
+  const day = String(next.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function formatDisplayDate(raw, { shortYear = false } = {}) {
   const datePart = toDateInputValue(raw);
   if (!datePart) return "";
@@ -162,7 +248,7 @@ export function formatInvoiceLabel(invoice) {
   return invoiceDate ? `${head}(${invoiceDate})` : head;
 }
 
-/** Collection entry invoice dropdown: invoice no with due/generation dates only (no contract no). */
+/** Collection entry invoice dropdown: invoice no, then Gen date, then Due date (no contract no). */
 export function formatCollectionInvoiceDropdownLabel(invoice) {
   const invoiceNo = String(pickField(invoice, "invoiceNo", "InvoiceNo") || "").trim();
   if (!invoiceNo) return "";
@@ -181,8 +267,8 @@ export function formatCollectionInvoiceDropdownLabel(invoice) {
     )
   );
   const parts = [];
-  if (dueDate) parts.push(`Due: ${dueDate}`);
   if (generationDate) parts.push(`Gen: ${generationDate}`);
+  if (dueDate) parts.push(`Due: ${dueDate}`);
   if (!parts.length) return invoiceNo;
   return `${invoiceNo} (${parts.join(", ")})`;
 }
@@ -235,6 +321,7 @@ export function normalizeCatalogRow(row) {
     businessName: pickField(row, "businessName", "BusinessName"),
     natureOfBusiness: pickField(row, "natureOfBusiness", "NatureOfBusiness"),
     coaId: row?.coaId ?? row?.CoaId ?? "",
+    coaId2: row?.coaId2 ?? row?.CoaId2 ?? "",
     contractId: row?.contractId ?? row?.ContractId ?? null,
     contractNo: pickField(row, "contractNo", "ContractNo"),
     contractStartDate: pickField(row, "contractStartDate", "ContractStartDate"),
@@ -308,10 +395,200 @@ export function isFinalizedContract(row) {
 
 /** Active, non-archived agreements for new collection entry. */
 export function getCollectionAgreementsForClass(contracts, classId) {
-  if (!classId) return [];
-  return getAgreementsForClass(contracts, classId)
-    .filter(isNotArchivedRecord)
-    .filter((row) => formatContractNoLabel(row));
+  const sourceRows = classId
+    ? getAgreementsForClass(contracts, classId)
+    : (contracts || [])
+        .map(normalizeCatalogRow)
+        .filter((row) => isActiveRecord(row) && isNotDeletedRecord(row));
+  return sourceRows.filter(isNotArchivedRecord).filter((row) => formatContractNoLabel(row));
+}
+
+/** Unlocked invoice headers available for collection entry (all contracts). */
+export function getCollectionInvoiceOptions(invoices, { includeInvoiceKey = "" } = {}) {
+  const includeKey = String(includeInvoiceKey || "").trim();
+  const byInvoiceKey = new Map();
+
+  (invoices || [])
+    .map(normalizeCatalogRow)
+    .filter((row) => isNotDeletedRecord(row))
+    .filter((row) => !pickInvoiceIsLocked(row))
+    .forEach((row) => {
+      const invoiceKey = buildInvoiceKey(row);
+      if (!invoiceKey) return;
+      if (includeKey && invoiceKey === includeKey) {
+        byInvoiceKey.set(invoiceKey, row);
+        return;
+      }
+      const existing = byInvoiceKey.get(invoiceKey);
+      if (!existing) {
+        byInvoiceKey.set(invoiceKey, row);
+        return;
+      }
+      if (isInvoiceScheduleHeaderRow(row) && !isInvoiceScheduleHeaderRow(existing)) {
+        byInvoiceKey.set(invoiceKey, row);
+      }
+    });
+
+  return Array.from(byInvoiceKey.values()).sort((a, b) =>
+    String(a.invoiceNo).localeCompare(String(b.invoiceNo))
+  );
+}
+
+/** Active tenants for collection entry, optionally filtered by receipt account (coaId). */
+function getCollectionPartyTypeForAccount(coa) {
+  if (isCustomersControlAccount(coa?.controlAccount)) return "Customer";
+  if (isSupplierOrSuppliersControlAccount(coa?.controlAccount)) return "Supplier";
+  if (isTenantOrTenantsControlAccount(coa?.controlAccount)) return "Tenant";
+  return "Tenant";
+}
+
+function getCollectionPartyReceiptCoaId(row, partyType) {
+  if (partyType === "Supplier") {
+    return row?.coaId2 ?? row?.CoaId2 ?? row?.coaId ?? row?.CoaId ?? "";
+  }
+  return row?.coaId ?? row?.CoaId ?? "";
+}
+
+export function normalizeCollectionPartyOption(row, partyType = "Tenant") {
+  const normalized = normalizeCatalogRow(row);
+  const isTenant = partyType === "Tenant";
+  const tenantNo = isTenant ? normalized.tenantNo : normalized.code;
+  return {
+    ...normalized,
+    tenantNo,
+    partyType,
+    coaId: getCollectionPartyReceiptCoaId(normalized, partyType),
+  };
+}
+
+export function formatCollectionPartyDropdownLabel(party) {
+  if (!party) return "";
+  if (party.partyType === "Tenant" || (!party.partyType && party.tenantNo)) {
+    return formatTenantBusinessLabel(null, party);
+  }
+  const code = String(party.tenantNo || party.code || "").trim();
+  const name = String(party.name || "").trim();
+  if (code && name) return `${code} - ${name}`;
+  return code || name || "";
+}
+
+export function getCollectionTenantOptionsForAccount(
+  tenants,
+  coaId,
+  { includeTenantNo = "", customers = [], suppliers = [], coaOptions = [] } = {}
+) {
+  const accountId = coaId !== "" && coaId != null ? Number(coaId) : null;
+  if (!Number.isFinite(accountId)) return [];
+
+  const coa = findCoaById(coaOptions, accountId);
+  const partyType = getCollectionPartyTypeForAccount(coa);
+  const catalog =
+    partyType === "Customer" ? customers : partyType === "Supplier" ? suppliers : tenants;
+
+  const includeTn = String(includeTenantNo || "")
+    .trim()
+    .toLowerCase();
+
+  return (catalog || [])
+    .map((row) => normalizeCollectionPartyOption(row, partyType))
+    .filter((row) => isActiveRecord(row) && isNotDeletedRecord(row))
+    .filter((row) => String(row.tenantNo || "").trim())
+    .filter((row) => {
+      const rowCoaId = row?.coaId;
+      const matchesAccount = rowCoaId !== "" && rowCoaId != null && Number(rowCoaId) === accountId;
+      const isIncluded =
+        includeTn &&
+        String(row.tenantNo || "")
+          .trim()
+          .toLowerCase() === includeTn;
+      return matchesAccount || isIncluded;
+    })
+    .sort((a, b) =>
+      formatCollectionPartyDropdownLabel(a).localeCompare(formatCollectionPartyDropdownLabel(b))
+    );
+}
+
+/** All active tenants for collection entry tenant dropdown. */
+export function getCollectionTenantOptions(tenants) {
+  return (tenants || [])
+    .map(normalizeCatalogRow)
+    .filter((row) => isActiveRecord(row) && isNotDeletedRecord(row))
+    .filter((row) => String(row.tenantNo || "").trim())
+    .sort((a, b) =>
+      formatTenantBusinessLabel(null, a).localeCompare(formatTenantBusinessLabel(null, b))
+    );
+}
+
+export function resolveCollectionTenantSelection(tenantRow, coaOptions) {
+  if (!tenantRow) {
+    return { tenantNo: "", tenantBusiness: "", coaId: "", accountLabel: "" };
+  }
+  const tenant = normalizeCollectionPartyOption(tenantRow, tenantRow.partyType || "Tenant");
+  const coa = findCoaById(coaOptions, tenant.coaId);
+  return {
+    tenantNo: String(tenant.tenantNo || "").trim(),
+    tenantBusiness: formatCollectionPartyDropdownLabel(tenant),
+    coaId: coa?.id ?? tenant.coaId ?? "",
+    accountLabel: formatAccountLabel(coa),
+  };
+}
+
+export function findCollectionPartyOption(
+  { tenants = [], customers = [], suppliers = [] } = {},
+  partyNo,
+  coaId,
+  coaOptions = []
+) {
+  const tn = String(partyNo || "").trim();
+  if (!tn) return null;
+
+  if (coaId !== "" && coaId != null) {
+    const match = getCollectionTenantOptionsForAccount(tenants, coaId, {
+      includeTenantNo: tn,
+      customers,
+      suppliers,
+      coaOptions,
+    }).find(
+      (row) =>
+        String(row.tenantNo || "")
+          .trim()
+          .toLowerCase() === tn.toLowerCase()
+    );
+    if (match) return match;
+  }
+
+  const catalogs = [
+    [tenants, "Tenant"],
+    [customers, "Customer"],
+    [suppliers, "Supplier"],
+  ];
+  for (let i = 0; i < catalogs.length; i += 1) {
+    const [catalog, partyType] = catalogs[i];
+    const match = (catalog || [])
+      .map((row) => normalizeCollectionPartyOption(row, partyType))
+      .find(
+        (row) =>
+          String(row.tenantNo || "")
+            .trim()
+            .toLowerCase() === tn.toLowerCase()
+      );
+    if (match) return match;
+  }
+
+  return findCollectionTenantOption(tenants, partyNo);
+}
+
+export function findCollectionTenantOption(tenants, tenantNo) {
+  const tn = String(tenantNo || "").trim();
+  if (!tn) return null;
+  return (
+    getCollectionTenantOptions(tenants).find(
+      (row) =>
+        String(row.tenantNo || "")
+          .trim()
+          .toLowerCase() === tn.toLowerCase()
+    ) || null
+  );
 }
 
 export function pickInvoiceIsFinalized(row) {
@@ -448,6 +725,53 @@ export function getCollectionInvoicesForContract(
   );
 }
 
+/** Unlocked invoices for any contract belonging to the tenant (when no agreement is selected). */
+export function getCollectionInvoicesForTenant(
+  invoices,
+  contracts,
+  tenantNo,
+  { includeInvoiceKey = "" } = {}
+) {
+  const tn = String(tenantNo || "").trim();
+  if (!tn) return [];
+  const tenantContractNos = new Set(
+    (contracts || [])
+      .map(normalizeCatalogRow)
+      .filter((row) => isActiveRecord(row) && isNotDeletedRecord(row))
+      .filter((row) => String(pickField(row, "tenantNo", "TenantNo") || "").trim() === tn)
+      .map((row) => String(pickField(row, "contractNo", "ContractNo") || "").trim())
+      .filter(Boolean)
+  );
+  const includeKey = String(includeInvoiceKey || "").trim();
+  const byInvoiceKey = new Map();
+
+  (invoices || [])
+    .map(normalizeCatalogRow)
+    .filter((row) => isNotDeletedRecord(row))
+    .filter((row) => !pickInvoiceIsLocked(row))
+    .filter((row) => tenantContractNos.has(String(row.contractNo || "").trim()))
+    .forEach((row) => {
+      const invoiceKey = buildInvoiceKey(row);
+      if (!invoiceKey) return;
+      if (includeKey && invoiceKey === includeKey) {
+        byInvoiceKey.set(invoiceKey, row);
+        return;
+      }
+      const existing = byInvoiceKey.get(invoiceKey);
+      if (!existing) {
+        byInvoiceKey.set(invoiceKey, row);
+        return;
+      }
+      if (isInvoiceScheduleHeaderRow(row) && !isInvoiceScheduleHeaderRow(existing)) {
+        byInvoiceKey.set(invoiceKey, row);
+      }
+    });
+
+  return Array.from(byInvoiceKey.values()).sort((a, b) =>
+    String(a.invoiceNo).localeCompare(String(b.invoiceNo))
+  );
+}
+
 export function findTenantByContract(tenants, contract) {
   const tenantNo = resolveContractTenantNo(contract);
   if (!tenantNo) return null;
@@ -473,14 +797,6 @@ export function findCoaById(coaOptions, coaId) {
 /** @deprecated Use findCoaById — kept for callers outside collections. */
 export function findCustomerCoa(coaOptions, coaId) {
   return findCoaById(coaOptions, coaId);
-}
-
-export function isTenantsControlAccount(controlAccount) {
-  return /^tenants$/i.test(String(controlAccount || "").trim());
-}
-
-export function isCustomersControlAccount(controlAccount) {
-  return /^customers$/i.test(String(controlAccount || "").trim());
 }
 
 export function resolveCollectionTenantAccount(contract, tenants, coaOptions) {
@@ -519,21 +835,30 @@ export function buildCollectionGroupKey(row) {
   const classId = row?.classId ?? row?.ClassId ?? "";
   const contractId = row?.contractId ?? row?.ContractId ?? "";
   const invoiceKey = String(row?.invoiceKey || "").trim();
-  if (!classId || !contractId || !invoiceKey) return "";
-  return `${classId}|${contractId}|${invoiceKey}`;
+  const tenantNo = String(row?.tenantNo ?? row?.TenantNo ?? "").trim();
+  if (invoiceKey && classId && contractId) return `${classId}|${contractId}|${invoiceKey}`;
+  if (invoiceKey && tenantNo) return `tenant|${tenantNo}|${invoiceKey}`;
+  if (row?.id != null && !String(row.id).startsWith("line-")) return `entry|${row.id}`;
+  return String(row?.localKey || row?.groupKey || "").trim();
 }
 
 export function computeCollectionGroupAmounts(invoiceReceivable, items = []) {
   const receivable = parseAmount(invoiceReceivable);
   const totalPaid = sumCollectionReceiptLineAmounts(items);
-  const currentDue = Math.max(0, receivable - totalPaid);
-  const balance = totalPaid > receivable ? totalPaid - receivable : 0;
+  const remaining = receivable - totalPaid;
+  const due = remaining < 0 ? 0 : remaining;
+  const balance = remaining < 0 ? remaining : 0;
   return {
-    due: receivable,
-    currentDue,
+    due,
+    currentDue: due,
     balance,
     totalPaid,
   };
+}
+
+/** Per-row balance for the collections grid: Receivable minus Amount (may be negative). */
+export function computeCollectionRowBalance(receivable, amount) {
+  return parseAmount(receivable) - parseAmount(amount);
 }
 
 export function getValidCollectionReceiptLines(items = []) {
@@ -561,10 +886,19 @@ export function createEmptyCollectionLineItem(overrides = {}) {
   const today = new Date().toISOString().slice(0, 10);
   return {
     id,
+    localKey: id,
     date: today,
     amount: "",
     tinTrn: "",
+    status: "Pending",
+    vrNo: "",
+    vrDate: "",
+    receiptId: "",
     isLocalOnly: true,
+    pendingAttachmentFile: null,
+    attachmentFileName: "",
+    attachmentFileId: null,
+    hasAttachment: false,
     ...overrides,
   };
 }
@@ -610,7 +944,15 @@ export function groupCollectionEntries(entries = []) {
       date: entry.date,
       amount: entry.amount,
       tinTrn: entry.tinTrn,
+      status: entry.status,
+      vrNo: entry.vrNo,
+      vrDate: entry.vrDate,
+      receiptId: entry.receiptId,
       isLocalOnly: entry.isLocalOnly,
+      pendingAttachmentFile: null,
+      attachmentFileName: "",
+      attachmentFileId: null,
+      hasAttachment: false,
     });
   });
   return Array.from(groups.values());
@@ -705,38 +1047,135 @@ export function flattenCollectionGroupItems(group, amounts) {
 }
 
 export function buildCollectionLinePayload(group, item, amounts) {
-  const parentPayload = buildCollectionEntryPayload({
+  return buildCollectionEntryPayload({
     ...group,
-    date: item.date,
+    ...item,
+    due: amounts?.due ?? group?.due ?? 0,
+    balance: amounts?.balance ?? group?.balance ?? 0,
+    receivable: amounts?.receivable ?? group?.invoiceReceivable ?? group?.receivable ?? 0,
     amount: normalizeCollectionLineAmount(item.amount),
+    date: item.date,
     tinTrn: item.tinTrn,
-    due: amounts?.due ?? 0,
-    balance: amounts?.balance ?? 0,
+    status: item.status,
+    vrNo: item.vrNo,
+    vrDate: item.vrDate,
+    receiptId: item.receiptId,
   });
-  return parentPayload;
 }
 
 let nextRowId = 1;
 
 export function createEmptyCollectionRow(overrides = {}) {
-  const id = nextRowId;
-  nextRowId += 1;
+  const localKey = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const today = new Date().toISOString().slice(0, 10);
   return {
-    id,
+    id: localKey,
+    localKey,
     classId: "",
     contractId: "",
+    tenantNo: "",
     tenantBusiness: "",
     accountLabel: "",
     coaId: "",
     invoiceKey: "",
+    receivable: "",
     due: "",
     balance: "",
     date: today,
     amount: "",
     tinTrn: "",
+    status: "Pending",
+    vrNo: "",
+    vrDate: "",
+    receiptId: "",
+    isLocalOnly: true,
     isEditing: true,
+    pendingAttachmentFile: null,
+    attachmentFileName: "",
+    attachmentFileId: null,
+    hasAttachment: false,
     ...overrides,
+  };
+}
+
+export function computeCollectionRowAmounts(entry, siblings = [], invoiceReceivable = 0) {
+  const receivable = parseAmount(invoiceReceivable || entry?.receivable);
+  const balance = computeCollectionRowBalance(receivable, entry?.amount);
+  const due = balance > 0 ? balance : 0;
+  return {
+    due,
+    currentDue: due,
+    balance,
+    totalPaid: parseAmount(entry?.amount),
+    receivable,
+  };
+}
+
+export function enrichCollectionGridRow(
+  row,
+  {
+    contracts,
+    tenants,
+    customers = [],
+    suppliers = [],
+    coaOptions,
+    invoices,
+    classes,
+    allRows = [],
+  } = {}
+) {
+  const classRow = (classes || []).find((item) => Number(item.id) === Number(row.classId));
+  const className = classRow?.name || classRow?.code || "";
+  const contract =
+    row.contractId != null && row.contractId !== ""
+      ? (contracts || [])
+          .map(normalizeCatalogRow)
+          .find((item) => Number(item.id) === Number(row.contractId))
+      : null;
+  const tenantFromNo = findCollectionPartyOption(
+    { tenants, customers, suppliers },
+    row.tenantNo,
+    row.coaId,
+    coaOptions
+  );
+  const tenant = tenantFromNo || findTenantByContract(tenants, contract);
+  const tenantAccount = row.tenantNo
+    ? resolveCollectionTenantSelection(tenant, coaOptions)
+    : resolveCollectionTenantAccount(contract, tenants, coaOptions);
+  const coa = findCoaById(
+    coaOptions,
+    row.coaId || tenantAccount.coaId || tenant?.coaId || tenant?.CoaId
+  );
+  const selectedInvoice =
+    findInvoiceByKey(invoices, row.invoiceKey) ||
+    (row.invoiceKey
+      ? (invoices || [])
+          .map(normalizeCatalogRow)
+          .find((item) => buildInvoiceKey(item) === String(row.invoiceKey || "").trim())
+      : null);
+  const invoiceReceivable = selectedInvoice
+    ? computeInvoiceDue(selectedInvoice)
+    : parseAmount(row.receivable);
+  const amounts = computeCollectionRowAmounts(row, [], invoiceReceivable);
+
+  return {
+    ...row,
+    className,
+    tenantNo: row.tenantNo || tenantAccount.tenantNo || resolveContractTenantNo(contract),
+    tenantBusiness:
+      row.tenantBusiness ||
+      tenantAccount.tenantBusiness ||
+      (contract ? formatTenantBusinessLabel(contract, tenant) : ""),
+    accountLabel: row.accountLabel || tenantAccount.accountLabel || formatAccountLabel(coa),
+    coaId: row.coaId || tenantAccount.coaId || coa?.id || "",
+    receivable: invoiceReceivable,
+    invoiceReceivable,
+    due: amounts.due,
+    currentDue: amounts.currentDue,
+    balance: amounts.balance,
+    totalPaid: amounts.totalPaid,
+    selectedContract: contract || null,
+    selectedInvoice: selectedInvoice || null,
   };
 }
 
@@ -758,6 +1197,7 @@ export function buildAgreementProvInvoiceDeepLink(contractNo, invoiceNo) {
   const params = new URLSearchParams();
   const cn = String(contractNo || "").trim();
   const inv = String(invoiceNo || "").trim();
+  params.set("view", "grid");
   if (cn) params.set("contractNo", cn);
   if (inv) params.set("invoiceNo", inv);
   const qs = params.toString();
@@ -766,8 +1206,18 @@ export function buildAgreementProvInvoiceDeepLink(contractNo, invoiceNo) {
 
 export function buildTenantConfigDeepLink(tenantNo) {
   const tn = String(tenantNo || "").trim();
-  if (!tn) return "/configuration/tenants";
-  return `/configuration/tenants?tenantNo=${encodeURIComponent(tn)}`;
+  if (!tn) return "/configuration/tenants?view=grid";
+  const params = new URLSearchParams({ view: "grid", tenantNo: tn });
+  return `/configuration/tenants?${params.toString()}`;
+}
+
+export function buildReceiptDeepLink(vrNo, receiptId) {
+  const vr = String(vrNo || "").trim();
+  if (!vr) return "";
+  const params = new URLSearchParams({ vrNo: vr });
+  const rid = String(receiptId || "").trim();
+  if (rid) params.set("receiptId", rid);
+  return `/receipts?${params.toString()}`;
 }
 
 export function openAppRouteInNewTab(path) {
@@ -815,23 +1265,41 @@ export function resolveCollectionTenantNo(row, selectedContract, tenants) {
 
 export function normalizeCollectionEntryRow(row) {
   const normalized = normalizeCatalogRow(row);
+  const statusRaw = row?.status ?? row?.Status ?? "";
+  const statusText = String(statusRaw || "")
+    .trim()
+    .toLowerCase();
+  const normalizedStatus =
+    statusText === "received" ? "Received" : statusText === "pending" ? "Pending" : "";
   return {
     ...normalized,
     id: row?.id ?? row?.Id ?? null,
+    localKey: row?.localKey || row?.id || "",
     classId: row?.classId ?? row?.ClassId ?? "",
     contractId: row?.contractId ?? row?.ContractId ?? "",
+    tenantNo: pickField(row, "tenantNo", "TenantNo"),
     tenantBusiness: row?.tenantBusiness ?? row?.TenantBusiness ?? "",
     coaId: row?.coaId ?? row?.CoaId ?? "",
+    receivable: row?.receivableAmount ?? row?.ReceivableAmount ?? "",
     due: row?.dueAmount ?? row?.DueAmount ?? "",
     balance: row?.balanceAmount ?? row?.BalanceAmount ?? "",
     date: toDateInputValue(row?.collectionDate ?? row?.CollectionDate),
     amount: row?.amount ?? row?.Amount ?? "",
     tinTrn: normalizeTinTrn(row?.tinTrn ?? row?.TinTrn ?? ""),
+    status: normalizedStatus || String(statusRaw || "").trim(),
+    vrNo: pickField(row, "vrNo", "VrNo"),
+    vrDate: toDateInputValue(row?.vrDate ?? row?.VrDate),
+    receiptId: row?.receiptId ?? row?.ReceiptId ?? "",
     invoiceKey: buildInvoiceKey({
       contractNo: row?.contractNo ?? row?.ContractNo ?? "",
       invoiceNo: row?.invoiceNo ?? row?.InvoiceNo ?? "",
     }),
+    isLocalOnly: false,
     isEditing: false,
+    pendingAttachmentFile: null,
+    attachmentFileName: "",
+    attachmentFileId: null,
+    hasAttachment: false,
   };
 }
 
@@ -840,7 +1308,12 @@ export function buildCollectionEntryPayload(row) {
     row?.contractId !== "" && row?.contractId != null ? Number(row.contractId) : null;
   const classId = row?.classId !== "" && row?.classId != null ? Number(row.classId) : null;
   const coaId = row?.coaId !== "" && row?.coaId != null ? Number(row.coaId) : null;
+  const receiptId = row?.receiptId !== "" && row?.receiptId != null ? Number(row.receiptId) : null;
   const { contractNo, invoiceNo } = parseInvoiceKey(row?.invoiceKey);
+  const status = String(row?.status || "").trim() || (row?.vrNo ? "Received" : "Pending");
+  const receivable = parseAmount(row?.receivable ?? row?.invoiceReceivable);
+  const balance = computeCollectionRowBalance(receivable, row?.amount);
+  const due = balance > 0 ? balance : 0;
   return {
     ClassId: classId,
     classId,
@@ -848,21 +1321,33 @@ export function buildCollectionEntryPayload(row) {
     contractId,
     ContractNo: contractNo || null,
     contractNo: contractNo || null,
+    TenantNo: String(row?.tenantNo || "").trim() || null,
+    tenantNo: String(row?.tenantNo || "").trim() || null,
     TenantBusiness: String(row?.tenantBusiness || "").trim() || null,
     tenantBusiness: String(row?.tenantBusiness || "").trim() || null,
     CoaId: coaId,
     coaId,
     InvoiceNo: invoiceNo || null,
     invoiceNo: invoiceNo || null,
-    DueAmount: parseAmount(row?.due),
-    dueAmount: parseAmount(row?.due),
-    BalanceAmount: parseAmount(row?.balance),
-    balanceAmount: parseAmount(row?.balance),
+    ReceivableAmount: receivable,
+    receivableAmount: receivable,
+    DueAmount: due,
+    dueAmount: due,
+    BalanceAmount: balance,
+    balanceAmount: balance,
     CollectionDate: toDateInputValue(row?.date) || null,
     collectionDate: toDateInputValue(row?.date) || null,
     Amount: parseAmount(row?.amount),
     amount: parseAmount(row?.amount),
     TinTrn: normalizeTinTrn(row?.tinTrn).trim() || null,
     tinTrn: normalizeTinTrn(row?.tinTrn).trim() || null,
+    Status: status,
+    status,
+    VrNo: String(row?.vrNo || "").trim() || null,
+    vrNo: String(row?.vrNo || "").trim() || null,
+    VrDate: toDateInputValue(row?.vrDate) || null,
+    vrDate: toDateInputValue(row?.vrDate) || null,
+    ReceiptId: receiptId,
+    receiptId,
   };
 }

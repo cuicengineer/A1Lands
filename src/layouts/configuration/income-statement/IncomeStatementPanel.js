@@ -629,7 +629,7 @@ function IncomeStatementPanel({ panelTitle = "Income Statement" }) {
       ...(SHOW_ATTACHMENTS
         ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "5%" }]
         : []),
-      { Header: "Acc ID - Acc Name", accessor: "account", align: "left", width: "38%" },
+      { Header: "Acct ID - Acct Name", accessor: "account", align: "left", width: "38%" },
       { Header: "Group", accessor: "groupName", align: "left", width: "20%" },
       { Header: "Sub Group", accessor: "subGroup", align: "left", width: "26%" },
     ],

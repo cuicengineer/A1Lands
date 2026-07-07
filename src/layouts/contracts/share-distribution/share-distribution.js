@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import Icon from "@mui/material/Icon";
+import IconButton from "@mui/material/IconButton";
 import Checkbox from "@mui/material/Checkbox";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -14,27 +17,109 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
 import DataTable from "examples/Tables/DataTable";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
-import { ServerGridPagination } from "components/CompactGridPagination";
+import CompactGroupBySelect from "components/CompactGroupBySelect";
+import AgreementProvPdfPreviewDialog from "components/AgreementProvPdfPreviewDialog";
 import IncomeAgreementsModuleTabs from "layouts/income-agreements/components/IncomeAgreementsModuleTabs";
 import contractApi from "services/api.contract.service";
 import { GRID_DISPLAY_DEFAULT_PAGE_SIZE } from "utils/gridDisplayPageSize";
+import { ServerGridPagination } from "components/CompactGridPagination";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
+import { buildCollectionsGridTableBodySx } from "utils/collectionsGridTableSx";
+import {
+  loadShareDistributionWorkbookPdfMargins,
+  saveShareDistributionWorkbookPdfMargins,
+  SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS,
+} from "utils/agreementProvPdfMargins";
+import { GRID_DARK_ARROW_ICON_SX } from "utils/gridDarkArrowIconSx";
 import {
   buildShareDistributionRows,
-  generateNextWorkbookNumber,
+  buildShareDistributionGroupedRows,
+  buildShareDistributionGridTotalRow,
+  filterShareDistributionRowsByWorkbook,
+  getShareDistributionContractId,
+  getShareDistributionRowKey,
+  isShareDistributionWorkbookAssigned,
+  SHARE_DIST_DEFAULT_GROUP_BY_COLUMNS,
+  SHARE_DIST_GROUPING_COLUMN_OPTIONS,
+  SHARE_DIST_UNASSIGNED_ROW_BG,
+  SHARE_DIST_WORKBOOK_FILTER,
+  SHARE_DIST_WORKBOOK_ROW_BG,
+  sumShareDistributionGridRows,
   unwrapContractsResponse,
 } from "./shareDistributionUtils";
+import { generateShareDistributionWorkbookPdf } from "./shareDistributionWorkbookPdf";
 
-function ShareDistributionSelectCell({ row, selectedRowIds, onToggle }) {
-  const rowId = String(row.original?.id ?? row.id);
+function ShareDistributionSelectCell({
+  row,
+  selectedRowIds,
+  onToggle,
+  expandedGroups,
+  onToggleGroup,
+}) {
+  const rowOriginal = row.original ?? row;
+
+  if (rowOriginal?.isGroupRow) {
+    const groupKey = rowOriginal.groupKey;
+    const isExpanded = expandedGroups.has(groupKey);
+    return (
+      <MDBox
+        className="share-dist-select-checkbox-host"
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          m: 0,
+          p: 0,
+        }}
+      >
+        <IconButton
+          size="small"
+          onClick={() => onToggleGroup?.(groupKey)}
+          title={isExpanded ? "Collapse group" : "Expand group"}
+          sx={{ p: 0, m: 0, ...GRID_DARK_ARROW_ICON_SX }}
+        >
+          <Icon sx={{ fontSize: "1.1rem" }}>{isExpanded ? "expand_less" : "expand_more"}</Icon>
+        </IconButton>
+      </MDBox>
+    );
+  }
+
+  if (rowOriginal?.__isTotalRow) {
+    return null;
+  }
+
+  const rowKey = getShareDistributionRowKey(rowOriginal);
+  const hasWorkbook = isShareDistributionWorkbookAssigned(rowOriginal);
   return (
-    <Checkbox
-      size="small"
-      checked={selectedRowIds.has(rowId)}
-      onChange={() => onToggle(rowId)}
-      inputProps={{ "aria-label": `Select row ${rowId}` }}
-      sx={{ p: 0 }}
-    />
+    <MDBox
+      className="share-dist-select-checkbox-host"
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        m: 0,
+        p: 0,
+      }}
+    >
+      <Checkbox
+        size="small"
+        checked={!hasWorkbook && selectedRowIds.has(rowKey)}
+        disabled={hasWorkbook}
+        onClick={(event) => event.stopPropagation()}
+        onChange={(event) => {
+          event.stopPropagation();
+          if (!hasWorkbook) onToggle(rowKey);
+        }}
+        inputProps={{
+          "aria-label": hasWorkbook
+            ? `Row ${rowKey} already assigned to a workbook`
+            : `Select row ${rowKey}`,
+        }}
+        sx={{ p: 0, m: 0 }}
+      />
+    </MDBox>
   );
 }
 
@@ -47,94 +132,139 @@ ShareDistributionSelectCell.propTypes = {
   }).isRequired,
   selectedRowIds: PropTypes.instanceOf(Set).isRequired,
   onToggle: PropTypes.func.isRequired,
+  expandedGroups: PropTypes.instanceOf(Set).isRequired,
+  onToggleGroup: PropTypes.func.isRequired,
 };
 
+function ShareDistributionWorkbookCell({ value, row, onOpenWorkbookPdf }) {
+  const rowOriginal = row?.original ?? row;
+  if (rowOriginal?.__isTotalRow) {
+    return null;
+  }
+  if (rowOriginal?.isGroupRow) {
+    const text = String(value || "").trim();
+    return (
+      <MDTypography
+        variant="caption"
+        fontWeight="bold"
+        color="text"
+        sx={{ lineHeight: 1, whiteSpace: "nowrap", verticalAlign: "middle" }}
+      >
+        {text || "-"}
+      </MDTypography>
+    );
+  }
+
+  const text = String(value || "").trim();
+  if (text) {
+    return (
+      <MDButton
+        variant="text"
+        color="success"
+        onClick={() => onOpenWorkbookPdf?.(text, rowOriginal)}
+        sx={{
+          p: 0,
+          minWidth: "auto",
+          minHeight: 0,
+          fontSize: "0.75rem",
+          fontWeight: 700,
+          lineHeight: 1,
+          textDecoration: "underline",
+          display: "inline-flex",
+          alignItems: "center",
+          verticalAlign: "middle",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {text}
+      </MDButton>
+    );
+  }
+  return (
+    <MDTypography
+      variant="caption"
+      fontWeight="regular"
+      color="text"
+      sx={{ lineHeight: 1, whiteSpace: "nowrap", verticalAlign: "middle" }}
+    >
+      {text}
+    </MDTypography>
+  );
+}
+
+ShareDistributionWorkbookCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  row: PropTypes.object,
+  onOpenWorkbookPdf: PropTypes.func,
+};
+
+ShareDistributionWorkbookCell.defaultProps = {
+  value: "",
+  row: null,
+  onOpenWorkbookPdf: undefined,
+};
+
+const SHARE_DIST_NUM_HEADER_CLASS = "share-dist-num-header";
+const SHARE_DIST_NUM_CELL_CLASS = "share-dist-num-cell";
+const SHARE_DIST_SELECT_HEADER_CLASS = "share-dist-select-header";
+const SHARE_DIST_SELECT_CELL_CLASS = "share-dist-select-cell";
+
+function numericColumn(definition) {
+  return {
+    ...definition,
+    align: "center",
+    disableFilters: true,
+    disableSortBy: true,
+    className: SHARE_DIST_NUM_CELL_CLASS,
+    headerClassName: SHARE_DIST_NUM_HEADER_CLASS,
+  };
+}
+
+function textColumn(definition) {
+  return {
+    ...definition,
+    disableFilters: true,
+    disableSortBy: true,
+  };
+}
+
 const SHARE_DISTRIBUTION_COLUMNS = [
-  { id: "base", Header: "Base", accessor: "base", align: "left" },
-  {
-    id: "caId",
-    Header: "CA ID",
-    accessor: "caId",
-    align: "left",
-  },
-  {
-    id: "tenantAndBusiness",
-    Header: "Tenant and Business",
-    accessor: "tenantAndBusiness",
-    align: "left",
-  },
-  {
-    id: "caArea1",
-    Header: "CA Area",
-    accessor: "caArea1",
-    align: "right",
-  },
-  {
-    id: "caArea2",
-    Header: "CA Area",
-    accessor: "caArea2",
-    align: "right",
-  },
-  {
-    id: "revenueRate",
-    Header: "Revenue Rate",
-    accessor: "revenueRate",
-    align: "right",
-  },
-  { id: "rrFy", Header: "RR FY", accessor: "rrFy", align: "left" },
-  {
-    id: "rentalValue",
-    Header: "Rental Value",
-    accessor: "rentalValue",
-    align: "right",
-  },
-  {
-    id: "annualRent",
-    Header: "Annual Rent",
-    accessor: "annualRent",
-    align: "right",
-  },
-  {
-    id: "currentRentPA",
-    Header: "Current Rent PA",
-    accessor: "currentRentPA",
-    align: "right",
-  },
-  {
-    id: "govtSharePA",
-    Header: "Govt Share-PA",
-    accessor: "govtSharePA",
-    align: "right",
-  },
-  {
-    id: "receiptDate",
-    Header: "Receipt Date",
-    accessor: "receiptDate",
-    align: "left",
-  },
-  {
-    id: "receiptAmount",
-    Header: "Receipt Amount",
-    accessor: "receiptAmount",
-    align: "right",
-  },
-  { id: "ratio", Header: "Ratio", accessor: "ratio", align: "right" },
-  { id: "govt", Header: "Govt", accessor: "govt", align: "right" },
-  { id: "paf", Header: "PAF", accessor: "paf", align: "right" },
-  { id: "ahq", Header: "AHQ", accessor: "ahq", align: "right" },
-  { id: "rac", Header: "RAC", accessor: "rac", align: "right" },
-  {
-    id: "baseShare",
-    Header: "Base",
-    accessor: "baseShare",
-    align: "right",
-  },
-  {
+  textColumn({
     id: "workbook",
     Header: "Workbook",
     accessor: "workbook",
     align: "left",
-  },
+    Cell: ShareDistributionWorkbookCell,
+  }),
+  numericColumn({ id: "sn", Header: "SN", accessor: "sn", width: 48 }),
+  textColumn({ id: "racName", Header: "RAC Name", accessor: "racName", align: "left" }),
+  textColumn({ id: "base", Header: "Base", accessor: "base", align: "left" }),
+  textColumn({ id: "className", Header: "Class", accessor: "className", align: "left" }),
+  textColumn({ id: "agreement", Header: "Agreement", accessor: "agreement", align: "left" }),
+  textColumn({
+    id: "tenantAndBusiness",
+    Header: "Tenant and Business",
+    accessor: "tenantAndBusiness",
+    align: "left",
+  }),
+  numericColumn({ id: "booArea", Header: "BoO Area", accessor: "booArea" }),
+  textColumn({ id: "rrFy", Header: "RR FY", accessor: "rrFy", align: "left" }),
+  numericColumn({ id: "revenueRate", Header: "Revenue Rate", accessor: "revenueRate" }),
+  numericColumn({ id: "govtSharePA", Header: "Govt Share-PA", accessor: "govtSharePA" }),
+  numericColumn({ id: "currentRentPA", Header: "Current Rent-PA", accessor: "currentRentPA" }),
+  textColumn({
+    id: "receiptDate",
+    Header: "Receipt Date",
+    accessor: "receiptDate",
+    align: "left",
+  }),
+  numericColumn({ id: "receiptAmount", Header: "Receipt Amount", accessor: "receiptAmount" }),
+  numericColumn({ id: "ratio", Header: "Ratio", accessor: "ratio" }),
+  numericColumn({ id: "govt", Header: "Govt", accessor: "govt" }),
+  numericColumn({ id: "paf", Header: "PAF", accessor: "paf" }),
+  numericColumn({ id: "ahq", Header: "AHQ", accessor: "ahq" }),
+  numericColumn({ id: "rac", Header: "RAC", accessor: "rac" }),
+  numericColumn({ id: "baseShare", Header: "Base", accessor: "baseShare" }),
 ];
 
 export default function ShareDistribution() {
@@ -146,6 +276,14 @@ export default function ShareDistribution() {
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [workbookDialogOpen, setWorkbookDialogOpen] = useState(false);
   const [lastCreatedWorkbook, setLastCreatedWorkbook] = useState(null);
+  const [creatingWorkbook, setCreatingWorkbook] = useState(false);
+  const [workbookError, setWorkbookError] = useState("");
+  const [paginationHost, setPaginationHost] = useState(null);
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [pdfPreviewData, setPdfPreviewData] = useState(null);
+  const [workbookFilter, setWorkbookFilter] = useState(SHARE_DIST_WORKBOOK_FILTER.ALL);
+  const [groupByColumns, setGroupByColumns] = useState(SHARE_DIST_DEFAULT_GROUP_BY_COLUMNS);
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -176,29 +314,95 @@ export default function ShareDistribution() {
     fetchRows();
   }, [fetchRows]);
 
+  useEffect(() => {
+    setSelectedRowIds((prev) => {
+      if (prev.size === 0) return prev;
+      const assignedKeys = new Set(
+        rows
+          .filter(isShareDistributionWorkbookAssigned)
+          .map((row) => getShareDistributionRowKey(row))
+      );
+      if (![...prev].some((id) => assignedKeys.has(id))) return prev;
+      const next = new Set(prev);
+      assignedKeys.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, [rows]);
+
   const selectedCount = selectedRowIds.size;
+
+  const handleToggleGroup = useCallback((groupKey) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setExpandedGroups(new Set());
+  }, [groupByColumns]);
+
+  useEffect(() => {
+    setGridPageNumber(1);
+  }, [workbookFilter, groupByColumns]);
+
+  const filteredRows = useMemo(
+    () => filterShareDistributionRowsByWorkbook(rows, workbookFilter),
+    [rows, workbookFilter]
+  );
+
+  const displayRows = useMemo(
+    () => buildShareDistributionGroupedRows(filteredRows, groupByColumns, expandedGroups),
+    [filteredRows, groupByColumns, expandedGroups]
+  );
+
+  useEffect(() => {
+    const maxPages = Math.max(1, Math.ceil(displayRows.length / gridPageSize) || 1);
+    if (gridPageNumber > maxPages) {
+      setGridPageNumber(maxPages);
+    }
+  }, [displayRows.length, gridPageNumber, gridPageSize]);
 
   const paginatedRows = useMemo(() => {
     const start = (gridPageNumber - 1) * gridPageSize;
-    return rows.slice(start, start + gridPageSize);
-  }, [rows, gridPageNumber, gridPageSize]);
+    return displayRows.slice(start, start + gridPageSize);
+  }, [displayRows, gridPageNumber, gridPageSize]);
 
-  const pageRowIds = useMemo(() => paginatedRows.map((row) => String(row.id)), [paginatedRows]);
+  const selectablePaginatedRows = useMemo(
+    () =>
+      paginatedRows.filter(
+        (row) => !row?.isGroupRow && !row?.__isTotalRow && !isShareDistributionWorkbookAssigned(row)
+      ),
+    [paginatedRows]
+  );
+
+  const pageRowIds = useMemo(
+    () => selectablePaginatedRows.map((row) => getShareDistributionRowKey(row)),
+    [selectablePaginatedRows]
+  );
 
   const allPageRowsSelected =
     pageRowIds.length > 0 && pageRowIds.every((id) => selectedRowIds.has(id));
   const somePageRowsSelected =
     pageRowIds.some((id) => selectedRowIds.has(id)) && !allPageRowsSelected;
 
-  const toggleRowSelection = useCallback((rowId) => {
-    const key = String(rowId);
-    setSelectedRowIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  const toggleRowSelection = useCallback(
+    (rowKey) => {
+      const key = String(rowKey);
+      const row = rows.find((item) => getShareDistributionRowKey(item) === key);
+      if (row && isShareDistributionWorkbookAssigned(row)) return;
+
+      setSelectedRowIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+    },
+    [rows]
+  );
 
   const togglePageSelection = useCallback(() => {
     setSelectedRowIds((prev) => {
@@ -212,67 +416,181 @@ export default function ShareDistribution() {
     });
   }, [allPageRowsSelected, pageRowIds]);
 
-  const handleCreateWorkbook = useCallback(() => {
-    if (selectedCount === 0) return;
+  const handleCreateWorkbook = useCallback(async () => {
+    if (selectedCount === 0 || creatingWorkbook) return;
 
-    const workbookNumber = generateNextWorkbookNumber();
-    const selectedIds = new Set(selectedRowIds);
-    const assignedRows = rows.filter((row) => selectedIds.has(String(row.id)));
+    const selectedKeys = new Set(selectedRowIds);
+    const assignedRows = rows.filter((row) => selectedKeys.has(getShareDistributionRowKey(row)));
+    const eligibleRows = assignedRows.filter((row) => !isShareDistributionWorkbookAssigned(row));
 
-    setRows((prev) =>
-      prev.map((row) =>
-        selectedIds.has(String(row.id)) ? { ...row, workbook: workbookNumber } : row
-      )
-    );
-    setLastCreatedWorkbook({
-      number: workbookNumber,
-      rowCount: assignedRows.length,
-      caIds: assignedRows.map((row) => row.caId).filter(Boolean),
-    });
-    setWorkbookDialogOpen(true);
-    setSelectedRowIds(new Set());
-  }, [rows, selectedCount, selectedRowIds]);
+    if (eligibleRows.length === 0) {
+      setWorkbookError("Selected records already have a workbook and cannot be reassigned.");
+      return;
+    }
+
+    const contractIds = [
+      ...new Set(
+        eligibleRows.map((row) => getShareDistributionContractId(row)).filter((id) => id != null)
+      ),
+    ];
+
+    if (contractIds.length === 0) {
+      setWorkbookError("Selected rows do not have valid contract IDs.");
+      return;
+    }
+
+    setWorkbookError("");
+    setCreatingWorkbook(true);
+    try {
+      const response = await contractApi.createShareDistributionWorkbook(contractIds);
+      const result = response?.data && !response?.workbookNo ? response.data : response;
+      const workbookNumber = result?.workbookNo || result?.WorkbookNo || "";
+
+      setLastCreatedWorkbook({
+        number: workbookNumber,
+        rowCount: result?.assignedCount ?? contractIds.length,
+        caIds: eligibleRows.map((row) => row.caId).filter(Boolean),
+      });
+      setWorkbookDialogOpen(true);
+      setSelectedRowIds(new Set());
+      await fetchRows();
+    } catch (error) {
+      console.error("Failed to create share distribution workbook:", error);
+      setWorkbookError(
+        error?.message || "Failed to create workbook. Please try again or contact support."
+      );
+    } finally {
+      setCreatingWorkbook(false);
+    }
+  }, [rows, selectedCount, selectedRowIds, creatingWorkbook, fetchRows]);
+
+  const handleOpenWorkbookPdf = useCallback(
+    (workbookNo) => {
+      const normalizedWorkbookNo = String(workbookNo || "").trim();
+      if (!normalizedWorkbookNo) return;
+      const workbookRows = rows.filter(
+        (row) => String(row?.workbook || "").trim() === normalizedWorkbookNo
+      );
+      if (workbookRows.length === 0) return;
+      setPdfPreviewData({
+        workbookNo: normalizedWorkbookNo,
+        rows: workbookRows,
+      });
+      setPdfPreviewOpen(true);
+    },
+    [rows]
+  );
+
+  const handleCloseWorkbookPdf = useCallback(() => {
+    setPdfPreviewOpen(false);
+    setPdfPreviewData(null);
+  }, []);
+
+  const generateWorkbookPdfBlob = useCallback(
+    (data, marginsIn) =>
+      generateShareDistributionWorkbookPdf(data, marginsIn, {
+        openNewTab: false,
+        documentTitle: "Workbook",
+      }),
+    []
+  );
 
   const tableColumns = useMemo(() => {
+    const hasSelectableRowsOnPage = pageRowIds.length > 0;
     const selectColumn = {
       id: "select",
       Header: () => (
-        <Checkbox
-          size="small"
-          checked={allPageRowsSelected}
-          indeterminate={somePageRowsSelected}
-          onChange={togglePageSelection}
-          inputProps={{ "aria-label": "Select all rows on this page" }}
-          sx={{ p: 0 }}
-        />
+        <MDBox
+          className="share-dist-select-checkbox-host"
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "100%",
+            m: 0,
+            p: 0,
+          }}
+        >
+          <Checkbox
+            size="small"
+            checked={hasSelectableRowsOnPage && allPageRowsSelected}
+            indeterminate={somePageRowsSelected}
+            disabled={!hasSelectableRowsOnPage}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              event.stopPropagation();
+              togglePageSelection();
+            }}
+            inputProps={{ "aria-label": "Select all unassigned rows on this page" }}
+            sx={{ p: 0, m: 0 }}
+          />
+        </MDBox>
       ),
       accessor: "select",
       disableSortBy: true,
+      disableFilters: true,
       align: "center",
+      className: SHARE_DIST_SELECT_CELL_CLASS,
+      headerClassName: SHARE_DIST_SELECT_HEADER_CLASS,
       width: 48,
+      minWidth: 48,
+      maxWidth: 48,
       Cell: (cellProps) => (
         <ShareDistributionSelectCell
           row={cellProps.row}
           selectedRowIds={selectedRowIds}
           onToggle={toggleRowSelection}
+          expandedGroups={expandedGroups}
+          onToggleGroup={handleToggleGroup}
         />
       ),
     };
 
-    return [selectColumn, ...SHARE_DISTRIBUTION_COLUMNS];
+    return [
+      selectColumn,
+      ...SHARE_DISTRIBUTION_COLUMNS.map((column) =>
+        column.id === "workbook"
+          ? {
+              ...column,
+              Cell: (cellProps) => (
+                <ShareDistributionWorkbookCell
+                  value={cellProps?.value}
+                  row={cellProps?.row}
+                  onOpenWorkbookPdf={handleOpenWorkbookPdf}
+                />
+              ),
+            }
+          : column
+      ),
+    ];
   }, [
     allPageRowsSelected,
+    handleOpenWorkbookPdf,
+    handleToggleGroup,
+    expandedGroups,
     somePageRowsSelected,
     selectedRowIds,
     togglePageSelection,
     toggleRowSelection,
+    pageRowIds.length,
   ]);
 
-  const totalCount = rows.length;
+  const totalCount = displayRows.length;
+  const totalPages = Math.ceil(totalCount / gridPageSize) || 0;
+
   const workspaceMetadata = useMemo(
-    () => buildWorkspaceRecordMetrics({ total: totalCount }),
-    [totalCount]
+    () => buildWorkspaceRecordMetrics({ total: filteredRows.length }),
+    [filteredRows.length]
   );
+
+  const tableData = useMemo(() => {
+    const pageDataRows = paginatedRows.filter((row) => !row?.isGroupRow && !row?.__isTotalRow);
+    if (pageDataRows.length === 0) {
+      return { columns: tableColumns, rows: paginatedRows };
+    }
+    const totalRow = buildShareDistributionGridTotalRow(sumShareDistributionGridRows(pageDataRows));
+    return { columns: tableColumns, rows: [...paginatedRows, totalRow] };
+  }, [tableColumns, paginatedRows]);
 
   const serverPaginationFooter = useMemo(
     () => (
@@ -286,7 +604,64 @@ export default function ShareDistribution() {
     [totalCount, gridPageNumber, gridPageSize]
   );
 
-  const tableData = useMemo(() => ({ columns: tableColumns, rows }), [tableColumns, rows]);
+  const shareDistributionTableSx = useMemo(
+    () => ({
+      ...buildCollectionsGridTableBodySx({ leadingCompactColumnCount: 3 }),
+      display: "flex",
+      flexDirection: "column",
+      overflow: "hidden",
+      position: "relative",
+      flex: "1 1 0",
+      minHeight: 0,
+      "& > .contracts-workspace-context-bar": {
+        flexShrink: 0,
+      },
+      "& > .saas-settings-table": {
+        flex: "1 1 0",
+        minHeight: 0,
+        height: "100%",
+        alignSelf: "stretch",
+      },
+      "& .saas-settings-table-scroll": {
+        flex: "1 1 0",
+        minHeight: 0,
+      },
+      "& .MuiTable-root thead th > div > div:nth-of-type(2)": {
+        display: "none !important",
+      },
+      "& .MuiTable-root thead th > div > div:first-of-type": {
+        flex: "1 1 100% !important",
+        width: "100%",
+        maxWidth: "100%",
+      },
+      [`& .MuiTable-root th.${SHARE_DIST_NUM_HEADER_CLASS} > div`]: {
+        justifyContent: "center !important",
+      },
+      [`& .MuiTable-root th.${SHARE_DIST_NUM_HEADER_CLASS}, & .MuiTable-root td.${SHARE_DIST_NUM_CELL_CLASS}`]:
+        {
+          textAlign: "center !important",
+        },
+      [`& .MuiTable-root th.${SHARE_DIST_SELECT_HEADER_CLASS} > div`]: {
+        justifyContent: "center !important",
+      },
+      "& tr.share-dist-workbook-row td": {
+        backgroundColor: `${SHARE_DIST_WORKBOOK_ROW_BG} !important`,
+      },
+      "& tr.share-dist-unassigned-row td": {
+        backgroundColor: `${SHARE_DIST_UNASSIGNED_ROW_BG} !important`,
+      },
+      "& tr.share-dist-group-row td": {
+        backgroundColor: "#f8f9fa !important",
+        fontWeight: "600 !important",
+      },
+      "& tr.share-dist-total-row td": {
+        backgroundColor: "#f5f5f5 !important",
+        fontWeight: "700 !important",
+        borderTop: "2px solid #bdbdbd !important",
+      },
+    }),
+    []
+  );
 
   const contextFilters = (
     <MDBox
@@ -304,16 +679,41 @@ export default function ShareDistribution() {
           {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
         </MDTypography>
       ) : null}
+      {workbookError ? (
+        <MDTypography variant="caption" color="error" sx={{ whiteSpace: "nowrap" }}>
+          {workbookError}
+        </MDTypography>
+      ) : null}
+      <CompactGroupBySelect
+        options={SHARE_DIST_GROUPING_COLUMN_OPTIONS}
+        value={groupByColumns}
+        onChange={setGroupByColumns}
+      />
+      <ToggleButtonGroup
+        exclusive
+        value={workbookFilter}
+        onChange={(_, value) => {
+          if (value !== null) setWorkbookFilter(value);
+        }}
+        size="small"
+        color="info"
+        aria-label="Filter share distribution by workbook assignment"
+        className="contracts-context-segmented contracts-context-toggle"
+      >
+        <ToggleButton value={SHARE_DIST_WORKBOOK_FILTER.ALL}>ALL</ToggleButton>
+        <ToggleButton value={SHARE_DIST_WORKBOOK_FILTER.ASSIGNED}>ASSIGNED</ToggleButton>
+        <ToggleButton value={SHARE_DIST_WORKBOOK_FILTER.UNASSIGNED}>NOT ASSIGNED</ToggleButton>
+      </ToggleButtonGroup>
       <MDButton
         variant="gradient"
         color="info"
         size="small"
-        disabled={selectedCount === 0 || loading}
+        disabled={selectedCount === 0 || loading || creatingWorkbook}
         onClick={handleCreateWorkbook}
         sx={{ minHeight: 32, height: 32, px: 1.5 }}
       >
         <Icon sx={{ mr: 0.5, fontSize: "1rem" }}>book</Icon>
-        Create Workbook
+        {creatingWorkbook ? "Creating..." : "Create Workbook"}
       </MDButton>
     </MDBox>
   );
@@ -327,63 +727,26 @@ export default function ShareDistribution() {
         tabs={<IncomeAgreementsModuleTabs />}
         metadata={workspaceMetadata}
         filters={contextFilters}
-        bodySx={{
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative",
-          flex: "1 1 0",
-          minHeight: 0,
-          "& > .contracts-workspace-context-bar": {
-            flexShrink: 0,
-          },
-          "& > .saas-settings-table": {
-            flex: "1 1 0",
-            minHeight: 0,
-            height: "100%",
-            alignSelf: "stretch",
-          },
-          "& .saas-settings-table-scroll": {
-            flex: "1 1 0",
-            minHeight: 0,
-          },
-          "& .MuiTableContainer-root": {
-            flex: "1 1 0",
-            minHeight: 0,
-            overflow: "auto",
-          },
-          "& .MuiTable-root": {
-            tableLayout: "auto",
-            width: "max-content",
-            minWidth: "100%",
-            borderCollapse: "collapse",
-          },
-          "& .MuiTable-root th": {
-            fontSize: "0.75rem !important",
-            fontWeight: "700 !important",
-            padding: "8px 6px !important",
-            backgroundColor: "#c8e6c9",
-            color: "#1b5e20 !important",
-            borderBottom: "1px solid rgba(0,0,0,0.12)",
-            borderRight: "1px solid rgba(0,0,0,0.06)",
-            whiteSpace: "nowrap",
-            verticalAlign: "middle",
-          },
-          "& .MuiTable-root td": {
-            padding: "6px 6px !important",
-            borderBottom: "1px solid #e0e0e0",
-            whiteSpace: "nowrap",
-            lineHeight: 1.3,
-            verticalAlign: "top",
-            fontSize: "0.8125rem",
-          },
-        }}
+        bodySx={shareDistributionTableSx}
       >
         <WorkspaceLoadingOverlay open={loading} />
+        <MDBox
+          ref={setPaginationHost}
+          className="saas-settings-table-pagination-top"
+          sx={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            flexShrink: 0,
+            width: "100%",
+            minHeight: totalPages > 1 ? 28 : 0,
+          }}
+        />
         <DataTable
           table={tableData}
           isSorted={false}
           stickyToolbarAndHeader
+          contentFitTable
           entriesPerPage={{
             defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
             entries: [10, 25, 50, 100],
@@ -395,9 +758,10 @@ export default function ShareDistribution() {
             setGridPageSize(Number(n));
             setGridPageNumber(1);
           }}
+          paginationHost={paginationHost}
           paginationFooter={serverPaginationFooter}
           showTotalEntries
-          totalEntriesText={`${totalCount} records`}
+          totalEntriesText={`${filteredRows.length} records`}
           pagination={{ variant: "gradient", color: "info" }}
           noEndBorder
           canSearch={false}
@@ -413,10 +777,6 @@ export default function ShareDistribution() {
       >
         <DialogTitle sx={{ fontSize: "1.1rem", fontWeight: 700 }}>Workbook Created</DialogTitle>
         <DialogContent dividers>
-          <MDTypography variant="body2" color="text" sx={{ mb: 1.5 }}>
-            A workbook number has been assigned to the selected rows (UI preview only — not saved to
-            the server).
-          </MDTypography>
           <MDBox
             sx={{
               px: 2,
@@ -447,6 +807,18 @@ export default function ShareDistribution() {
           </MDButton>
         </DialogActions>
       </Dialog>
+
+      <AgreementProvPdfPreviewDialog
+        open={pdfPreviewOpen}
+        onClose={handleCloseWorkbookPdf}
+        data={pdfPreviewData}
+        generatePdfBlob={generateWorkbookPdfBlob}
+        title="PDF Preview"
+        previewTitle="Workbook PDF"
+        defaultMargins={SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS}
+        loadMargins={loadShareDistributionWorkbookPdfMargins}
+        saveMargins={saveShareDistributionWorkbookPdfMargins}
+      />
     </DashboardLayout>
   );
 }

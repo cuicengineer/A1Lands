@@ -6,6 +6,8 @@ export const SALES_RETURNS_LABELS = {
   payeePlaceholder: "Payee name",
   gridPaidFrom: "Paid From",
   gridPayee: "Payee",
+  gridContractCustomer: "Contract / Customer",
+  gridSalesInvoice: "Sales Invoice",
   pageTitle: "Sales Returns",
   pageSubtitle: "Record and manage sales return transactions",
   exportFileName: "Sales Returns",

@@ -32,12 +32,23 @@ import ChartExportButton from "./ChartExportButton";
 import {
   coerceChartDataValue,
   nullIfZeroChartBarValue,
+  roundChartBarNumber,
   withCompactGroupedBarDatasets,
   COMPACT_GROUPED_BAR_OPTIONS,
 } from "utils/chartBarDataUtils";
-import { applyKpiZoomBarChartEnhancements } from "./kpiZoomChartEnhancements";
+import { applyKpiCrosshairBarChartEnhancements } from "./kpiZoomChartEnhancements";
 import { exportGroupedBarChartDataToExcel } from "utils/kpiChartExcelExport";
-import { formatKpiMoneyLabel } from "../kpiDataUtils";
+import {
+  formatKpiBarMoneyLabel,
+  formatKpiBarAxisTick,
+  formatKpiMoneyLabel,
+  formatKpiCrosshairBarValue,
+} from "../kpiDataUtils";
+import {
+  KPI_FISCAL_BAR_CHART_COLORS,
+  KPI_BAR_INSIDE_LABEL_COLOR,
+  KPI_BAR_INSIDE_LABEL_SHADOW,
+} from "../kpiBarChartColors";
 
 /** Ensures null/zero grouped bars never reserve width (legend-uncheck style layout). */
 const fiscalGroupedBarCompactPlugin = {
@@ -55,7 +66,7 @@ const fiscalGroupedBarCompactPlugin = {
   },
 };
 
-/** Draw vertical series name inside each fiscal bar (aligned to legend color/series). */
+/** Draw vertical series name and numeric value inside each fiscal bar. */
 const fiscalBarVerticalSeriesLabelPlugin = {
   id: "fiscalBarVerticalSeriesLabel",
   afterDatasetsDraw(chart) {
@@ -65,7 +76,14 @@ const fiscalBarVerticalSeriesLabelPlugin = {
     const minBarHeight = Number(opts.minBarHeight ?? 28);
     const fontSize = Number(opts.fontSize ?? 10);
     const fontWeight = opts.fontWeight ?? 700;
-    const textColor = opts.color || "#ffffff";
+    const textColor = opts.color || KPI_BAR_INSIDE_LABEL_COLOR;
+    const showValue = opts.showValue !== false;
+    const valueMinBarHeight = Number(opts.valueMinBarHeight ?? 36);
+    const valueFontSize = Number(opts.valueFontSize ?? 8);
+    const valueFontWeight = opts.valueFontWeight ?? 700;
+    const valueColor = opts.valueColor || textColor;
+    const valueTopInset = Number(opts.valueTopInset ?? 4);
+    const fontFamily = "Inter, Roboto, Helvetica, Arial, sans-serif";
 
     chart.data.datasets.forEach((dataset, datasetIndex) => {
       const label = String(dataset?.label || "").trim();
@@ -78,7 +96,7 @@ const fiscalBarVerticalSeriesLabelPlugin = {
         const n = coerceChartDataValue(raw);
         if (n == null || n === 0) return;
 
-        const { x, y, base } = bar.getProps(["x", "y", "base"], true);
+        const { x, y, base, width } = bar.getProps(["x", "y", "base", "width"], true);
         const barHeight = Math.abs(base - y);
         if (barHeight < minBarHeight) return;
         const centerY = (y + base) / 2;
@@ -86,13 +104,43 @@ const fiscalBarVerticalSeriesLabelPlugin = {
         ctx.save();
         ctx.translate(x, centerY);
         ctx.rotate(-Math.PI / 2);
-        ctx.font = `${fontWeight} ${fontSize}px Inter, Roboto, Helvetica, Arial, sans-serif`;
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
         ctx.fillStyle = textColor;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowColor = KPI_BAR_INSIDE_LABEL_SHADOW;
         ctx.shadowBlur = 2;
         ctx.fillText(label, 0, 0);
+        ctx.restore();
+
+        if (!showValue || barHeight < valueMinBarHeight) return;
+
+        const valueText = formatFiscalChartValue(n, dataset.fiscalRowId);
+        if (!valueText || valueText === "—") return;
+
+        let drawValueFontSize = valueFontSize;
+        ctx.save();
+        ctx.font = `${valueFontWeight} ${drawValueFontSize}px ${fontFamily}`;
+        let drawValueText = valueText;
+        let textWidth = ctx.measureText(drawValueText).width;
+        const barWidth = width ?? 0;
+        while (drawValueFontSize > 6 && barWidth > 0 && textWidth + 4 > barWidth) {
+          drawValueFontSize -= 1;
+          ctx.font = `${valueFontWeight} ${drawValueFontSize}px ${fontFamily}`;
+          textWidth = ctx.measureText(drawValueText).width;
+        }
+        if (barWidth > 0 && textWidth + 2 > barWidth) {
+          ctx.restore();
+          return;
+        }
+
+        const topY = Math.min(y, base) + valueTopInset;
+        ctx.fillStyle = valueColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.shadowColor = KPI_BAR_INSIDE_LABEL_SHADOW;
+        ctx.shadowBlur = 2;
+        ctx.fillText(drawValueText, x, topY);
         ctx.restore();
       });
     });
@@ -108,17 +156,6 @@ ChartJS.register(
   fiscalGroupedBarCompactPlugin,
   fiscalBarVerticalSeriesLabelPlugin
 );
-
-const FISCAL_CHART_COLORS = [
-  "#025B64",
-  "#00D47E",
-  "#F5A524",
-  "#1976d2",
-  "#ed6c02",
-  "#2e7d32",
-  "#3B82F6",
-  "#6B7280",
-];
 
 /** Row ids whose table values are in millions (vs integer receipts/payments). */
 const FISCAL_MIL_ROW_IDS = new Set([
@@ -152,10 +189,10 @@ function fiscalRowMil(row, fieldKey) {
 }
 
 function formatFiscalChartValue(value, rowId) {
-  const n = coerceChartDataValue(value);
+  const n = roundChartBarNumber(value);
   if (n == null) return "—";
   if (FISCAL_MIL_ROW_IDS.has(rowId)) return formatKpiMoneyLabel(n);
-  return n.toLocaleString();
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function rowHasNumericFiscalData(row, periods) {
@@ -310,7 +347,7 @@ function FiscalKpiGrid({
           label: row.kpiName,
           fiscalRowId: row.id,
           data: activePeriods.map((p) => nullIfZeroChartBarValue(fiscalRowMil(row, p.fieldKey))),
-          backgroundColor: FISCAL_CHART_COLORS[idx % FISCAL_CHART_COLORS.length],
+          backgroundColor: KPI_FISCAL_BAR_CHART_COLORS[idx % KPI_FISCAL_BAR_CHART_COLORS.length],
           borderRadius: 2,
           categoryPercentage: 0.66,
           barPercentage: 1,
@@ -349,7 +386,12 @@ function FiscalKpiGrid({
           minBarHeight: 34,
           fontSize: 9,
           fontWeight: 700,
-          color: "#ffffff",
+          color: KPI_BAR_INSIDE_LABEL_COLOR,
+          showValue: true,
+          valueFontSize: 8,
+          valueMinBarHeight: 38,
+          valueTopInset: 4,
+          valueColor: KPI_BAR_INSIDE_LABEL_COLOR,
         },
         tooltip: {
           mode: "index",
@@ -386,7 +428,10 @@ function FiscalKpiGrid({
           beginAtZero: true,
           position: "left",
           grid: { color: gridColor },
-          ticks: { color: textColor },
+          ticks: {
+            color: textColor,
+            callback: (value) => formatKpiBarAxisTick(value),
+          },
           title: {
             display: hasChartData,
             text: "Amount (M / B)",
@@ -398,32 +443,63 @@ function FiscalKpiGrid({
     };
   }, [darkMode, fiscalTableChartData.datasets, gridColor, textColor]);
 
-  const fiscalZoomedChartOptions = useMemo(
-    () =>
-      applyKpiZoomBarChartEnhancements(
-        {
-          ...fiscalTableChartOptions,
-          plugins: {
-            ...fiscalTableChartOptions.plugins,
-            legend: {
-              ...fiscalTableChartOptions.plugins.legend,
-              labels: {
-                ...fiscalTableChartOptions.plugins.legend.labels,
-                font: { size: 13, weight: "600" },
-              },
+  const fiscalCrosshairFormatValue = useCallback((value) => formatKpiCrosshairBarValue(value), []);
+
+  const fiscalTableChartCrosshairOptions = useMemo(() => {
+    const enhanced = applyKpiCrosshairBarChartEnhancements(fiscalTableChartOptions, {
+      darkMode,
+      formatValue: fiscalCrosshairFormatValue,
+      tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
+      fontSize: 10,
+      labelPlacement: "inside",
+    });
+
+    return {
+      ...enhanced,
+      plugins: {
+        ...enhanced.plugins,
+        kpiZoomPermanentLabels: { enabled: false },
+        fiscalBarVerticalSeriesLabel: fiscalTableChartOptions.plugins.fiscalBarVerticalSeriesLabel,
+      },
+    };
+  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue]);
+
+  const fiscalZoomedChartOptions = useMemo(() => {
+    const enhanced = applyKpiCrosshairBarChartEnhancements(
+      {
+        ...fiscalTableChartOptions,
+        plugins: {
+          ...fiscalTableChartOptions.plugins,
+          legend: {
+            ...fiscalTableChartOptions.plugins.legend,
+            labels: {
+              ...fiscalTableChartOptions.plugins.legend.labels,
+              font: { size: 13, weight: "600" },
             },
           },
         },
-        {
-          darkMode,
-          formatValue: (value, ctx) =>
-            formatFiscalChartValue(value, ctx?.dataset?.fiscalRowId || ""),
-          tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
-          fontSize: 13,
-        }
-      ),
-    [fiscalTableChartOptions, darkMode]
-  );
+      },
+      {
+        darkMode,
+        formatValue: fiscalCrosshairFormatValue,
+        tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
+        fontSize: 12,
+        labelPlacement: "inside",
+      }
+    );
+
+    return {
+      ...enhanced,
+      plugins: {
+        ...enhanced.plugins,
+        kpiZoomPermanentLabels: { enabled: false },
+        fiscalBarVerticalSeriesLabel: {
+          ...fiscalTableChartOptions.plugins.fiscalBarVerticalSeriesLabel,
+          valueFontSize: 10,
+        },
+      },
+    };
+  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue]);
 
   const chartZoomEnabled =
     Boolean(chartZoomOnClick) &&
@@ -728,9 +804,10 @@ function FiscalKpiGrid({
                 <ChartZoomSurface
                   enabled={chartZoomEnabled}
                   darkMode={darkMode}
+                  showZoomHint={false}
                   onZoom={() => setChartZoomOpen(true)}
                 >
-                  <Bar data={fiscalTableChartData} options={fiscalTableChartOptions} />
+                  <Bar data={fiscalTableChartData} options={fiscalTableChartCrosshairOptions} />
                 </ChartZoomSurface>
               </MDBox>
             </MDBox>

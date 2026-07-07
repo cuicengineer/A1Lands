@@ -1,4 +1,5 @@
-import api, { getActionBy } from "services/api.service";
+import api from "services/api.service";
+import partyRankApi from "services/api.partyRank.service";
 
 function unwrapList(response) {
   if (!response) return [];
@@ -9,46 +10,35 @@ function unwrapList(response) {
 }
 
 function normalizeRankRow(row) {
-  const id = row?.id ?? row?.Id;
-  const rankName = String(row?.rankName ?? row?.RankName ?? "").trim();
-  return { id, rankName };
+  return partyRankApi.normalizeRankRow(row);
 }
 
 function getRanks() {
-  return api.request("GET", "/api/CustomerRanks");
+  return partyRankApi.getRanks();
 }
 
 async function createRank(rankName) {
-  const actionBy = await getActionBy();
-  return api.request("POST", "/api/CustomerRanks", {
-    RankName: rankName,
-    rankName,
-    Action: "Create",
-    ActionBy: actionBy,
-    ActionDate: new Date().toISOString(),
-    IsDeleted: false,
-  });
+  return partyRankApi.createRank(rankName);
 }
 
 async function updateRank(id, rankName) {
-  const actionBy = await getActionBy();
-  return api.request("PUT", `/api/CustomerRanks/${id}`, {
-    Id: id,
-    id,
-    RankName: rankName,
-    rankName,
-    Action: "Update",
-    ActionBy: actionBy,
-    ActionDate: new Date().toISOString(),
-  });
+  return partyRankApi.updateRank(id, rankName);
 }
 
 function deleteRank(id) {
-  return api.remove("CustomerRanks", id);
+  return partyRankApi.deleteRank(id);
 }
 
 function listCustomers() {
   return api.request("GET", "/api/Customer");
+}
+
+function getByCode(code, excludeId) {
+  const params = new URLSearchParams({ code: String(code || "").trim() });
+  if (excludeId != null && excludeId !== "") {
+    params.set("excludeId", String(excludeId));
+  }
+  return api.request("GET", `/api/Customer/byCode?${params.toString()}`);
 }
 
 async function createCustomer(data) {
@@ -63,6 +53,15 @@ function removeCustomer(id) {
   return api.remove("Customer", id);
 }
 
+async function bulkUpdateStatus(ids, status) {
+  return api.request("PATCH", "/api/Customer/bulkStatus", {
+    Ids: ids,
+    ids,
+    Status: status,
+    status,
+  });
+}
+
 const customerApi = {
   unwrapList,
   normalizeRankRow,
@@ -71,9 +70,11 @@ const customerApi = {
   updateRank,
   deleteRank,
   listCustomers,
+  getByCode,
   createCustomer,
   updateCustomer,
   removeCustomer,
+  bulkUpdateStatus,
 };
 
 export default customerApi;

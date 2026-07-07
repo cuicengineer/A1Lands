@@ -1,3 +1,14 @@
+import { formatPartyStatusLabel, normalizePartyStatus } from "utils/partyStatusUtils";
+import {
+  findPartyCoaOption,
+  getPartyCoaDropdownLabel,
+  isCustomerPartyCoaOption,
+  isCustomerPayableCoaOption,
+  isCustomerReceiptCoaOption,
+  mergePartyCoaOption,
+  normalizePartyCoaOption,
+} from "utils/partyCoaUtils";
+
 export function pickCoaField(row, ...keys) {
   for (let i = 0; i < keys.length; i += 1) {
     const value = row?.[keys[i]];
@@ -7,49 +18,24 @@ export function pickCoaField(row, ...keys) {
 }
 
 export function normalizeCustomerCoaOption(row) {
-  const id = row?.Id ?? row?.id;
-  return {
-    id: id != null ? Number(id) : null,
-    acctId: pickCoaField(row, "acctId", "AcctId"),
-    acctName: pickCoaField(row, "acctName", "AcctName"),
-    controlAccount: pickCoaField(row, "controlAccount", "ControlAccount"),
-  };
+  return normalizePartyCoaOption(row);
 }
 
-export function isCustomersControlAccount(controlAccount) {
-  return /^customers$/i.test(String(controlAccount || "").trim());
-}
+export { isCustomersControlAccount } from "utils/partyCoaUtils";
 
 export function getCustomerCoaDropdownLabel(option) {
-  if (option == null) return "";
-  const acctId = String(option.acctId ?? "").trim();
-  const acctName = String(option.acctName ?? "").trim();
-  if (acctId && acctName) return `${acctId} - ${acctName}`;
-  return acctId || acctName || "";
+  return getPartyCoaDropdownLabel(option);
 }
 
 export function findCustomerCoaOption(options, coaId) {
-  if (coaId === "" || coaId == null) return null;
-  return (options || []).find((option) => Number(option.id) === Number(coaId)) ?? null;
+  return findPartyCoaOption(options, coaId);
 }
 
 export function mergeCustomerCoaOption(options, option) {
-  if (option?.id == null) return options || [];
-  const list = [...(options || [])];
-  if (!list.some((row) => Number(row.id) === Number(option.id))) {
-    list.push(option);
-  }
-  return list.sort((a, b) => {
-    const idDiff = String(a.acctId).localeCompare(String(b.acctId), undefined, {
-      numeric: true,
-      sensitivity: "base",
-    });
-    if (idDiff !== 0) return idDiff;
-    return String(a.acctName).localeCompare(String(b.acctName), undefined, {
-      sensitivity: "base",
-    });
-  });
+  return mergePartyCoaOption(options, option);
 }
+
+export { isCustomerPartyCoaOption, isCustomerPayableCoaOption, isCustomerReceiptCoaOption };
 
 export const PREFIX_OPTIONS = [
   { value: "M/s", label: "M/s" },
@@ -152,6 +138,8 @@ export function parseCustomerCode(code, prefixOptions = []) {
 
 export function buildCustomerFormState(overrides = {}) {
   return {
+    dealerId: "",
+    dealerName: "",
     code: "",
 
     codeAlpha: "",
@@ -180,11 +168,15 @@ export function buildCustomerFormState(overrides = {}) {
 
     coaId: "",
 
+    coaId2: "",
+
     representative: "",
 
     bankListsId: "",
 
     iban: "",
+
+    status: true,
 
     ...overrides,
   };
@@ -201,6 +193,8 @@ export function normalizeCustomerRecord(row, prefixOptions = []) {
 
   return buildCustomerFormState({
     id: row.id ?? row.Id,
+    dealerId: row.dealerId ?? row.DealerId ?? "",
+    dealerName: row.dealerName ?? row.DealerName ?? row.name ?? row.Name ?? "",
 
     code: normalizedCode,
 
@@ -230,11 +224,15 @@ export function normalizeCustomerRecord(row, prefixOptions = []) {
 
     coaId: row.coaId ?? row.CoaId ?? "",
 
+    coaId2: row.coaId2 ?? row.CoaId2 ?? "",
+
     representative: row.representative ?? row.Representative ?? "",
 
     bankListsId: row.bankListsId ?? row.BankListsId ?? "",
 
     iban: row.iban ?? row.IBAN ?? "",
+
+    status: normalizePartyStatus(row.status ?? row.Status),
   });
 }
 
@@ -249,20 +247,15 @@ export function stripCustomerForClone(record, prefixOptions = []) {
 export function validateCustomerForm(form) {
   const errors = {};
 
-  const codeAlpha = String(form.codeAlpha || "").trim();
-
-  const codeNumeric = String(form.codeNumeric || "").replace(/\D/g, "");
-
-  if (!codeAlpha) errors.codeAlpha = "Code prefix is required";
-
-  if (!codeNumeric) errors.codeNumeric = "Code number is required";
-  else if (!/^\d{1,6}$/.test(codeNumeric)) {
-    errors.codeNumeric = "Code number must be 1 to 6 digits";
+  if (form.dealerId === "" || form.dealerId == null) {
+    errors.dealerId = "Dealer is required";
+    errors.code = "Select an active dealer";
   }
 
-  const combinedCode = buildCustomerCode(codeAlpha, codeNumeric);
-
-  if (!combinedCode) errors.code = "Code is required";
+  const combinedCode = buildCustomerCode(form.codeAlpha, form.codeNumeric);
+  if (!combinedCode && !errors.code) {
+    errors.code = "Code is required";
+  }
 
   if (!form.name?.trim()) errors.name = "Name is required";
 
@@ -275,7 +268,17 @@ export function validateCustomerForm(form) {
   if (!form.ntnCnic?.trim()) errors.ntnCnic = "NTN / CNIC is required";
 
   if (form.coaId === "" || form.coaId == null) {
-    errors.coaId = "Control Account is required";
+    errors.coaId = "Receipt CA is required";
+  }
+
+  if (form.coaId2 === "" || form.coaId2 == null) {
+    errors.coaId2 = "Payable CA is required";
+  } else if (
+    form.coaId !== "" &&
+    form.coaId != null &&
+    Number(form.coaId) === Number(form.coaId2)
+  ) {
+    errors.coaId2 = "Payable CA must differ from Receipt CA";
   }
 
   return errors;
@@ -288,6 +291,10 @@ export function buildCustomerPayload(form) {
     Code: code,
 
     code,
+
+    DealerId: form.dealerId !== "" && form.dealerId != null ? Number(form.dealerId) : null,
+
+    dealerId: form.dealerId !== "" && form.dealerId != null ? Number(form.dealerId) : null,
 
     Prefix: form.prefix || null,
 
@@ -333,6 +340,10 @@ export function buildCustomerPayload(form) {
 
     coaId: form.coaId !== "" && form.coaId != null ? Number(form.coaId) : null,
 
+    CoaId2: form.coaId2 !== "" && form.coaId2 != null ? Number(form.coaId2) : null,
+
+    coaId2: form.coaId2 !== "" && form.coaId2 != null ? Number(form.coaId2) : null,
+
     Representative: form.representative || null,
 
     representative: form.representative || null,
@@ -346,6 +357,10 @@ export function buildCustomerPayload(form) {
     IBAN: String(form.iban || "").trim() || null,
 
     iban: String(form.iban || "").trim() || null,
+
+    Status: normalizePartyStatus(form.status),
+
+    status: normalizePartyStatus(form.status),
   };
 }
 
@@ -355,6 +370,10 @@ export function flattenCustomerForGrid(record, index, coaLabelById = {}) {
   const coaId = normalized.coaId;
 
   const coaLabel = coaId !== "" && coaId != null ? coaLabelById[Number(coaId)] || "-" : "-";
+
+  const coaId2 = normalized.coaId2;
+
+  const coaLabel2 = coaId2 !== "" && coaId2 != null ? coaLabelById[Number(coaId2)] || "-" : "-";
 
   return {
     id: normalized.id,
@@ -366,6 +385,10 @@ export function flattenCustomerForGrid(record, index, coaLabelById = {}) {
     prefix: normalized.prefix || "-",
 
     rank: normalized.rank || "-",
+
+    status: formatPartyStatusLabel(normalized.status),
+
+    statusRaw: normalized.status,
 
     name: normalized.name || "-",
 
@@ -384,6 +407,8 @@ export function flattenCustomerForGrid(record, index, coaLabelById = {}) {
     mobileNo: normalized.mobileNo || "-",
 
     controlAccount: coaLabel,
+
+    controlAccount2: coaLabel2,
 
     representative: normalized.representative || "-",
 

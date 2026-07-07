@@ -716,7 +716,7 @@ export function ChartOfAccountsPanel({ panelTitle = "Balance Sheet" }) {
       ...(SHOW_ATTACHMENTS
         ? [{ Header: "Attach", accessor: "attachments", align: "center", width: "5%" }]
         : []),
-      { Header: "Acc ID - Acc Name", accessor: "account", align: "left", width: "28%" },
+      { Header: "Acct ID - Acct Name", accessor: "account", align: "left", width: "28%" },
       { Header: "Group", accessor: "groupName", align: "left", width: "14%" },
       {
         Header: (

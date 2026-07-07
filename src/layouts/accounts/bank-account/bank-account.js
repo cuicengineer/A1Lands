@@ -18,6 +18,7 @@ import { withGridValueChip } from "utils/gridValueChipCell";
 import CurrencyLoading from "components/CurrencyLoading";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import { ServerGridPagination } from "components/CompactGridPagination";
+import AccountsModuleTabs from "layouts/accounts/components/AccountsModuleTabs";
 import BankAccountForm from "layouts/accounts/bank-account/BankAccountForm";
 import bankAccountApi, {
   UPLOAD_TABLE_NAME,
@@ -1523,6 +1524,7 @@ export default function BankAccounts() {
         title="Inst Bank Accounts"
         subtitle="Manage institutional bank account records"
         metadata={workspaceMetadata}
+        tabs={<AccountsModuleTabs />}
         actions={
           canCreateCurrentMenu() ? (
             <MDButton variant="outlined" color="dark" onClick={handleOpenForm}>
@@ -1606,8 +1608,6 @@ export default function BankAccounts() {
               justifyContent: "flex-end",
               alignItems: "center",
               flexShrink: 0,
-              minHeight: 28,
-              maxHeight: 32,
               width: "100%",
             }}
           />

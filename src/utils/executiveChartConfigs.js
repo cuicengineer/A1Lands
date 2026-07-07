@@ -2,7 +2,11 @@
  * Executive / flat Chart.js configs for ERP dashboard (Stripe / Linear style).
  */
 
-import { nullIfZeroChartBarValue } from "utils/chartBarDataUtils";
+import {
+  nullIfZeroChartBarValue,
+  coerceChartDataValue,
+  roundChartBarNumber,
+} from "utils/chartBarDataUtils";
 
 const GRID_COLOR = "rgba(0, 0, 0, 0.06)";
 const TICK_COLOR = "#6b7280";
@@ -22,11 +26,13 @@ const tickFont = { size: 11, family: "Inter, Helvetica, Arial, sans-serif" };
 const xAxisTickFont = { ...tickFont, weight: "bold" };
 
 function formatAxisValue(value) {
-  if (value >= 1000000) {
-    const millions = value / 1000000;
-    return `${millions.toFixed(millions >= 1 ? 1 : 2)}M`;
+  const n = roundChartBarNumber(value);
+  if (n == null) return "";
+  if (Math.abs(n) >= 1000000) {
+    const millions = roundChartBarNumber(n / 1000000);
+    return `${millions.toLocaleString(undefined, { maximumFractionDigits: 2 })}M`;
   }
-  return value;
+  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 export function executiveBarConfigs(

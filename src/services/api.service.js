@@ -349,6 +349,7 @@ function isOperatorUser() {
 const MENU_ROUTE_EXACT = [
   { menuName: "Agreement Invoice", prefix: "/contracts/agreement-prov-invoice" },
   { menuName: "Sales Returns", prefix: "/income-agreements/sales-returns" },
+  { menuName: "Purchase Returns", prefix: "/purchases/purchase-returns" },
   { menuName: "Collections", prefix: "/income-agreements/collections" },
   { menuName: "Share Distribution", prefix: "/contracts/share-distribution" },
 ];
@@ -362,8 +363,12 @@ const MENU_ROUTE_PREFIXES = [
   { menuName: "Accounts", prefix: "/accounts" },
   { menuName: "Cash & Fund Flow", prefix: "/payments" },
   { menuName: "Cash & Fund Flow", prefix: "/receipts" },
+  { menuName: "Cash & Fund Flow", prefix: "/cash-and-bank" },
+  { menuName: "Cash & Fund Flow", prefix: "/inter-acc-transfer" },
   { menuName: "Purchases", prefix: "/supplier" },
+  { menuName: "Purchases", prefix: "/purchases" },
   { menuName: "Sales", prefix: "/customer" },
+  { menuName: "Products", prefix: "/products" },
 ];
 
 /** Menus that must have an Assign Rights row; otherwise navbar, routes, and actions stay hidden. */
@@ -379,7 +384,10 @@ function menuRequiresExplicitPermission(menuName) {
     normalized === "payments" ||
     normalized === "receipts" ||
     normalized === "supplier" ||
-    normalized === "customer"
+    normalized === "customer" ||
+    normalized === "products" ||
+    normalized === "services" ||
+    normalized === "goods"
   );
 }
 
@@ -543,6 +551,9 @@ function getPermissionByMenuName(menuName) {
   }
   if (normalized === "sales" || normalized === "customer") {
     return find("sales") || find("customer");
+  }
+  if (normalized === "products" || normalized === "services" || normalized === "goods") {
+    return find("products") || find("services") || find("goods");
   }
   return null;
 }

@@ -1,368 +1,116 @@
 import { useMemo } from "react";
 import PropTypes from "prop-types";
+import Checkbox from "@mui/material/Checkbox";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
+import MenuItem from "@mui/material/MenuItem";
 import Tooltip from "@mui/material/Tooltip";
 import MDBox from "components/MDBox";
+import MDInput from "components/MDInput";
 import MDTypography from "components/MDTypography";
+import { COLLECTION_STATUS_OPTIONS } from "./collectionReceiptUtils";
+import CollectionEntryGridRow from "./CollectionEntryGridRow";
 import {
-  buildAgreementProvInvoiceDeepLink,
-  buildCollectionGroupParentFields,
-  buildTenantConfigDeepLink,
-  formatAccountLabel,
-  formatAgreementLabel,
-  formatAmount,
-  openAppRouteInNewTab,
-  resolveCollectionInvoiceContext,
-  resolveCollectionTenantNo,
-} from "./collectionsUtils";
-import { openCollectionInvoicePdf } from "./collectionInvoicePdf";
-
-const COLLECTIONS_COLUMNS = [
-  { label: "View", key: "view", align: "center", width: "52px" },
-  { label: "S.No", key: "sno", align: "center", width: "48px" },
-  { label: "Class", key: "class", align: "left", width: "minmax(90px, 1fr)" },
-  { label: "Agreement", key: "agreement", align: "left", width: "minmax(180px, 1.4fr)" },
-  {
-    label: "Tenant and Business",
-    key: "tenantBusiness",
-    align: "left",
-    width: "minmax(200px, 1.6fr)",
-  },
-  { label: "Account", key: "account", align: "left", width: "minmax(150px, 1.2fr)" },
-  { label: "Invoice", key: "invoice", align: "left", width: "minmax(180px, 1.4fr)" },
-  { label: "Due", key: "due", align: "right", width: "minmax(80px, 0.8fr)" },
-  { label: "Balance", key: "balance", align: "right", width: "minmax(80px, 0.8fr)" },
-  { label: "Action", key: "actions", align: "center", width: "96px" },
-];
-
-const GRID_TEMPLATE = COLLECTIONS_COLUMNS.map((col) => col.width).join(" ");
-
-const clickableLinkSx = {
-  cursor: "pointer",
-  color: "info.main",
-  textDecoration: "underline",
-  fontFamily: "inherit",
-  fontSize: "inherit",
-  lineHeight: "inherit",
-  background: "none",
-  border: "none",
-  padding: 0,
-  textAlign: "left",
-  maxWidth: "100%",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  "&:hover": { opacity: 0.85 },
-};
-
-function ReadOnlyCell({ value, align = "left" }) {
-  return (
-    <MDTypography
-      variant="caption"
-      sx={{
-        display: "block",
-        width: "100%",
-        textAlign: align,
-        fontSize: "0.8125rem",
-        lineHeight: 1.3,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {value || "—"}
-    </MDTypography>
-  );
-}
-
-ReadOnlyCell.propTypes = {
-  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  align: PropTypes.string,
-};
-
-function ClickableLinkCell({ value, align = "left", onClick, disabled = false }) {
-  const label = value || "—";
-  if (disabled || !value || !onClick) {
-    return <ReadOnlyCell value={label === "—" ? "" : label} align={align} />;
-  }
-
-  return (
-    <MDTypography
-      component="button"
-      type="button"
-      variant="caption"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick();
-      }}
-      sx={{
-        ...clickableLinkSx,
-        display: "block",
-        width: "100%",
-        textAlign: align,
-      }}
-    >
-      {label}
-    </MDTypography>
-  );
-}
-
-ClickableLinkCell.propTypes = {
-  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  align: PropTypes.string,
-  onClick: PropTypes.func,
-  disabled: PropTypes.bool,
-};
-
-function CollectionGroupRow({
-  group,
-  index,
-  classOptions,
-  contracts,
-  invoices,
-  tenants,
-  coaById,
-  canEdit,
-  canDelete,
-  saving,
-  onOpenDialog,
-  onDeleteGroup,
-  gridRowSx,
-  bodyCellSx,
-}) {
-  const parent = buildCollectionGroupParentFields(group, {
-    contracts,
-    tenants,
-    coaOptions: Array.from(coaById.values()),
-    invoices,
-    classes: classOptions,
-  });
-  const selectedContract = parent.selectedContract;
-  const tenantBusinessLabel = parent.tenantBusiness;
-  const invoiceContext = resolveCollectionInvoiceContext(parent, selectedContract, invoices);
-  const tenantNo = resolveCollectionTenantNo(parent, selectedContract, tenants);
-  const agreementLabel = selectedContract ? formatAgreementLabel(selectedContract) : "";
-
-  const handleOpenInvoice = () => {
-    if (!invoiceContext.invoiceNo) return;
-    openAppRouteInNewTab(
-      buildAgreementProvInvoiceDeepLink(invoiceContext.contractNo, invoiceContext.invoiceNo)
-    );
-  };
-
-  const handleOpenTenant = () => {
-    if (!tenantNo) return;
-    openAppRouteInNewTab(buildTenantConfigDeepLink(tenantNo));
-  };
-
-  const handleViewPdf = async () => {
-    try {
-      await openCollectionInvoicePdf(parent);
-    } catch (error) {
-      console.error("Failed to generate collection PDF:", error);
-      window.alert(error?.message || "Failed to generate collection PDF.");
-    }
-  };
-
-  return (
-    <MDBox
-      sx={{
-        ...gridRowSx,
-        "&:hover": { bgcolor: "rgba(0,0,0,0.02)" },
-      }}
-    >
-      <MDBox
-        sx={{
-          ...bodyCellSx,
-          textAlign: "center",
-          display: "flex",
-          justifyContent: "center",
-        }}
-      >
-        <Tooltip title="View as PDF">
-          <span>
-            <IconButton
-              size="small"
-              color="error"
-              disabled={saving}
-              onClick={handleViewPdf}
-              sx={{ padding: "2px" }}
-            >
-              <Icon fontSize="small">picture_as_pdf</Icon>
-            </IconButton>
-          </span>
-        </Tooltip>
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, textAlign: "center", fontWeight: 600 }}>{index + 1}</MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
-        <ReadOnlyCell value={parent.className || parent.classId} />
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
-        <ReadOnlyCell value={agreementLabel} />
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
-        <ClickableLinkCell
-          value={tenantBusinessLabel}
-          onClick={handleOpenTenant}
-          disabled={!tenantNo}
-        />
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
-        <ReadOnlyCell
-          value={parent.accountLabel || formatAccountLabel(coaById.get(Number(parent.coaId)))}
-        />
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, p: 0.5 }}>
-        <ClickableLinkCell
-          value={invoiceContext.label}
-          onClick={handleOpenInvoice}
-          disabled={!invoiceContext.invoiceNo}
-        />
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-        {formatAmount(parent.due)}
-      </MDBox>
-
-      <MDBox sx={{ ...bodyCellSx, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-        {formatAmount(parent.balance)}
-      </MDBox>
-
-      <MDBox
-        sx={{
-          ...bodyCellSx,
-          textAlign: "center",
-          display: "flex",
-          justifyContent: "center",
-          gap: 0.25,
-        }}
-      >
-        {canEdit && (
-          <Tooltip title="Edit receipt lines">
-            <span>
-              <IconButton
-                size="small"
-                color="info"
-                disabled={saving}
-                onClick={() => onOpenDialog("edit", parent)}
-                sx={{ padding: "2px" }}
-              >
-                <Icon fontSize="small">edit</Icon>
-              </IconButton>
-            </span>
-          </Tooltip>
-        )}
-        {canEdit && (
-          <Tooltip title="View receipt lines">
-            <span>
-              <IconButton
-                size="small"
-                color="secondary"
-                disabled={saving}
-                onClick={() => onOpenDialog("view", parent)}
-                sx={{ padding: "2px" }}
-              >
-                <Icon fontSize="small">visibility</Icon>
-              </IconButton>
-            </span>
-          </Tooltip>
-        )}
-        {canDelete && (
-          <Tooltip title="Delete collection">
-            <span>
-              <IconButton
-                size="small"
-                color="error"
-                disabled={saving}
-                onClick={() => onDeleteGroup(parent.groupKey)}
-                sx={{ padding: "2px" }}
-              >
-                <Icon fontSize="small">delete</Icon>
-              </IconButton>
-            </span>
-          </Tooltip>
-        )}
-      </MDBox>
-    </MDBox>
-  );
-}
-
-CollectionGroupRow.propTypes = {
-  group: PropTypes.object.isRequired,
-  index: PropTypes.number.isRequired,
-  classOptions: PropTypes.array.isRequired,
-  contracts: PropTypes.array.isRequired,
-  invoices: PropTypes.array.isRequired,
-  tenants: PropTypes.array.isRequired,
-  coaById: PropTypes.instanceOf(Map).isRequired,
-  canEdit: PropTypes.bool,
-  canDelete: PropTypes.bool,
-  saving: PropTypes.bool,
-  onOpenDialog: PropTypes.func.isRequired,
-  onDeleteGroup: PropTypes.func.isRequired,
-  gridRowSx: PropTypes.object.isRequired,
-  bodyCellSx: PropTypes.object.isRequired,
-};
+  COLLECTIONS_COLUMNS,
+  GRID_TEMPLATE,
+  buildCollectionsGridTemplate,
+  COLLECTION_GRID_CELL_TEXT_COLOR,
+  inputSx,
+  isCollectionGridColumnVisible,
+  mergeBodyCellSx,
+} from "./collectionGridShared";
 
 function CollectionsGrid({
-  groups,
+  rows,
+  totalRowCount,
+  rowIndexOffset,
+  gridTemplate,
+  hiddenColumnKeys,
+  statusFilter,
+  onStatusFilterChange,
   classOptions,
   contracts,
   invoices,
   tenants,
-  coaById,
-  canEdit,
-  canDelete,
+  customers,
+  suppliers,
+  coaOptions,
+  receipts,
+  canCreate,
+  canEditRow,
+  canDeleteRow,
+  canEditStatus,
+  activeLockDate,
   saving,
-  addDisabled,
-  onOpenDialog,
-  onDeleteGroup,
-  onAddGroup,
+  onRowChange,
+  onSaveRow,
+  onEditRow,
+  onCancelEditRow,
+  onDeleteRow,
+  onDuplicateRow,
+  onAddRow,
+  onAttachmentSelect,
+  onClearPendingAttachment,
+  onDownloadAttachment,
+  onViewTenant,
+  onViewInvoice,
+  selectedRowIds,
+  allRowsSelected,
+  someRowsSelected,
+  onToggleRowSelection,
+  onToggleAllRowSelection,
+  getRowKey,
 }) {
+  const resolvedGridTemplate = useMemo(
+    () => gridTemplate || buildCollectionsGridTemplate(hiddenColumnKeys) || GRID_TEMPLATE,
+    [gridTemplate, hiddenColumnKeys]
+  );
+
   const gridRowSx = {
     display: "grid",
-    gridTemplateColumns: GRID_TEMPLATE,
+    gridTemplateColumns: resolvedGridTemplate,
     width: "100%",
     alignItems: "center",
     columnGap: 0,
-    minWidth: "1150px",
+    minWidth: "1720px",
   };
 
+  const hiddenColumns = useMemo(() => new Set(hiddenColumnKeys || []), [hiddenColumnKeys]);
+
   const cellBaseSx = {
-    fontSize: "0.8125rem",
+    fontSize: "0.75rem",
     lineHeight: 1.25,
-    py: 0.75,
-    px: 1,
+    py: 0.65,
+    px: 0.75,
     overflow: "hidden",
     boxSizing: "border-box",
   };
 
-  const headerCellSx = {
-    ...cellBaseSx,
+  const headerCellSx = (align = "left") => ({
+    ...mergeBodyCellSx(cellBaseSx, { align }),
     fontWeight: 700,
-    fontSize: "0.75rem",
+    fontSize: "0.6875rem",
     bgcolor: "#c8e6c9",
     color: "#1b5e20",
     borderBottom: "1px solid rgba(0,0,0,0.12)",
     borderRight: "1px solid rgba(0,0,0,0.06)",
     whiteSpace: "nowrap",
-  };
+  });
 
   const bodyCellSx = {
     ...cellBaseSx,
+    color: COLLECTION_GRID_CELL_TEXT_COLOR,
     borderBottom: "1px solid rgba(0,0,0,0.06)",
     borderRight: "1px solid rgba(0,0,0,0.04)",
+    "& .MuiTypography-root": {
+      color: `${COLLECTION_GRID_CELL_TEXT_COLOR} !important`,
+    },
+    "& .MuiInputBase-input, & .MuiSelect-select": {
+      color: `${COLLECTION_GRID_CELL_TEXT_COLOR} !important`,
+    },
   };
 
-  const displayGroups = useMemo(() => groups || [], [groups]);
+  const displayRows = useMemo(() => rows || [], [rows]);
 
   return (
     <MDBox sx={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -372,71 +120,124 @@ function CollectionsGrid({
         justifyContent="space-between"
         gap={1}
         mb={1}
-        sx={{ flexShrink: 0 }}
+        sx={{ flexShrink: 0, flexWrap: "wrap" }}
       >
         <MDTypography variant="button" fontWeight="bold">
           Collection entries
+          {selectedRowIds?.size > 0 ? ` (${selectedRowIds.size} selected)` : ""}
         </MDTypography>
-        {canEdit && (
-          <Tooltip
-            title={
-              addDisabled
-                ? "Finish the current new collection before adding another"
-                : "Add collection"
-            }
-          >
-            <span>
-              <IconButton
-                color="info"
-                size="small"
-                disabled={saving || addDisabled}
-                onClick={onAddGroup}
-                sx={{ border: "1px solid", borderColor: "info.main", borderRadius: 1, p: 0.35 }}
-              >
-                <Icon fontSize="small">add</Icon>
-              </IconButton>
-            </span>
-          </Tooltip>
-        )}
+        <MDBox display="flex" alignItems="center" gap={1}>
+          <MDBox sx={{ minWidth: 140 }}>
+            <MDInput
+              select
+              value={statusFilter || "Pending"}
+              onChange={(e) => onStatusFilterChange?.(e.target.value)}
+              fullWidth
+              size="small"
+              sx={inputSx}
+            >
+              {COLLECTION_STATUS_OPTIONS.map((option) => (
+                <MenuItem key={option} value={option}>
+                  {option === "All" ? "All records" : option}
+                </MenuItem>
+              ))}
+            </MDInput>
+          </MDBox>
+          {canCreate ? (
+            <Tooltip title="Add collection row">
+              <span>
+                <IconButton
+                  color="info"
+                  size="small"
+                  disabled={saving}
+                  onClick={onAddRow}
+                  sx={{ border: "1px solid", borderColor: "info.main", borderRadius: 1, p: 0.35 }}
+                >
+                  <Icon fontSize="small">add</Icon>
+                </IconButton>
+              </span>
+            </Tooltip>
+          ) : null}
+        </MDBox>
       </MDBox>
 
       <MDBox sx={{ flex: "1 1 0", minHeight: 0, overflow: "auto", border: "1px solid #e0e0e0" }}>
         <MDBox sx={gridRowSx}>
-          {COLLECTIONS_COLUMNS.map((col) => (
-            <MDBox
-              key={col.key}
-              sx={{
-                ...headerCellSx,
-                textAlign: col.align,
-              }}
-            >
-              {col.label}
-            </MDBox>
-          ))}
+          {COLLECTIONS_COLUMNS.map((col) => {
+            const hidden = !isCollectionGridColumnVisible(col.key, hiddenColumnKeys);
+            return (
+              <MDBox
+                key={col.key}
+                sx={{
+                  ...headerCellSx(col.align),
+                  ...(hidden
+                    ? { display: "none", minWidth: 0, width: 0, p: 0, border: "none" }
+                    : {}),
+                }}
+              >
+                {col.key === "select" ? (
+                  <Checkbox
+                    size="small"
+                    checked={Boolean(allRowsSelected)}
+                    indeterminate={Boolean(someRowsSelected)}
+                    onChange={onToggleAllRowSelection}
+                    disabled={displayRows.length === 0 || saving}
+                    inputProps={{ "aria-label": "Select all collection rows on this page" }}
+                    sx={{ p: 0 }}
+                  />
+                ) : (
+                  col.label
+                )}
+              </MDBox>
+            );
+          })}
         </MDBox>
 
-        {displayGroups.length === 0 ? (
+        {displayRows.length === 0 ? (
           <MDBox py={3} textAlign="center">
             <MDTypography variant="caption" color="text">
-              No collection entries yet. Use Add to create one.
+              {statusFilter && statusFilter !== "All"
+                ? `No ${statusFilter.toLowerCase()} collection entries found.`
+                : "No collection entries yet. Use Add to create one."}
             </MDTypography>
           </MDBox>
         ) : (
-          displayGroups.map((group, index) => (
-            <CollectionGroupRow
-              key={group.groupKey}
-              group={group}
+          displayRows.map((row, index) => (
+            <CollectionEntryGridRow
+              key={row.localKey || row.id}
+              row={row}
               index={index}
+              rowNumber={rowIndexOffset + index + 1}
+              allRows={displayRows}
               classOptions={classOptions}
               contracts={contracts}
               invoices={invoices}
               tenants={tenants}
-              coaById={coaById}
-              canEdit={canEdit}
-              canDelete={canDelete}
+              customers={customers}
+              suppliers={suppliers}
+              coaOptions={coaOptions}
+              receipts={receipts}
+              canCreate={canCreate}
+              canEditRow={canEditRow}
+              canDeleteRow={canDeleteRow}
+              canEditStatus={canEditStatus}
+              activeLockDate={activeLockDate}
               saving={saving}
-              onOpenDialog={onOpenDialog}
-              onDeleteGroup={onDeleteGroup}
+              onRowChange={onRowChange}
+              onSaveRow={onSaveRow}
+              onEditRow={onEditRow}
+              onCancelEditRow={onCancelEditRow}
+              onDeleteRow={onDeleteRow}
+              onDuplicateRow={onDuplicateRow}
+              onAttachmentSelect={onAttachmentSelect}
+              onClearPendingAttachment={onClearPendingAttachment}
+              onDownloadAttachment={onDownloadAttachment}
+              onViewTenant={onViewTenant}
+              onViewInvoice={onViewInvoice}
+              selectedRowIds={selectedRowIds}
+              onToggleRowSelection={onToggleRowSelection}
+              getRowKey={getRowKey}
+              hiddenColumnKeys={hiddenColumns}
               gridRowSx={gridRowSx}
               bodyCellSx={bodyCellSx}
             />
@@ -448,26 +249,74 @@ function CollectionsGrid({
 }
 
 CollectionsGrid.propTypes = {
-  groups: PropTypes.array.isRequired,
+  rows: PropTypes.array.isRequired,
+  totalRowCount: PropTypes.number,
+  rowIndexOffset: PropTypes.number,
+  gridTemplate: PropTypes.string,
+  hiddenColumnKeys: PropTypes.arrayOf(PropTypes.string),
+  statusFilter: PropTypes.string,
+  onStatusFilterChange: PropTypes.func,
   classOptions: PropTypes.array.isRequired,
   contracts: PropTypes.array.isRequired,
   invoices: PropTypes.array.isRequired,
   tenants: PropTypes.array.isRequired,
-  coaById: PropTypes.instanceOf(Map).isRequired,
-  canEdit: PropTypes.bool,
-  canDelete: PropTypes.bool,
+  customers: PropTypes.array,
+  suppliers: PropTypes.array,
+  coaOptions: PropTypes.array.isRequired,
+  receipts: PropTypes.array.isRequired,
+  canCreate: PropTypes.bool,
+  canEditRow: PropTypes.bool,
+  canDeleteRow: PropTypes.bool,
+  canEditStatus: PropTypes.bool,
+  activeLockDate: PropTypes.string,
   saving: PropTypes.bool,
-  addDisabled: PropTypes.bool,
-  onOpenDialog: PropTypes.func.isRequired,
-  onDeleteGroup: PropTypes.func.isRequired,
-  onAddGroup: PropTypes.func.isRequired,
+  onRowChange: PropTypes.func.isRequired,
+  onSaveRow: PropTypes.func.isRequired,
+  onEditRow: PropTypes.func.isRequired,
+  onCancelEditRow: PropTypes.func.isRequired,
+  onDeleteRow: PropTypes.func.isRequired,
+  onDuplicateRow: PropTypes.func,
+  onAddRow: PropTypes.func.isRequired,
+  onAttachmentSelect: PropTypes.func,
+  onClearPendingAttachment: PropTypes.func,
+  onDownloadAttachment: PropTypes.func,
+  onViewTenant: PropTypes.func,
+  onViewInvoice: PropTypes.func,
+  selectedRowIds: PropTypes.instanceOf(Set),
+  allRowsSelected: PropTypes.bool,
+  someRowsSelected: PropTypes.bool,
+  onToggleRowSelection: PropTypes.func,
+  onToggleAllRowSelection: PropTypes.func,
+  getRowKey: PropTypes.func,
 };
 
 CollectionsGrid.defaultProps = {
-  canEdit: false,
-  canDelete: false,
+  totalRowCount: 0,
+  rowIndexOffset: 0,
+  gridTemplate: undefined,
+  hiddenColumnKeys: [],
+  statusFilter: "Pending",
+  onStatusFilterChange: undefined,
+  customers: [],
+  suppliers: [],
+  canCreate: false,
+  canEditRow: false,
+  canDeleteRow: false,
+  canEditStatus: false,
+  activeLockDate: "",
   saving: false,
-  addDisabled: false,
+  onDuplicateRow: undefined,
+  onAttachmentSelect: undefined,
+  onClearPendingAttachment: undefined,
+  onDownloadAttachment: undefined,
+  onViewTenant: undefined,
+  onViewInvoice: undefined,
+  selectedRowIds: undefined,
+  allRowsSelected: false,
+  someRowsSelected: false,
+  onToggleRowSelection: undefined,
+  onToggleAllRowSelection: undefined,
+  getRowKey: undefined,
 };
 
 export default CollectionsGrid;

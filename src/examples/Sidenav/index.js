@@ -220,6 +220,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
   const renderNestedRoutes = (allRoutes) =>
     allRoutes
       .filter((route) => {
+        if (route?.hideFromSidenav) return false;
         const routePath = route?.route;
         if (routePath && !canAccessPrivilegedConfigRoute(routePath)) return false;
         if (route?.name) return canViewMenu(route.name);

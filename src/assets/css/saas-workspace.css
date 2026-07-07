@@ -166,7 +166,7 @@ body.enterprise-ui .MuiAppBar-root .MuiToolbar-root {
 .saas-workspace-filters,
 .saas-workspace-card-toolbar {
   flex-shrink: 0;
-  padding: 4px 8px 0;
+  padding: 0;
   border-bottom: none;
   background: var(--layer-controls);
 }

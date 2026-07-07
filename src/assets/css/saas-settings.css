@@ -630,19 +630,70 @@ body.enterprise-ui .coa-split-workspace-page .saas-settings-table td .MuiIconBut
 
 .saas-settings-table-pagination-top {
   flex-shrink: 0 !important;
-  min-height: 28px !important;
-  max-height: 32px !important;
   display: flex !important;
   justify-content: flex-end !important;
   align-items: center !important;
   width: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+body.enterprise-ui .saas-settings-table-pagination-top:not(:empty),
+body.enterprise-ui .income-agreements-filter-pagination:not(:empty) {
+  min-height: 28px !important;
+  max-height: 32px !important;
   padding-right: 8px !important;
   border-bottom: 1px solid var(--layer-controls-border) !important;
   background: var(--layer-controls) !important;
 }
 
+body.enterprise-ui .saas-settings-table-pagination-top:empty,
+body.enterprise-ui .income-agreements-filter-pagination:empty {
+  display: none !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
+body.enterprise-ui .saas-workspace-filters:has(.income-agreements-filter-pagination:empty) {
+  display: none !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
 .saas-settings-table-pagination-top .compact-grid-pagination {
   margin-left: auto;
+}
+
+/* Grid stack — no dead band between page toolbar and column headers */
+body.enterprise-ui .saas-workspace-grid-host,
+body.enterprise-ui .enterprise-workspace-grid-host {
+  gap: 0 !important;
+}
+
+body.enterprise-ui .saas-workspace-grid-host > .MuiBox-root,
+body.enterprise-ui .enterprise-workspace-grid-host > .MuiBox-root {
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.enterprise-ui .saas-workspace-grid-host > .saas-settings-table,
+body.enterprise-ui .enterprise-workspace-grid-host > .saas-settings-table,
+body.enterprise-ui .saas-workspace-grid-host > .MuiBox-root > .saas-settings-table,
+body.enterprise-ui .enterprise-workspace-grid-host > .MuiBox-root > .saas-settings-table {
+  margin-top: 0 !important;
 }
 
 /* Empty navbar is position:absolute and blocks header clicks — hide on enterprise pages */
@@ -1073,10 +1124,17 @@ body.enterprise-ui .MuiTableBody-root td {
   border-right: none !important;
   padding: 6px 8px !important;
   font-size: 0.8125rem !important;
-  color: var(--settings-text) !important;
+  color: #111111 !important;
   vertical-align: middle !important;
   background-color: var(--layer-grid-body) !important;
   transition: background-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+body.enterprise-ui .saas-settings-table .MuiTableBody-root td .MuiTypography-root,
+body.enterprise-ui .saas-workspace-card .MuiTableBody-root td .MuiTypography-root,
+body.enterprise-ui .enterprise-workspace-grid-host .MuiTableBody-root td .MuiTypography-root,
+body.enterprise-ui .MuiTableBody-root td .MuiTypography-root {
+  color: #111111 !important;
 }
 
 body.enterprise-ui .saas-settings-table .MuiTableBody-root tr:hover td,
@@ -1588,7 +1646,7 @@ body.enterprise-ui .saas-workspace-grid-scroll-host {
   flex: 0 0 auto !important;
   min-height: auto !important;
   margin-top: 0 !important;
-  padding: 2px 8px 4px !important;
+  padding: 2px 8px 0 !important;
   overflow: visible !important;
 }
 
