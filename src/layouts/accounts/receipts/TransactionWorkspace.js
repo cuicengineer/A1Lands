@@ -432,6 +432,7 @@ function TransactionWorkspace({
       return generateReceiptPdf(pdfRecord, marginsIn, {
         openNewTab: false,
         documentTitle: usePaymentApi ? "Payment Voucher" : "Receipt Voucher",
+        isPaymentVoucher: Boolean(usePaymentApi),
       });
     },
     [usePaymentApi]

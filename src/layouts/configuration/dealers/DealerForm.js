@@ -288,7 +288,7 @@ export default function DealerForm({ open, onClose, onSubmit, initialData }) {
     <>
       <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" scroll="paper">
         <DialogTitle sx={{ color: "#344767", pb: 1 }}>
-          {isEditMode ? "Edit Dealer" : "Add New Dealer"}
+          {isEditMode ? "Edit Party" : "Add New Party"}
         </DialogTitle>
         <DialogContent dividers>
           <Grid container spacing={2}>

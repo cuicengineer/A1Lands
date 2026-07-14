@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -312,7 +313,7 @@ export default function CashAndBank() {
       await fetchRecords(pageNumber, pageSize);
     } catch (error) {
       console.error("Error deleting Cash & Bank record:", error);
-      window.alert("Failed to delete record. Please try again.");
+      window.alert(error?.message || "Failed to delete record. Please try again.");
     } finally {
       setDeleteDialogOpen(false);
       setRecordToDelete(null);
@@ -440,6 +441,7 @@ export default function CashAndBank() {
           !routeFilters.parentId && rowMode === "TR" && flat.parentCashAndBankId == null;
         const hasTrChildren = isParentTrRow && Number(flat.childCount || 0) > 0;
         const displayName = hasTrChildren ? flat.parentName : flat.name;
+        const referencedByTransfer = Boolean(flat.isReferencedByInterAccTransfer);
         return {
           ...flat,
           name: displayName,
@@ -466,7 +468,7 @@ export default function CashAndBank() {
                   <Icon fontSize="small">edit</Icon>
                 </IconButton>
               )}
-              {canDeleteCurrentMenu() && (
+              {canDeleteCurrentMenu() && !referencedByTransfer && (
                 <IconButton
                   size="small"
                   color="error"
@@ -476,6 +478,20 @@ export default function CashAndBank() {
                 >
                   <Icon fontSize="small">delete</Icon>
                 </IconButton>
+              )}
+              {canDeleteCurrentMenu() && referencedByTransfer && (
+                <Tooltip title="Used in inter-account transfer records. Delete those transfers first.">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      disabled
+                      sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
+                    >
+                      <Icon fontSize="small">delete</Icon>
+                    </IconButton>
+                  </span>
+                </Tooltip>
               )}
             </MDBox>
           ),

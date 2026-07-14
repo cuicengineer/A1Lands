@@ -500,8 +500,21 @@ function RentalPropertyForm({
         .join(" ")
         .trim();
       if (/Cannot insert duplicate key in obj(?:ect)?/i.test(rawErrorText)) {
-        alert("Cannot insert Duplocate Property ID");
+        alert(
+          "Cannot insert Duplicate Property ID. Delete the existing non-deleted property first, or refresh and retry if it was already deleted."
+        );
+        return;
       }
+      if (error?.response?.status === 409) {
+        const conflictMsg =
+          typeof error?.response?.data === "string"
+            ? error.response.data
+            : error?.response?.data?.message ||
+              "Property ID already exists. Delete the existing property first to reuse this Property No.";
+        alert(conflictMsg);
+        return;
+      }
+      alert("Failed to save rental property.");
       return;
     }
 

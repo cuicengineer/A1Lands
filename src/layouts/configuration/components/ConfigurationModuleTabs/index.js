@@ -9,6 +9,11 @@ import PropTypes from "prop-types";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import ModuleTabsBrandRow from "components/ModuleTabsBrandRow";
+import {
+  canViewModuleTab,
+  resolveModuleTabIndex,
+  usePermittedModuleTabs,
+} from "utils/moduleTabsPermissionUtils";
 
 export const CONFIGURATION_MODULE_TABS = [
   { label: "User Roles", route: "/configuration/user-role" },
@@ -17,7 +22,7 @@ export const CONFIGURATION_MODULE_TABS = [
   { label: "Nature", route: "/configuration/nature" },
   { label: "Property Type", route: "/configuration/property-type" },
   { label: "Banks List", route: "/configuration/banks-list" },
-  { label: "Dealers", route: "/configuration/dealers" },
+  { label: "Parties", route: "/configuration/dealers", menuName: "Parties" },
   { label: "Rental Value Rate", route: "/configuration/rental-value-rate" },
   { label: "Govt Share Rate", route: "/configuration/govt-share-rate" },
   { label: "Sharing Formula", route: "/configuration/sharing-formula" },
@@ -25,23 +30,8 @@ export const CONFIGURATION_MODULE_TABS = [
   { label: "Lock Date", route: "/configuration/lock-date" },
   { label: "Accounting Sys.", route: "/configuration/accounting-sys" },
   { label: "Chart of Accounts", route: "/configuration/chart-of-accounts" },
+  { label: "Notice", route: "/configuration/notice", menuName: "Notice" },
 ];
-
-function resolveConfigurationTabIndex(pathname) {
-  const path = (pathname || "").replace(/\/$/, "") || "/";
-  const exact = CONFIGURATION_MODULE_TABS.findIndex((tab) => path === tab.route);
-  if (exact >= 0) return exact;
-
-  const prefixMatch = [...CONFIGURATION_MODULE_TABS]
-    .sort((a, b) => b.route.length - a.route.length)
-    .find((tab) => path.startsWith(`${tab.route}/`));
-
-  if (prefixMatch) {
-    return CONFIGURATION_MODULE_TABS.findIndex((tab) => tab.route === prefixMatch.route);
-  }
-
-  return false;
-}
 
 const CONFIGURATION_TAB_SX = {
   whiteSpace: "nowrap",
@@ -71,14 +61,19 @@ function ConfigurationModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const items = tabs && tabs.length ? tabs : CONFIGURATION_MODULE_TABS;
-  const activeIndex = useMemo(() => resolveConfigurationTabIndex(pathname), [pathname]);
+  const items = usePermittedModuleTabs(CONFIGURATION_MODULE_TABS, tabs);
+  const activeIndex = useMemo(() => resolveModuleTabIndex(pathname, items), [pathname, items]);
+
+  if (items.length === 0) {
+    return null;
+  }
 
   const handleChange = (_, index) => {
     const target = items[index]?.route;
-    if (target && target !== pathname.replace(/\/$/, "")) {
-      navigate(target);
+    if (!target || target === pathname.replace(/\/$/, "") || !canViewModuleTab(items[index])) {
+      return;
     }
+    navigate(target);
   };
 
   return (

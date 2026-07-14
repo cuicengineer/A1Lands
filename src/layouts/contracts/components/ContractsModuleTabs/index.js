@@ -9,6 +9,11 @@ import PropTypes from "prop-types";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import ModuleTabsBrandRow from "components/ModuleTabsBrandRow";
+import {
+  canViewModuleTab,
+  resolveModuleTabIndex,
+  usePermittedModuleTabs,
+} from "utils/moduleTabsPermissionUtils";
 
 export const CONTRACTS_MODULE_TABS = [
   { label: "Rental Properties", route: "/contracts/rental-properties" },
@@ -17,34 +22,26 @@ export const CONTRACTS_MODULE_TABS = [
   { label: "Agreements", route: "/contracts" },
 ];
 
-function resolveContractsTabIndex(pathname) {
-  const path = (pathname || "").replace(/\/$/, "") || "/";
-  const exact = CONTRACTS_MODULE_TABS.findIndex((tab) => path === tab.route);
-  if (exact >= 0) return exact;
-
-  const prefixMatch = [...CONTRACTS_MODULE_TABS]
-    .sort((a, b) => b.route.length - a.route.length)
-    .find((tab) => tab.route !== "/contracts" && path.startsWith(`${tab.route}/`));
-
-  if (prefixMatch) {
-    return CONTRACTS_MODULE_TABS.findIndex((tab) => tab.route === prefixMatch.route);
-  }
-
-  return false;
-}
-
 function ContractsModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const items = tabs && tabs.length ? tabs : CONTRACTS_MODULE_TABS;
-  const activeIndex = useMemo(() => resolveContractsTabIndex(pathname), [pathname]);
+  const items = usePermittedModuleTabs(CONTRACTS_MODULE_TABS, tabs);
+  const activeIndex = useMemo(
+    () => resolveModuleTabIndex(pathname, items, { rootRoute: "/contracts" }),
+    [pathname, items]
+  );
+
+  if (items.length === 0) {
+    return null;
+  }
 
   const handleChange = (_, index) => {
     const target = items[index]?.route;
-    if (target && target !== pathname.replace(/\/$/, "")) {
-      navigate(target);
+    if (!target || target === pathname.replace(/\/$/, "") || !canViewModuleTab(items[index])) {
+      return;
     }
+    navigate(target);
   };
 
   return (

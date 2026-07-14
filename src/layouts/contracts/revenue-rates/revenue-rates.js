@@ -33,6 +33,7 @@ import api, {
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
+import govtShareRateApi from "services/api.govtsharerate.service";
 import CurrencyLoading from "components/CurrencyLoading";
 import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -564,6 +565,112 @@ const REVENUE_RATES_DATATABLE_DATE_FILTER_TYPES = Object.freeze({
   revenueRatesMoneyCompare: revenueRatesGridMoneyCompare,
 });
 
+function isGovtShareRowActiveAndNotDeleted(row) {
+  const isActive =
+    row?.Status === undefined ||
+    row?.Status === null ||
+    row?.Status === true ||
+    row?.Status === 1 ||
+    row?.Status === "1";
+  const isNotDeleted = !(row?.IsDeleted === true || row?.IsDeleted === 1 || row?.IsDeleted === "1");
+  return isActive && isNotDeleted;
+}
+
+function isAnnualRentGovtShareFactor(config) {
+  return (
+    String(config ?? "")
+      .trim()
+      .toLowerCase() === "revenue rate"
+  );
+}
+
+/** Latest govt-share row for RAC/Base/Class with applicable date on or before today. */
+function getLatestGovtShareRateForScope(rows, cmdId, baseId, classId) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const scoped = (rows || []).filter((row) => {
+    if (!isGovtShareRowActiveAndNotDeleted(row)) return false;
+    const rowCmdId = row.CmdId ?? row.cmdId;
+    const rowBaseId = row.BaseId ?? row.baseId;
+    const rowClassId = row.ClassId ?? row.classId;
+    if (Number(rowCmdId) !== Number(cmdId)) return false;
+    if (Number(rowBaseId) !== Number(baseId)) return false;
+    if (Number(rowClassId) !== Number(classId)) return false;
+
+    const applicableDate =
+      row.ApplicableDate ?? row.applicableDate ?? row.ApplicationDate ?? row.applicationDate;
+    if (!applicableDate) return false;
+
+    const date = new Date(applicableDate);
+    if (!Number.isFinite(date.getTime())) return false;
+    date.setHours(0, 0, 0, 0);
+    if (date > today) return false;
+
+    const deactiveDate = row.DeactiveDate ?? row.deactiveDate ?? null;
+    if (deactiveDate) {
+      const deact = new Date(deactiveDate);
+      if (Number.isFinite(deact.getTime())) {
+        deact.setHours(0, 0, 0, 0);
+        if (deact <= today) return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (scoped.length === 0) return null;
+
+  scoped.sort((a, b) => {
+    const dateA = new Date(
+      a.ApplicableDate ?? a.applicableDate ?? a.ApplicationDate ?? a.applicationDate ?? 0
+    );
+    const dateB = new Date(
+      b.ApplicableDate ?? b.applicableDate ?? b.ApplicationDate ?? b.applicationDate ?? 0
+    );
+    return dateB - dateA;
+  });
+
+  return scoped[0];
+}
+
+function latestGovtShareScopeIsAnnualRent(rows, cmdId, baseId, classId) {
+  const latest = getLatestGovtShareRateForScope(rows, cmdId, baseId, classId);
+  if (!latest) return false;
+  return isAnnualRentGovtShareFactor(latest.Config ?? latest.config);
+}
+
+function getClassOptionLabel(opt) {
+  return String(opt?.name ?? opt?.Name ?? opt?.value ?? opt?.Value ?? opt?.id ?? "");
+}
+
+const PROPERTY_ADDRESS_DISPLAY_MAX = 30;
+
+function truncatePropertyAddress(address, maxLen = PROPERTY_ADDRESS_DISPLAY_MAX) {
+  const text = String(address ?? "").trim();
+  if (!text) return { display: "—", full: "", truncated: false };
+  if (text.length <= maxLen) return { display: text, full: text, truncated: false };
+  return { display: `${text.slice(0, maxLen)}...`, full: text, truncated: true };
+}
+
+function getPropertyAddressFull(property) {
+  return String(property?.location ?? property?.Location ?? "").trim();
+}
+
+function formatRevenueRatePropertySecondary(property) {
+  const rawArea = property?.area ?? property?.Area;
+  const uoM = String(property?.uoM ?? property?.UoM ?? "").trim();
+  const areaDisplay =
+    rawArea !== null && rawArea !== undefined && rawArea !== ""
+      ? `${Number(rawArea).toLocaleString(undefined, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 4,
+        })}${uoM ? ` (${uoM})` : ""}`
+      : "—";
+  const { display: locationDisplay } = truncatePropertyAddress(getPropertyAddressFull(property));
+  return `Area: ${areaDisplay} · Address: ${locationDisplay}`;
+}
+
 const RevenueRatesStatusCell = React.memo(function RevenueRatesStatusCell({ value }) {
   return <StatusBadge value={value} />;
 });
@@ -782,11 +889,14 @@ function RevenueRatesForm({
   rentalProperties,
   commandOptions,
   baseOptions,
+  classOptions,
+  govtShareRates,
   onUploadSuccess,
 }) {
   const [form, setForm] = useState({
     cmdId: "",
     baseId: "",
+    classId: "",
     propertyId: "",
     applicableDate: "",
     deactiveDate: "",
@@ -876,8 +986,15 @@ function RevenueRatesForm({
         selectedProp?.baseId ??
         selectedProp?.baseid ??
         "";
+      const resolvedClassId =
+        initialData.classId ??
+        initialData.ClassId ??
+        selectedProp?.classId ??
+        selectedProp?.ClassId ??
+        "";
       const cmdIdValue = isPropertyDash ? 0 : resolvedCmdId ? Number(resolvedCmdId) : "";
       const baseIdValue = isPropertyDash ? 0 : resolvedBaseId ? Number(resolvedBaseId) : "";
+      const classIdValue = isPropertyDash ? "" : resolvedClassId ? Number(resolvedClassId) : "";
       const propertyIdValue = isPropertyDash ? 0 : initialData.propertyId || "";
 
       const rawDeactive = initialData.deactiveDate ?? initialData.DeactiveDate ?? "";
@@ -888,6 +1005,7 @@ function RevenueRatesForm({
       setForm({
         cmdId: cmdIdValue,
         baseId: baseIdValue,
+        classId: classIdValue,
         propertyId: propertyIdValue,
         applicableDate: initialData.applicableDate || "",
         deactiveDate: deactiveDateValue,
@@ -907,6 +1025,7 @@ function RevenueRatesForm({
       setForm({
         cmdId: "",
         baseId: "",
+        classId: "",
         propertyId: "",
         applicableDate: "",
         deactiveDate: "",
@@ -965,11 +1084,22 @@ function RevenueRatesForm({
       if (field === "cmdId") {
         const cmdIsAll = value === 0 || value === "0";
         next.baseId = cmdIsAll ? 0 : "";
+        next.classId = cmdIsAll ? "" : "";
         next.propertyId = cmdIsAll ? 0 : "";
       } else if (field === "baseId") {
-        next.propertyId = value === 0 || value === "0" ? 0 : "";
+        const baseIsAll = value === 0 || value === "0";
+        next.classId = baseIsAll ? "" : "";
+        next.propertyId = baseIsAll ? 0 : "";
+      } else if (field === "classId") {
+        next.propertyId = "";
       } else if (field === "applicableDate") {
-        if (next.deactiveDate && value) {
+        if (value && !isEditMode) {
+          // Default Deactive Date to 30 June of the Applicable Date year (user-editable).
+          const year = Number(String(value).slice(0, 4));
+          next.deactiveDate = Number.isFinite(year) && year > 0 ? `${year}-06-30` : "";
+        } else if (!value && !isEditMode) {
+          next.deactiveDate = "";
+        } else if (next.deactiveDate && value) {
           const appTs = new Date(value).getTime();
           const deactTs = new Date(next.deactiveDate).getTime();
           if (deactTs <= appTs) next.deactiveDate = "";
@@ -995,6 +1125,15 @@ function RevenueRatesForm({
   const isBothAll =
     (form.cmdId === 0 || form.cmdId === "0") && (form.baseId === 0 || form.baseId === "0");
   const isBaseAll = form.baseId === 0 || form.baseId === "0";
+  const isCmdAll = form.cmdId === 0 || form.cmdId === "0";
+  const isClassScopeReady =
+    !isCmdAll &&
+    !isBaseAll &&
+    form.cmdId !== "" &&
+    form.cmdId != null &&
+    form.baseId !== "" &&
+    form.baseId != null;
+  const isClassSelected = form.classId !== "" && form.classId != null;
 
   useEffect(() => {
     if (isBothAll && form.propertyId !== 0 && form.propertyId !== "0") {
@@ -1007,6 +1146,47 @@ function RevenueRatesForm({
       setForm((prev) => ({ ...prev, propertyId: 0 }));
     }
   }, [isBaseAll, form.propertyId]);
+
+  useEffect(() => {
+    if (isBaseAll && form.classId !== "" && form.classId != null) {
+      setForm((prev) => ({ ...prev, classId: "" }));
+    }
+  }, [isBaseAll, form.classId]);
+
+  const filteredClassOptions = useMemo(() => {
+    if (!isClassScopeReady) return [];
+    const numCmdId = Number(form.cmdId);
+    const numBaseId = Number(form.baseId);
+    if (!numCmdId || !numBaseId) return [];
+    return (classOptions || []).filter((cls) => {
+      const classId = Number(cls?.id ?? cls?.Id);
+      if (!classId) return false;
+      return latestGovtShareScopeIsAnnualRent(govtShareRates, numCmdId, numBaseId, classId);
+    });
+  }, [classOptions, govtShareRates, form.cmdId, form.baseId, isClassScopeReady]);
+
+  const classSelectOptions = useMemo(() => {
+    const opts = [...filteredClassOptions];
+    if (!form.classId) return opts;
+    const hasCurrent = opts.some((cls) => Number(cls?.id ?? cls?.Id) === Number(form.classId));
+    if (!hasCurrent) {
+      const current = (classOptions || []).find(
+        (cls) => Number(cls?.id ?? cls?.Id) === Number(form.classId)
+      );
+      if (current) opts.unshift(current);
+    }
+    return opts;
+  }, [filteredClassOptions, classOptions, form.classId]);
+
+  useEffect(() => {
+    if (!isClassScopeReady || !form.classId) return;
+    const stillValid = classSelectOptions.some(
+      (cls) => Number(cls?.id ?? cls?.Id) === Number(form.classId)
+    );
+    if (!stillValid) {
+      setForm((prev) => ({ ...prev, classId: "", propertyId: "" }));
+    }
+  }, [isClassScopeReady, form.classId, classSelectOptions]);
 
   const filteredBaseOptions = useMemo(() => {
     if (form.cmdId === 0 || form.cmdId === "0") return baseOptions || [];
@@ -1038,27 +1218,80 @@ function RevenueRatesForm({
   }, [form.baseId, baseAutocompleteOptions]);
 
   const filteredRentalProperties = useMemo(() => {
-    const isCmdAll = form.cmdId === 0 || form.cmdId === "0";
-    const isBaseAll = form.baseId === 0 || form.baseId === "0";
     const numCmdId = Number(form.cmdId || 0);
     const numBaseId = Number(form.baseId || 0);
+    const numClassId = Number(form.classId || 0);
     return (rentalProperties || []).filter((p) => {
       const cmdId = Number(p?.cmdId ?? p?.cmdid ?? p?.commandId ?? 0);
       const baseId = Number(p?.baseId ?? p?.baseid ?? 0);
+      const classId = Number(p?.classId ?? p?.ClassId ?? 0);
       if (!isCmdAll && numCmdId && cmdId !== numCmdId) return false;
       if (!isBaseAll && numBaseId && baseId !== numBaseId) return false;
+      if (isClassScopeReady && isClassSelected && numClassId && classId !== numClassId)
+        return false;
       return true;
     });
-  }, [rentalProperties, form.cmdId, form.baseId]);
+  }, [
+    rentalProperties,
+    form.cmdId,
+    form.baseId,
+    form.classId,
+    isCmdAll,
+    isBaseAll,
+    isClassScopeReady,
+    isClassSelected,
+  ]);
 
-  const selectedProperty = useMemo(() => {
-    const propId = form.propertyId ?? "";
-    if (propId === 0 || propId === "0" || propId === "") return null;
-    return (rentalProperties || []).find((p) => Number(p.id) === Number(propId)) ?? null;
-  }, [rentalProperties, form.propertyId]);
+  const getPropertyPrimaryLabel = (property) =>
+    String(property?.pId ?? property?.pid ?? property?.PId ?? property?.id ?? "");
 
-  const selectedArea = selectedProperty?.area ?? selectedProperty?.Area ?? "";
-  const selectedUoM = selectedProperty?.uoM ?? selectedProperty?.UoM ?? "";
+  const renderPropertyOptionLabel = (property) => {
+    const primary = getPropertyPrimaryLabel(property);
+    const secondary = formatRevenueRatePropertySecondary(property);
+    const fullAddress = getPropertyAddressFull(property);
+    const { truncated: addressTruncated } = truncatePropertyAddress(fullAddress);
+    return (
+      <MDBox
+        title={addressTruncated ? fullAddress : undefined}
+        sx={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "baseline",
+          columnGap: 1,
+          rowGap: 0.25,
+          width: "100%",
+          maxWidth: "100%",
+          py: 0.25,
+        }}
+      >
+        <MDTypography
+          component="span"
+          sx={{
+            fontSize: "1.1rem",
+            lineHeight: 1.35,
+            wordBreak: "break-word",
+            color: "#111111",
+          }}
+        >
+          {primary}
+        </MDTypography>
+        <MDTypography
+          variant="caption"
+          component="span"
+          sx={{
+            fontSize: "0.72rem",
+            lineHeight: 1.3,
+            color: "#111111",
+            wordBreak: "break-word",
+            flex: "1 1 auto",
+            minWidth: 0,
+          }}
+        >
+          {secondary}
+        </MDTypography>
+      </MDBox>
+    );
+  };
 
   const handleFileSelect = (event) => {
     const files = Array.from(event.target.files);
@@ -1125,6 +1358,18 @@ function RevenueRatesForm({
   };
 
   const handleSave = async () => {
+    if (isClassScopeReady && !isClassSelected) {
+      alert("Class is required.");
+      return;
+    }
+    if (
+      isClassScopeReady &&
+      isClassSelected &&
+      (form.propertyId === "" || form.propertyId == null)
+    ) {
+      alert("Property is required.");
+      return;
+    }
     const applicableDate = String(form.applicableDate ?? "").trim();
     if (!applicableDate) {
       alert("Applicable Date is required.");
@@ -1175,7 +1420,7 @@ function RevenueRatesForm({
       <DialogContent>
         <Grid container spacing={3} mt={1}>
           {/* Command Dropdown */}
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={4}>
             <Autocomplete
               size="small"
               fullWidth
@@ -1207,7 +1452,7 @@ function RevenueRatesForm({
           </Grid>
 
           {/* Base Dropdown */}
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={4}>
             <Autocomplete
               size="small"
               fullWidth
@@ -1243,6 +1488,62 @@ function RevenueRatesForm({
             />
           </Grid>
 
+          {/* Class Dropdown — only classes with Govt Share Factor = Annual Rent */}
+          <Grid item xs={12} sm={4}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="class-label" sx={{ fontSize: "1.1rem" }}>
+                Class
+              </InputLabel>
+              <SearchableSelect
+                labelId="class-label"
+                value={isBaseAll ? "" : form.classId ?? ""}
+                label="Class"
+                onChange={(e) => handleChange("classId", e.target.value)}
+                disabled={!isClassScopeReady}
+                renderValue={(v) => {
+                  if (!isClassScopeReady || v === "" || v == null) return "";
+                  const opt = classSelectOptions.find(
+                    (cls) => Number(cls?.id ?? cls?.Id) === Number(v)
+                  );
+                  return opt ? getClassOptionLabel(opt) : String(v);
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    style: {
+                      maxHeight: 300,
+                    },
+                  },
+                }}
+                sx={{
+                  fontSize: "1.1rem",
+                  "& .MuiSelect-select": {
+                    fontSize: "1.1rem",
+                    padding: "0 32px 0 14px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    display: "flex",
+                    alignItems: "center",
+                  },
+                  "& .MuiSelect-icon": {
+                    display: "block !important",
+                    right: "10px",
+                  },
+                }}
+              >
+                {classSelectOptions.map((option) => (
+                  <MenuItem
+                    key={option.id ?? option.Id}
+                    value={option.id ?? option.Id}
+                    sx={{ fontSize: "1.1rem", padding: "10px 14px" }}
+                  >
+                    {getClassOptionLabel(option)}
+                  </MenuItem>
+                ))}
+              </SearchableSelect>
+            </FormControl>
+          </Grid>
+
           {/* Property and Revenue Rate - same row */}
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
@@ -1254,17 +1555,60 @@ function RevenueRatesForm({
                 value={isBaseAll ? 0 : form.propertyId ?? ""}
                 label="Property"
                 onChange={(e) => handleChange("propertyId", e.target.value)}
-                disabled={isBaseAll}
+                disabled={isBaseAll || (isClassScopeReady && !isClassSelected)}
                 renderValue={(v) => {
                   if (isBaseAll) return "—";
                   if (v === "" || v == null) return "";
                   const opt = filteredRentalProperties.find((p) => Number(p.id) === Number(v));
-                  return opt ? opt.pId ?? opt.pid ?? opt.PId ?? String(v) : String(v);
+                  if (!opt) return String(v);
+                  const fullAddress = getPropertyAddressFull(opt);
+                  const { truncated: addressTruncated } = truncatePropertyAddress(fullAddress);
+                  return (
+                    <MDBox
+                      title={addressTruncated ? fullAddress : undefined}
+                      sx={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "baseline",
+                        columnGap: 0.75,
+                        rowGap: 0.25,
+                        width: "100%",
+                        maxWidth: "100%",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <MDTypography
+                        component="span"
+                        sx={{
+                          fontSize: "1.1rem",
+                          lineHeight: 1.3,
+                          color: "#111111",
+                        }}
+                      >
+                        {getPropertyPrimaryLabel(opt)}
+                      </MDTypography>
+                      <MDTypography
+                        variant="caption"
+                        component="span"
+                        sx={{
+                          fontSize: "0.72rem",
+                          lineHeight: 1.3,
+                          color: "#111111",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatRevenueRatePropertySecondary(opt)}
+                      </MDTypography>
+                    </MDBox>
+                  );
                 }}
                 MenuProps={{
                   PaperProps: {
                     style: {
                       maxHeight: 300,
+                      maxWidth: 560,
                     },
                   },
                 }}
@@ -1291,22 +1635,27 @@ function RevenueRatesForm({
                   </MenuItem>
                 )}
                 {!isBaseAll &&
-                  filteredRentalProperties.map((option) => (
-                    <MenuItem
-                      key={option.id}
-                      value={option.id}
-                      sx={{ fontSize: "1.1rem", padding: "10px 14px" }}
-                    >
-                      {option.pId}
-                    </MenuItem>
-                  ))}
+                  filteredRentalProperties.map((option) => {
+                    const fullAddress = getPropertyAddressFull(option);
+                    const { truncated: addressTruncated } = truncatePropertyAddress(fullAddress);
+                    return (
+                      <MenuItem
+                        key={option.id}
+                        value={option.id}
+                        title={addressTruncated ? fullAddress : undefined}
+                        sx={{
+                          fontSize: "1.1rem",
+                          padding: "10px 14px",
+                          alignItems: "flex-start",
+                          maxWidth: 560,
+                        }}
+                      >
+                        {renderPropertyOptionLabel(option)}
+                      </MenuItem>
+                    );
+                  })}
               </SearchableSelect>
             </FormControl>
-            {selectedProperty && !isBaseAll && (
-              <MDTypography variant="caption" color="text" sx={{ mt: 0.5, display: "block" }}>
-                Area: {selectedArea || "-"} UoM: {selectedUoM || "-"}
-              </MDTypography>
-            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -1653,6 +2002,8 @@ RevenueRatesForm.propTypes = {
   rentalProperties: PropTypes.array.isRequired,
   commandOptions: PropTypes.array.isRequired,
   baseOptions: PropTypes.array.isRequired,
+  classOptions: PropTypes.array.isRequired,
+  govtShareRates: PropTypes.array.isRequired,
   onUploadSuccess: PropTypes.func,
 };
 
@@ -1666,6 +2017,7 @@ export default function RevenueRates() {
   const [commandOptions, setCommandOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
   const [classOptions, setClassOptions] = useState([]);
+  const [govtShareRates, setGovtShareRates] = useState([]);
   const [gridPageSize, setGridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -1762,11 +2114,23 @@ export default function RevenueRates() {
     }
   };
 
+  const fetchGovtShareRates = async () => {
+    try {
+      const response = await govtShareRateApi.getAllRecords();
+      const data = response?.data ?? (Array.isArray(response) ? response : []);
+      setGovtShareRates(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error fetching govt share rates:", error);
+      setGovtShareRates([]);
+    }
+  };
+
   useEffect(() => {
     fetchRentalProperties();
     fetchCommands();
     fetchBases();
     fetchClasses();
+    fetchGovtShareRates();
   }, []);
 
   useEffect(() => {
@@ -1798,6 +2162,7 @@ export default function RevenueRates() {
     }
     // Handle both camelCase and PascalCase for all fields
     const propertyId = revenueRate.propertyId ?? revenueRate.PropertyId ?? null;
+    const classId = revenueRate.classId ?? revenueRate.ClassId ?? null;
     const applicableDate = revenueRate.applicableDate ?? revenueRate.ApplicableDate ?? null;
     const rate = revenueRate.rate ?? revenueRate.Rate ?? "";
     const attachments = revenueRate.attachments ?? revenueRate.Attachments ?? "";
@@ -1807,6 +2172,7 @@ export default function RevenueRates() {
       ...revenueRate,
       id: revenueRate.id ?? revenueRate.Id,
       propertyId: propertyId,
+      classId: classId,
       applicableDate: applicableDate
         ? typeof applicableDate === "string"
           ? applicableDate.split("T")[0]
@@ -2321,6 +2687,8 @@ export default function RevenueRates() {
         rentalProperties={rentalProperties}
         commandOptions={commandOptions}
         baseOptions={baseOptions}
+        classOptions={classOptions}
+        govtShareRates={govtShareRates}
         onUploadSuccess={openSuccessSB}
       />
       <Dialog

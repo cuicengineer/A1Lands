@@ -18,12 +18,7 @@ import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import { ServerGridPagination } from "components/CompactGridPagination";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
 import interAccTransferApi from "services/api.interAccTransfer.service";
-import {
-  canCreateCurrentMenu,
-  canDeleteCurrentMenu,
-  canEditCurrentMenu,
-  isSuperuserOrAhqSupervisorUser,
-} from "services/api.service";
+import { canCreateCurrentMenu, isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import lockDateApi from "services/api.lockdate.service";
 import {
   buildCollectionsGridTableBodySx,
@@ -35,9 +30,9 @@ import {
 import CashFundFlowModuleTabs from "layouts/cash-fund-flow/components/CashFundFlowModuleTabs";
 import AgreementProvPdfPreviewDialog from "components/AgreementProvPdfPreviewDialog";
 import {
-  loadReceiptPdfMargins,
-  RECEIPT_PDF_DEFAULT_MARGINS,
-  saveReceiptPdfMargins,
+  INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS,
+  loadInterAccTransferPdfMargins,
+  saveInterAccTransferPdfMargins,
 } from "utils/agreementProvPdfMargins";
 import InterAccTransferForm from "./InterAccTransferForm";
 import { generateInterAccTransferPdf } from "./interAccTransferPdf";
@@ -212,6 +207,10 @@ export default function InterAccTransfer() {
   };
 
   const handleEditRecord = (id) => {
+    if (!canManageTransferLock) {
+      window.alert("Only superuser or AHQ supervisor can edit inter account transfers.");
+      return;
+    }
     const record = tableRows.find((row) => Number(row.id ?? row.Id) === Number(id));
     if (!record) return;
     if (isTransferLocked(record) || isTransferDateLocked(record)) {
@@ -229,6 +228,10 @@ export default function InterAccTransfer() {
   };
 
   const handleDeleteRecord = (id) => {
+    if (!canManageTransferLock) {
+      window.alert("Only superuser or AHQ supervisor can delete inter account transfers.");
+      return;
+    }
     const record = tableRows.find((row) => Number(row.id ?? row.Id) === Number(id));
     if (record && isTransferLocked(record)) {
       window.alert("Locked transfers cannot be deleted.");
@@ -257,6 +260,10 @@ export default function InterAccTransfer() {
   };
 
   const handleSubmit = async (form) => {
+    if (!canManageTransferLock) {
+      window.alert("Only superuser or AHQ supervisor can edit inter account transfers.");
+      return;
+    }
     if (isDateLockedByLockDate(form?.transferDate, activeLockDate)) {
       window.alert(formatTransactionLockDateValidationMessage(activeLockDate));
       return;
@@ -467,7 +474,7 @@ export default function InterAccTransfer() {
           ),
           actions: (
             <MDBox sx={COLLECTIONS_GRID_ACTION_BOX_SX}>
-              {canEditCurrentMenu() && (
+              {canManageTransferLock && (
                 <IconButton
                   size="small"
                   color="info"
@@ -478,7 +485,7 @@ export default function InterAccTransfer() {
                   <Icon fontSize="small">{locked || dateLocked ? "visibility" : "edit"}</Icon>
                 </IconButton>
               )}
-              {canDeleteCurrentMenu() && !locked && !dateLocked && (
+              {canManageTransferLock && !locked && !dateLocked && (
                 <IconButton
                   size="small"
                   color="error"
@@ -612,9 +619,9 @@ export default function InterAccTransfer() {
         generatePdfBlob={generateTransferPdfBlob}
         title="PDF Preview"
         previewTitle="Transfer Entry PDF"
-        defaultMargins={RECEIPT_PDF_DEFAULT_MARGINS}
-        loadMargins={loadReceiptPdfMargins}
-        saveMargins={saveReceiptPdfMargins}
+        defaultMargins={INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS}
+        loadMargins={loadInterAccTransferPdfMargins}
+        saveMargins={saveInterAccTransferPdfMargins}
       />
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
@@ -624,7 +631,7 @@ export default function InterAccTransfer() {
         </DialogContent>
         <DialogActions>
           <MDButton onClick={() => setDeleteDialogOpen(false)}>Cancel</MDButton>
-          <MDButton onClick={handleConfirmDelete} color="error" disabled={!canDeleteCurrentMenu()}>
+          <MDButton onClick={handleConfirmDelete} color="error" disabled={!canManageTransferLock}>
             Delete
           </MDButton>
         </DialogActions>

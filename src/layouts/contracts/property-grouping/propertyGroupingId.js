@@ -2,23 +2,46 @@ import {
   sanitizePropertyNumberInput,
   isValidPropertyNumber,
   formatPropertyNumber,
-  getBasePrefix,
   getClassSuffix,
+  parsePropertyNumberFromPId,
 } from "layouts/configuration/rental-properties/rentalPropertyId";
 
 export const sanitizeGroupNumberInput = sanitizePropertyNumberInput;
 export const isValidGroupNumber = isValidPropertyNumber;
 export const formatGroupNumber = formatPropertyNumber;
 
+/** Prefer Base Name (not Code) for Group ID on this page only. */
+function getBaseNameSuffix(baseRow) {
+  const name = String(baseRow?.name ?? baseRow?.Name ?? "").trim();
+  if (name) return name.toUpperCase();
+  return "";
+}
+
 /**
- * Build Group ID as CLASS + NUMBER + BASE (e.g. A001PSH).
+ * Lowest numeric sequence from selected property PIds (e.g. NRK-032A → 32).
+ * Used as the Group ID number when one or more properties are selected.
+ */
+export function getLowestGroupNumberFromPropertyPIds(pIdList) {
+  let lowest = null;
+  (pIdList || []).forEach((pId) => {
+    const numStr = parsePropertyNumberFromPId(pId);
+    if (!numStr) return;
+    const n = Number(numStr);
+    if (!Number.isFinite(n)) return;
+    if (lowest === null || n < lowest) lowest = n;
+  });
+  return lowest === null ? "" : String(lowest);
+}
+
+/**
+ * Build Group ID as CLASS + NUMBER + BASE NAME (e.g. A001PSH).
  */
 export function buildPropertyGroupingGId({ groupNumber, baseRow, classRow }) {
   const paddedNumber = formatGroupNumber(groupNumber);
   if (!paddedNumber) return "";
 
   const classPrefix = getClassSuffix(classRow);
-  const baseSuffix = getBasePrefix(baseRow);
+  const baseSuffix = getBaseNameSuffix(baseRow);
   if (!classPrefix || !baseSuffix) return "";
 
   return `${classPrefix}${paddedNumber}${baseSuffix}`;

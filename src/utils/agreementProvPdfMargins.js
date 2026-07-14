@@ -1,6 +1,7 @@
 export const AGREEMENT_PROV_PDF_MARGIN_STORAGE_KEY = "agreement-prov-invoice-pdf-margins";
 export const RECEIPT_PDF_MARGIN_STORAGE_KEY = "receipt-pdf-margins";
 export const SHARE_DIST_WORKBOOK_PDF_MARGIN_STORAGE_KEY = "share-dist-workbook-pdf-margins";
+export const INTER_ACC_TRANSFER_PDF_MARGIN_STORAGE_KEY = "inter-acc-transfer-pdf-margins";
 
 export const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
   topIn: 0.5,
@@ -16,6 +17,11 @@ export const RECEIPT_PDF_DEFAULT_MARGINS = {
 };
 
 export const SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS = {
+  ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
+  leftIn: 0.5,
+};
+
+export const INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS = {
   ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
   leftIn: 0.5,
 };
@@ -108,6 +114,21 @@ export function saveShareDistributionWorkbookPdfMargins(margins) {
     SHARE_DIST_WORKBOOK_PDF_MARGIN_STORAGE_KEY,
     margins,
     SHARE_DIST_WORKBOOK_PDF_DEFAULT_MARGINS
+  );
+}
+
+export function loadInterAccTransferPdfMargins() {
+  return loadPdfMarginsFromStorage(
+    INTER_ACC_TRANSFER_PDF_MARGIN_STORAGE_KEY,
+    INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS
+  );
+}
+
+export function saveInterAccTransferPdfMargins(margins) {
+  savePdfMarginsToStorage(
+    INTER_ACC_TRANSFER_PDF_MARGIN_STORAGE_KEY,
+    margins,
+    INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS
   );
 }
 

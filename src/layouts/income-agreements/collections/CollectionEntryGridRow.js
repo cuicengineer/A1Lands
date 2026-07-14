@@ -11,6 +11,7 @@ import MDTypography from "components/MDTypography";
 import {
   applyReceiptVoucherSelection,
   buildCollectionReceiptVoucherOptions,
+  collectionGridRowAllowsEditDelete,
   deriveCollectionEntryStatus,
   findReceiptVoucherOption,
 } from "./collectionReceiptUtils";
@@ -404,6 +405,10 @@ function CollectionEntryGridRow({
   });
   const isRowEditing = Boolean(row.isEditing || row.isLocalOnly);
   const isLockedByVrDate = isCollectionRowLockedByVrDate(enriched, activeLockDate);
+  const allowsEditDelete = collectionGridRowAllowsEditDelete(enriched, {
+    isSuperuser: canEditStatus,
+    allowManualOverride: canEditStatus,
+  });
   const canEditFields =
     (row.isLocalOnly ? canCreate || canEditRow : canEditRow) && !isLockedByVrDate;
   const readOnly = !canEditFields || saving || !isRowEditing;
@@ -960,7 +965,7 @@ function CollectionEntryGridRow({
           </>
         ) : (
           <>
-            {canEditRow && !isLockedByVrDate ? (
+            {canEditRow && !isLockedByVrDate && allowsEditDelete ? (
               <Tooltip title="Edit row">
                 <span>
                   <IconButton
@@ -992,7 +997,7 @@ function CollectionEntryGridRow({
             </span>
           </Tooltip>
         ) : null}
-        {canDeleteRow ? (
+        {canDeleteRow && allowsEditDelete ? (
           <Tooltip title="Delete row">
             <span>
               <IconButton

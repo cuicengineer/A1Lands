@@ -51,8 +51,48 @@ function pickField(row, ...keys) {
 }
 
 export function normalizePaymentRow(row) {
-  const lines = parseJsonArray(pickField(row, "linesJson", "LinesJson"), []).map((line) =>
-    normalizePaymentLineFromApi(line)
+  const embedded = row?.lines ?? row?.Lines ?? row?.receiptLines ?? row?.ReceiptLines;
+  const rawLines =
+    Array.isArray(embedded) && embedded.length
+      ? embedded
+      : parseJsonArray(pickField(row, "linesJson", "LinesJson"), []);
+  const lines = rawLines.map((line) =>
+    normalizePaymentLineFromApi({
+      ...line,
+      id:
+        line?.id ||
+        line?.Id ||
+        `line-${line?.lineNo ?? line?.LineNo ?? Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+      racId: line?.racId ?? line?.RacId ?? "",
+      baseId: line?.baseId ?? line?.BaseId ?? "",
+      item: line?.item ?? line?.Item ?? "",
+      account: line?.account ?? line?.Account ?? "",
+      accountCoaId: String(line?.accountCoaId ?? line?.AccountCoaId ?? ""),
+      partyKey: line?.partyKey ?? line?.PartyKey ?? "",
+      partyType: line?.partyType ?? line?.PartyType ?? "",
+      partyId: String(line?.partyId ?? line?.PartyId ?? ""),
+      partyCode: line?.partyCode ?? line?.PartyCode ?? "",
+      partyName: line?.partyName ?? line?.PartyName ?? "",
+      partyLabel: line?.partyLabel ?? line?.PartyLabel ?? "",
+      contractId: String(line?.contractId ?? line?.ContractId ?? ""),
+      invoiceKey: line?.invoiceKey ?? line?.InvoiceKey ?? "",
+      contractNo: line?.contractNo ?? line?.ContractNo ?? "",
+      invoiceNo: line?.invoiceNo ?? line?.InvoiceNo ?? "",
+      collectionEntryId: String(line?.collectionEntryId ?? line?.CollectionEntryId ?? ""),
+      tinTrn: line?.tinTrn ?? line?.TinTrn ?? "",
+      tinFtn: line?.tinFtn ?? line?.TinFtn ?? "",
+      amount: line?.amount ?? line?.Amount ?? "",
+      unitPrice: line?.unitPrice ?? line?.UnitPrice ?? "",
+      quantity: line?.quantity ?? line?.Quantity ?? "",
+      productKey: line?.productKey ?? line?.ProductKey ?? "",
+      productType: line?.productType ?? line?.ProductType ?? "",
+      productId: String(line?.productId ?? line?.ProductId ?? ""),
+      discount: line?.discount ?? line?.Discount ?? "0",
+      tax: line?.tax ?? line?.Tax ?? "0",
+      total: line?.total ?? line?.Total ?? 0,
+    })
   );
   const payeeContactType = pickField(row, "payeeContactType", "PayeeContactType") || "";
 
@@ -88,6 +128,49 @@ export function normalizePaymentRow(row) {
   });
 }
 
+function mapPaymentLineToApi(line, index) {
+  const amount = Number(line?.amount) || 0;
+  const discount = Number(line?.discount) || 0;
+  const tax = Number(line?.tax) || 0;
+  const total = Number(line?.total) || Math.max(0, amount - discount + tax);
+  const quantityRaw = line?.quantity;
+  const unitPriceRaw = line?.unitPrice;
+  const quantity = quantityRaw === "" || quantityRaw == null ? null : Number(quantityRaw) || null;
+  const unitPrice =
+    unitPriceRaw === "" || unitPriceRaw == null ? null : Number(unitPriceRaw) || null;
+
+  return {
+    LineNo: index + 1,
+    RacId: String(line?.racId || "").trim() || null,
+    BaseId: String(line?.baseId || "").trim() || null,
+    Item: String(line?.item || "").trim() || null,
+    Account: String(line?.account || "").trim() || null,
+    AccountCoaId: String(line?.accountCoaId || "").trim() || null,
+    PartyKey: String(line?.partyKey || "").trim() || null,
+    PartyType: String(line?.partyType || "").trim() || null,
+    PartyId: String(line?.partyId || "").trim() || null,
+    PartyCode: String(line?.partyCode || "").trim() || null,
+    PartyName: String(line?.partyName || "").trim() || null,
+    PartyLabel: String(line?.partyLabel || "").trim() || null,
+    ContractId: String(line?.contractId || "").trim() || null,
+    InvoiceKey: String(line?.invoiceKey || "").trim() || null,
+    ContractNo: String(line?.contractNo || "").trim() || null,
+    InvoiceNo: String(line?.invoiceNo || "").trim() || null,
+    CollectionEntryId: String(line?.collectionEntryId || "").trim() || null,
+    TinTrn: String(line?.tinTrn || "").trim() || null,
+    TinFtn: String(line?.tinFtn || "").trim() || null,
+    Amount: amount,
+    UnitPrice: unitPrice,
+    Quantity: quantity,
+    ProductKey: String(line?.productKey || "").trim() || null,
+    ProductType: String(line?.productType || "").trim() || null,
+    ProductId: String(line?.productId || "").trim() || null,
+    Discount: discount,
+    Tax: tax,
+    Total: total,
+  };
+}
+
 export function buildPaymentApiPayload(form, grandTotal) {
   const cashAndBankAccountId = resolveCashAndBankAccountIdFromSelection(
     form.cashAndBankAccountId || form.receivedInCoaId,
@@ -106,7 +189,7 @@ export function buildPaymentApiPayload(form, grandTotal) {
     PayeeName: form.payeeName || null,
     Description: form.description || null,
     GrandTotal: grandTotal,
-    LinesJson: JSON.stringify(form.lines || []),
+    Lines: (form.lines || []).map(mapPaymentLineToApi),
     RecordType: "Payment",
   };
 }

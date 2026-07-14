@@ -96,8 +96,15 @@ import {
 import chartOfAccountsApi from "services/api.chartofaccounts.service";
 import {
   buildAgreementProvInvoiceDeepLink,
+  formatAccountLabel,
   openAppRouteInNewTab,
 } from "layouts/income-agreements/collections/collectionsUtils";
+import { fetchReceiptProductOptions } from "layouts/accounts/receipts/receiptUtils";
+import {
+  getPartyCoaDropdownLabel,
+  isTenantReceiptCoaOption,
+  normalizePartyCoaOption,
+} from "utils/partyCoaUtils";
 import {
   buildContractNo,
   isValidContractNumber,
@@ -107,9 +114,35 @@ import {
 
 const AHQ_APPROVAL_CHECKBOX_SX = {
   p: 0.25,
-  color: "#000000",
-  "&:not(.Mui-checked) .MuiSvgIcon-root": {
-    border: "1px solid #000000 !important",
+  color: "#111827",
+  "&.Mui-disabled": {
+    color: "#111827",
+    opacity: 1,
+  },
+  "& .MuiSvgIcon-root": {
+    width: 20,
+    height: 20,
+    borderRadius: "4px",
+    color: "transparent",
+    backgroundColor: "#ffffff",
+    border: "2px solid #111827 !important",
+    boxSizing: "border-box",
+  },
+  "&.Mui-checked .MuiSvgIcon-root, &.MuiCheckbox-indeterminate .MuiSvgIcon-root": {
+    color: "transparent",
+    backgroundColor: "#111827",
+    borderColor: "#111827 !important",
+    backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 -1 22 22'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M6 10l3 3l6-6'/%3e%3c/svg%3e")`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "center",
+    backgroundSize: "contain",
+  },
+  "&.Mui-disabled .MuiSvgIcon-root": {
+    opacity: 1,
+  },
+  "&.Mui-checked.Mui-disabled .MuiSvgIcon-root": {
+    backgroundColor: "#166534",
+    borderColor: "#166534 !important",
   },
 };
 
@@ -4896,6 +4929,75 @@ function collectInvoiceScheduleSubNos(scheduleRows, invoiceNo) {
   return Array.from(subs);
 }
 
+async function fetchAgreementProvFinalizeProductOptions() {
+  const products = await fetchReceiptProductOptions();
+  return (products || [])
+    .map((row) => {
+      const label = String(row?.label || "").trim();
+      if (!label) return null;
+      const itemCode = label.includes(" - ") ? label.split(" - ")[0].trim() : label;
+      return {
+        value: itemCode,
+        label,
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildAgreementProvFinalizeAccountOptions(coaRows) {
+  return (coaRows || [])
+    .map(normalizePartyCoaOption)
+    .filter(isTenantReceiptCoaOption)
+    .map((option) => ({
+      value: formatAccountLabel(option),
+      label: getPartyCoaDropdownLabel(option),
+      id: option.id,
+    }))
+    .filter((option) => option.value)
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}
+
+/** Ensure the tenant-bound control account is present and used as the finalize Account value. */
+function resolveAgreementProvFinalizeAccountBinding(contractRow, tenants, coaRows) {
+  const coaOptions = (coaRows || []).map(normalizePartyCoaOption);
+  const accountOptions = buildAgreementProvFinalizeAccountOptions(coaRows);
+  const defaultAccHead = resolveAgreementProvTenantAccHead(contractRow, tenants, coaRows);
+  if (!defaultAccHead) {
+    return { accountOptions, defaultAccHead: "" };
+  }
+
+  const hasDefault = accountOptions.some((option) => option.value === defaultAccHead);
+  if (hasDefault) {
+    return { accountOptions, defaultAccHead };
+  }
+
+  const matched =
+    coaOptions.find((option) => formatAccountLabel(option) === defaultAccHead) || null;
+  return {
+    accountOptions: [
+      {
+        value: defaultAccHead,
+        label: matched ? getPartyCoaDropdownLabel(matched) : defaultAccHead,
+        id: matched?.id ?? defaultAccHead,
+      },
+      ...accountOptions,
+    ],
+    defaultAccHead,
+  };
+}
+
+function withInvoiceScheduleItemWithCode(payload, itemWithCode) {
+  const itemCode = String(itemWithCode || "").trim();
+  if (!itemCode) return payload || {};
+  return {
+    ...(payload || {}),
+    ItemwithCode: itemCode,
+    itemwithCode: itemCode,
+    ItemCode: itemCode,
+    itemCode,
+  };
+}
+
 async function persistFinalizedInvoiceScheduleWithTenantAccHead({
   contractRow,
   contractNo,
@@ -4904,16 +5006,23 @@ async function persistFinalizedInvoiceScheduleWithTenantAccHead({
   scheduleRows,
   tenants,
   coaOptions,
+  itemWithCode = "",
+  accHead = "",
 }) {
-  const accHead = resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions);
+  const resolvedAccHead =
+    String(accHead || "").trim() ||
+    resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions);
   const finalizeFlags = { IsFinalized: true, isFinalized: true };
   const mainPayload = withInvoiceScheduleAccHead(
-    { ...buildFinalizeInvoiceSchedulePayload(contractRow, schRow), ...finalizeFlags },
-    accHead
+    withInvoiceScheduleItemWithCode(
+      { ...buildFinalizeInvoiceSchedulePayload(contractRow, schRow), ...finalizeFlags },
+      itemWithCode
+    ),
+    resolvedAccHead
   );
   await contractApi.updateInvoiceSchedule(contractNo, invoiceNo, mainPayload);
 
-  if (!accHead) return;
+  if (!resolvedAccHead) return;
 
   const invoiceKey = String(invoiceNo || "").trim();
   for (const sub of collectInvoiceScheduleSubNos(scheduleRows, invoiceKey)) {
@@ -4923,12 +5032,153 @@ async function persistFinalizedInvoiceScheduleWithTenantAccHead({
         return pickScheduleSubInvoiceNo(row) === sub;
       }) || schRow;
     const subPayload = withInvoiceScheduleAccHead(
-      { ...buildFinalizeInvoiceSchedulePayload(contractRow, subRow), ...finalizeFlags },
-      accHead
+      withInvoiceScheduleItemWithCode(
+        { ...buildFinalizeInvoiceSchedulePayload(contractRow, subRow), ...finalizeFlags },
+        itemWithCode
+      ),
+      resolvedAccHead
     );
     await contractApi.updateInvoiceScheduleSub(contractNo, invoiceKey, sub, subPayload);
   }
 }
+
+function AgreementProvFinalizeOptionsDialog({
+  open,
+  onClose,
+  onConfirm,
+  busy,
+  defaultAccHead,
+  accountOptions,
+  productOptions,
+  loadingOptions,
+}) {
+  const [itemWithCode, setItemWithCode] = useState("");
+  const [accHead, setAccHead] = useState("");
+  const [itemError, setItemError] = useState("");
+  const [accountError, setAccountError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setItemWithCode("");
+    setAccHead(String(defaultAccHead || "").trim());
+    setItemError("");
+    setAccountError("");
+  }, [open, defaultAccHead]);
+
+  const handleConfirm = () => {
+    const nextItem = String(itemWithCode || "").trim();
+    const nextAccount = String(accHead || "").trim();
+    const nextItemError = nextItem ? "" : "Select Item with Code.";
+    const nextAccountError = nextAccount
+      ? ""
+      : "Tenant control account is required. Bind a control account on the tenant.";
+    setItemError(nextItemError);
+    setAccountError(nextAccountError);
+    if (nextItemError || nextAccountError) return;
+    onConfirm({ itemWithCode: nextItem, accHead: nextAccount });
+  };
+
+  return (
+    <Dialog open={open} onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
+      <DialogTitle>
+        <MDTypography variant="h6" fontWeight="bold">
+          Select Item with Code and Account
+        </MDTypography>
+      </DialogTitle>
+      <DialogContent dividers>
+        {loadingOptions ? (
+          <MDBox display="flex" justifyContent="center" py={4}>
+            <CurrencyLoading size={40} />
+          </MDBox>
+        ) : (
+          <MDBox display="flex" flexDirection="column" gap={2} pt={0.5}>
+            <FormControl fullWidth size="small" error={Boolean(itemError)}>
+              <InputLabel id="agreement-prov-finalize-item-label">Item with Code</InputLabel>
+              <SearchableSelect
+                labelId="agreement-prov-finalize-item-label"
+                label="Item with Code"
+                value={itemWithCode}
+                onChange={(e) => {
+                  setItemWithCode(e.target.value);
+                  if (itemError) setItemError("");
+                }}
+                disabled={busy}
+              >
+                <MenuItem value="">
+                  <em>Select item</em>
+                </MenuItem>
+                {(productOptions || []).map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </SearchableSelect>
+              {itemError ? <FormHelperText>{itemError}</FormHelperText> : null}
+            </FormControl>
+            <FormControl fullWidth size="small" error={Boolean(accountError)}>
+              <InputLabel id="agreement-prov-finalize-account-label">Account</InputLabel>
+              <SearchableSelect
+                labelId="agreement-prov-finalize-account-label"
+                label="Account"
+                value={accHead}
+                onChange={() => {}}
+                disabled
+              >
+                {!accHead ? (
+                  <MenuItem value="">
+                    <em>No tenant control account</em>
+                  </MenuItem>
+                ) : null}
+                {(accountOptions || []).map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </SearchableSelect>
+              {accountError ? (
+                <FormHelperText>{accountError}</FormHelperText>
+              ) : (
+                <FormHelperText>Bound to the tenant control account (read-only)</FormHelperText>
+              )}
+            </FormControl>
+          </MDBox>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <MDButton variant="outlined" color="secondary" onClick={onClose} disabled={busy}>
+          Cancel
+        </MDButton>
+        <MDButton
+          variant="gradient"
+          color="info"
+          onClick={handleConfirm}
+          disabled={busy || loadingOptions}
+        >
+          Finalize
+        </MDButton>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+AgreementProvFinalizeOptionsDialog.propTypes = {
+  open: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onConfirm: PropTypes.func.isRequired,
+  busy: PropTypes.bool,
+  defaultAccHead: PropTypes.string,
+  accountOptions: PropTypes.arrayOf(PropTypes.object),
+  productOptions: PropTypes.arrayOf(PropTypes.object),
+  loadingOptions: PropTypes.bool,
+};
+
+AgreementProvFinalizeOptionsDialog.defaultProps = {
+  busy: false,
+  defaultAccHead: "",
+  accountOptions: [],
+  productOptions: [],
+  loadingOptions: false,
+};
 
 function formatSchGridNumber(value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -5838,6 +6088,11 @@ export default function Contracts() {
   const [agreementProvEditSaving, setAgreementProvEditSaving] = useState(false);
   const [invoiceFinalizeSearch, setInvoiceFinalizeSearch] = useState("");
   const [invoiceFinalizeLockDate, setInvoiceFinalizeLockDate] = useState("");
+  const [finalizeOptionsOpen, setFinalizeOptionsOpen] = useState(false);
+  const [finalizeOptionsLoading, setFinalizeOptionsLoading] = useState(false);
+  const [finalizeProductOptions, setFinalizeProductOptions] = useState([]);
+  const [finalizeAccountOptions, setFinalizeAccountOptions] = useState([]);
+  const [finalizeDefaultAccHead, setFinalizeDefaultAccHead] = useState("");
   const asOfDateInputRef = useRef(null);
 
   const openDatePicker = (ref) => {
@@ -6577,6 +6832,10 @@ export default function Contracts() {
     setAgreementProvEditDialogOpen(false);
     setAgreementProvEditRowData(null);
     setInvoiceFinalizeSearch("");
+    setFinalizeOptionsOpen(false);
+    setFinalizeProductOptions([]);
+    setFinalizeAccountOptions([]);
+    setFinalizeDefaultAccHead("");
   }, [invoiceFinalizeBusy, agreementProvEditSaving]);
 
   const invoiceFinalizePendingRows = useMemo(
@@ -6603,6 +6862,78 @@ export default function Contracts() {
     [invoiceScheduleRows]
   );
 
+  const executeFinalizeSelectedInvoices = useCallback(
+    async ({ itemWithCode = "", accHead = "" } = {}) => {
+      if (!invoiceFinalizeContractRow) return;
+      const selected = invoiceScheduleRows.filter(
+        (r) =>
+          invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
+          !pickScheduleRowIsFinalize(r) &&
+          (invoiceFinalizeAllowedPendingKeys.size === 0 ||
+            invoiceFinalizeAllowedPendingKeys.has(getContractInvoiceFinalizeRowKey(r)))
+      );
+      if (selected.length === 0) {
+        alert("Selected rows are already finalized, invalid, or out of sequence.");
+        return;
+      }
+      const contractNo = String(
+        invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
+      ).trim();
+      setInvoiceFinalizeBusy(true);
+      try {
+        let coaOptions = [];
+        try {
+          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
+        } catch (coaError) {
+          console.error("Error loading chart of accounts for Acc Head:", coaError);
+        }
+
+        const finalizedInvoiceNos = new Set();
+        for (let i = 0; i < selected.length; i += 1) {
+          const schRow = selected[i];
+          const rowContractNo = String(
+            schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
+          ).trim();
+          const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
+          if (!rowContractNo || !invoiceNo || finalizedInvoiceNos.has(invoiceNo)) continue;
+          finalizedInvoiceNos.add(invoiceNo);
+          await persistFinalizedInvoiceScheduleWithTenantAccHead({
+            contractRow: invoiceFinalizeContractRow,
+            contractNo: rowContractNo,
+            invoiceNo,
+            schRow,
+            scheduleRows: invoiceScheduleRows,
+            tenants,
+            coaOptions,
+            itemWithCode,
+            accHead,
+          });
+        }
+        if (contractNo) {
+          const res = await contractApi.getInvoiceSchedule({ contractNo });
+          setInvoiceScheduleRows(
+            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+          );
+        }
+        setInvoiceFinalizeSelectedKeys(new Set());
+        setInvoiceFinalizeTab("finalized");
+        setFinalizeOptionsOpen(false);
+      } catch (error) {
+        console.error("Error finalizing invoice rows:", error);
+        alert(String(error?.message || "Finalize failed. Please try again."));
+      } finally {
+        setInvoiceFinalizeBusy(false);
+      }
+    },
+    [
+      invoiceFinalizeContractRow,
+      invoiceFinalizeSelectedKeys,
+      invoiceScheduleRows,
+      invoiceFinalizeAllowedPendingKeys,
+      tenants,
+    ]
+  );
+
   const handleFinalizeSelectedInvoices = useCallback(async () => {
     if (!invoiceFinalizeContractRow) return;
     if (invoiceFinalizeSelectedKeys.size === 0) {
@@ -6618,69 +6949,60 @@ export default function Contracts() {
         return;
       }
     }
-    const selected = invoiceScheduleRows.filter(
-      (r) =>
-        invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
-        !pickScheduleRowIsFinalize(r) &&
-        (invoiceFinalizeAllowedPendingKeys.size === 0 ||
-          invoiceFinalizeAllowedPendingKeys.has(getContractInvoiceFinalizeRowKey(r)))
-    );
-    if (selected.length === 0) {
-      alert("Selected rows are already finalized, invalid, or out of sequence.");
-      return;
-    }
-    const contractNo = String(
-      invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
-    ).trim();
-    setInvoiceFinalizeBusy(true);
-    try {
-      let coaOptions = [];
-      try {
-        coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
-      } catch (coaError) {
-        console.error("Error loading chart of accounts for Acc Head:", coaError);
-      }
 
-      const finalizedInvoiceNos = new Set();
-      for (let i = 0; i < selected.length; i += 1) {
-        const schRow = selected[i];
-        const rowContractNo = String(
-          schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
-        ).trim();
-        const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
-        if (!rowContractNo || !invoiceNo || finalizedInvoiceNos.has(invoiceNo)) continue;
-        finalizedInvoiceNos.add(invoiceNo);
-        await persistFinalizedInvoiceScheduleWithTenantAccHead({
-          contractRow: invoiceFinalizeContractRow,
-          contractNo: rowContractNo,
-          invoiceNo,
-          schRow,
-          scheduleRows: invoiceScheduleRows,
-          tenants,
-          coaOptions,
-        });
+    setFinalizeOptionsOpen(true);
+    setFinalizeOptionsLoading(true);
+    setFinalizeProductOptions([]);
+    setFinalizeAccountOptions([]);
+    setFinalizeDefaultAccHead("");
+
+    try {
+      const [productOptions, coaResponse] = await Promise.all([
+        fetchAgreementProvFinalizeProductOptions(),
+        chartOfAccountsApi.getAll().catch(() => null),
+      ]);
+      const coaOptions = chartOfAccountsApi.unwrapList(coaResponse);
+      const { accountOptions, defaultAccHead } = resolveAgreementProvFinalizeAccountBinding(
+        invoiceFinalizeContractRow,
+        tenants,
+        coaOptions
+      );
+      setFinalizeProductOptions(productOptions);
+      setFinalizeAccountOptions(accountOptions);
+      setFinalizeDefaultAccHead(defaultAccHead);
+      if (productOptions.length === 0) {
+        alert("No active services or goods found. Add products before finalizing.");
       }
-      if (contractNo) {
-        const res = await contractApi.getInvoiceSchedule({ contractNo });
-        setInvoiceScheduleRows(
-          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+      if (!defaultAccHead) {
+        alert(
+          "No control account is linked to this tenant. Bind a control account on the tenant before finalizing."
         );
       }
-      setInvoiceFinalizeSelectedKeys(new Set());
-      setInvoiceFinalizeTab("finalized");
     } catch (error) {
-      console.error("Error finalizing invoice rows:", error);
-      alert(String(error?.message || "Finalize failed. Please try again."));
+      console.error("Error loading finalize options:", error);
+      alert("Failed to load Item with Code and Account options. Please try again.");
+      setFinalizeOptionsOpen(false);
     } finally {
-      setInvoiceFinalizeBusy(false);
+      setFinalizeOptionsLoading(false);
     }
   }, [
     invoiceFinalizeContractRow,
     invoiceFinalizeSelectedKeys,
-    invoiceScheduleRows,
     invoiceFinalizeAllowedPendingKeys,
     tenants,
   ]);
+
+  const handleConfirmFinalizeOptions = useCallback(
+    async (selection) => {
+      await executeFinalizeSelectedInvoices(selection);
+    },
+    [executeFinalizeSelectedInvoices]
+  );
+
+  const handleCloseFinalizeOptionsDialog = useCallback(() => {
+    if (invoiceFinalizeBusy) return;
+    setFinalizeOptionsOpen(false);
+  }, [invoiceFinalizeBusy]);
 
   const handleCloseAgreementProvCreateDialog = useCallback(() => {
     if (invoiceFinalizeBusy) return;
@@ -7009,6 +7331,30 @@ export default function Contracts() {
       handleCloseForm();
     } catch (error) {
       console.error("Error saving contract:", error);
+      const rawErrorText = [
+        error?.response?.data,
+        error?.response?.data?.message,
+        error?.response?.data?.title,
+        error?.message,
+      ]
+        .map((part) => (typeof part === "string" ? part : ""))
+        .join(" ")
+        .trim();
+      if (/Cannot insert duplicate key in obj(?:ect)?/i.test(rawErrorText)) {
+        alert(
+          "Cannot insert Duplicate Contract No. Delete the existing non-deleted contract first, or refresh and retry if it was already deleted."
+        );
+        return;
+      }
+      if (error?.response?.status === 409) {
+        const conflictMsg =
+          typeof error?.response?.data === "string"
+            ? error.response.data
+            : error?.response?.data?.message ||
+              "Contract No already exists. Delete the existing contract first to reuse it.";
+        alert(conflictMsg);
+        return;
+      }
       alert("Error: Contract ID Duplicate or Please try again.");
     }
   };
@@ -7587,7 +7933,6 @@ export default function Contracts() {
 
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "72px", showInTable: true },
-    { Header: "S.No", accessor: "id", align: "center", width: "56px", showInTable: true },
     { Header: "Contract No", accessor: "contractNo", align: "left", showInTable: true },
     // Backend now sends names directly (no mapping)
     { Header: "RAC", accessor: "cmdName", align: "left", width: "72px", showInTable: true },
@@ -9868,7 +10213,19 @@ export default function Contracts() {
         // eslint-disable-next-line react/prop-types
         const data = row?.original || {};
         const contractId = getContractGridRowId(data);
-        if (contractId == null || !isContractApprovalPending(data)) return "";
+        if (contractId == null) return "";
+        const isPending = isContractApprovalPending(data);
+        if (!isPending) {
+          return (
+            <Checkbox
+              size="small"
+              checked
+              disabled
+              inputProps={{ "aria-label": "Approved by AHQ" }}
+              sx={AHQ_APPROVAL_CHECKBOX_SX}
+            />
+          );
+        }
         return (
           <Checkbox
             size="small"
@@ -10905,6 +11262,7 @@ export default function Contracts() {
             rows: computedRows,
           }}
           isSorted={false}
+          autoResetFilters={false}
           stickyToolbarAndHeader
           entriesPerPage={{
             defaultValue: GRID_DISPLAY_DEFAULT_PAGE_SIZE,
@@ -11458,6 +11816,17 @@ export default function Contracts() {
           )}
         </DialogActions>
       </Dialog>
+
+      <AgreementProvFinalizeOptionsDialog
+        open={finalizeOptionsOpen}
+        onClose={handleCloseFinalizeOptionsDialog}
+        onConfirm={handleConfirmFinalizeOptions}
+        busy={invoiceFinalizeBusy}
+        defaultAccHead={finalizeDefaultAccHead}
+        accountOptions={finalizeAccountOptions}
+        productOptions={finalizeProductOptions}
+        loadingOptions={finalizeOptionsLoading}
+      />
 
       <AgreementProvInvoiceEditDialog
         open={agreementProvCreateDialogOpen}

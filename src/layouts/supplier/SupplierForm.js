@@ -152,7 +152,9 @@ export default function SupplierForm({
     const fetchDealerOptions = async () => {
       try {
         const response = await dealerApi.listActiveDealers();
-        const options = (dealerApi.unwrapList(response) || []).map(normalizeDealerFormOption);
+        const options = (dealerApi.unwrapList(response) || []).map((row) =>
+          normalizeDealerFormOption(row)
+        );
         if (!cancelled) setDealerOptions(options);
       } catch (error) {
         console.error("Error fetching dealer options:", error);
@@ -375,40 +377,34 @@ export default function SupplierForm({
         <DialogContent dividers>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={4}>
-              {isEditMode ? (
-                <TextField
-                  fullWidth
-                  label="Code"
-                  value={form.code || buildSupplierCode(form.codeAlpha, form.codeNumeric)}
-                  size="small"
-                  sx={textFieldSx}
-                  InputProps={{ readOnly: true }}
-                />
-              ) : (
-                <Autocomplete
-                  size="small"
-                  fullWidth
-                  options={selectableDealerOptions}
-                  getOptionLabel={getDealerCodeOptionLabel}
-                  isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                  value={selectedDealer || null}
-                  onChange={handleDealerCodeChange}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Code"
-                      required
-                      error={codeHasError}
-                      helperText={
-                        errors.dealerId ||
-                        errors.code ||
-                        "Select an active dealer to auto-fill details"
-                      }
-                      sx={textFieldSx}
-                    />
-                  )}
-                />
-              )}
+              <Autocomplete
+                size="small"
+                fullWidth
+                options={selectableDealerOptions}
+                getOptionLabel={getDealerCodeOptionLabel}
+                isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                value={selectedDealer || null}
+                onChange={handleDealerCodeChange}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.id}>
+                    {getDealerCodeOptionLabel(option)}
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Code"
+                    required
+                    error={codeHasError}
+                    helperText={
+                      errors.dealerId ||
+                      errors.code ||
+                      "Select an active dealer (Code — Rank — Name) to auto-fill details"
+                    }
+                    sx={textFieldSx}
+                  />
+                )}
+              />
             </Grid>
             <Grid item xs={12} sm={4} md={3}>
               <TextField

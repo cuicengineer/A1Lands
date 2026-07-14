@@ -168,5 +168,8 @@ export function flattenCashAndBankForGrid(row, index, coaLabelById, bankLabelByI
     balance: 0,
     parentCashAndBankId,
     childCount,
+    isReferencedByInterAccTransfer: Boolean(
+      row?.isReferencedByInterAccTransfer ?? row?.IsReferencedByInterAccTransfer
+    ),
   };
 }

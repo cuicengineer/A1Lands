@@ -9,27 +9,27 @@ function unwrapList(response) {
 }
 
 function listDealers() {
-  return api.request("GET", "/api/Dealers");
+  return api.request("GET", "/api/Parties");
 }
 
 function listActiveDealers() {
-  return api.request("GET", "/api/Dealers/active");
+  return api.request("GET", "/api/Parties/active");
 }
 
 function createDealer(data) {
-  return api.create("Dealers", data);
+  return api.create("Parties", data);
 }
 
 function updateDealer(id, data) {
-  return api.update("Dealers", id, data);
+  return api.update("Parties", id, data);
 }
 
 function removeDealer(id) {
-  return api.remove("Dealers", id);
+  return api.remove("Parties", id);
 }
 
 function bulkUpdateStatus(ids, status) {
-  return api.request("PATCH", "/api/Dealers/bulkStatus", {
+  return api.request("PATCH", "/api/Parties/bulkStatus", {
     Ids: ids,
     ids,
     Status: status,

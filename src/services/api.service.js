@@ -346,49 +346,87 @@ function isOperatorUser() {
   return false;
 }
 
-const MENU_ROUTE_EXACT = [
+const MENU_ROUTE_MAPPINGS = [
+  { menuName: "KPI Overview", prefix: "/dashboard/kpi-overview" },
   { menuName: "Agreement Invoice", prefix: "/contracts/agreement-prov-invoice" },
   { menuName: "Sales Returns", prefix: "/income-agreements/sales-returns" },
   { menuName: "Purchase Returns", prefix: "/purchases/purchase-returns" },
   { menuName: "Collections", prefix: "/income-agreements/collections" },
   { menuName: "Share Distribution", prefix: "/contracts/share-distribution" },
-];
-
-const MENU_ROUTE_PREFIXES = [
-  { menuName: "Dashboard", prefix: "/dashboard" },
-  { menuName: "Configuration", prefix: "/configuration" },
-  { menuName: "Income Agreements", prefix: "/contracts/agreement-prov-invoice" },
+  { menuName: "Rental Properties", prefix: "/contracts/rental-properties" },
+  { menuName: "Revenue Rates", prefix: "/contracts/revenue-rates" },
+  { menuName: "Property Grouping", prefix: "/contracts/property-grouping" },
+  { menuName: "Payments", prefix: "/payments" },
+  { menuName: "Receipts", prefix: "/receipts" },
+  { menuName: "Cash & Bank", prefix: "/cash-and-bank" },
+  { menuName: "Transfer Entry", prefix: "/inter-acc-transfer" },
+  { menuName: "Journal Entry", prefix: "/journal-entry" },
+  { menuName: "Services", prefix: "/products/services" },
+  { menuName: "Goods", prefix: "/products/goods" },
+  { menuName: "Supplier", prefix: "/supplier" },
+  { menuName: "Customer", prefix: "/customer" },
+  { menuName: "Inst Bank Accts", prefix: "/accounts/bank-accounts" },
+  { menuName: "Exchange Rate", prefix: "/accounts/exchange-rate" },
+  { menuName: "User Roles", prefix: "/configuration/user-role" },
+  { menuName: "User Mgmt", prefix: "/configuration/user-mgmt" },
+  { menuName: "Class", prefix: "/configuration/class" },
+  { menuName: "Nature", prefix: "/configuration/nature" },
+  { menuName: "Property Type", prefix: "/configuration/property-type" },
+  { menuName: "Banks List", prefix: "/configuration/banks-list" },
+  { menuName: "Parties", prefix: "/configuration/dealers" },
+  { menuName: "Currencies", prefix: "/configuration/currencies" },
+  { menuName: "Rental Value Rate", prefix: "/configuration/rental-value-rate" },
+  { menuName: "Govt Share Rate", prefix: "/configuration/govt-share-rate" },
+  { menuName: "Sharing Formula", prefix: "/configuration/sharing-formula" },
+  { menuName: "Tenants", prefix: "/configuration/tenants" },
+  { menuName: "Lock Date", prefix: "/configuration/lock-date" },
+  { menuName: "Accounting Sys.", prefix: "/configuration/accounting-sys" },
+  { menuName: "Chart of Accounts", prefix: "/configuration/chart-of-accounts" },
+  { menuName: "Notice", prefix: "/configuration/notice" },
+  { menuName: "Agreements", prefix: "/contracts" },
+  { menuName: "KPI", prefix: "/dashboard" },
   { menuName: "Income Agreements", prefix: "/income-agreements" },
-  { menuName: "Sales Agreements", prefix: "/contracts" },
-  { menuName: "Accounts", prefix: "/accounts" },
-  { menuName: "Cash & Fund Flow", prefix: "/payments" },
-  { menuName: "Cash & Fund Flow", prefix: "/receipts" },
-  { menuName: "Cash & Fund Flow", prefix: "/cash-and-bank" },
-  { menuName: "Cash & Fund Flow", prefix: "/inter-acc-transfer" },
-  { menuName: "Purchases", prefix: "/supplier" },
-  { menuName: "Purchases", prefix: "/purchases" },
-  { menuName: "Sales", prefix: "/customer" },
   { menuName: "Products", prefix: "/products" },
-];
+  { menuName: "Purchases", prefix: "/purchases" },
+  { menuName: "Configuration", prefix: "/configuration" },
+  { menuName: "Guidelines", prefix: "/guidelines" },
+  { menuName: "Accounts", prefix: "/accounts" },
+].sort((a, b) => b.prefix.length - a.prefix.length);
+
+const PERMISSION_MENU_LEGACY_ALIASES = {
+  "sales agreements": ["contracts mgmt"],
+  "contracts mgmt": ["sales agreements"],
+  agreements: ["contracts"],
+  contracts: ["agreements"],
+  accounts: ["account"],
+  account: ["accounts"],
+  supplier: ["purchases"],
+  customer: ["sales"],
+  parties: ["dealers"],
+};
+
+const EXPLICIT_PARENT_MENU_NAMES = new Set([
+  "dashboard",
+  "cash & fund flow",
+  "cash and fund flow",
+  "sales agreements",
+  "contracts mgmt",
+  "income agreements",
+  "products",
+  "purchases",
+  "sales",
+  "configuration",
+  "guidelines",
+  "accounts",
+  "account",
+]);
 
 /** Menus that must have an Assign Rights row; otherwise navbar, routes, and actions stay hidden. */
 function menuRequiresExplicitPermission(menuName) {
   const normalized = normalizeMenuName(menuName);
-  return (
-    normalized === "accounts" ||
-    normalized === "account" ||
-    normalized === "cash & fund flow" ||
-    normalized === "cash and fund flow" ||
-    normalized === "purchases" ||
-    normalized === "sales" ||
-    normalized === "payments" ||
-    normalized === "receipts" ||
-    normalized === "supplier" ||
-    normalized === "customer" ||
-    normalized === "products" ||
-    normalized === "services" ||
-    normalized === "goods"
-  );
+  if (!normalized) return false;
+  if (EXPLICIT_PARENT_MENU_NAMES.has(normalized)) return true;
+  return MENU_ROUTE_MAPPINGS.some((entry) => normalizeMenuName(entry.menuName) === normalized);
 }
 
 function toBooleanFlag(value) {
@@ -496,9 +534,13 @@ function canAccessPrivilegedConfigRoute(pathnameArg) {
     return isAhqOrSuperuserUser() || canViewMenu("Configuration");
   }
   if (cleaned.startsWith("/configuration/user-mgmt")) {
-    return isAhqOrSuperuserUser();
+    return canAccessUserMgmt();
   }
   return true;
+}
+
+function isUserMgmtMenu(menuName) {
+  return normalizeMenuName(menuName) === "user mgmt";
 }
 
 function getPermissionByMenuName(menuName) {
@@ -510,51 +552,16 @@ function getPermissionByMenuName(menuName) {
       const name = String(item?.menuName ?? item?.MenuName ?? "").trim();
       return normalizeMenuName(name) === n;
     });
+
   const direct = find(normalized);
   if (direct) return direct;
-  if (normalized === "accounts" || normalized === "account") {
-    return find("accounts") || find("account");
+
+  const legacyAliases = PERMISSION_MENU_LEGACY_ALIASES[normalized] || [];
+  for (const alias of legacyAliases) {
+    const match = find(alias);
+    if (match) return match;
   }
-  if (normalized === "sales agreements" || normalized === "contracts mgmt") {
-    return find("sales agreements") || find("contracts mgmt");
-  }
-  if (normalized === "agreements") {
-    return find("agreements") || find("contracts") || find("sales agreements");
-  }
-  if (normalized === "income agreements") {
-    return find("income agreements");
-  }
-  if (normalized === "agreement invoice") {
-    return find("agreement invoice") || find("income agreements");
-  }
-  if (normalized === "sales returns") {
-    return find("sales returns") || find("income agreements");
-  }
-  if (normalized === "collections") {
-    return find("collections") || find("income agreements");
-  }
-  if (normalized === "share distributions") {
-    return find("share distributions") || find("income agreements");
-  }
-  if (normalized === "cash & fund flow" || normalized === "cash and fund flow") {
-    return (
-      find("cash & fund flow") || find("cash and fund flow") || find("payments") || find("receipts")
-    );
-  }
-  if (normalized === "payments" || normalized === "receipts") {
-    return (
-      find("cash & fund flow") || find("cash and fund flow") || find("payments") || find("receipts")
-    );
-  }
-  if (normalized === "purchases" || normalized === "supplier") {
-    return find("purchases") || find("supplier");
-  }
-  if (normalized === "sales" || normalized === "customer") {
-    return find("sales") || find("customer");
-  }
-  if (normalized === "products" || normalized === "services" || normalized === "goods") {
-    return find("products") || find("services") || find("goods");
-  }
+
   return null;
 }
 
@@ -568,30 +575,86 @@ function getCurrentMainMenuName(pathnameArg) {
     .trim()
     .toLowerCase();
 
-  const exact = MENU_ROUTE_EXACT.find(({ prefix }) => {
+  const matched = MENU_ROUTE_MAPPINGS.find(({ prefix }) => {
     const normalizedPrefix = String(prefix || "")
       .trim()
       .toLowerCase();
     return cleaned === normalizedPrefix || cleaned.startsWith(`${normalizedPrefix}/`);
   });
-  if (exact) return exact.menuName;
-
-  const matched = MENU_ROUTE_PREFIXES.find(({ prefix }) => cleaned.startsWith(prefix));
   return matched?.menuName || "";
 }
 
 function canViewMenu(menuName) {
   if (isSuperuserUser()) return true;
+  if (isUserMgmtMenu(menuName)) return canAccessUserMgmt();
   const p = getPermissionByMenuName(menuName);
+  // Notice: visible to superuser / AHQ Category Supervisor (editors).
+  if (normalizeMenuName(menuName) === "notice") {
+    if (isSuperuserOrAhqSupervisorUser()) return true;
+    if (!p) return false;
+    return toBooleanFlag(p?.canView ?? p?.CanView ?? p?.view ?? p?.View);
+  }
   if (!p) {
+    // Guidelines is viewable by default; create/edit is gated separately.
+    if (normalizeMenuName(menuName) === "guidelines") return true;
     if (menuRequiresExplicitPermission(menuName)) return false;
     return true;
   }
   return toBooleanFlag(p?.canView ?? p?.CanView ?? p?.view ?? p?.View);
 }
 
+function hasAssignedUserMgmtPermission(action = "view") {
+  const p = getPermissionByMenuName("User Mgmt");
+  if (!p) return false;
+  const fieldMap = {
+    view: ["canView", "CanView", "view", "View"],
+    create: ["canCreate", "CanCreate", "create", "Create"],
+    edit: ["canEdit", "CanEdit", "edit", "Edit"],
+    delete: ["canDelete", "CanDelete", "delete", "Delete"],
+  };
+  const fields = fieldMap[action] || fieldMap.view;
+  for (const field of fields) {
+    if (field in p) return toBooleanFlag(p[field]);
+  }
+  return false;
+}
+
+function isAhqLevelUser() {
+  if (Number(getLoggedInUserLevelId()) === 1) return true;
+  if (isAhqOrSuperuserUser() && !isSuperuserUser()) return true;
+  try {
+    const obj = readAuthSessionObject();
+    if (!obj) return false;
+    const parts = [
+      obj?.levelName,
+      obj?.LevelName,
+      obj?.level,
+      obj?.Level,
+      obj?.cmdName,
+      obj?.CmdName,
+      obj?.commandName,
+      obj?.CommandName,
+      obj?.rac,
+      obj?.Rac,
+      obj?.racName,
+      obj?.RacName,
+      obj?.baseName,
+      obj?.BaseName,
+      obj?.base,
+      obj?.Base,
+    ];
+    return parts.some((value) => normalizeAccessValue(value) === "ahq");
+  } catch (e) {
+    return false;
+  }
+}
+
 function canCreateInMenu(menuName) {
   if (isSuperuserUser()) return true;
+  if (isUserMgmtMenu(menuName)) {
+    if (canAccessUserMgmtByPrivilege()) return true;
+    return hasAssignedUserMgmtPermission("create");
+  }
   const p = getPermissionByMenuName(menuName);
   if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canCreate ?? p?.CanCreate ?? p?.create ?? p?.Create);
@@ -599,6 +662,10 @@ function canCreateInMenu(menuName) {
 
 function canEditInMenu(menuName) {
   if (isSuperuserUser()) return true;
+  if (isUserMgmtMenu(menuName)) {
+    if (canAccessUserMgmtByPrivilege()) return true;
+    return hasAssignedUserMgmtPermission("edit");
+  }
   const p = getPermissionByMenuName(menuName);
   if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canEdit ?? p?.CanEdit ?? p?.edit ?? p?.Edit);
@@ -606,6 +673,10 @@ function canEditInMenu(menuName) {
 
 function canDeleteInMenu(menuName) {
   if (isSuperuserUser()) return true;
+  if (isUserMgmtMenu(menuName)) {
+    if (canAccessUserMgmtByPrivilege()) return true;
+    return hasAssignedUserMgmtPermission("delete");
+  }
   const p = getPermissionByMenuName(menuName);
   if (!p) return menuRequiresExplicitPermission(menuName) ? false : true;
   return toBooleanFlag(p?.canDelete ?? p?.CanDelete ?? p?.delete ?? p?.Delete);
@@ -753,6 +824,70 @@ function getLoggedInUserBaseId() {
   }
 }
 
+function readAuthSessionObject() {
+  try {
+    const raw = localStorage.getItem("auth");
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Logged-in user's assigned RAC/command id from session, or null if not present. */
+function getLoggedInUserCmdId() {
+  try {
+    const obj = readAuthSessionObject();
+    if (!obj) return null;
+    const v =
+      obj?.cmdId ?? obj?.CmdId ?? obj?.commandId ?? obj?.CommandId ?? obj?.racId ?? obj?.RacId;
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** User level from session: 1 = AHQ, 2 = Command/RAC, 3 = Base. */
+function getLoggedInUserLevelId() {
+  try {
+    const obj = readAuthSessionObject();
+    if (!obj) return null;
+    const v = obj?.levelId ?? obj?.LevelId ?? obj?.levelID ?? obj?.LevelID;
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Superuser, AHQ level, or row/category supervisor may pick any RAC / Base on bank accounts. */
+function canSeeAllBankAccountRacBaseOptions() {
+  if (isSuperuserUser()) return true;
+  if (Number(getLoggedInUserLevelId()) === 1) return true;
+  return loggedInUserHasSupervisorCategory();
+}
+
+/** KPI Overview: superuser, or AHQ level with supervisor category, sees all RAC / Base data. */
+function canSeeAllKpiOverviewData() {
+  if (isSuperuserUser()) return true;
+  if (Number(getLoggedInUserLevelId()) === 1 && loggedInUserHasSupervisorCategory()) return true;
+  return false;
+}
+
+/** User Mgmt: superuser, AHQ supervisor, or explicit Assign Rights on User Mgmt. */
+function canAccessUserMgmtByPrivilege() {
+  if (isSuperuserUser()) return true;
+  return isAhqLevelUser() && loggedInUserHasSupervisorCategory();
+}
+
+function canAccessUserMgmt() {
+  return canAccessUserMgmtByPrivilege() || hasAssignedUserMgmtPermission("view");
+}
+
 // Get user's IP address from session (auth stored in localStorage).
 // No extra API calls — IP is provided by backend at login/refresh and stored in user session.
 function getUserIPAddress() {
@@ -898,13 +1033,29 @@ async function fetchWithAuth(method, path, body, headers = {}, requestOptions = 
       throw new Error("Only a superuser can create, update, or delete roles.");
     }
   } else {
-    if (m === "POST" && !canCreateCurrentMenu()) {
+    const isLoginAccountPath =
+      pathLower.includes("/api/login/verify-password") ||
+      pathLower.includes("/api/login/change-password") ||
+      pathLower === "/api/login/me" ||
+      pathLower.endsWith("/api/login/me");
+    const privilegedWrite =
+      isSuperuserOrAhqSupervisorUser() &&
+      (getCurrentMainMenuName() === "Guidelines" ||
+        pathLower.includes("/api/guidelines") ||
+        getCurrentMainMenuName() === "Notice" ||
+        pathLower.includes("/api/notices"));
+    if (m === "POST" && !canCreateCurrentMenu() && !privilegedWrite && !isLoginAccountPath) {
       throw new Error("You are not allowed to create in this module.");
     }
-    if ((m === "PUT" || m === "PATCH") && !canEditCurrentMenu()) {
+    if (
+      (m === "PUT" || m === "PATCH") &&
+      !canEditCurrentMenu() &&
+      !privilegedWrite &&
+      !isLoginAccountPath
+    ) {
       throw new Error("You are not allowed to edit in this module.");
     }
-    if (m === "DELETE" && !canDeleteCurrentMenu()) {
+    if (m === "DELETE" && !canDeleteCurrentMenu() && !privilegedWrite && !isLoginAccountPath) {
       throw new Error("You are not allowed to delete in this module.");
     }
   }
@@ -1096,6 +1247,7 @@ const api = {
   canEditCurrentMenu,
   canDeleteCurrentMenu,
   canAccessPrivilegedConfigRoute,
+  canAccessUserMgmt,
   isAhqOrSuperuserUser,
   isSuperuserUser,
   getCurrentUserRole,
@@ -1103,9 +1255,14 @@ const api = {
   getLoggedInUsername,
   getUserIPAddress,
   getLoggedInUserBaseId,
+  getLoggedInUserCmdId,
+  getLoggedInUserLevelId,
+  canSeeAllBankAccountRacBaseOptions,
+  canSeeAllKpiOverviewData,
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  loggedInUserHasSupervisorCategory,
   canAddContractAnnotations,
   isSuperuserOrAhqSupervisorUser,
   contractsApprovalActionsBypassUser,
@@ -1121,6 +1278,7 @@ export {
   canEditCurrentMenu,
   canDeleteCurrentMenu,
   canAccessPrivilegedConfigRoute,
+  canAccessUserMgmt,
   isAhqOrSuperuserUser,
   isSuperuserUser,
   getCurrentUserRole,
@@ -1128,9 +1286,14 @@ export {
   getLoggedInUsername,
   getUserIPAddress,
   getLoggedInUserBaseId,
+  getLoggedInUserCmdId,
+  getLoggedInUserLevelId,
+  canSeeAllBankAccountRacBaseOptions,
+  canSeeAllKpiOverviewData,
   isLoggedInUserBaseReadCategory,
   getLoggedInUserCategoryRaw,
   loggedInUserHasCategoryToken,
+  loggedInUserHasSupervisorCategory,
   canAddContractAnnotations,
   isSuperuserOrAhqSupervisorUser,
   contractsApprovalActionsBypassUser,

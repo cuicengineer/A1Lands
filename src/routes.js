@@ -65,6 +65,8 @@ import LockDateConfig from "layouts/configuration/lock-date/lock-date";
 import AccountingSysConfig from "layouts/configuration/accounting-sys/accounting-sys";
 import ChartOfAccounts from "layouts/configuration/chart-of-accounts/chart-of-accounts";
 import IncomeStatement from "layouts/configuration/income-statement/income-statement";
+import Guidelines from "layouts/guidelines/guidelines";
+import NoticeConfig from "layouts/configuration/notice/notice";
 import PropertyGrouping from "layouts/contracts/property-grouping/property-grouping";
 import Contracts from "layouts/contracts";
 import ContractsReport from "layouts/contracts/report";
@@ -87,6 +89,7 @@ import PurchaseReturns from "layouts/purchases/purchase-returns/purchase-returns
 import Customer from "layouts/customer/customer";
 import CashAndBank from "layouts/cash-fund-flow/cash-and-bank/cash-and-bank";
 import InterAccTransfer from "layouts/cash-fund-flow/inter-acc-transfer/inter-acc-transfer";
+import JournalEntry from "layouts/cash-fund-flow/journal-entry/journal-entry";
 import Services from "layouts/products/services/services";
 import Goods from "layouts/products/goods/goods";
 // @mui icons
@@ -137,7 +140,6 @@ const routes = [
         type: "collapse",
         name: "Payments",
         key: "payments",
-        excludeFromAssignRights: true,
         icon: <Icon fontSize="small">payments</Icon>,
         route: "/payments",
         component: <Payments />,
@@ -146,7 +148,6 @@ const routes = [
         type: "collapse",
         name: "Receipts",
         key: "receipts",
-        excludeFromAssignRights: true,
         icon: <Icon fontSize="small">receipt_long</Icon>,
         route: "/receipts",
         component: <Receipts />,
@@ -166,6 +167,14 @@ const routes = [
         icon: <Icon fontSize="small">swap_horiz</Icon>,
         route: "/inter-acc-transfer",
         component: <InterAccTransfer />,
+      },
+      {
+        type: "collapse",
+        name: "Journal Entry",
+        key: "journal-entry",
+        icon: <Icon fontSize="small">menu_book</Icon>,
+        route: "/journal-entry",
+        component: <JournalEntry />,
       },
     ],
   },
@@ -291,6 +300,7 @@ const routes = [
         type: "collapse",
         name: "Supplier",
         key: "supplier",
+        // Rights are assigned on the parent Purchases menu; this alias page stays in the navbar only.
         excludeFromAssignRights: true,
         icon: <Icon fontSize="small">local_shipping</Icon>,
         route: "/supplier",
@@ -316,6 +326,7 @@ const routes = [
         type: "collapse",
         name: "Customer",
         key: "customer",
+        // Rights are assigned on the parent Sales menu; this alias page stays in the navbar only.
         excludeFromAssignRights: true,
         icon: <Icon fontSize="small">people</Icon>,
         route: "/customer",
@@ -407,7 +418,7 @@ const routes = [
       },
       {
         type: "collapse",
-        name: "Dealers",
+        name: "Parties",
         key: "configuration-dealers",
         icon: <Icon fontSize="small">badge</Icon>,
         route: "/configuration/dealers",
@@ -479,6 +490,14 @@ const routes = [
         component: <ChartOfAccounts />,
       },
       {
+        type: "collapse",
+        name: "Notice",
+        key: "configuration-notice",
+        icon: <Icon fontSize="small">campaign</Icon>,
+        route: "/configuration/notice",
+        component: <NoticeConfig />,
+      },
+      {
         key: "configuration-income-statement-redirect",
         route: "/configuration/income-statement",
         component: <IncomeStatement />,
@@ -498,6 +517,14 @@ const routes = [
       //   component: <DataConfig />,
       // },
     ],
+  },
+  {
+    type: "collapse",
+    name: "Guidelines",
+    key: "guidelines",
+    icon: <Icon fontSize="small">menu_book</Icon>,
+    route: "/guidelines",
+    component: <Guidelines />,
   },
   {
     type: "collapse",

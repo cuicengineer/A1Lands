@@ -216,16 +216,22 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
     }
   }, [location.pathname, routes]);
 
+  const isSidenavRouteVisible = (route) => {
+    if (route?.hideFromSidenav) return false;
+    const routePath = route?.route;
+    if (routePath && !canAccessPrivilegedConfigRoute(routePath)) return false;
+    const hasSubmenu = Array.isArray(route?.collapse) && route.collapse.length > 0;
+    if (hasSubmenu) {
+      return route.collapse.some((child) => isSidenavRouteVisible(child));
+    }
+    if (route?.name) return canViewMenu(route.name);
+    return true;
+  };
+
   // Render routes recursively to support nested collapse items
   const renderNestedRoutes = (allRoutes) =>
     allRoutes
-      .filter((route) => {
-        if (route?.hideFromSidenav) return false;
-        const routePath = route?.route;
-        if (routePath && !canAccessPrivilegedConfigRoute(routePath)) return false;
-        if (route?.name) return canViewMenu(route.name);
-        return true;
-      })
+      .filter((route) => isSidenavRouteVisible(route))
       .map((route) => {
         const { type, name, icon, title, noCollapse, key, href, route: path, collapse } = route;
         const defaultIcon = <Icon fontSize="small">chevron_right</Icon>;
@@ -511,7 +517,7 @@ function Sidenav({ color, brand, brandName, routes, ...rest }) {
         >
           <List sx={{ py: 0, minWidth: 0, maxWidth: "100%" }}>
             {renderNestedRoutes(
-              routes.filter((route) => route?.type !== "collapse" || canViewMenu(route?.name))
+              routes.filter((route) => route?.type !== "collapse" || isSidenavRouteVisible(route))
             )}
           </List>
         </MDBox>

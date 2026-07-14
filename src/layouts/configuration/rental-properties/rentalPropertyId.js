@@ -25,7 +25,7 @@ export function formatPropertyNumber(value) {
 }
 
 export function getBasePrefix(baseRow) {
-  return pickField(baseRow, "name", "Name").toUpperCase();
+  return pickField(baseRow, "code", "Code", "name", "Name").toUpperCase();
 }
 
 export function getRacPrefix(commandRow) {

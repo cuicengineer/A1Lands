@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import PageLayout from "examples/LayoutContainers/PageLayout";
 import api, { notifyAuthSessionChanged, canViewMenu } from "services/api.service";
+import { markLoginNoticePending } from "components/LoginNoticeAlert";
 
 import "./login-overrides.css";
 
@@ -225,6 +226,7 @@ function A1Login() {
       } catch (storageErr) {
         // ignore
       }
+      markLoginNoticePending();
       notifyAuthSessionChanged();
 
       const canView = (perm) =>

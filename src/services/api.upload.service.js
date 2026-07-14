@@ -91,8 +91,95 @@ function getFileIdFromObject(file) {
 }
 
 /**
+ * Fetch an uploaded file as a Blob (by ID or path).
+ * @param {object|string|number} fileOrId - Attachment object or file ID
+ * @returns {Promise<{ blob: Blob, fileName: string }>}
+ */
+async function fetchFileBlob(fileOrId, suggestedFileName) {
+  const file = fileOrId && typeof fileOrId === "object" ? fileOrId : { id: fileOrId };
+  const fileId = getFileIdFromObject(file);
+  let res;
+  if (fileId != null && String(fileId).trim() !== "") {
+    const id = String(fileId).trim();
+    const pathUrl = `/api/Upload/Download/${encodeURIComponent(id)}`;
+    const queryFileIdUrl = `/api/Upload/Download?fileId=${encodeURIComponent(id)}`;
+    const queryIdUrl = `/api/Upload/Download?id=${encodeURIComponent(id)}`;
+    try {
+      res = await api.requestRaw("GET", pathUrl);
+    } catch (e1) {
+      try {
+        res = await api.requestRaw("GET", queryFileIdUrl);
+      } catch (e2) {
+        res = await api.requestRaw("GET", queryIdUrl);
+      }
+    }
+  } else {
+    const path =
+      file?.Path ||
+      file?.path ||
+      file?.filePath ||
+      file?.downloadUrl ||
+      file?.fileUrl ||
+      file?.url ||
+      "";
+    if (!path || typeof path !== "string") {
+      throw new Error("File ID or file path is required.");
+    }
+    const trimmed = path.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      const remote = await fetch(trimmed);
+      if (!remote.ok) throw new Error(`HTTP ${remote.status}`);
+      const blob = await remote.blob();
+      return {
+        blob,
+        fileName: suggestedFileName || file?.fileName || file?.FileName || "download",
+      };
+    }
+    res = await api.requestRaw("GET", `/api/Upload/Download?path=${encodeURIComponent(trimmed)}`);
+  }
+  const blob = await res.blob();
+  return {
+    blob,
+    fileName: suggestedFileName || file?.fileName || file?.FileName || "download",
+  };
+}
+
+function isPdfFileName(fileName) {
+  return /\.pdf$/i.test(String(fileName || "").trim());
+}
+
+function triggerBlobDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || "download";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Open a file in a new browser tab (PDFs open inline). Use downloadFile to force download.
+ */
+async function openFile(file, suggestedFileName) {
+  const { blob, fileName } = await fetchFileBlob(file, suggestedFileName);
+  const treatAsPdf = isPdfFileName(fileName) || String(blob.type || "").includes("pdf");
+  const viewBlob =
+    treatAsPdf && blob.type !== "application/pdf"
+      ? new Blob([blob], { type: "application/pdf" })
+      : blob;
+  const url = URL.createObjectURL(viewBlob);
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    URL.revokeObjectURL(url);
+    throw new Error("Popup blocked. Allow popups to view the file.");
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
  * Download a file by file ID (backend requires a valid file ID).
- * Tries path-style URL first (same pattern as Delete: /api/Upload/{id}), then query param.
  * @param {string|number} fileId - The attachment/file ID from the server
  * @param {string} suggestedFileName - Suggested filename for the download
  */
@@ -101,29 +188,8 @@ async function downloadFileById(fileId, suggestedFileName) {
   if (!id) {
     throw new Error("Valid file ID is required.");
   }
-  // Backend requires a valid file ID. Try path-style then query (?fileId= then ?id=).
-  const pathUrl = `/api/Upload/Download/${encodeURIComponent(id)}`;
-  const queryFileIdUrl = `/api/Upload/Download?fileId=${encodeURIComponent(id)}`;
-  const queryIdUrl = `/api/Upload/Download?id=${encodeURIComponent(id)}`;
-  let res;
-  try {
-    res = await api.requestRaw("GET", pathUrl);
-  } catch (e1) {
-    try {
-      res = await api.requestRaw("GET", queryFileIdUrl);
-    } catch (e2) {
-      res = await api.requestRaw("GET", queryIdUrl);
-    }
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = suggestedFileName || "download";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const { blob, fileName } = await fetchFileBlob({ id }, suggestedFileName);
+  triggerBlobDownload(blob, fileName || "download");
 }
 
 /**
@@ -132,37 +198,8 @@ async function downloadFileById(fileId, suggestedFileName) {
  * @param {string} suggestedFileName - Suggested filename for the download
  */
 async function downloadFile(file, suggestedFileName) {
-  const fileId = getFileIdFromObject(file);
-  if (fileId != null && String(fileId).trim() !== "") {
-    return downloadFileById(fileId, suggestedFileName || file?.fileName || "download");
-  }
-  const path =
-    file?.Path ||
-    file?.path ||
-    file?.filePath ||
-    file?.downloadUrl ||
-    file?.fileUrl ||
-    file?.url ||
-    "";
-  if (!path || typeof path !== "string") {
-    throw new Error("File ID or file path is required for download.");
-  }
-  const trimmed = path.trim();
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    window.open(trimmed, "_blank", "noopener,noreferrer");
-    return;
-  }
-  const encodedPath = encodeURIComponent(trimmed);
-  const res = await api.requestRaw("GET", `/api/Upload/Download?path=${encodedPath}`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = suggestedFileName || file?.fileName || "download";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const { blob, fileName } = await fetchFileBlob(file, suggestedFileName);
+  triggerBlobDownload(blob, fileName || "download");
 }
 
 const uploadApi = {
@@ -171,6 +208,8 @@ const uploadApi = {
   deleteUploadedFile,
   downloadFileById,
   downloadFile,
+  openFile,
+  isPdfFileName,
 };
 
 export default uploadApi;

@@ -37,6 +37,7 @@ import "assets/css/all.min.css";
 import KpiCharts, { getEnterpriseCardSx } from "./components/KpiCharts";
 import ChartExportButton from "./components/ChartExportButton";
 import FiscalKpiGrid from "./components/FiscalKpiGrid";
+import FiscalRacCharts from "./components/FiscalRacCharts";
 import { exportSingleSeriesBarChartToExcel } from "utils/kpiChartExcelExport";
 import propertyGroupingApi from "services/api.propertygrouping.service";
 import contractApi from "services/api.contract.service";
@@ -71,6 +72,14 @@ import {
   unwrapKpiApiList,
 } from "./kpiDataUtils";
 import { getBaseDropdownLabel } from "./kpiOverviewNavigation";
+import {
+  filterKpiBaseCatalogForUser,
+  filterKpiRacOptionsForUser,
+  getKpiOverviewUserScope,
+  isKpiBaseFilterLocked,
+  isKpiRacFilterLocked,
+  resolveKpiEffectiveRacBaseFilters,
+} from "./kpiOverviewAccess";
 function TabPanel({ children, value, index }) {
   if (value !== index) return null;
   return (
@@ -856,6 +865,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
   const [asOfApplied, setAsOfApplied] = useState(false);
   const [asOfRefreshing, setAsOfRefreshing] = useState(false);
   const [asOfContractRows, setAsOfContractRows] = useState([]);
+  const [contractCatalogRows, setContractCatalogRows] = useState([]);
   const [contractMetaById, setContractMetaById] = useState(() => new Map());
   const [tenure, setTenure] = useState("Annual");
   const [racOptions, setRacOptions] = useState([]);
@@ -870,10 +880,23 @@ function KpiOverview({ embedded = false, onShellProps }) {
   const fiscalPeriods = useMemo(() => getFiscalYearPeriods(6), []);
   const cardSx = useMemo(() => getEnterpriseCardSx(), []);
   const closeFinancialZoom = useCallback(() => setFinancialZoomChart(null), []);
+  const kpiUserScope = useMemo(() => getKpiOverviewUserScope(), []);
+  const racFilterLocked = isKpiRacFilterLocked(kpiUserScope);
+  const baseFilterLocked = isKpiBaseFilterLocked(kpiUserScope);
+
+  const accessibleRacOptions = useMemo(
+    () => filterKpiRacOptionsForUser(racOptions, kpiUserScope),
+    [racOptions, kpiUserScope]
+  );
+
+  const { racIds: effectiveRacIds, baseIds: effectiveBaseIds } = useMemo(
+    () => resolveKpiEffectiveRacBaseFilters(racIds, baseIds, kpiUserScope),
+    [racIds, baseIds, kpiUserScope]
+  );
 
   const racFilterWidth = useMemo(
-    () => estimateKpiFilterWidth(["All", "RAC", ...racOptions.map(getKpiOptionName)]),
-    [racOptions]
+    () => estimateKpiFilterWidth(["All", "RAC", ...accessibleRacOptions.map(getKpiOptionName)]),
+    [accessibleRacOptions]
   );
   const baseFilterWidth = useMemo(
     () => estimateKpiFilterWidth(["All", "Base", ...baseOptions.map(getBaseDropdownLabel)]),
@@ -901,15 +924,20 @@ function KpiOverview({ embedded = false, onShellProps }) {
 
     (async () => {
       try {
-        const summaryData = await api.request("GET", buildPropertySummaryApiPath(""));
+        const [summaryData, contractRecords] = await Promise.all([
+          api.request("GET", buildPropertySummaryApiPath("")),
+          contractApi.getAllRecords().catch(() => []),
+        ]);
         if (cancelled) return;
 
+        const catalogRows = unwrapKpiApiList(contractRecords);
         setPropertyRows(extractPropertySummaryRows(summaryData));
         setPropertyGroupSummaryRows(extractPropertyGroupSummaryRows(summaryData));
         setContractRows(extractContractsSummaryRows(summaryData));
         setShareRows(extractGovtPafShareRows(summaryData));
+        setContractCatalogRows(catalogRows);
+        setContractMetaById(buildContractMetaLookup(catalogRows));
         setAsOfContractRows([]);
-        setContractMetaById(new Map());
         setAsOfApplied(false);
       } catch (e) {
         if (!cancelled) console.error("KPI Overview initial load:", e);
@@ -922,6 +950,20 @@ function KpiOverview({ embedded = false, onShellProps }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (kpiUserScope.canSeeAll) return;
+    const nextRac =
+      kpiUserScope.userCmdId != null && kpiUserScope.userCmdId !== ""
+        ? [String(kpiUserScope.userCmdId)]
+        : [];
+    const nextBase =
+      Number(kpiUserScope.userLevelId) === 3 && kpiUserScope.userBaseId != null
+        ? [String(kpiUserScope.userBaseId)]
+        : [];
+    setRacIds(nextRac);
+    setBaseIds(nextBase);
+  }, [kpiUserScope]);
 
   useEffect(() => {
     if (!asOfRefreshToken) return;
@@ -962,11 +1004,12 @@ function KpiOverview({ embedded = false, onShellProps }) {
         setAsOfApplied(true);
 
         if (asOfDate && String(asOfDate).trim()) {
+          const catalogRows = unwrapKpiApiList(contractRecords);
           setAsOfContractRows(unwrapKpiApiList(asOfResponse));
-          setContractMetaById(buildContractMetaLookup(unwrapKpiApiList(contractRecords)));
+          setContractCatalogRows(catalogRows);
+          setContractMetaById(buildContractMetaLookup(catalogRows));
         } else {
           setAsOfContractRows([]);
-          setContractMetaById(new Map());
         }
       } catch (e) {
         if (!cancelled) console.error("KPI Overview as-of refresh:", e);
@@ -1039,17 +1082,20 @@ function KpiOverview({ embedded = false, onShellProps }) {
   }, []);
 
   useEffect(() => {
+    const scopedBases = filterKpiBaseCatalogForUser(allBases, kpiUserScope);
     const selectedRacs = new Set((racIds || []).map(String));
     const filtered =
       selectedRacs.size > 0
-        ? allBases.filter((base) => selectedRacs.has(String(base.cmd ?? base.CmdId ?? base.cmdId)))
-        : allBases;
+        ? scopedBases.filter((base) =>
+            selectedRacs.has(String(base.cmd ?? base.CmdId ?? base.cmdId))
+          )
+        : scopedBases;
     setBaseOptions(filtered);
     setBaseIds((prev) => {
       const validIds = new Set(filtered.map((b) => String(b.id ?? b.Id)));
       return (prev || []).filter((id) => validIds.has(String(id)));
     });
-  }, [racIds, allBases]);
+  }, [racIds, allBases, kpiUserScope]);
 
   const handleRacChange = useCallback((event) => {
     const value = Array.isArray(event.target.value) ? event.target.value : [];
@@ -1085,20 +1131,20 @@ function KpiOverview({ embedded = false, onShellProps }) {
   }, [shareRows, asOfDerivedShareRows]);
 
   const filteredPropertyRows = useMemo(
-    () => filterKpiRowsByRacBase(propertyRows, racIds, baseIds),
-    [propertyRows, racIds, baseIds]
+    () => filterKpiRowsByRacBase(propertyRows, effectiveRacIds, effectiveBaseIds),
+    [propertyRows, effectiveRacIds, effectiveBaseIds]
   );
   const filteredContractRows = useMemo(
-    () => filterKpiRowsByRacBase(contractRows, racIds, baseIds),
-    [contractRows, racIds, baseIds]
+    () => filterKpiRowsByRacBase(contractRows, effectiveRacIds, effectiveBaseIds),
+    [contractRows, effectiveRacIds, effectiveBaseIds]
   );
   const filteredShareRows = useMemo(
-    () => filterKpiRowsByRacBase(effectiveShareRows, racIds, baseIds),
-    [effectiveShareRows, racIds, baseIds]
+    () => filterKpiRowsByRacBase(effectiveShareRows, effectiveRacIds, effectiveBaseIds),
+    [effectiveShareRows, effectiveRacIds, effectiveBaseIds]
   );
   const filteredAsOfContractRows = useMemo(
-    () => filterKpiRowsByRacBase(enrichedAsOfContractRows, racIds, baseIds),
-    [enrichedAsOfContractRows, racIds, baseIds]
+    () => filterKpiRowsByRacBase(enrichedAsOfContractRows, effectiveRacIds, effectiveBaseIds),
+    [enrichedAsOfContractRows, effectiveRacIds, effectiveBaseIds]
   );
 
   const executive = useMemo(
@@ -1114,8 +1160,8 @@ function KpiOverview({ embedded = false, onShellProps }) {
       buildGroupedAssetCards(filteredPropertyRows, filteredShareRows, filteredContractRows, {
         propertyGroupSummaryRows,
         propertyGroups,
-        racIds,
-        baseIds,
+        racIds: effectiveRacIds,
+        baseIds: effectiveBaseIds,
       }),
     [
       filteredPropertyRows,
@@ -1123,8 +1169,8 @@ function KpiOverview({ embedded = false, onShellProps }) {
       filteredContractRows,
       propertyGroupSummaryRows,
       propertyGroups,
-      racIds,
-      baseIds,
+      effectiveRacIds,
+      effectiveBaseIds,
     ]
   );
   const tenureScaledGroupedAssetCards = useMemo(
@@ -1211,6 +1257,27 @@ function KpiOverview({ embedded = false, onShellProps }) {
         fiscalPeriods
       ),
     [filteredPropertyRows, filteredContractRows, filteredShareRows, fiscalPeriods]
+  );
+
+  const racChartPropertyRows = useMemo(() => {
+    const racFilter = kpiUserScope.canSeeAll ? [] : effectiveRacIds;
+    return filterKpiRowsByRacBase(propertyRows, racFilter, effectiveBaseIds);
+  }, [propertyRows, effectiveRacIds, effectiveBaseIds, kpiUserScope.canSeeAll]);
+  const racChartContractRows = useMemo(() => {
+    const racFilter = kpiUserScope.canSeeAll ? [] : effectiveRacIds;
+    return filterKpiRowsByRacBase(contractRows, racFilter, effectiveBaseIds);
+  }, [contractRows, effectiveRacIds, effectiveBaseIds, kpiUserScope.canSeeAll]);
+  const racChartShareRows = useMemo(() => {
+    const racFilter = kpiUserScope.canSeeAll ? [] : effectiveRacIds;
+    return filterKpiRowsByRacBase(effectiveShareRows, racFilter, effectiveBaseIds);
+  }, [effectiveShareRows, effectiveRacIds, effectiveBaseIds, kpiUserScope.canSeeAll]);
+  const racChartAsOfContractRows = useMemo(
+    () => filterKpiRowsByRacBase(enrichedAsOfContractRows, effectiveRacIds, effectiveBaseIds),
+    [enrichedAsOfContractRows, effectiveRacIds, effectiveBaseIds]
+  );
+  const racChartContractCatalogRows = useMemo(
+    () => filterKpiRowsByRacBase(contractCatalogRows, effectiveRacIds, effectiveBaseIds),
+    [contractCatalogRows, effectiveRacIds, effectiveBaseIds]
   );
 
   const healthTotal =
@@ -1326,10 +1393,10 @@ function KpiOverview({ embedded = false, onShellProps }) {
           shareRows={effectiveShareRows}
           contractRows={contractRows}
           propertyRows={propertyRows}
-          racOptions={racOptions}
-          racIds={racIds}
+          racOptions={accessibleRacOptions}
+          racIds={effectiveRacIds}
           baseOptions={baseOptions}
-          allBases={allBases}
+          allBases={filterKpiBaseCatalogForUser(allBases, kpiUserScope)}
           assetCards={assetCards}
           loading={dataBusy}
           chartZoomOnClick
@@ -1401,26 +1468,34 @@ function KpiOverview({ embedded = false, onShellProps }) {
     const chart = buildKpiCommandFinancialBarChart({
       shareRows: filteredShareRows,
       propertyRows: filteredPropertyRows,
-      racOptions,
+      racOptions: accessibleRacOptions,
       baseOptions,
-      racIds,
-      baseIds,
+      racIds: effectiveRacIds,
+      baseIds: effectiveBaseIds,
       usePropertyFallback: true,
     });
     return {
       labels: chart.labels,
       datasets: { label: "Annual Rent", data: applyTenureToChartData(chart.data, tenure) },
     };
-  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds, tenure]);
+  }, [
+    filteredShareRows,
+    filteredPropertyRows,
+    accessibleRacOptions,
+    baseOptions,
+    effectiveRacIds,
+    effectiveBaseIds,
+    tenure,
+  ]);
 
   const govtShareChart = useMemo(() => {
     const chart = buildKpiCommandFinancialBarChart({
       shareRows: filteredShareRows,
       propertyRows: filteredPropertyRows,
-      racOptions,
+      racOptions: accessibleRacOptions,
       baseOptions,
-      racIds,
-      baseIds,
+      racIds: effectiveRacIds,
+      baseIds: effectiveBaseIds,
       shareFieldKeys: ["GovtShare", "govtShare", "GovtShare_Million", "govtShare_Million"],
       usePropertyFallback: false,
     });
@@ -1428,7 +1503,15 @@ function KpiOverview({ embedded = false, onShellProps }) {
       labels: chart.labels,
       datasets: { label: "Govt Share", data: applyTenureToChartData(chart.data, tenure) },
     };
-  }, [filteredShareRows, filteredPropertyRows, racOptions, baseOptions, racIds, baseIds, tenure]);
+  }, [
+    filteredShareRows,
+    filteredPropertyRows,
+    accessibleRacOptions,
+    baseOptions,
+    effectiveRacIds,
+    effectiveBaseIds,
+    tenure,
+  ]);
 
   const financialZoomConfig = useMemo(() => {
     const configs = {
@@ -1530,10 +1613,10 @@ function KpiOverview({ embedded = false, onShellProps }) {
         shareRows={filteredShareRows}
         contractRows={filteredContractRows}
         propertyRows={filteredPropertyRows}
-        racOptions={racOptions}
-        racIds={racIds}
+        racOptions={accessibleRacOptions}
+        racIds={effectiveRacIds}
         baseOptions={baseOptions}
-        allBases={allBases}
+        allBases={filterKpiBaseCatalogForUser(allBases, kpiUserScope)}
         assetCards={assetCards}
         loading={dataBusy}
         chartZoomOnClick
@@ -1545,14 +1628,29 @@ function KpiOverview({ embedded = false, onShellProps }) {
   );
 
   const fiscalSectionContent = (
-    <FiscalKpiGrid
-      rows={fiscalRows}
-      fiscalPeriods={fiscalPeriods}
-      expanded={analyticsExpanded}
-      onToggleExpanded={() => setAnalyticsExpanded((e) => !e)}
-      loading={dataBusy}
-      chartZoomOnClick
-    />
+    <>
+      <FiscalKpiGrid
+        rows={fiscalRows}
+        fiscalPeriods={fiscalPeriods}
+        expanded={analyticsExpanded}
+        onToggleExpanded={() => setAnalyticsExpanded((e) => !e)}
+        loading={dataBusy}
+        chartZoomOnClick
+      />
+      <FiscalRacCharts
+        shareRows={racChartShareRows}
+        propertyRows={racChartPropertyRows}
+        contractRows={racChartContractRows}
+        asOfContractRows={racChartAsOfContractRows}
+        contractCatalogRows={racChartContractCatalogRows}
+        contractMetaById={contractMetaById}
+        racOptions={accessibleRacOptions}
+        racIds={effectiveRacIds}
+        tenure={tenure}
+        loading={dataBusy}
+        chartZoomOnClick
+      />
+    </>
   );
 
   const kpiFilters = (
@@ -1579,7 +1677,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
           multiple
           value={racIds}
           onChange={handleRacChange}
-          disabled={loadingRacOptions}
+          disabled={loadingRacOptions || racFilterLocked}
           MenuProps={KPI_COMPACT_MULTI_SELECT_MENU_PROPS.MenuProps}
           renderValue={(selected) =>
             selected.length > 1
@@ -1587,18 +1685,24 @@ function KpiOverview({ embedded = false, onShellProps }) {
               : selected.length
               ? selected
                   .map((id) => {
-                    const match = racOptions.find((o) => String(o.id ?? o.Id) === String(id));
+                    const match = accessibleRacOptions.find(
+                      (o) => String(o.id ?? o.Id) === String(id)
+                    );
                     return getKpiOptionName(match) || id;
                   })
                   .join(", ")
+              : racFilterLocked
+              ? getKpiOptionName(accessibleRacOptions[0]) || "—"
               : "All"
           }
         >
-          <MenuItem value={KPI_FILTER_ALL_VALUE}>
-            <Checkbox checked={racIds.length === 0} size="small" sx={KPI_COMPACT_CHECKBOX_SX} />
-            <ListItemText primary="All" {...KPI_COMPACT_LIST_TEXT_PROPS} />
-          </MenuItem>
-          {racOptions.map((o) => (
+          {!racFilterLocked ? (
+            <MenuItem value={KPI_FILTER_ALL_VALUE}>
+              <Checkbox checked={racIds.length === 0} size="small" sx={KPI_COMPACT_CHECKBOX_SX} />
+              <ListItemText primary="All" {...KPI_COMPACT_LIST_TEXT_PROPS} />
+            </MenuItem>
+          ) : null}
+          {accessibleRacOptions.map((o) => (
             <MenuItem key={o.id ?? o.Id} value={String(o.id ?? o.Id)}>
               <Checkbox
                 checked={racIds.includes(String(o.id ?? o.Id))}
@@ -1610,7 +1714,11 @@ function KpiOverview({ embedded = false, onShellProps }) {
           ))}
         </SearchableSelect>
       </FormControl>
-      <FormControl size="small" sx={baseFilterControlSx} disabled={loadingBaseOptions}>
+      <FormControl
+        size="small"
+        sx={baseFilterControlSx}
+        disabled={loadingBaseOptions || baseFilterLocked}
+      >
         <InputLabel id="kpi-filter-base-label">Base</InputLabel>
         <SearchableSelect
           labelId="kpi-filter-base-label"
@@ -1629,13 +1737,17 @@ function KpiOverview({ embedded = false, onShellProps }) {
                     return getBaseDropdownLabel(match) || id;
                   })
                   .join(", ")
+              : baseFilterLocked
+              ? getBaseDropdownLabel(baseOptions[0]) || "—"
               : "All"
           }
         >
-          <MenuItem value={KPI_FILTER_ALL_VALUE}>
-            <Checkbox checked={baseIds.length === 0} size="small" sx={KPI_BASE_CHECKBOX_SX} />
-            <ListItemText primary="All" {...KPI_BASE_LIST_TEXT_PROPS} />
-          </MenuItem>
+          {!baseFilterLocked ? (
+            <MenuItem value={KPI_FILTER_ALL_VALUE}>
+              <Checkbox checked={baseIds.length === 0} size="small" sx={KPI_BASE_CHECKBOX_SX} />
+              <ListItemText primary="All" {...KPI_BASE_LIST_TEXT_PROPS} />
+            </MenuItem>
+          ) : null}
           {baseOptions.map((o) => (
             <MenuItem key={o.id ?? o.Id} value={String(o.id ?? o.Id)}>
               <Checkbox
@@ -1742,8 +1854,10 @@ function KpiOverview({ embedded = false, onShellProps }) {
     tenure,
     loadingRacOptions,
     loadingBaseOptions,
-    racOptions,
+    accessibleRacOptions,
     baseOptions,
+    racFilterLocked,
+    baseFilterLocked,
   ]);
 
   const pageContent = (

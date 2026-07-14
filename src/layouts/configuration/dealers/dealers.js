@@ -272,7 +272,7 @@ export default function Dealers() {
     <DashboardLayout>
       <DashboardNavbar />
       <EnterpriseWorkspace
-        title="Dealers"
+        title="Parties"
         subtitle="Manage dealer records"
         metadata={workspaceMetadata}
         tabs={<ConfigurationModuleTabs />}
@@ -322,7 +322,7 @@ export default function Dealers() {
               showTotalEntries={false}
               noEndBorder
               canSearch
-              exportFileName="Dealers"
+              exportFileName="Parties"
               contentFitTable
               paginationHost={paginationHost}
             />

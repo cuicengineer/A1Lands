@@ -4,17 +4,24 @@ import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 import {
   agreementProvPdfMarginsInchesToMm,
   createAgreementProvPdfScaleHelpers,
-  loadReceiptPdfMargins,
+  loadInterAccTransferPdfMargins,
 } from "utils/agreementProvPdfMargins";
 import { mapInterAccTransferForVoucherPdf } from "./interAccTransferUtils";
 
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
 const PDF_FONT_PARTICULARS_MIN = 5;
-const PDF_AMOUNT_HEADER_FONT_RATIO = 0.98;
+const PDF_FONT_ACCOUNTS_MIN = 7;
+const PDF_PARTICULARS_MAX_LINES = 2;
+const PDF_PARTICULARS_LINE_STEP_RATIO = 0.9;
 const PDF_LINE_HEIGHT_MM = 5;
 const PDF_VALUE_UNDERLINE_GAP_MM = 0.75;
-const VOUCHER_PDF_SIGNATURE_BLOCKS = ["Prepared By", "Checked By", "Approved By"];
+const VOUCHER_PDF_SIGNATURE_BLOCKS = [
+  "Prepared By",
+  "Checked By",
+  "Authorized By",
+  "Counter Signed",
+];
 const VOUCHER_PDF_SIGNATURE_BLANK_LINES = 7;
 
 function formatPdfDate(dateString) {
@@ -54,6 +61,35 @@ function resolveSingleLinePdfFontSize(
   }
   doc.setFontSize(minSize);
   return minSize;
+}
+
+function resolveWrappedPdfFontSize(
+  doc,
+  text,
+  maxWidth,
+  maxLines,
+  startSize,
+  minSize,
+  fontStyle = "normal"
+) {
+  const value = String(text ?? "");
+  if (!value) {
+    return { fontSize: startSize, lines: [""] };
+  }
+
+  let size = startSize;
+  doc.setFont("helvetica", fontStyle);
+  while (size >= minSize) {
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(value, maxWidth);
+    if (lines.length <= maxLines) {
+      return { fontSize: size, lines };
+    }
+    size -= 0.5;
+  }
+
+  doc.setFontSize(minSize);
+  return { fontSize: minSize, lines: doc.splitTextToSize(value, maxWidth) };
 }
 
 function unwrapAccountingSysList(response) {
@@ -115,8 +151,13 @@ function pickTransferVrNo(transfer) {
   return textValue(transfer?.vrNo);
 }
 
-function pickTransferParticulars(transfer) {
-  return textValue(transfer?.particulars);
+function pickTransferAccounts(transfer) {
+  const paidFrom = textValue(transfer?.paidFrom);
+  const receivedIn = textValue(transfer?.receivedInAccount || transfer?.receivedFromAccountLabel);
+  if (paidFrom === "—" && receivedIn === "—") return "—";
+  if (paidFrom === "—") return receivedIn;
+  if (receivedIn === "—") return paidFrom;
+  return `${paidFrom} / ${receivedIn}`;
 }
 
 function pickTransferAmount(value) {
@@ -140,7 +181,7 @@ export async function generateInterAccTransferPdf(
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const marginsIn = marginsInParam ?? loadReceiptPdfMargins();
+  const marginsIn = marginsInParam ?? loadInterAccTransferPdfMargins();
   const { marginLeft, marginRight, marginTop, marginBottom } =
     agreementProvPdfMarginsInchesToMm(marginsIn);
   const { sx, sy, sf, sc, logicalPageBottomY, logicalPageBottomReserve } =
@@ -158,8 +199,8 @@ export async function generateInterAccTransferPdf(
 
   const vrNoDisplay = pickTransferVrNo(mapped);
   const vrDateDisplay = formatPdfDate(mapped?.date);
-  const paidByDisplay = textValue(mapped?.paidFrom);
   const descriptionText = String(mapped?.description ?? "").trim();
+  const accountsDisplay = pickTransferAccounts(mapped);
   const outflowTotal = pickTransferAmount(mapped?.paidFromAmount);
   const inflowTotal = pickTransferAmount(mapped?.receivedInAmount);
 
@@ -190,10 +231,8 @@ export async function generateInterAccTransferPdf(
   const LOGO_GAP_MM = 3;
   const textStartX = marginLeft + LOGO_WIDTH_MM + LOGO_GAP_MM;
   const VOUCHER_BOX_WIDTH_MM = 54;
-  const VOUCHER_LABEL_COL_MM = 24;
+  const VOUCHER_LABEL_VALUE_GAP_MM = 1.5;
   const voucherBoxLeft = contentRight - VOUCHER_BOX_WIDTH_MM;
-  const voucherSepX = voucherBoxLeft + VOUCHER_LABEL_COL_MM;
-  const voucherValueX = voucherSepX + 2;
   const valueStartX = textStartX;
 
   await loadPafLogoIntoPdf(doc, sx(marginLeft), sy(marginTop), sc(LOGO_WIDTH_MM));
@@ -243,9 +282,17 @@ export async function generateInterAccTransferPdf(
   const voucherMetaStartY = marginTop + 5 + lineHeight;
   let voucherMetaY = voucherMetaStartY;
 
+  const resolveVoucherMetaValueX = (label) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(sf(bodyFont));
+    const labelTextWidth = doc.getTextWidth(String(label ?? ""));
+    return voucherBoxLeft + 2 + labelTextWidth + VOUCHER_LABEL_VALUE_GAP_MM;
+  };
+
   const drawVoucherMetaRow = (label, value) => {
     const rowTop = voucherMetaY;
-    const valueMaxWidth = Math.max(8, contentRight - voucherValueX - 1);
+    const valueX = resolveVoucherMetaValueX(label);
+    const valueMaxWidth = Math.max(8, contentRight - valueX - 1);
 
     drawBodyText(label, voucherBoxLeft + 2, rowTop, { bold: true });
 
@@ -259,7 +306,7 @@ export async function generateInterAccTransferPdf(
     );
     doc.setFont("helvetica", "normal");
     doc.setFontSize(valueFontSize);
-    doc.text(String(value ?? ""), sx(voucherValueX), sy(rowTop));
+    doc.text(String(value ?? ""), sx(valueX), sy(rowTop));
     voucherMetaY += lineHeight;
   };
 
@@ -328,7 +375,6 @@ export async function generateInterAccTransferPdf(
     yPos = underlineY + 1.75;
   };
 
-  drawUnderlinedRow("Paid By", paidByDisplay);
   drawUnderlinedRow("Description", descriptionText, {
     shrinkFont: true,
     hideEmptyPlaceholder: true,
@@ -337,15 +383,15 @@ export async function generateInterAccTransferPdf(
 
   yPos += lineHeight * 0.5;
 
-  const colSnX = marginLeft;
-  const colParticularsX = marginLeft + contentWidth * 0.07;
-  const colOutflowRightX = marginLeft + contentWidth * 0.52;
-  const colInflowRightX = marginLeft + contentWidth * 0.68;
-  const colTinFtnRightX = contentRight;
-  const colOutflowLeftX = marginLeft + contentWidth * 0.4;
-  const colInflowLeftX = marginLeft + contentWidth * 0.56;
-  const colTinFtnLeftX = marginLeft + contentWidth * 0.72;
-  const particularsMaxWidth = Math.max(12, colOutflowLeftX - colParticularsX - 3);
+  const colParticularsX = marginLeft;
+  const colInflowRightX = contentRight;
+  // Wide enough for "Amount Outflow" / "Amount Inflow" on one line at body font.
+  const colInflowLeftX = colInflowRightX - contentWidth * 0.17;
+  const colOutflowRightX = colInflowLeftX - contentWidth * 0.01;
+  const colOutflowLeftX = colOutflowRightX - contentWidth * 0.17;
+  const colTinFtnRightX = colOutflowLeftX - contentWidth * 0.01;
+  const colTinFtnLeftX = colTinFtnRightX - contentWidth * 0.22;
+  const particularsMaxWidth = Math.max(12, colTinFtnLeftX - colParticularsX - 3);
   const outflowMaxWidth = Math.max(10, colOutflowRightX - colOutflowLeftX);
   const inflowMaxWidth = Math.max(10, colInflowRightX - colInflowLeftX);
   const tinFtnMaxWidth = Math.max(10, colTinFtnRightX - colTinFtnLeftX);
@@ -383,29 +429,35 @@ export async function generateInterAccTransferPdf(
     });
   };
 
-  const drawParticularsText = (text, y) => {
+  const drawAccountsText = (text, y) => {
     const value = String(text ?? "");
-    const fontSize = resolveSingleLinePdfFontSize(
+    // Match Description body font size (PDF_FONT_BODY).
+    const { fontSize, lines } = resolveWrappedPdfFontSize(
       doc,
       value,
-      particularsMaxWidth,
+      sc(particularsMaxWidth),
+      PDF_PARTICULARS_MAX_LINES,
       sf(bodyFont),
-      sf(PDF_FONT_PARTICULARS_MIN),
+      sf(PDF_FONT_ACCOUNTS_MIN),
       "normal"
     );
+    const lineStep = lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(fontSize);
-    doc.text(value, sx(colParticularsX), sy(y));
+    lines.forEach((line, index) => {
+      doc.text(line, sx(colParticularsX), sy(y + index * lineStep));
+    });
+    return Math.max(1, lines.length);
   };
 
-  const drawSingleLineHeaderCell = (text, x, y, maxWidth) => {
+  const drawSingleLineAmountHeader = (text, x, y, maxWidth) => {
     const value = String(text ?? "");
-    const startSize = bodyFont * PDF_AMOUNT_HEADER_FONT_RATIO;
+    // Keep one line; prefer same size as TIN-FTN (body bold), shrink only if needed.
     const fontSize = resolveSingleLinePdfFontSize(
       doc,
       value,
-      maxWidth,
-      sf(startSize),
+      sc(maxWidth),
+      sf(bodyFont),
       sf(PDF_FONT_PARTICULARS_MIN),
       "bold"
     );
@@ -416,45 +468,45 @@ export async function generateInterAccTransferPdf(
 
   const drawVoucherTableHeader = () => {
     const rowTop = yPos;
-    drawBodyText("SN", colSnX, rowTop, { bold: true });
-    drawBodyText("Particulars", colParticularsX, rowTop, { bold: true });
-    drawSingleLineHeaderCell("Amount Outflow", colOutflowRightX, rowTop, outflowMaxWidth);
-    drawSingleLineHeaderCell("Amount Inflow", colInflowRightX, rowTop, inflowMaxWidth);
+    drawBodyText("Accounts", colParticularsX, rowTop, { bold: true });
     drawBodyText("TIN-FTN", colTinFtnRightX, rowTop, {
       bold: true,
       textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
     });
+    drawSingleLineAmountHeader("Amount Outflow", colOutflowRightX, rowTop, outflowMaxWidth);
+    drawSingleLineAmountHeader("Amount Inflow", colInflowRightX, rowTop, inflowMaxWidth);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(sf(bodyFont));
-    const headerTextHeight = doc.getTextDimensions("SN").h;
+    const headerTextHeight = doc.getTextDimensions("Accounts").h;
     const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
     drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
     yPos = underlineY + lineHeight;
   };
 
-  const drawVoucherTableRow = (serialNo, particulars, outflowAmount, inflowAmount, tinFtn) => {
-    yPos = ensurePageSpace(yPos, lineHeight + 2);
+  const drawVoucherTableRow = (accounts, outflowAmount, inflowAmount, tinFtn) => {
+    yPos = ensurePageSpace(
+      yPos,
+      lineHeight * PDF_PARTICULARS_MAX_LINES * PDF_PARTICULARS_LINE_STEP_RATIO + 2
+    );
     if (yPos === marginTop) {
       drawVoucherTableHeader();
     }
 
-    drawBodyText(`${serialNo}.`, colSnX, yPos);
-    drawParticularsText(particulars || "—", yPos);
-    drawOutflowCell(formatPdfCurrency(outflowAmount), yPos);
-    drawInflowCell(formatPdfCurrency(inflowAmount), yPos);
-    drawTinFtnCell(tinFtn, yPos);
-    yPos += lineHeight;
+    const rowTop = yPos;
+    const drawnAccountsLines = drawAccountsText(accounts || "—", rowTop);
+    const rowHeight = Math.max(
+      lineHeight,
+      drawnAccountsLines * lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO
+    );
+    drawTinFtnCell(tinFtn, rowTop);
+    drawOutflowCell(formatPdfCurrency(outflowAmount), rowTop);
+    drawInflowCell(formatPdfCurrency(inflowAmount), rowTop);
+    yPos += rowHeight;
   };
 
   drawVoucherTableHeader();
-  drawVoucherTableRow(
-    1,
-    pickTransferParticulars(mapped),
-    outflowTotal,
-    inflowTotal,
-    textValue(mapped?.tinFtn)
-  );
+  drawVoucherTableRow(accountsDisplay, outflowTotal, inflowTotal, textValue(mapped?.tinFtn));
 
   yPos = ensurePageSpace(yPos + 4, lineHeight * 3);
   yPos += 4;

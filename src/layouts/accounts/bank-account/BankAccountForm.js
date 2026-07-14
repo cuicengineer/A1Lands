@@ -29,6 +29,13 @@ import api, {
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import { fetchBankListsForDropdown, UPLOAD_TABLE_NAME } from "services/api.bankAccount.service";
+import {
+  buildScopedBaseDropdownOptions,
+  buildScopedRacDropdownOptions,
+  isCustomAccRacBaseDropdownOption,
+  mapAccRacBaseToRacOption,
+  mapAccRacBaseToUnitOption,
+} from "layouts/accounts/bank-account/bankAccountRacBaseUtils";
 
 const FUNDING_SOURCES = ["Public Fund", "Non-Public Fund"];
 const CURRENCIES = ["PKR", "USD", "EUR", "CNY", "SAR", "INR", "Other"];
@@ -70,14 +77,6 @@ function mapAccRacBasesRow(row, fallbackId = "") {
   const id = toAccRacBaseId(row?.id ?? row?.Id ?? fallbackId);
   const name = String(row?.name ?? row?.Name ?? "").trim();
   return { id, name };
-}
-
-function mergeAccRacBaseOption(options, option) {
-  if (!option?.id || !option?.name) return options;
-  const exists = options.some((item) => String(item.id) === String(option.id));
-  return exists
-    ? options.map((item) => (String(item.id) === String(option.id) ? option : item))
-    : [option, ...options];
 }
 
 /** Limits text to at most `maxWords` words (split on whitespace); used for Reference field. */
@@ -316,6 +315,8 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
   const [racOptions, setRacOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
+  const [catalogCommands, setCatalogCommands] = useState([]);
+  const [catalogBases, setCatalogBases] = useState([]);
   const [bankOptions, setBankOptions] = useState([]);
   const [loadingLists, setLoadingLists] = useState(true);
   const [loadingBases, setLoadingBases] = useState(false);
@@ -471,18 +472,30 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
       setLoadingLists(true);
       try {
         const savedRacId = toAccRacBaseId(initialDataToFormOverrides(initialData).racId);
-        const [racRes, banks, savedRacRes] = await Promise.all([
+        const [racRes, commandRes, baseRes, banks, savedRacRes] = await Promise.all([
           api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }).catch(() => []),
+          api.list("command").catch(() => []),
+          api.list("base").catch(() => []),
           fetchBankListsForDropdown().catch(() => []),
           savedRacId ? api.get(ACC_RAC_BASES_ENTITY, savedRacId).catch(() => null) : null,
         ]);
         if (!alive) return;
-        let racArr = unwrapAccRacBasesList(racRes)
-          .map(mapAccRacBasesRow)
-          .filter((o) => o.id && o.name);
-        const savedRacOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedRacRes), savedRacId);
-        racArr = mergeAccRacBaseOption(racArr, savedRacOption);
-        setRacOptions(racArr);
+        const customRacRows = unwrapAccRacBasesList(racRes);
+        const commands = Array.isArray(commandRes) ? commandRes : [];
+        const bases = Array.isArray(baseRes) ? baseRes : [];
+        const savedRacRow = unwrapAccRacBaseRow(savedRacRes);
+        const savedRacOption =
+          mapAccRacBaseToRacOption(savedRacRow, savedRacId) ||
+          mapAccRacBasesRow(savedRacRow, savedRacId);
+        setCatalogCommands(commands);
+        setCatalogBases(bases);
+        setRacOptions(
+          buildScopedRacDropdownOptions({
+            catalogCommands: commands,
+            customRacRows,
+            savedOption: savedRacOption,
+          })
+        );
         setBankOptions(Array.isArray(banks) ? banks : []);
       } catch (err) {
         console.error("Bank form dropdowns:", err);
@@ -570,12 +583,19 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
           savedBaseId ? api.get(ACC_RAC_BASES_ENTITY, savedBaseId).catch(() => null) : null,
         ]);
         if (cancelled) return;
-        let arr = unwrapAccRacBasesList(raw)
-          .map(mapAccRacBasesRow)
-          .filter((o) => o.id && o.name);
-        const savedBaseOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedBaseRes), savedBaseId);
-        arr = mergeAccRacBaseOption(arr, savedBaseOption);
-        setBaseOptions(arr);
+        const customBaseRows = unwrapAccRacBasesList(raw);
+        const savedBaseRow = unwrapAccRacBaseRow(savedBaseRes);
+        const savedBaseOption =
+          mapAccRacBaseToUnitOption(savedBaseRow, savedBaseId) ||
+          mapAccRacBasesRow(savedBaseRow, savedBaseId);
+        setBaseOptions(
+          buildScopedBaseDropdownOptions({
+            catalogBases,
+            customBaseRows,
+            selectedRacId: rid,
+            savedOption: savedBaseOption,
+          })
+        );
       } catch (err) {
         if (!cancelled) {
           console.error("Bank form bases:", err);
@@ -588,7 +608,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     return () => {
       cancelled = true;
     };
-  }, [open, form.racId, form.baseId]);
+  }, [open, form.racId, form.baseId, catalogBases]);
 
   const onChange = useCallback(
     (field) => (event) => {
@@ -668,13 +688,20 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   }, [open, closeQuickAdd]);
 
   const refreshRacOptions = useCallback(async () => {
-    const racRes = await api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" });
-    const racArr = unwrapAccRacBasesList(racRes)
-      .map(mapAccRacBasesRow)
-      .filter((o) => o.id && o.name);
+    const [racRes, commandRes] = await Promise.all([
+      api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }),
+      api.list("command").catch(() => catalogCommands),
+    ]);
+    const commands = Array.isArray(commandRes) ? commandRes : catalogCommands;
+    const customRacRows = unwrapAccRacBasesList(racRes);
+    const racArr = buildScopedRacDropdownOptions({
+      catalogCommands: commands,
+      customRacRows,
+    });
+    setCatalogCommands(commands);
     setRacOptions(racArr);
     return racArr;
-  }, []);
+  }, [catalogCommands]);
 
   const refreshBaseOptionsAfterRacUnitRename = useCallback(async () => {
     const rid = form.racId;
@@ -685,16 +712,23 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
         api.list(ACC_RAC_BASES_ENTITY, { parentId: String(rid) }),
         savedBaseId ? api.get(ACC_RAC_BASES_ENTITY, savedBaseId).catch(() => null) : null,
       ]);
-      let arr = unwrapAccRacBasesList(raw)
-        .map(mapAccRacBasesRow)
-        .filter((o) => o.id && o.name);
-      const savedBaseOption = mapAccRacBasesRow(unwrapAccRacBaseRow(savedBaseRes), savedBaseId);
-      arr = mergeAccRacBaseOption(arr, savedBaseOption);
-      setBaseOptions(arr);
+      const customBaseRows = unwrapAccRacBasesList(raw);
+      const savedBaseRow = unwrapAccRacBaseRow(savedBaseRes);
+      const savedBaseOption =
+        mapAccRacBaseToUnitOption(savedBaseRow, savedBaseId) ||
+        mapAccRacBasesRow(savedBaseRow, savedBaseId);
+      setBaseOptions(
+        buildScopedBaseDropdownOptions({
+          catalogBases,
+          customBaseRows,
+          selectedRacId: rid,
+          savedOption: savedBaseOption,
+        })
+      );
     } catch (err) {
       console.error("Bank form bases refresh:", err);
     }
-  }, [form.racId, form.baseId]);
+  }, [form.racId, form.baseId, catalogBases]);
 
   const closeRacUnitNameEdit = useCallback(() => {
     if (racUnitNameEditSaving) return;
@@ -780,10 +814,14 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
           Name: name,
         });
         const raw = await api.list(ACC_RAC_BASES_ENTITY, { parentId: String(parentId) });
-        const arr = unwrapAccRacBasesList(raw)
-          .map(mapAccRacBasesRow)
-          .filter((o) => o.id && o.name);
-        setBaseOptions(arr);
+        const customBaseRows = unwrapAccRacBasesList(raw);
+        setBaseOptions(
+          buildScopedBaseDropdownOptions({
+            catalogBases,
+            customBaseRows,
+            selectedRacId: parentId,
+          })
+        );
         const newId = created?.id ?? created?.Id;
         if (newId != null && newId !== "") {
           setForm((prev) => ({ ...prev, baseId: String(newId) }));
@@ -795,7 +833,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     } finally {
       setQuickAddSubmitting(false);
     }
-  }, [quickAddName, quickAddType, form.racId, refreshRacOptions, closeQuickAdd]);
+  }, [quickAddName, quickAddType, form.racId, catalogBases, refreshRacOptions, closeQuickAdd]);
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return "0 Bytes";
@@ -977,46 +1015,50 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                     <MenuItem value="">
                       <em>None</em>
                     </MenuItem>
-                    {racOptions.map((o) => (
-                      <MenuItem
-                        key={o.id}
-                        value={String(o.id)}
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 0.5,
-                          pr: canEditRacUnitDropdownLabels ? 0.25 : undefined,
-                        }}
-                      >
-                        <Typography
-                          component="span"
-                          variant="body2"
-                          sx={{ flex: 1, minWidth: 0 }}
-                          noWrap
+                    {racOptions.map((o) => {
+                      const canRenameRacOption =
+                        canEditRacUnitDropdownLabels && isCustomAccRacBaseDropdownOption(o);
+                      return (
+                        <MenuItem
+                          key={o.id}
+                          value={String(o.id)}
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 0.5,
+                            pr: canRenameRacOption ? 0.25 : undefined,
+                          }}
                         >
-                          {o.name}
-                        </Typography>
-                        {canEditRacUnitDropdownLabels && (
-                          <IconButton
-                            size="small"
-                            edge="end"
-                            aria-label={`Edit RAC name: ${o.name}`}
-                            title="Edit name"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setRacUnitNameEdit({ list: "rac", id: String(o.id) });
-                              setRacUnitNameEditDraft(o.name);
-                              setRacUnitNameEditError("");
-                            }}
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            sx={{ flex: 1, minWidth: 0 }}
+                            noWrap
                           >
-                            <Icon fontSize="small">edit</Icon>
-                          </IconButton>
-                        )}
-                      </MenuItem>
-                    ))}
+                            {o.name}
+                          </Typography>
+                          {canRenameRacOption ? (
+                            <IconButton
+                              size="small"
+                              edge="end"
+                              aria-label={`Edit RAC name: ${o.name}`}
+                              title="Edit name"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setRacUnitNameEdit({ list: "rac", id: String(o.id) });
+                                setRacUnitNameEditDraft(o.name);
+                                setRacUnitNameEditError("");
+                              }}
+                            >
+                              <Icon fontSize="small">edit</Icon>
+                            </IconButton>
+                          ) : null}
+                        </MenuItem>
+                      );
+                    })}
                   </SearchableSelect>
                 </FormControl>
                 {canQuickAddRacBase && (
@@ -1064,46 +1106,50 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                     <MenuItem value="">
                       <em>None</em>
                     </MenuItem>
-                    {baseOptions.map((o) => (
-                      <MenuItem
-                        key={o.id}
-                        value={String(o.id)}
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 0.5,
-                          pr: canEditRacUnitDropdownLabels ? 0.25 : undefined,
-                        }}
-                      >
-                        <Typography
-                          component="span"
-                          variant="body2"
-                          sx={{ flex: 1, minWidth: 0 }}
-                          noWrap
+                    {baseOptions.map((o) => {
+                      const canRenameUnitOption =
+                        canEditRacUnitDropdownLabels && isCustomAccRacBaseDropdownOption(o);
+                      return (
+                        <MenuItem
+                          key={o.id}
+                          value={String(o.id)}
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 0.5,
+                            pr: canRenameUnitOption ? 0.25 : undefined,
+                          }}
                         >
-                          {o.name}
-                        </Typography>
-                        {canEditRacUnitDropdownLabels && (
-                          <IconButton
-                            size="small"
-                            edge="end"
-                            aria-label={`Edit Unit name: ${o.name}`}
-                            title="Edit name"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setRacUnitNameEdit({ list: "base", id: String(o.id) });
-                              setRacUnitNameEditDraft(o.name);
-                              setRacUnitNameEditError("");
-                            }}
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            sx={{ flex: 1, minWidth: 0 }}
+                            noWrap
                           >
-                            <Icon fontSize="small">edit</Icon>
-                          </IconButton>
-                        )}
-                      </MenuItem>
-                    ))}
+                            {o.name}
+                          </Typography>
+                          {canRenameUnitOption ? (
+                            <IconButton
+                              size="small"
+                              edge="end"
+                              aria-label={`Edit Unit name: ${o.name}`}
+                              title="Edit name"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setRacUnitNameEdit({ list: "base", id: String(o.id) });
+                                setRacUnitNameEditDraft(o.name);
+                                setRacUnitNameEditError("");
+                              }}
+                            >
+                              <Icon fontSize="small">edit</Icon>
+                            </IconButton>
+                          ) : null}
+                        </MenuItem>
+                      );
+                    })}
                   </SearchableSelect>
                 </FormControl>
                 {canQuickAddRacBase && (

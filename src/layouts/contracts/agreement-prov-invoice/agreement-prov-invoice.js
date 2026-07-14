@@ -34,6 +34,13 @@ import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import contractApi from "services/api.contract.service";
 import accountingSysApi from "services/api.accountingsys.service";
 import salesReturnsApi from "services/api.salesReturns.service";
+import { productServiceApi } from "services/api.product.service";
+import {
+  buildProductUomLookup,
+  fetchProductUomOptions,
+  formatProductUomLabel,
+  normalizeServiceRecord,
+} from "layouts/products/shared/productUtils";
 import {
   buildInvoiceKey,
   resolveCollectionTenantAccount,
@@ -1429,11 +1436,78 @@ const invoiceLineDraftInputSx = {
   "& .MuiInputBase-input": { py: 0.5, px: 0.75 },
 };
 
+function unwrapProductListResponse(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  return [];
+}
+
+function isActiveProductServiceStatus(status) {
+  return (
+    String(status || "Active")
+      .trim()
+      .toLowerCase() !== "inactive"
+  );
+}
+
+function getInvoiceProductServiceOptionLabel(option) {
+  if (!option) return "";
+  const code = String(option.itemCode || "").trim();
+  const name = String(option.itemName || "").trim();
+  const uom = String(option.uomLabel || option.uom || "").trim();
+  return [code, name, uom].filter((part) => part && part !== "-").join(" — ");
+}
+
+function buildActiveProductServiceOptions(serviceRows, uomLookup = {}) {
+  return (serviceRows || [])
+    .map(normalizeServiceRecord)
+    .filter((row) => row?.id != null && isActiveProductServiceStatus(row.status))
+    .map((row) => {
+      const uomRaw = String(row.uom || "").trim();
+      const uomLabel = uomRaw ? formatProductUomLabel(uomRaw, uomLookup) : "";
+      return {
+        ...row,
+        uomLabel: uomLabel && uomLabel !== "-" ? uomLabel : uomRaw,
+        label: getInvoiceProductServiceOptionLabel({
+          itemCode: row.itemCode,
+          itemName: row.itemName,
+          uomLabel: uomLabel && uomLabel !== "-" ? uomLabel : uomRaw,
+        }),
+      };
+    })
+    .filter((row) => Boolean(String(row.itemCode || "").trim()))
+    .sort((a, b) =>
+      getInvoiceProductServiceOptionLabel(a).localeCompare(
+        getInvoiceProductServiceOptionLabel(b),
+        undefined,
+        { sensitivity: "base" }
+      )
+    );
+}
+
+function findInvoiceProductServiceOption(options, itemCode) {
+  const code = String(itemCode || "")
+    .trim()
+    .toUpperCase();
+  if (!code) return null;
+  return (
+    (options || []).find(
+      (option) =>
+        String(option?.itemCode || "")
+          .trim()
+          .toUpperCase() === code
+    ) || null
+  );
+}
+
 function AgreementProvInvoiceLineDraftRow({
   gridRowSx,
   bodyCellSx,
   draftForm,
+  productServiceOptions,
   onDraftFieldChange,
+  onDraftItemServiceChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
   onDraftCancel,
@@ -1443,6 +1517,22 @@ function AgreementProvInvoiceLineDraftRow({
   saving,
 }) {
   const subLabel = draftForm.pendingSubInvoiceNo || "—";
+  const serviceOptions = productServiceOptions || [];
+  const selectedService = findInvoiceProductServiceOption(serviceOptions, draftForm.itemCode);
+  const itemCodeOptions =
+    selectedService || !String(draftForm.itemCode || "").trim()
+      ? serviceOptions
+      : [
+          {
+            id: `saved:${draftForm.itemCode}`,
+            itemCode: String(draftForm.itemCode).trim(),
+            itemName: "",
+            uom: "",
+            uomLabel: "",
+            label: String(draftForm.itemCode).trim(),
+          },
+          ...serviceOptions,
+        ];
 
   return (
     <MDBox
@@ -1468,13 +1558,49 @@ function AgreementProvInvoiceLineDraftRow({
         {subLabel}
       </MDBox>
       <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
-        <MDInput
-          value={draftForm.itemCode ?? ""}
-          onChange={onDraftFieldChange("itemCode")}
-          fullWidth
+        <Autocomplete
           size="small"
-          placeholder="Item with Code"
-          sx={invoiceLineDraftInputSx}
+          fullWidth
+          options={itemCodeOptions}
+          value={
+            selectedService ||
+            findInvoiceProductServiceOption(itemCodeOptions, draftForm.itemCode) ||
+            null
+          }
+          getOptionLabel={getInvoiceProductServiceOptionLabel}
+          isOptionEqualToValue={(a, b) =>
+            String(a?.itemCode || "")
+              .trim()
+              .toUpperCase() ===
+            String(b?.itemCode || "")
+              .trim()
+              .toUpperCase()
+          }
+          onChange={(_, newValue) => onDraftItemServiceChange?.(newValue)}
+          renderOption={(props, option) => (
+            <li {...props} key={option.id ?? option.itemCode}>
+              <MDTypography
+                component="span"
+                variant="caption"
+                sx={{
+                  display: "block",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  fontSize: "0.8125rem",
+                }}
+              >
+                {getInvoiceProductServiceOptionLabel(option)}
+              </MDTypography>
+            </li>
+          )}
+          renderInput={(params) => (
+            <MDInput
+              {...params}
+              placeholder="Item Code — Name — UoM"
+              sx={invoiceLineDraftInputSx}
+            />
+          )}
         />
       </MDBox>
       <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
@@ -1591,7 +1717,9 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
   gridRowSx: PropTypes.object.isRequired,
   bodyCellSx: PropTypes.object.isRequired,
   draftForm: PropTypes.object.isRequired,
+  productServiceOptions: PropTypes.arrayOf(PropTypes.object),
   onDraftFieldChange: PropTypes.func.isRequired,
+  onDraftItemServiceChange: PropTypes.func,
   onDraftIntegerFieldChange: PropTypes.func.isRequired,
   onDraftNumericFieldChange: PropTypes.func.isRequired,
   onDraftCancel: PropTypes.func.isRequired,
@@ -1599,6 +1727,15 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
   hasIncompleteNewLineDrafts: PropTypes.bool,
   disableCancel: PropTypes.bool,
   saving: PropTypes.bool,
+};
+
+AgreementProvInvoiceLineDraftRow.defaultProps = {
+  productServiceOptions: [],
+  onDraftItemServiceChange: undefined,
+  onDuplicateLine: undefined,
+  hasIncompleteNewLineDrafts: false,
+  disableCancel: false,
+  saving: false,
 };
 
 function AgreementProvInvoiceLinesGrid({
@@ -1616,7 +1753,9 @@ function AgreementProvInvoiceLinesGrid({
   newLineDrafts,
   editingLineDraft,
   hasIncompleteNewLineDrafts,
+  productServiceOptions,
   onDraftFieldChange,
+  onDraftItemServiceChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
   onDraftCancel,
@@ -1720,7 +1859,9 @@ function AgreementProvInvoiceLinesGrid({
               gridRowSx={gridRowSx}
               bodyCellSx={bodyCellSx}
               draftForm={draftForm}
+              productServiceOptions={productServiceOptions}
               onDraftFieldChange={onDraftFieldChange(draftForm.__draftId)}
+              onDraftItemServiceChange={onDraftItemServiceChange?.(draftForm.__draftId)}
               onDraftIntegerFieldChange={onDraftIntegerFieldChange(draftForm.__draftId)}
               onDraftNumericFieldChange={onDraftNumericFieldChange(draftForm.__draftId)}
               onDraftCancel={() => onDraftCancel?.(draftForm.__draftId)}
@@ -1747,7 +1888,9 @@ function AgreementProvInvoiceLinesGrid({
                   gridRowSx={gridRowSx}
                   bodyCellSx={bodyCellSx}
                   draftForm={editingLineDraft}
+                  productServiceOptions={productServiceOptions}
                   onDraftFieldChange={onDraftFieldChange(editDraftId)}
+                  onDraftItemServiceChange={onDraftItemServiceChange?.(editDraftId)}
                   onDraftIntegerFieldChange={onDraftIntegerFieldChange(editDraftId)}
                   onDraftNumericFieldChange={onDraftNumericFieldChange(editDraftId)}
                   onDraftCancel={() => onDraftCancel?.(editDraftId)}
@@ -1893,7 +2036,9 @@ AgreementProvInvoiceLinesGrid.propTypes = {
   newLineDrafts: PropTypes.arrayOf(PropTypes.object),
   editingLineDraft: PropTypes.object,
   hasIncompleteNewLineDrafts: PropTypes.bool,
+  productServiceOptions: PropTypes.arrayOf(PropTypes.object),
   onDraftFieldChange: PropTypes.func,
+  onDraftItemServiceChange: PropTypes.func,
   onDraftIntegerFieldChange: PropTypes.func,
   onDraftNumericFieldChange: PropTypes.func,
   onDraftCancel: PropTypes.func,
@@ -3200,6 +3345,7 @@ function AgreementProvInvoiceEditDialog({
   const [newLineDrafts, setNewLineDrafts] = useState([]);
   const [editingLineDraft, setEditingLineDraft] = useState(null);
   const [pendingDeleteSubs, setPendingDeleteSubs] = useState([]);
+  const [productServiceOptions, setProductServiceOptions] = useState([]);
   const originalServerSubsRef = useRef(new Set());
   const originalLinePayloadSnapshotsRef = useRef(new Map());
   const newLineDraftsRef = useRef([]);
@@ -3225,6 +3371,36 @@ function AgreementProvInvoiceEditDialog({
   useEffect(() => {
     pendingDeleteSubsRef.current = pendingDeleteSubs;
   }, [pendingDeleteSubs]);
+
+  useEffect(() => {
+    if (!open || viewMode) {
+      setProductServiceOptions([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadActiveProductServices = async () => {
+      try {
+        const [servicesResponse, uomRows] = await Promise.all([
+          productServiceApi.getAll(1, 10000),
+          fetchProductUomOptions().catch(() => []),
+        ]);
+        if (cancelled) return;
+        const uomLookup = buildProductUomLookup(Array.isArray(uomRows) ? uomRows : []);
+        setProductServiceOptions(
+          buildActiveProductServiceOptions(unwrapProductListResponse(servicesResponse), uomLookup)
+        );
+      } catch (error) {
+        console.error("Error loading active product services:", error);
+        if (!cancelled) setProductServiceOptions([]);
+      }
+    };
+
+    loadActiveProductServices();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, viewMode]);
 
   const getScheduleLinesForSuggest = useCallback(
     () =>
@@ -3572,6 +3748,28 @@ function AgreementProvInvoiceEditDialog({
 
   const handleDraftFieldChange = (draftId) => (field) => (e) => {
     updateDraftById(draftId, (prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleDraftItemServiceChange = (draftId) => (service) => {
+    updateDraftById(draftId, (prev) => {
+      if (!service) {
+        return { ...prev, itemCode: "" };
+      }
+      const nextUnitPrice =
+        service.defaultUnitPriceSales !== "" && service.defaultUnitPriceSales != null
+          ? String(service.defaultUnitPriceSales)
+          : prev.calculatedRentPM;
+      const nextDesc =
+        String(service.defaultParticulars || "").trim() ||
+        String(service.itemName || "").trim() ||
+        prev.desc;
+      return recalcDraftTotal({
+        ...prev,
+        itemCode: String(service.itemCode || "").trim(),
+        desc: nextDesc,
+        calculatedRentPM: nextUnitPrice,
+      });
+    });
   };
 
   const handleDraftIntegerFieldChange = (draftId) => (field) => (e) => {
@@ -3924,7 +4122,9 @@ function AgreementProvInvoiceEditDialog({
                   newLineDrafts={viewMode ? [] : newLineDrafts}
                   editingLineDraft={viewMode ? null : editingLineDraft}
                   hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+                  productServiceOptions={productServiceOptions}
                   onDraftFieldChange={handleDraftFieldChange}
+                  onDraftItemServiceChange={handleDraftItemServiceChange}
                   onDraftIntegerFieldChange={handleDraftIntegerFieldChange}
                   onDraftNumericFieldChange={handleDraftNumericFieldChange}
                   onDraftCancel={handleDraftCancel}

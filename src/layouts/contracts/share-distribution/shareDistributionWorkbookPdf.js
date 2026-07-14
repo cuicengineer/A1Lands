@@ -10,13 +10,27 @@ const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
 const PDF_LINE_HEIGHT_MM = 5;
 const PDF_VALUE_UNDERLINE_GAP_MM = 0.75;
-const SIGNATURE_BLOCKS = ["Prepared By", "Checked By", "Approved By"];
+const PDF_TABLE_FONT = 9.5;
+const PDF_TABLE_FONT_MIN = 7;
+const PDF_TABLE_FONT_STEP = 0.5;
+const PDF_TABLE_CELL_PAD_X = 0.55;
+const PDF_TABLE_CELL_PAD_Y = 0.35;
+const PDF_TABLE_HEADER_LINE_GAP = 0.5;
+const PDF_TABLE_FLEX_GROW_COLUMN_KEYS = new Set([
+  "tenantAndBusiness",
+  "agreement",
+  "base",
+  "className",
+]);
+const SIGNATURE_BLOCKS = ["Prepared By", "Checked By", "Authorized By", "Counter Signed"];
 const SIGNATURE_BOTTOM_RATIO = 0.2;
 
 function formatPdfCurrency(value) {
   if (value === null || value === undefined || value === "") return "0";
   const n = Number(String(value).replace(/,/g, "").trim());
-  return Number.isFinite(n) ? n.toLocaleString("en-US") : String(value);
+  return Number.isFinite(n)
+    ? n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    : String(value);
 }
 
 function textValue(value) {
@@ -80,6 +94,202 @@ function getPdfRowCenteredBaselineY(rowTop, rowBandHeight, textHeight) {
 
 function getPdfValueUnderlineY(baselineY, textHeight, scaleLength = (mm) => mm) {
   return baselineY + textHeight * 0.32 + scaleLength(PDF_VALUE_UNDERLINE_GAP_MM);
+}
+
+function setTablePdfFont(doc, sf, bold = false, fontSize = PDF_TABLE_FONT) {
+  doc.setFont("helvetica", bold ? "bold" : "normal");
+  doc.setFontSize(sf(fontSize));
+}
+
+function measurePdfTextWidth(doc, sf, text, bold = false, fontSize = PDF_TABLE_FONT) {
+  setTablePdfFont(doc, sf, bold, fontSize);
+  return doc.getTextWidth(String(text ?? "").trim() || "—");
+}
+
+function getPdfTableCellText(col, row, numericColumnKeys) {
+  if (!row || typeof row !== "object") return "—";
+  if (col.key === "ratio") {
+    return textValue(row[col.key]);
+  }
+  if (numericColumnKeys.has(col.key)) {
+    return formatPdfCurrency(row[col.key]);
+  }
+  return textValue(row[col.key]);
+}
+
+function getPdfHeaderLines(col) {
+  if (Array.isArray(col.headerLines) && col.headerLines.length > 0) {
+    return col.headerLines.map((line) => String(line ?? "").trim()).filter(Boolean);
+  }
+  return [String(col.label ?? "").trim()].filter(Boolean);
+}
+
+function getPdfTableTextLineHeight(doc, sf, fontSize = PDF_TABLE_FONT) {
+  setTablePdfFont(doc, sf, false, fontSize);
+  return doc.getTextDimensions("Xy").h;
+}
+
+function getPdfTableCellLines(
+  doc,
+  sf,
+  text,
+  maxInnerWidth,
+  bold = false,
+  allowWrap = true,
+  fontSize = PDF_TABLE_FONT
+) {
+  setTablePdfFont(doc, sf, bold, fontSize);
+  const value = String(text ?? "").trim() || "—";
+  if (!allowWrap || maxInnerWidth <= 0 || doc.getTextWidth(value) <= maxInnerWidth) {
+    return [value];
+  }
+  const wrapped = doc.splitTextToSize(value, maxInnerWidth);
+  return wrapped.length > 0 ? wrapped : [value];
+}
+
+function distributePdfTableColumnWidths(rawWidths, columnDefs, contentWidth) {
+  const totalRawWidth = rawWidths.reduce((sum, width) => sum + width, 0);
+  if (totalRawWidth <= 0) return { widths: rawWidths, totalWidth: 0 };
+
+  if (totalRawWidth >= contentWidth - 0.01) {
+    return { widths: rawWidths, totalWidth: totalRawWidth };
+  }
+
+  const extra = contentWidth - totalRawWidth;
+  const flexIndexes = columnDefs
+    .map((col, index) => (PDF_TABLE_FLEX_GROW_COLUMN_KEYS.has(col.key) ? index : -1))
+    .filter((index) => index >= 0);
+  const flexTotal = flexIndexes.reduce((sum, index) => sum + rawWidths[index], 0);
+
+  if (flexTotal > 0) {
+    const widths = rawWidths.map((width, index) => {
+      if (!flexIndexes.includes(index)) return width;
+      return width + extra * (width / flexTotal);
+    });
+    return { widths, totalWidth: contentWidth };
+  }
+
+  const widths = rawWidths.map((width) => width + extra * (width / totalRawWidth));
+  return { widths, totalWidth: contentWidth };
+}
+
+function measurePdfTableBlockHeight(lineCount, lineHeight) {
+  if (lineCount <= 0) return lineHeight;
+  return lineCount * lineHeight + (lineCount - 1) * PDF_TABLE_HEADER_LINE_GAP;
+}
+
+function buildTightPdfTableColumns({
+  doc,
+  sf,
+  columnDefs,
+  rows,
+  totalsRow,
+  numericColumnKeys,
+  contentWidth,
+  marginLeft,
+  tableFontSize = PDF_TABLE_FONT,
+}) {
+  const rawWidths = columnDefs.map((col) => {
+    const headerLines = getPdfHeaderLines(col);
+    let maxContentWidth = 0;
+    const isNumericCol = numericColumnKeys.has(col.key);
+
+    headerLines.forEach((line) => {
+      maxContentWidth = Math.max(
+        maxContentWidth,
+        measurePdfTextWidth(doc, sf, line, true, tableFontSize)
+      );
+    });
+
+    rows.forEach((row) => {
+      const cellText = getPdfTableCellText(col, row, numericColumnKeys);
+      maxContentWidth = Math.max(
+        maxContentWidth,
+        measurePdfTextWidth(doc, sf, cellText, false, tableFontSize)
+      );
+      if (isNumericCol) {
+        maxContentWidth = Math.max(
+          maxContentWidth,
+          measurePdfTextWidth(doc, sf, cellText, true, tableFontSize)
+        );
+      }
+    });
+
+    if (isNumericCol) {
+      maxContentWidth = Math.max(
+        maxContentWidth,
+        measurePdfTextWidth(
+          doc,
+          sf,
+          formatPdfCurrency(totalsRow[col.key] ?? 0),
+          true,
+          tableFontSize
+        )
+      );
+    }
+
+    if (col.key === columnDefs[0]?.key) {
+      maxContentWidth = Math.max(
+        maxContentWidth,
+        measurePdfTextWidth(doc, sf, "Total", true, tableFontSize)
+      );
+    }
+
+    return maxContentWidth + 2 * PDF_TABLE_CELL_PAD_X;
+  });
+
+  const { widths, totalWidth } = distributePdfTableColumnWidths(
+    rawWidths,
+    columnDefs,
+    contentWidth
+  );
+
+  let runningX = marginLeft;
+  const columns = columnDefs.map((col, index) => {
+    const width = widths[index];
+    const column = {
+      ...col,
+      width,
+      leftX: runningX,
+      rightX: runningX + width,
+      innerWidth: Math.max(width - 2 * PDF_TABLE_CELL_PAD_X, 1),
+      minWidth: rawWidths[index],
+    };
+    runningX += width;
+    return column;
+  });
+
+  return { columns, totalWidth, tableFontSize };
+}
+
+function resolveShareDistributionPdfTableLayout(options) {
+  for (
+    let tableFontSize = PDF_TABLE_FONT;
+    tableFontSize >= PDF_TABLE_FONT_MIN;
+    tableFontSize -= PDF_TABLE_FONT_STEP
+  ) {
+    const layout = buildTightPdfTableColumns({ ...options, tableFontSize });
+    if (layout.totalWidth <= options.contentWidth + 0.01) {
+      return layout;
+    }
+  }
+
+  return buildTightPdfTableColumns({
+    ...options,
+    tableFontSize: PDF_TABLE_FONT_MIN,
+  });
+}
+
+function getPdfTableTextX(col) {
+  if (col.align === "right") return col.rightX - PDF_TABLE_CELL_PAD_X;
+  if (col.align === "center") return (col.leftX + col.rightX) / 2;
+  return col.leftX + PDF_TABLE_CELL_PAD_X;
+}
+
+function getPdfTableTextAlign(col) {
+  if (col.align === "right") return "right";
+  if (col.align === "center") return "center";
+  return "left";
 }
 
 function buildWorkbookRows(workbookData) {
@@ -204,52 +414,34 @@ export async function generateShareDistributionWorkbookPdf(
   let yPos = Math.max(headerY, metaStartY + lineHeight) + lineHeight + 2;
 
   const columnDefs = [
-    { key: "base", label: "Base", width: 0.07, align: "left" },
-    { key: "className", label: "Class", width: 0.07, align: "left" },
-    { key: "agreement", label: "Agreement", width: 0.15, align: "left" },
-    { key: "tenantAndBusiness", label: "Tenant and Business", width: 0.2, align: "left" },
+    { key: "base", label: "Base", align: "left" },
+    { key: "className", label: "Class", align: "left" },
+    { key: "agreement", label: "Agreement", align: "left" },
+    { key: "tenantAndBusiness", label: "Tenant and Business", align: "left" },
     {
       key: "govtSharePA",
       headerLines: ["Govt Share", "PA"],
       label: "Govt Share-PA",
-      width: 0.1,
       align: "right",
     },
     {
       key: "currentRentPA",
       headerLines: ["Current Rent", "PA"],
       label: "Current Rent-PA",
-      width: 0.1,
       align: "right",
     },
-    { key: "receiptDate", label: "Receipt Date", width: 0.08, align: "center" },
-    { key: "receiptAmount", label: "Receipt Amount", width: 0.1, align: "right" },
-    { key: "ratio", label: "Ratio", width: 0.06, align: "right" },
-    { key: "govt", label: "Govt", width: 0.06, align: "right" },
-    { key: "paf", label: "PAF", width: 0.06, align: "right" },
-    { key: "ahq", label: "AHQ", width: 0.06, align: "right" },
-    { key: "rac", label: "RAC", width: 0.05, align: "right" },
-    { key: "baseShare", label: "Base", width: 0.05, align: "right" },
+    { key: "receiptDate", label: "Receipt Date", align: "center" },
+    { key: "receiptAmount", label: "Receipt Amount", align: "right" },
+    { key: "ratio", label: "Ratio", align: "right" },
+    { key: "govt", label: "Govt", align: "right" },
+    { key: "paf", label: "PAF", align: "right" },
+    { key: "ahq", label: "AHQ", align: "right" },
+    { key: "rac", label: "RAC", align: "right" },
+    { key: "baseShare", label: "Base", align: "right" },
   ];
 
-  const totalRatio = columnDefs.reduce((sum, col) => sum + col.width, 0);
-  const normalizedColumns = columnDefs.map((col) => ({ ...col, width: col.width / totalRatio }));
-
-  let runningX = marginLeft;
-  const columns = normalizedColumns.map((col) => {
-    const width = contentWidth * col.width;
-    const current = {
-      ...col,
-      leftX: runningX,
-      rightX: runningX + width,
-      width,
-    };
-    runningX += width;
-    return current;
-  });
-
   const numericColumnKeys = new Set(
-    columnDefs.filter((col) => col.align === "right").map((col) => col.key)
+    columnDefs.filter((col) => col.align === "right" && col.key !== "ratio").map((col) => col.key)
   );
 
   const totalsRow = rows.reduce((acc, row) => {
@@ -260,97 +452,127 @@ export async function generateShareDistributionWorkbookPdf(
     return acc;
   }, {});
 
+  const { columns, tableFontSize } = resolveShareDistributionPdfTableLayout({
+    doc,
+    sf,
+    columnDefs,
+    rows,
+    totalsRow,
+    numericColumnKeys,
+    contentWidth,
+    marginLeft,
+  });
+
+  const tableTextLineHeight = getPdfTableTextLineHeight(doc, sf, tableFontSize);
+  const singleBodyRowHeight = tableTextLineHeight + 2 * PDF_TABLE_CELL_PAD_Y;
+
+  const measureHeaderRowHeight = () => {
+    let maxLines = 1;
+    columns.forEach((col) => {
+      maxLines = Math.max(maxLines, getPdfHeaderLines(col).length);
+    });
+    return measurePdfTableBlockHeight(maxLines, tableTextLineHeight) + 2 * PDF_TABLE_CELL_PAD_Y;
+  };
+
+  const measureBodyRowHeight = () => singleBodyRowHeight;
+
+  const drawTableCellBorder = (leftX, rowTop, width, rowHeight) => {
+    doc.rect(sx(leftX), sy(rowTop), sc(width), sc(rowHeight));
+  };
+
+  const drawTableHeaderCellText = (col, rowTop) => {
+    const headerLines = getPdfHeaderLines(col);
+    let baseline = rowTop + PDF_TABLE_CELL_PAD_Y + tableTextLineHeight * 0.82;
+
+    setTablePdfFont(doc, sf, true, tableFontSize);
+    headerLines.forEach((line, index) => {
+      doc.text(line, sx((col.leftX + col.rightX) / 2), sy(baseline), { align: "center" });
+      if (index < headerLines.length - 1) {
+        baseline += tableTextLineHeight + PDF_TABLE_HEADER_LINE_GAP;
+      }
+    });
+  };
+
+  const drawTableBodyCellText = (col, text, rowTop, options = {}) => {
+    const lines = getPdfTableCellLines(
+      doc,
+      sf,
+      text,
+      col.innerWidth,
+      options.bold,
+      false,
+      tableFontSize
+    );
+    let baseline = rowTop + PDF_TABLE_CELL_PAD_Y + tableTextLineHeight * 0.82;
+
+    setTablePdfFont(doc, sf, Boolean(options.bold), tableFontSize);
+    lines.forEach((line, index) => {
+      doc.text(line, sx(getPdfTableTextX(col)), sy(baseline), {
+        align: getPdfTableTextAlign(col),
+      });
+      if (index < lines.length - 1) {
+        baseline += tableTextLineHeight + PDF_TABLE_HEADER_LINE_GAP;
+      }
+    });
+  };
+
   const drawTableHeader = () => {
     const rowTop = yPos;
-    const rowHeight = lineHeight * 2;
+    const rowHeight = measureHeaderRowHeight();
 
     columns.forEach((col) => {
       doc.setDrawColor(0, 0, 0);
-      doc.rect(sx(col.leftX), sy(rowTop - 3.5), sc(col.width), sc(rowHeight));
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(sf(7.5));
-      const headerLines = Array.isArray(col.headerLines)
-        ? col.headerLines
-        : doc.splitTextToSize(String(col.label), sc(col.width - 2));
-      const line1 = headerLines[0] || "";
-      const line2 = headerLines[1] || "";
-      doc.text(line1, sx((col.leftX + col.rightX) / 2), sy(rowTop + 1), { align: "center" });
-      if (line2) {
-        doc.text(line2, sx((col.leftX + col.rightX) / 2), sy(rowTop + 5), { align: "center" });
-      }
+      drawTableCellBorder(col.leftX, rowTop, col.width, rowHeight);
+      drawTableHeaderCellText(col, rowTop);
     });
 
-    yPos += rowHeight + 1;
-  };
-
-  const drawCellValue = (col, text, y, options = {}) => {
-    const value = textValue(text);
-    drawBodyText(
-      value,
-      col.align === "right"
-        ? col.rightX - 1.2
-        : col.align === "center"
-        ? (col.leftX + col.rightX) / 2
-        : col.leftX + 1.2,
-      y,
-      {
-        fontSize: 7.5,
-        bold: Boolean(options.bold),
-        textOptions:
-          col.align === "right"
-            ? { align: "right", maxWidth: sc(col.width - 2) }
-            : col.align === "center"
-            ? { align: "center", maxWidth: sc(col.width - 2) }
-            : { align: "left", maxWidth: sc(col.width - 2) },
-      }
-    );
+    yPos = rowTop + rowHeight;
   };
 
   const drawTableRow = (row) => {
-    yPos = ensurePageSpace(yPos, lineHeight + 4);
+    const rowHeight = measureBodyRowHeight();
+    yPos = ensurePageSpace(yPos, rowHeight);
     if (yPos === marginTop) {
       drawTableHeader();
     }
+
     const rowTop = yPos;
-    const rowHeight = lineHeight + 2;
     columns.forEach((col) => {
-      doc.rect(sx(col.leftX), sy(rowTop - 3), sc(col.width), sc(rowHeight));
-      drawCellValue(col, row?.[col.key], rowTop + 1);
+      drawTableCellBorder(col.leftX, rowTop, col.width, rowHeight);
+      drawTableBodyCellText(col, getPdfTableCellText(col, row, numericColumnKeys), rowTop);
     });
-    yPos += rowHeight;
+    yPos = rowTop + rowHeight;
   };
 
   const drawTotalsRow = () => {
-    yPos = ensurePageSpace(yPos, lineHeight + 4);
+    const totalLabelSpan = Math.min(4, columns.length);
+    const rowHeight = singleBodyRowHeight;
+
+    yPos = ensurePageSpace(yPos, rowHeight);
     if (yPos === marginTop) {
       drawTableHeader();
     }
 
     const rowTop = yPos;
-    const rowHeight = lineHeight + 2;
-    const totalLabelSpan = Math.min(4, columns.length);
-
     columns.forEach((col, index) => {
       if (index < totalLabelSpan) {
         if (index === 0) {
           const spanRightX = columns[totalLabelSpan - 1].rightX;
-          doc.rect(sx(col.leftX), sy(rowTop - 3), sc(spanRightX - col.leftX), sc(rowHeight));
-          drawBodyText("Total", col.leftX + 1.2, rowTop + 1, {
-            bold: true,
-            fontSize: 7.5,
-            textOptions: { align: "left", maxWidth: sc(spanRightX - col.leftX - 2) },
-          });
+          drawTableCellBorder(col.leftX, rowTop, spanRightX - col.leftX, rowHeight);
+          drawTableBodyCellText(col, "Total", rowTop, { bold: true });
         }
         return;
       }
 
-      doc.rect(sx(col.leftX), sy(rowTop - 3), sc(col.width), sc(rowHeight));
+      drawTableCellBorder(col.leftX, rowTop, col.width, rowHeight);
       if (numericColumnKeys.has(col.key)) {
-        drawCellValue(col, formatPdfCurrency(totalsRow[col.key] ?? 0), rowTop + 1, { bold: true });
+        drawTableBodyCellText(col, formatPdfCurrency(totalsRow[col.key] ?? 0), rowTop, {
+          bold: true,
+        });
       }
     });
 
-    yPos += rowHeight;
+    yPos = rowTop + rowHeight;
   };
 
   drawTableHeader();

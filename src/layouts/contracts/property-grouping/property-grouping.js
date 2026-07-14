@@ -27,7 +27,6 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import FormHelperText from "@mui/material/FormHelperText";
-import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Popover from "@mui/material/Popover";
 import Box from "@mui/material/Box";
@@ -66,9 +65,9 @@ import PropTypes from "prop-types";
 import StatusBadge from "components/StatusBadge";
 import {
   buildPropertyGroupingGId,
+  getLowestGroupNumberFromPropertyPIds,
   isValidGroupNumber,
   parseGroupNumberFromGId,
-  sanitizeGroupNumberInput,
 } from "./propertyGroupingId";
 
 let revenueRatesCatalogPromise = null;
@@ -785,7 +784,6 @@ function PropertyGroupingForm({
   bases,
   classes,
   allPropertyGroupings = [],
-  onGroupIdBlur,
   propertyTypes = [],
   boundContractRateEdit = false,
 }) {
@@ -1392,6 +1390,29 @@ function PropertyGroupingForm({
     }
   }, [initialData, allBases, classes, open]);
 
+  // Derive Group ID number from selected properties' PIds (lowest when multiple).
+  useEffect(() => {
+    const propertyIds = Array.isArray(form.property) ? form.property : [];
+    if (propertyIds.length === 0) {
+      setForm((prev) => (prev.groupNumber === "" ? prev : { ...prev, groupNumber: "" }));
+      return;
+    }
+
+    const pIds = propertyIds.map((id) => {
+      const property = getPropertyById(id);
+      const fromProperty = String(
+        property?.PId || property?.pId || property?.PropertyName || ""
+      ).trim();
+      if (fromProperty) return fromProperty;
+      return String(linkedPropertyNameById[String(id)] || "").trim();
+    });
+
+    const nextGroupNumber = getLowestGroupNumberFromPropertyPIds(pIds);
+    setForm((prev) =>
+      prev.groupNumber === nextGroupNumber ? prev : { ...prev, groupNumber: nextGroupNumber }
+    );
+  }, [form.property, selectableRentalProperties, rentalProperties, linkedPropertyNameById]);
+
   useEffect(() => {
     const selectedBase = allBases.find((b) => Number(b.id) === Number(form.baseid));
     const selectedClass = classes.find((c) => Number(c.id) === Number(form.classid));
@@ -1622,10 +1643,13 @@ function PropertyGroupingForm({
     ];
     required.forEach(({ key, label }) => {
       if (key === "groupNumber") {
-        if (isEmpty(form?.groupNumber)) {
-          next.groupNumber = `${label} is required`;
+        if (isEmpty(form?.property)) {
+          next.groupNumber = "Select at least one property to generate Group ID";
+        } else if (isEmpty(form?.groupNumber)) {
+          next.groupNumber =
+            "Group ID could not be generated. Selected properties need a valid Property ID.";
         } else if (!isValidGroupNumber(form.groupNumber)) {
-          next.groupNumber = `${label} must be a number from 1 to 999`;
+          next.groupNumber = "Group ID number must be from 1 to 999";
         } else if (isEmpty(form?.gId)) {
           next.groupNumber = "Group ID could not be generated. Check Class and Base.";
         }
@@ -1637,43 +1661,37 @@ function PropertyGroupingForm({
     return Object.keys(next).length === 0;
   };
 
-  // Validate for duplicate active Group ID
+  // Validate for duplicate Group ID (deleted groups may be reused)
   const validateDuplicateGroupId = () => {
-    // Only check if status is active (1/true) and not deleted (0/false)
-    const isActive = form.status === true || form.status === 1;
-    const isNotDeleted = form.isDeleted === false || form.isDeleted === 0;
+    const toBool = (v) => v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
+    const isNotDeleted = !toBool(form.isDeleted);
 
-    if (!isActive || !isNotDeleted) {
-      return true; // No validation needed for inactive or deleted records
+    if (!isNotDeleted) {
+      return true; // No uniqueness check for a deleted record being saved
     }
 
     if (!form.gId || !form.classid || !form.baseid) {
       return true; // Skip validation if required fields are missing
     }
 
-    // Check for duplicate active Group ID with same class and base
+    // Block only when another non-deleted group already uses this Group ID for same class + base
     const duplicate = allPropertyGroupings.find((pg) => {
-      const sameGroupId = (pg.gId || "").toString().trim() === form.gId.toString().trim();
-      const sameClass = Number(pg.classId || pg.classid) === Number(form.classid);
-      const sameBase = Number(pg.baseId || pg.baseid) === Number(form.baseid);
-      const isActiveRecord = pg.status === true || pg.status === 1;
-      const isNotDeletedRecord = pg.isDeleted === false || pg.isDeleted === 0;
-      const isDifferentRecord = initialData ? Number(pg.id) !== Number(initialData.id) : true;
+      const sameGroupId = (pg.gId || pg.GId || "").toString().trim() === form.gId.toString().trim();
+      const sameClass = Number(pg.classId || pg.ClassId || pg.classid) === Number(form.classid);
+      const sameBase = Number(pg.baseId || pg.BaseId || pg.baseid) === Number(form.baseid);
+      const isNotDeletedRecord = !toBool(pg?.isDeleted ?? pg?.IsDeleted);
+      const isDifferentRecord = initialData
+        ? Number(pg.id || pg.Id) !== Number(initialData.id || initialData.Id)
+        : true;
 
-      return (
-        sameGroupId &&
-        sameClass &&
-        sameBase &&
-        isActiveRecord &&
-        isNotDeletedRecord &&
-        isDifferentRecord
-      );
+      return sameGroupId && sameClass && sameBase && isNotDeletedRecord && isDifferentRecord;
     });
 
     if (duplicate) {
       setErrors((prev) => ({
         ...prev,
-        groupNumber: "Same group ID already active for this class and base",
+        groupNumber:
+          "Same Group ID already exists for this class and base. Delete the existing group first to reuse it.",
       }));
       return false;
     }
@@ -1798,24 +1816,6 @@ function PropertyGroupingForm({
       submitPayload = { ...form, rate: avgRate };
     }
     onSubmit(submitPayload);
-  };
-
-  const handleGroupNumberChange = (rawValue) => {
-    const nextValue = sanitizeGroupNumberInput(rawValue);
-    setForm((prevForm) => ({ ...prevForm, groupNumber: nextValue }));
-    if (errors?.groupNumber) {
-      setErrors((prev) => ({ ...prev, groupNumber: undefined }));
-    }
-    if (errors?.gId) {
-      setErrors((prev) => ({ ...prev, gId: undefined }));
-    }
-  };
-
-  // Handle Group ID blur (when user finishes entering) - delegates to parent
-  const handleGroupIdBlur = () => {
-    if (form.gId && form.gId.trim() && onGroupIdBlur) {
-      onGroupIdBlur(form.gId.trim());
-    }
   };
 
   const handlePropertyChange = async (event) => {
@@ -1981,6 +1981,9 @@ function PropertyGroupingForm({
       };
     });
     if (errors?.property) setErrors((prev) => ({ ...prev, property: undefined }));
+    if (errors?.groupNumber || errors?.gId) {
+      setErrors((prev) => ({ ...prev, groupNumber: undefined, gId: undefined }));
+    }
   };
 
   const handleDeleteProperty = (propertyToDelete) => () => {
@@ -2366,41 +2369,20 @@ function PropertyGroupingForm({
               </FormControl>
             </Grid>
 
-            {/* Group ID */}
+            {/* Group ID (auto from selected property PIds) */}
             <Grid item xs={12} sm={6}>
               <MDInput
                 label="Group ID"
                 type="text"
-                value={form.groupNumber}
-                onChange={(e) => handleGroupNumberChange(e.target.value)}
-                onBlur={handleGroupIdBlur}
+                value={form.gId}
                 size="small"
                 fullWidth
                 required={!isEditMode}
                 error={Boolean(errors.groupNumber || errors.gId)}
                 helperText={errors.groupNumber || errors.gId || ""}
-                inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 3 }}
-                InputProps={{
-                  endAdornment: form.gId ? (
-                    <InputAdornment position="end">
-                      <MDTypography
-                        component="span"
-                        variant="body2"
-                        sx={{
-                          fontSize: "1rem",
-                          color: "text.secondary",
-                          whiteSpace: "nowrap",
-                          userSelect: "none",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        {form.gId}
-                      </MDTypography>
-                    </InputAdornment>
-                  ) : null,
-                }}
+                InputProps={{ readOnly: true }}
                 sx={{
-                  "& .MuiInputBase-input": { fontSize: "1rem", maxWidth: "4ch" },
+                  "& .MuiInputBase-input": { fontSize: "1rem" },
                   "& .MuiInputLabel-root": { fontSize: "1rem" },
                 }}
               />
@@ -2682,7 +2664,6 @@ PropertyGroupingForm.propTypes = {
   bases: PropTypes.array.isRequired,
   classes: PropTypes.array.isRequired,
   allPropertyGroupings: PropTypes.array,
-  onGroupIdBlur: PropTypes.func,
   propertyTypes: PropTypes.array,
   boundContractRateEdit: PropTypes.bool,
 };
@@ -3740,24 +3721,25 @@ export default function PropertyGrouping() {
 
   const handleSubmit = async (data) => {
     try {
-      // Check for duplicate group ID before saving (only for create, not update)
+      // Check for duplicate group ID before saving (only for create, not update).
+      // Deleted groups are allowed to be reused.
       if (!currentPropertyGrouping) {
-        // Check if group ID already exists for the same class and base
+        const toBool = (v) =>
+          v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
         const duplicateGroup = allPropertyGroupings.find((pg) => {
           const sameGroupId =
             (pg.GId || pg.gId || "").toString().trim() === (data.gId || "").toString().trim();
           const sameClass = Number(pg.ClassId || pg.classId) === Number(data.classid);
           const sameBase = Number(pg.BaseId || pg.baseId) === Number(data.baseid);
-          const isActive = pg.Status === true || pg.Status === 1;
-          const isNotDeleted = pg.IsDeleted === false || pg.IsDeleted === 0;
+          const isNotDeleted = !toBool(pg.IsDeleted ?? pg.isDeleted);
 
-          return sameGroupId && sameClass && sameBase && isActive && isNotDeleted;
+          return sameGroupId && sameClass && sameBase && isNotDeleted;
         });
 
         if (duplicateGroup) {
           alert(
             `Group ID "${data.gId}" already exists for this class and base.\n\n` +
-              `Please use a different Group ID or deactivate the existing group first.`
+              `Delete the existing group first to reuse this Group ID.`
           );
           return;
         }
@@ -3809,7 +3791,18 @@ export default function PropertyGrouping() {
         .join(" ")
         .trim();
       if (/Cannot insert duplicate key in obj(?:ect)?/i.test(rawErrorText)) {
-        alert("Cannot insert Duplicate Group ID");
+        alert(
+          "Cannot insert Duplicate Group ID. Delete the existing non-deleted group first, or refresh and retry if it was already deleted."
+        );
+        return;
+      }
+      if (error?.response?.status === 409) {
+        const conflictMsg =
+          typeof error?.response?.data === "string"
+            ? error.response.data
+            : error?.response?.data?.message ||
+              "Group ID already exists. Delete the existing group first to reuse it.";
+        alert(conflictMsg);
         return;
       }
       if (currentPropertyGrouping && isSuperuserUser()) {
@@ -4210,7 +4203,6 @@ export default function PropertyGrouping() {
         bases={bases}
         classes={classes}
         allPropertyGroupings={allPropertyGroupings}
-        onGroupIdBlur={handleViewActiveContractsForGroup}
         propertyTypes={propertyTypes}
         boundContractRateEdit={boundContractRateEdit}
       />

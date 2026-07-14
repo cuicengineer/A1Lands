@@ -152,6 +152,13 @@ export function formatKpiBarAxisTick(value) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+/** Y-axis tick labels — whole numbers only (no decimals). */
+export function formatKpiBarAxisTickRounded(value) {
+  const n = roundChartBarNumber(value);
+  if (n == null) return "";
+  return Math.round(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
 export function formatKpiMoneyLabel(valueInMillions, options) {
   const { text, suffix } = formatKpiMoneyAmount(valueInMillions, options);
   return `${text} ${suffix}`;
@@ -1841,6 +1848,255 @@ export function buildKpiRacGovtPafCells({
   return cells;
 }
 
+function sumScopedIncomePA(shareRows, propertyRows) {
+  const fromShare = sumIncomePAFromAllShareRows(shareRows);
+  if (fromShare) return fromShare;
+  return sumIncomePAFromAllPropertyRows(propertyRows);
+}
+
+function sumScopedClassRevenueMil(propertyRows) {
+  let sum = 0;
+  for (const r of propertyRows || []) {
+    if (!isDataSetRow(r, DATA_SET_PROPERTY_SUMMARY)) continue;
+    sum += readNumber(r, ["ClassRevenue_Million", "classRevenue_Million"]) || 0;
+  }
+  return sum;
+}
+
+function sumScopedCollectionsMil(contractRows) {
+  let sum = 0;
+  for (const r of contractRows || []) {
+    if (!isDataSetRow(r, DATA_SET_CONTRACTS_SUMMARY)) continue;
+    const raw =
+      readNumber(r, [
+        "Receipts",
+        "receipts",
+        "TotalReceipts",
+        "totalReceipts",
+        "ReceiptsAmount",
+        "receiptsAmount",
+        "Collections",
+        "collections",
+        "TotalCollections",
+        "totalCollections",
+      ]) || 0;
+    if (Number.isFinite(raw)) sum += asOfAmountToMillions(raw);
+  }
+  return sum;
+}
+
+function racCellHasTurnoverData(cell) {
+  const income = coerceChartDataValue(cell?.mil?.income);
+  const govt = coerceChartDataValue(cell?.mil?.govt);
+  const paf = coerceChartDataValue(cell?.mil?.paf);
+  return (
+    (income != null && income !== 0) || (govt != null && govt !== 0) || (paf != null && paf !== 0)
+  );
+}
+
+function racCellHasDueCollectionsData(cell) {
+  const due = coerceChartDataValue(cell?.mil?.incomeDue);
+  const collections = coerceChartDataValue(cell?.mil?.collections);
+  return (due != null && due !== 0) || (collections != null && collections !== 0);
+}
+
+/**
+ * Income, Govt Share, and PAF Share per RAC (CmdId).
+ * Used by Fiscal Year Shares — Income Turnover RAC Wise chart.
+ */
+export function buildKpiRacIncomeTurnoverCells({
+  shareRows = [],
+  propertyRows = [],
+  contractRows = [],
+  racOptions = [],
+  racIds = [],
+}) {
+  const govtPafCells = buildKpiRacGovtPafCells({
+    shareRows,
+    contractRows,
+    racOptions,
+    racIds,
+  });
+
+  return govtPafCells
+    .map((cell) => {
+      const cmdId = cell.key && cell.key !== "all" ? cell.key : "";
+      const racShare = cmdId ? filterKpiRowsByCmdId(shareRows, cmdId) : shareRows;
+      const racProperty = cmdId ? filterKpiRowsByCmdId(propertyRows, cmdId) : propertyRows;
+      const income = sumScopedIncomePA(racShare, racProperty);
+
+      return {
+        ...cell,
+        mil: {
+          income,
+          govt: cell.mil?.govt || 0,
+          paf: cell.mil?.paf || 0,
+        },
+      };
+    })
+    .filter(racCellHasTurnoverData);
+}
+
+/**
+ * Income due (ClassRevenue) and collections (receipts) per RAC (CmdId).
+ * Used by Fiscal Year Shares — Income Due vs Collections RAC Wise chart.
+ */
+export function buildKpiRacIncomeDueCollectionsCells({
+  propertyRows = [],
+  contractRows = [],
+  racOptions = [],
+  racIds = [],
+}) {
+  const racs = resolveKpiRacChartOptions(racOptions, racIds);
+  const racList = racs.length > 0 ? racs : [{ id: "", name: "All" }];
+  const cells = [];
+
+  for (const rac of racList) {
+    const cmdId = String(rac.id ?? rac.Id ?? "");
+    const racLabel = getKpiOptionName(rac) || cmdId || "All";
+    const racProperty = cmdId ? filterKpiRowsByCmdId(propertyRows, cmdId) : propertyRows;
+    const racContract = cmdId ? filterKpiRowsByCmdId(contractRows, cmdId) : contractRows;
+    cells.push({
+      key: cmdId || "all",
+      chartLabel: racLabel,
+      mil: {
+        incomeDue: sumScopedClassRevenueMil(racProperty),
+        collections: sumScopedCollectionsMil(racContract),
+      },
+    });
+  }
+
+  return cells.filter(racCellHasDueCollectionsData);
+}
+
+function racCellHasOutstandingIncomeData(cell) {
+  const total = coerceChartDataValue(cell?.mil?.total);
+  return total != null && total !== 0;
+}
+
+/**
+ * Outstanding income (ClassRevenue) per RAC with class-wise breakdown.
+ * Used by Fiscal Year Shares — Outstanding Income Formation Wise chart.
+ */
+export function buildKpiRacOutstandingIncomeCells({
+  propertyRows = [],
+  racOptions = [],
+  racIds = [],
+}) {
+  const racs = resolveKpiRacChartOptions(racOptions, racIds);
+  const racList = racs.length > 0 ? racs : [{ id: "", name: "All" }];
+  const cells = [];
+
+  for (const rac of racList) {
+    const cmdId = String(rac.id ?? rac.Id ?? "");
+    const racLabel = getKpiOptionName(rac) || cmdId || "All";
+    const racProperty = cmdId ? filterKpiRowsByCmdId(propertyRows, cmdId) : propertyRows;
+    const classMil = {};
+    let total = 0;
+
+    for (const key of KPI_ASSET_CHART_CATEGORY_KEYS) {
+      const meta = PROPERTY_CLASS_STICKERS[key];
+      const worth = aggregateByClassIds(racProperty, meta.classIds).worth;
+      classMil[key] = worth;
+      total += worth;
+    }
+
+    cells.push({
+      key: cmdId || "all",
+      chartLabel: racLabel,
+      mil: {
+        total,
+        ...classMil,
+      },
+    });
+  }
+
+  return cells.filter(racCellHasOutstandingIncomeData);
+}
+
+function resolveContractNatureOfBusiness(row, contractMetaById = new Map()) {
+  const fromRow = readString(row, ["NatureOfBusiness", "natureOfBusiness"]);
+  if (fromRow) return fromRow;
+
+  const id = Number(row?.Id ?? row?.id);
+  const meta = Number.isFinite(id) ? contractMetaById?.get?.(id) : null;
+  const fromMeta = String(meta?.natureOfBusiness ?? "").trim();
+  return fromMeta || "Unspecified";
+}
+
+function readContractIncomeMil(row) {
+  return (
+    asOfAmountToMillions(readNumber(row, MIL_FIELDS.incomePAShare)) ||
+    asOfAmountToMillions(readNumber(row, MIL_FIELDS.incomePAProperty)) ||
+    asOfAmountToMillions(
+      readNumber(row, [
+        "RentalValue",
+        "rentalValue",
+        "CurrRentPA",
+        "currRentPA",
+        "CurrentRentPA",
+        "currentRentPA",
+        "InitialRentPA",
+        "initialRentPA",
+      ])
+    )
+  );
+}
+
+function isActiveCatalogContractRow(row) {
+  const deleted = row?.IsDeleted ?? row?.isDeleted;
+  if (deleted === true || deleted === 1 || deleted === "1") return false;
+  const archived = row?.IsArchive ?? row?.isArchive;
+  if (archived === true || archived === 1 || archived === "1") return false;
+  const status = row?.Status ?? row?.status;
+  if (status === 0 || status === false || status === "0") return false;
+  return true;
+}
+
+function natureCellHasIncomeData(cell) {
+  const income = coerceChartDataValue(cell?.mil?.income);
+  return income != null && income !== 0;
+}
+
+/**
+ * Income per Nature of Business from active as-of contracts (preferred) or catalog contracts.
+ * Used by Fiscal Year Shares — Nature of Activity Wise Income chart.
+ */
+export function buildKpiNatureOfBusinessIncomeCells({
+  asOfContractRows = [],
+  contractCatalogRows = [],
+  contractMetaById = new Map(),
+  racIds = [],
+  baseIds = [],
+}) {
+  const useAsOf = Array.isArray(asOfContractRows) && asOfContractRows.length > 0;
+  const sourceRows = useAsOf ? asOfContractRows : contractCatalogRows;
+  const filtered = filterKpiRowsByRacBase(sourceRows || [], racIds, baseIds);
+  const byNature = new Map();
+
+  for (const row of filtered) {
+    if (!useAsOf && !isActiveCatalogContractRow(row)) continue;
+
+    const nature = resolveContractNatureOfBusiness(row, contractMetaById);
+    const income = readContractIncomeMil(row);
+    if (!income) continue;
+
+    const entry = byNature.get(nature) || {
+      key: nature,
+      chartLabel: nature,
+      mil: { income: 0 },
+      contractCount: 0,
+    };
+    entry.mil.income += income;
+    entry.contractCount += 1;
+    byNature.set(nature, entry);
+  }
+
+  return [...byNature.values()]
+    .filter(natureCellHasIncomeData)
+    .sort((a, b) => (b.mil?.income || 0) - (a.mil?.income || 0));
+}
+
 function filterKpiRowsByBaseId(rows, baseId) {
   const id = String(baseId ?? "");
   if (!id) return rows || [];
@@ -2348,6 +2604,7 @@ export function buildContractMetaLookup(contracts) {
       classId: row?.ClassId ?? row?.classId ?? "",
       cmdId: row?.CmdId ?? row?.cmdId ?? "",
       baseId: row?.BaseId ?? row?.baseId ?? "",
+      natureOfBusiness: readString(row, ["NatureOfBusiness", "natureOfBusiness"]),
     });
   });
   return map;

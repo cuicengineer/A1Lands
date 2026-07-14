@@ -61,6 +61,7 @@ import { useMaterialUIController, setMiniSidenav, setLayout, setOpenConfigurator
 
 // Images
 import pafLogo from "examples/login_page/assets/img/PAF-Logo.gif";
+import LoginNoticeAlert from "components/LoginNoticeAlert";
 
 const LAST_ACTIVITY_KEY = "lastActivityAt";
 const AUTH_SESSION_CHANGED_EVENT = "auth:session-changed";
@@ -434,6 +435,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
         <ContractsAlertSkin enabled={useContractsAlertSkin} />
+        {isAuthenticated && !isPublicAuthRoute(pathname) ? <LoginNoticeAlert /> : null}
       </ThemeProvider>
     </CacheProvider>
   ) : (
@@ -453,6 +455,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
       <ContractsAlertSkin enabled={useContractsAlertSkin} />
+      {isAuthenticated && !isPublicAuthRoute(pathname) ? <LoginNoticeAlert /> : null}
     </ThemeProvider>
   );
 }

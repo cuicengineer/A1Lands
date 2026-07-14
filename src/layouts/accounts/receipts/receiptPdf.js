@@ -13,12 +13,20 @@ import { computeGrandTotal, computeLineTotal } from "./receiptUtils";
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
 const PDF_FONT_PARTICULARS_MIN = 5;
-const PDF_FONT_PARTICULARS_CONTENT_START = 10.5;
-const PDF_FONT_PARTICULARS_CONTENT_MIN = 7;
+const PDF_FONT_PARTICULARS_CONTENT_START = 9.5;
+const PDF_FONT_PARTICULARS_CONTENT_MIN = 6.5;
+const PDF_PARTICULARS_COLUMN_GAP_MM = 1;
 const PDF_MODE_MAX_LINES = 2;
+const PDF_PARTICULARS_MAX_LINES = 2;
+const PDF_PARTICULARS_LINE_STEP_RATIO = 0.9;
 const PDF_LINE_HEIGHT_MM = 5;
 const PDF_VALUE_UNDERLINE_GAP_MM = 0.75;
-const RECEIPT_PDF_SIGNATURE_BLOCKS = ["Prepared By", "Checked By", "Approved By"];
+const RECEIPT_PDF_SIGNATURE_BLOCKS = [
+  "Prepared By",
+  "Checked By",
+  "Authorized By",
+  "Counter Signed",
+];
 const RECEIPT_PDF_SIGNATURE_BLANK_LINES = 7;
 
 function formatPdfDate(dateString) {
@@ -89,6 +97,39 @@ function resolveWrappedPdfFontSize(
   return { fontSize: minSize, lines: doc.splitTextToSize(value, maxWidth) };
 }
 
+/** Prefer one full-width line (shrinking font) before wrapping particulars. */
+function resolveParticularsPdfTextLayout(
+  doc,
+  text,
+  maxWidthLogical,
+  { maxLines = 2, startSize, minSize, scaleLength = (mm) => mm, scaleFont = (pt) => pt } = {}
+) {
+  const value = String(text ?? "").trim();
+  const maxWidth = scaleLength(maxWidthLogical);
+  if (!value) {
+    return { fontSize: startSize, lines: [""] };
+  }
+
+  doc.setFont("helvetica", "normal");
+
+  let singleLineSize = startSize;
+  while (singleLineSize >= minSize) {
+    doc.setFontSize(scaleFont(singleLineSize));
+    if (doc.getTextWidth(value) <= maxWidth) {
+      return { fontSize: singleLineSize, lines: [value] };
+    }
+    singleLineSize -= 0.5;
+  }
+
+  doc.setFontSize(scaleFont(minSize));
+  const wrappedLines = doc.splitTextToSize(value, maxWidth);
+  if (wrappedLines.length <= maxLines) {
+    return { fontSize: minSize, lines: wrappedLines };
+  }
+
+  return { fontSize: minSize, lines: wrappedLines.slice(0, maxLines) };
+}
+
 function unwrapAccountingSysList(response) {
   if (!response) return [];
   if (Array.isArray(response)) return response;
@@ -152,6 +193,29 @@ function textValue(value) {
   return text || "—";
 }
 
+function stripLedgerCodePrefix(label, acctId = "") {
+  const text = String(label || "").trim();
+  if (!text) return "";
+
+  const code = String(acctId || "").trim();
+  if (code) {
+    const prefix = `${code} - `;
+    if (text.startsWith(prefix)) return text.slice(prefix.length).trim();
+  }
+
+  return text;
+}
+
+function getCashAndBankLedgerPdfName(option) {
+  if (option == null) return "";
+  const name = String(option.name ?? option.Name ?? "").trim();
+  if (name) return name;
+
+  const acctId = String(option.acctId ?? option.AcctId ?? "").trim();
+  const label = getCashAndBankLedgerDropdownLabel(option);
+  return stripLedgerCodePrefix(label, acctId);
+}
+
 function pickReceiptVrNo(receipt) {
   return textValue(receipt?.vrNo || receipt?.reference);
 }
@@ -202,6 +266,26 @@ function buildReceiptVoucherParticulars(line) {
   return fallback || "—";
 }
 
+function buildPaymentVoucherParticulars(line) {
+  const partyType = String(line?.partyType || "").trim();
+  const party =
+    String(line?.partyLabel || "").trim() ||
+    [line?.partyCode, line?.partyName]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  const reference = formatReceiptLineReference(line);
+  const referenceSuffix = reference ? ` - (${reference})` : "";
+  const item = String(line?.item || "").trim();
+
+  if (partyType && party) return `${partyType} – ${party}${referenceSuffix}`;
+  if (party) return `${party}${referenceSuffix}`;
+  if (item && reference) return `${item}${referenceSuffix}`;
+  if (item) return item;
+  if (reference) return `(${reference})`;
+  return "—";
+}
+
 function pickReceiptLineAmount(line) {
   const total = Number(line?.total);
   if (Number.isFinite(total) && total > 0) return total;
@@ -219,7 +303,7 @@ async function resolveReceiptModeLabel(receipt) {
       const response = await cashAndBankApi.getAll(1, 1000);
       const rows = unwrapCashAndBankList(response);
       const match = rows.find((row) => Number(row?.id ?? row?.Id) === Number(ledgerId));
-      const label = getCashAndBankLedgerDropdownLabel(match);
+      const label = getCashAndBankLedgerPdfName(match);
       if (label) return label;
     } catch (error) {
       console.error("Error fetching cash and bank ledger for receipt PDF:", error);
@@ -229,7 +313,7 @@ async function resolveReceiptModeLabel(receipt) {
   const receivedFromLabel = String(
     receipt?.receivedFromAccountLabel || receipt?.receivedFromAccountDisplay || ""
   ).trim();
-  if (receivedFromLabel) return receivedFromLabel;
+  if (receivedFromLabel) return stripLedgerCodePrefix(receivedFromLabel);
 
   const payeeName = String(receipt?.payeeName || "").trim();
   if (payeeName) return payeeName;
@@ -244,11 +328,17 @@ async function resolveReceiptModeLabel(receipt) {
 export async function generateReceiptPdf(
   receipt,
   marginsInParam = null,
-  { openNewTab = false, documentTitle = "Receipt Voucher" } = {}
+  { openNewTab = false, documentTitle = "Receipt Voucher", isPaymentVoucher = false } = {}
 ) {
   if (!receipt) {
     throw new Error("No receipt data available for PDF.");
   }
+
+  const paymentVoucher =
+    isPaymentVoucher ||
+    String(documentTitle || "")
+      .trim()
+      .toLowerCase() === "payment voucher";
 
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -303,10 +393,8 @@ export async function generateReceiptPdf(
   const LOGO_GAP_MM = 3;
   const textStartX = marginLeft + LOGO_WIDTH_MM + LOGO_GAP_MM;
   const VOUCHER_BOX_WIDTH_MM = 54;
-  const VOUCHER_LABEL_COL_MM = 24;
+  const VOUCHER_LABEL_VALUE_GAP_MM = 1.5;
   const voucherBoxLeft = contentRight - VOUCHER_BOX_WIDTH_MM;
-  const voucherSepX = voucherBoxLeft + VOUCHER_LABEL_COL_MM;
-  const voucherValueX = voucherSepX + 2;
   const valueStartX = textStartX;
 
   await loadPafLogoIntoPdf(doc, sx(marginLeft), sy(marginTop), sc(LOGO_WIDTH_MM));
@@ -354,17 +442,24 @@ export async function generateReceiptPdf(
   drawBodyText(accountingTelNo ? `Tel No ${accountingTelNo}` : "Tel No", textStartX, headerY);
 
   const voucherMetaStartY = marginTop + 5 + lineHeight;
-  const voucherValueMaxWidth = Math.max(8, contentRight - voucherValueX - 2);
   let voucherMetaY = voucherMetaStartY;
+
+  const resolveVoucherMetaValueX = (label) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(sf(bodyFont));
+    const labelTextWidth = doc.getTextWidth(String(label ?? ""));
+    return voucherBoxLeft + 2 + labelTextWidth + VOUCHER_LABEL_VALUE_GAP_MM;
+  };
 
   const drawVoucherMetaRow = (label, value, options = {}) => {
     const { maxLines = 1, minFontSize = PDF_FONT_BODY } = options;
     const rowTop = voucherMetaY;
+    const valueX = resolveVoucherMetaValueX(label);
 
     drawBodyText(label, voucherBoxLeft + 2, rowTop, { bold: true });
 
     if (maxLines <= 1) {
-      const valueMaxWidth = Math.max(8, contentRight - voucherValueX - 1);
+      const valueMaxWidth = Math.max(8, contentRight - valueX - 1);
       const valueFontSize = resolveSingleLinePdfFontSize(
         doc,
         value,
@@ -375,15 +470,16 @@ export async function generateReceiptPdf(
       );
       doc.setFont("helvetica", "normal");
       doc.setFontSize(valueFontSize);
-      doc.text(String(value ?? ""), sx(voucherValueX), sy(rowTop));
+      doc.text(String(value ?? ""), sx(valueX), sy(rowTop));
       voucherMetaY += lineHeight;
       return;
     }
 
+    const valueMaxWidth = Math.max(8, contentRight - valueX - 1);
     const { fontSize: valueFontSize, lines: valueLines } = resolveWrappedPdfFontSize(
       doc,
       value,
-      sc(voucherValueMaxWidth),
+      sc(valueMaxWidth),
       maxLines,
       sf(bodyFont),
       sf(minFontSize),
@@ -393,7 +489,7 @@ export async function generateReceiptPdf(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(valueFontSize);
     valueLines.forEach((line, index) => {
-      doc.text(line, sx(voucherValueX), sy(rowTop + index * wrappedLineStep));
+      doc.text(line, sx(valueX), sy(rowTop + index * wrappedLineStep));
     });
     voucherMetaY += Math.max(lineHeight, valueLines.length * wrappedLineStep);
   };
@@ -476,15 +572,18 @@ export async function generateReceiptPdf(
 
   yPos += lineHeight * 0.5;
 
-  const colSnX = marginLeft;
-  const colParticularsX = marginLeft + contentWidth * 0.07;
-  const colAmountLeftX = marginLeft + contentWidth * 0.56;
-  const colAmountRightX = marginLeft + contentWidth * 0.66;
-  const colTinFtnLeftX = marginLeft + contentWidth * 0.72;
-  const colTinFtnRightX = contentRight;
-  const particularsMaxWidth = Math.max(12, colAmountLeftX - colParticularsX - 3);
+  const colParticularsX = marginLeft;
+  const colAmountRightX = contentRight;
+  const colAmountLeftX = colAmountRightX - contentWidth * 0.1;
+  const colTinFtnRightX = colAmountLeftX - contentWidth * 0.01;
+  const colTinFtnLeftX = colTinFtnRightX - contentWidth * 0.26;
+  const particularsMaxWidth = Math.max(
+    12,
+    colTinFtnLeftX - colParticularsX - PDF_PARTICULARS_COLUMN_GAP_MM
+  );
   const amountMaxWidth = Math.max(10, colAmountRightX - colAmountLeftX);
   const tinFtnMaxWidth = Math.max(10, colTinFtnRightX - colTinFtnLeftX);
+  const tinFtnHeaderLabel = paymentVoucher ? "TIN-TRN" : "TIN-FTN";
 
   const drawAmountCell = (text, y, options = {}) => {
     drawBodyText(text, colAmountRightX, y, {
@@ -510,67 +609,82 @@ export async function generateReceiptPdf(
 
   const drawParticularsText = (text, y) => {
     const value = String(text ?? "");
-    const fontSize = resolveSingleLinePdfFontSize(
-      doc,
-      value,
-      particularsMaxWidth,
-      sf(PDF_FONT_PARTICULARS_CONTENT_START),
-      sf(PDF_FONT_PARTICULARS_CONTENT_MIN),
-      "normal"
-    );
+    const { fontSize, lines } = resolveParticularsPdfTextLayout(doc, value, particularsMaxWidth, {
+      maxLines: PDF_PARTICULARS_MAX_LINES,
+      startSize: PDF_FONT_PARTICULARS_CONTENT_START,
+      minSize: PDF_FONT_PARTICULARS_CONTENT_MIN,
+      scaleLength: sc,
+      scaleFont: sf,
+    });
+    const lineStep = lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(fontSize);
-    doc.text(value, sx(colParticularsX), sy(y));
+    doc.setFontSize(sf(fontSize));
+    lines.forEach((line, index) => {
+      doc.text(line, sx(colParticularsX), sy(y + index * lineStep));
+    });
+    return Math.max(1, lines.length);
   };
 
   const drawVoucherTableHeader = () => {
     const rowTop = yPos;
-    drawBodyText("SN", colSnX, rowTop, { bold: true });
     drawBodyText("Particulars", colParticularsX, rowTop, { bold: true });
+    drawBodyText(tinFtnHeaderLabel, colTinFtnRightX, rowTop, {
+      bold: true,
+      textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
+    });
     drawBodyText("Amount", colAmountRightX, rowTop, {
       bold: true,
       textOptions: { align: "right", maxWidth: sc(amountMaxWidth) },
     });
-    drawBodyText("TIN-FTN", colTinFtnRightX, rowTop, {
-      bold: true,
-      textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
-    });
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(sf(bodyFont));
-    const headerTextHeight = doc.getTextDimensions("SN").h;
+    const headerTextHeight = doc.getTextDimensions("Particulars").h;
     const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
     drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
     yPos = underlineY + lineHeight;
   };
 
-  const drawVoucherTableRow = (serialNo, particulars, amount, tinFtn) => {
-    yPos = ensurePageSpace(yPos, lineHeight + 2);
+  const drawVoucherTableRow = (particulars, amount, tinFtn) => {
+    yPos = ensurePageSpace(
+      yPos,
+      lineHeight * PDF_PARTICULARS_MAX_LINES * PDF_PARTICULARS_LINE_STEP_RATIO + 2
+    );
     if (yPos === marginTop) {
       drawVoucherTableHeader();
     }
 
-    drawBodyText(`${serialNo}.`, colSnX, yPos);
-    drawParticularsText(particulars || "—", yPos);
-    drawAmountCell(formatPdfCurrency(amount), yPos);
-    drawTinFtnCell(tinFtn, yPos);
-    yPos += lineHeight;
+    const rowTop = yPos;
+    const drawnParticularsLines = drawParticularsText(particulars || "—", rowTop);
+    const rowHeight = Math.max(
+      lineHeight,
+      drawnParticularsLines * lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO
+    );
+    drawTinFtnCell(tinFtn, rowTop);
+    drawAmountCell(formatPdfCurrency(amount), rowTop);
+    yPos += rowHeight;
   };
 
   drawVoucherTableHeader();
 
+  const buildLineParticulars = paymentVoucher
+    ? buildPaymentVoucherParticulars
+    : buildReceiptVoucherParticulars;
+  const emptyLinesMessage = paymentVoucher
+    ? "No payment lines recorded"
+    : "No receipt lines recorded";
+
   const lines = Array.isArray(receipt?.lines) ? receipt.lines : [];
   if (lines.length > 0) {
-    lines.forEach((line, index) => {
+    lines.forEach((line) => {
       drawVoucherTableRow(
-        index + 1,
-        buildReceiptVoucherParticulars(line),
+        buildLineParticulars(line),
         pickReceiptLineAmount(line),
         pickReceiptLineTinFtn(line)
       );
     });
   } else {
-    drawVoucherTableRow(1, "No receipt lines recorded", 0, "—");
+    drawVoucherTableRow(emptyLinesMessage, 0, "—");
   }
 
   yPos = ensurePageSpace(yPos + 4, lineHeight * 3);

@@ -20,7 +20,6 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
-  isSuperuserOrAhqSupervisorUser,
   isSuperuserUser,
 } from "services/api.service";
 import { buildWorkspaceRecordMetrics } from "utils/workspaceRecordMetrics";
@@ -40,6 +39,7 @@ import {
   validateCollectionLineAttachmentFile,
 } from "./collectionAttachmentUtils";
 import {
+  collectionGridRowAllowsEditDelete,
   deriveCollectionEntryStatus,
   matchesCollectionStatusFilter,
 } from "./collectionReceiptUtils";
@@ -113,11 +113,19 @@ export default function Collections() {
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
   const canCreate = canCreateCurrentMenu();
-  const canPrivilegedRowActions = isSuperuserOrAhqSupervisorUser();
-  const canEditRow = (canEdit || canCreate) && canPrivilegedRowActions;
-  const canDeleteRow = canDelete && canPrivilegedRowActions;
+  const canEditRow = canEdit || canCreate;
+  const canDeleteRow = canDelete;
   const canAddRow = canCreate || canEdit;
   const canEditStatus = isSuperuserUser();
+
+  const rowAllowsEditDelete = useCallback(
+    (row) =>
+      collectionGridRowAllowsEditDelete(row, {
+        isSuperuser: canEditStatus,
+        allowManualOverride: canEditStatus,
+      }),
+    [canEditStatus]
+  );
 
   const deepLinkFilters = useMemo(() => {
     const params = new URLSearchParams(search || "");
@@ -486,6 +494,7 @@ export default function Collections() {
       }
 
       if (!canEditRow) return;
+      if (!rowAllowsEditDelete(row)) return;
 
       if (isCollectionRowLockedByVrDate(row, activeLockDate)) {
         window.alert(formatCollectionVrDateLockMessage(activeLockDate));
@@ -505,7 +514,15 @@ export default function Collections() {
         },
       ]);
     },
-    [allRows, activeLockDate, canAddRow, canEditRow, clearOtherEditingRows, updateRowState]
+    [
+      allRows,
+      activeLockDate,
+      canAddRow,
+      canEditRow,
+      clearOtherEditingRows,
+      rowAllowsEditDelete,
+      updateRowState,
+    ]
   );
 
   const handleCancelEditRow = useCallback((key) => {
@@ -583,6 +600,7 @@ export default function Collections() {
       if (!canDeleteRow) return;
       const row = findRowByKey(key);
       if (!row) return;
+      if (!rowAllowsEditDelete(row)) return;
       if (!window.confirm("Delete this collection entry?")) return;
 
       const deleteId = row.editingEntryId ?? row.id;
@@ -630,7 +648,7 @@ export default function Collections() {
         setSaving(false);
       }
     },
-    [canDeleteRow, findRowByKey]
+    [canDeleteRow, findRowByKey, rowAllowsEditDelete]
   );
 
   const handleSaveRow = useCallback(

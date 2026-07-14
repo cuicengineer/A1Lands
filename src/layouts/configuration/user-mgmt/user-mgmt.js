@@ -27,7 +27,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Checkbox from "@mui/material/Checkbox";
-import Paper from "@mui/material/Paper";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -41,16 +40,21 @@ import {
   buildAppointNameOptions,
   mapUserAppointRows,
 } from "./userAppointUtils";
-import { isSuperuserUsername } from "./userMgmtUtils";
+import {
+  isSuperuserUsername,
+  isOperatorCategoryUser,
+  isMandatoryViewRightsMenu,
+  loadAssignRightsMenuCatalog,
+  mergeAssignRightsPermissionMenus,
+  resolveAssignRightsExistingPermission,
+  applyAssignRightsToggle,
+  normalizeAssignRightsDraftRows,
+  getAssignRightsRowBackground,
+  getAssignRightsRowBgColors,
+  seedDefaultViewPermissionsForUser,
+} from "./userMgmtUtils";
 
-/** Dashboard menu row: View is always granted and cannot be unchecked in Assign Rights. */
-function isDashboardRightsMenu(menuName) {
-  return (
-    String(menuName || "")
-      .trim()
-      .toLowerCase() === "dashboard"
-  );
-}
+/** Dashboard and KPI Overview: View is always granted and cannot be unchecked in Assign Rights. */
 
 function UserMgmt() {
   const [controller] = useMaterialUIController();
@@ -79,7 +83,8 @@ function UserMgmt() {
   const [isRightsModalOpen, setIsRightsModalOpen] = useState(false);
   const [rightsUserId, setRightsUserId] = useState(null);
   const [rightsUserName, setRightsUserName] = useState("");
-  const [mainMenuNames, setMainMenuNames] = useState([]);
+  const [rightsUserCategory, setRightsUserCategory] = useState([]);
+  const [assignRightsMenuCatalog, setAssignRightsMenuCatalog] = useState([]);
   const [rightsDraftRows, setRightsDraftRows] = useState([]);
   const [rightsRowMetaByMenu, setRightsRowMetaByMenu] = useState({});
   const [isRightsSaving, setIsRightsSaving] = useState(false);
@@ -95,6 +100,16 @@ function UserMgmt() {
       .toLowerCase();
     return name === "ahq";
   };
+
+  useEffect(() => {
+    let mounted = true;
+    loadAssignRightsMenuCatalog().then((catalog) => {
+      if (mounted) setAssignRightsMenuCatalog(catalog);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -163,7 +178,7 @@ function UserMgmt() {
 
   const handleAddUser = () => {
     if (!canCreate) return;
-    if (editingRowId) return;
+    if (editingRowId || isAddFormOpen) return;
     const defaultCmdId = commandOptions[0]?.id || "";
     const isAhq = defaultCmdId ? isAhqCommand(defaultCmdId) : false;
     const firstBaseForCmd = baseOptions.find((b) => b.cmdId === Number(defaultCmdId));
@@ -188,7 +203,7 @@ function UserMgmt() {
 
   const handleEditUser = (id) => {
     if (!canEdit) return;
-    if (editingRowId) return;
+    if (editingRowId || isAddFormOpen) return;
     const row = tableRows.find((r) => Number(r.id) === Number(id));
     if (!row) return;
     if (isSuperuserUsername(row.username)) return;
@@ -214,6 +229,8 @@ function UserMgmt() {
       levelId: row.levelId !== undefined && row.levelId !== null ? Number(row.levelId) : "",
       status: row.status !== undefined && row.status !== null ? Number(row.status) : 1, // Ensure status is number
     });
+    setErrors({});
+    setIsAddFormOpen(true);
   };
 
   const PASSWORD_POLICY_TEXT =
@@ -392,10 +409,18 @@ function UserMgmt() {
         levelId: computedLevelId,
       };
       const created = await api.create("User", payload);
+      const createdUserId = created?.id ?? created?.Id;
+      if (createdUserId) {
+        try {
+          await seedDefaultViewPermissionsForUser(api, createdUserId);
+        } catch (permError) {
+          console.error("Failed to seed default view permissions for new user", permError);
+        }
+      }
       // Normalize status when adding new row
       const normalizedCreated = {
         ...created,
-        id: created.id,
+        id: created.id ?? createdUserId,
         status: created.status === 1 || created.status === "1" || created.status === true ? 1 : 0,
       };
       setTableRows((prev) => [normalizedCreated, ...prev]);
@@ -477,6 +502,7 @@ function UserMgmt() {
       setEditingRowId(null);
       setEditDraft(null);
       setErrors({});
+      setIsAddFormOpen(false);
     } catch (err) {
       console.error("Save failed", err);
       alert(err?.message || "Failed to save user. Please try again.");
@@ -506,34 +532,15 @@ function UserMgmt() {
     }
   };
 
-  const loadMainMenuNames = async () => {
-    try {
-      const routesModule = await import("routes");
-      const appRoutes = routesModule?.default || [];
-      const names = [];
-      const walk = (items) => {
-        if (!Array.isArray(items)) return;
-        items.forEach((route) => {
-          if (route?.type === "collapse" && route?.name && !route?.excludeFromAssignRights) {
-            names.push(route.name);
-          }
-          if (Array.isArray(route?.collapse)) {
-            walk(route.collapse);
-          }
-        });
-      };
-      walk(appRoutes);
-      setMainMenuNames(names);
-      return names;
-    } catch (e) {
-      console.error("Failed to load main menu names", e);
-      setMainMenuNames([]);
-      return [];
-    }
+  const loadAssignRightsMenus = async () => {
+    const catalog = await loadAssignRightsMenuCatalog();
+    setAssignRightsMenuCatalog(catalog);
+    return catalog;
   };
 
   const handleOpenRightsModal = async (id) => {
     const row = tableRows.find((r) => r.id === id);
+    const operatorUser = isOperatorCategoryUser(row?.category);
 
     const toBoolean = (value) =>
       value === true ||
@@ -558,7 +565,6 @@ function UserMgmt() {
         .trim()
         .toLowerCase();
 
-    const menus = mainMenuNames.length > 0 ? mainMenuNames : await loadMainMenuNames();
     let permissionRows = [];
     try {
       const permissionsData = await api.request("GET", `/api/UserPermissions/ByUser/${id}`);
@@ -575,6 +581,9 @@ function UserMgmt() {
       console.error("Failed to load user permissions", e);
     }
 
+    const catalog = await loadAssignRightsMenus();
+    const menus = mergeAssignRightsPermissionMenus(catalog, permissionRows, getMenuName);
+
     const rightsLookup = permissionRows.reduce((acc, item) => {
       const menuName = getMenuName(item);
       if (!menuName) return acc;
@@ -582,49 +591,41 @@ function UserMgmt() {
       return acc;
     }, {});
 
-    const resolveExistingRights = (menuName) => {
-      const key = normalizeMenuKey(menuName);
-      if (rightsLookup[key]) return rightsLookup[key];
-      if (key === "sales agreements") return rightsLookup["contracts mgmt"] || {};
-      if (key === "agreements") return rightsLookup.agreements || rightsLookup.contracts || {};
-      if (key === "cash & fund flow" || key === "cash and fund flow") {
-        return (
-          rightsLookup["cash & fund flow"] || rightsLookup.payments || rightsLookup.receipts || {}
-        );
-      }
-      if (key === "purchases") {
-        return rightsLookup.purchases || rightsLookup.supplier || {};
-      }
-      if (key === "sales") {
-        return rightsLookup.sales || rightsLookup.customer || {};
-      }
-      return {};
-    };
-
     setRightsRowMetaByMenu(rightsLookup);
     setRightsDraftRows(
-      menus.map((menuName) => {
-        const existing = resolveExistingRights(menuName);
-        const isDashboardRow = isDashboardRightsMenu(menuName);
-        return {
-          menuName,
-          view: isDashboardRow
-            ? true
-            : toBoolean(existing?.canView ?? existing?.CanView ?? existing?.view ?? existing?.View),
-          create: toBoolean(
-            existing?.canCreate ?? existing?.CanCreate ?? existing?.create ?? existing?.Create
-          ),
-          edit: toBoolean(
-            existing?.canEdit ?? existing?.CanEdit ?? existing?.edit ?? existing?.Edit
-          ),
-          delete: toBoolean(
-            existing?.canDelete ?? existing?.CanDelete ?? existing?.delete ?? existing?.Delete
-          ),
-        };
-      })
+      normalizeAssignRightsDraftRows(
+        menus.map(({ menuName, isMainMenu, groupIndex }) => {
+          const existing = resolveAssignRightsExistingPermission(menuName, rightsLookup);
+          const isMandatoryViewRow = isMandatoryViewRightsMenu(menuName);
+          return {
+            menuName,
+            isMainMenu,
+            groupIndex,
+            view: isMandatoryViewRow
+              ? true
+              : toBoolean(
+                  existing?.canView ?? existing?.CanView ?? existing?.view ?? existing?.View
+                ),
+            create: toBoolean(
+              existing?.canCreate ?? existing?.CanCreate ?? existing?.create ?? existing?.Create
+            ),
+            edit: operatorUser
+              ? false
+              : toBoolean(
+                  existing?.canEdit ?? existing?.CanEdit ?? existing?.edit ?? existing?.Edit
+                ),
+            delete: operatorUser
+              ? false
+              : toBoolean(
+                  existing?.canDelete ?? existing?.CanDelete ?? existing?.delete ?? existing?.Delete
+                ),
+          };
+        })
+      )
     );
     setRightsUserId(id);
     setRightsUserName(row?.username || "");
+    setRightsUserCategory(row?.category ?? []);
     setIsRightsModalOpen(true);
   };
 
@@ -632,23 +633,18 @@ function UserMgmt() {
     setIsRightsModalOpen(false);
     setRightsUserId(null);
     setRightsUserName("");
+    setRightsUserCategory([]);
     setRightsDraftRows([]);
     setRightsRowMetaByMenu({});
   };
 
   const handleRightsToggle = (menuName, field) => {
     if (isSuperuserUsername(rightsUserName)) return;
-    if (field === "view" && isDashboardRightsMenu(menuName)) return;
-    setRightsDraftRows((prev) =>
-      prev.map((row) =>
-        row.menuName === menuName
-          ? {
-              ...row,
-              [field]: !row[field],
-            }
-          : row
-      )
-    );
+    if (isOperatorCategoryUser(rightsUserCategory) && (field === "edit" || field === "delete")) {
+      return;
+    }
+    if (field === "view" && isMandatoryViewRightsMenu(menuName)) return;
+    setRightsDraftRows((prev) => applyAssignRightsToggle(prev, menuName, field));
   };
 
   const handleRightsSave = async () => {
@@ -656,8 +652,9 @@ function UserMgmt() {
     if (isSuperuserUsername(rightsUserName)) return;
     setIsRightsSaving(true);
     try {
+      const rowsToSave = normalizeAssignRightsDraftRows(rightsDraftRows);
       await Promise.all(
-        rightsDraftRows.map((row) => {
+        rowsToSave.map((row) => {
           const menuKey = String(row.menuName || "")
             .trim()
             .toLowerCase();
@@ -692,10 +689,10 @@ function UserMgmt() {
             ...existingRowWithoutPermissionFlags,
             userId: rightsUserId,
             menuName: row.menuName,
-            canView: row.view,
+            canView: isMandatoryViewRightsMenu(row.menuName) ? true : row.view,
             canCreate: row.create,
-            canEdit: row.edit,
-            canDelete: row.delete,
+            canEdit: isOperatorCategoryUser(rightsUserCategory) ? false : row.edit,
+            canDelete: isOperatorCategoryUser(rightsUserCategory) ? false : row.delete,
           };
           return api.post("/api/UserPermissions", payload);
         })
@@ -724,11 +721,6 @@ function UserMgmt() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = Number(editingRowId) === Number(row.original.id);
-        const draft = isEditing ? editDraft : row.original;
-        if (isEditing) {
-          return renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false);
-        }
         const display = commandOptions.find((cmd) => cmd.id === Number(value))?.name || value;
         return withGridValueChip(display, "rac", { row });
       },
@@ -739,16 +731,6 @@ function UserMgmt() {
       align: "left",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = Number(editingRowId) === Number(row.original.id);
-        const draft = isEditing ? editDraft : row.original;
-        if (isEditing) {
-          return renderBaseSelect(
-            "baseId",
-            draft.baseId ? Number(draft.baseId) : "",
-            Number(draft.cmdId),
-            false
-          );
-        }
         const display = baseOptions.find((base) => base.id === Number(value))?.name || value;
         return withGridValueChip(display, "base", { row });
       },
@@ -758,18 +740,8 @@ function UserMgmt() {
       accessor: "levelId",
       align: "left",
       // eslint-disable-next-line react/prop-types
-      Cell: ({ cell: { value, row } }) => {
-        const isEditing = Number(editingRowId) === Number(row.original.id);
-        const draft = isEditing ? editDraft : row.original;
-        const ahqSelected = isAhqCommand(draft?.cmdId);
-        return isEditing
-          ? renderLevelSelect(
-              "levelId",
-              Number(draft.levelId || (ahqSelected ? 1 : 2)),
-              ahqSelected
-            )
-          : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(value))?.label || value || "-";
-      },
+      Cell: ({ cell: { value } }) =>
+        LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(value))?.label || value || "-",
     },
     {
       Header: "Status",
@@ -777,11 +749,6 @@ function UserMgmt() {
       align: "center",
       // eslint-disable-next-line react/prop-types
       Cell: ({ cell: { value, row } }) => {
-        const isEditing = Number(editingRowId) === Number(row.original.id);
-        const draft = isEditing ? editDraft : row.original;
-        if (isEditing) {
-          return renderStatusSelect("status", draft.status);
-        }
         // Get status value - prefer row.original.status, fallback to value
         // The status in row.original should be the raw number (0 or 1) from computedRows
         const statusValue = row.original?.status !== undefined ? row.original.status : value;
@@ -1136,74 +1103,25 @@ function UserMgmt() {
     const rows = [];
 
     tableRows.forEach((r) => {
-      const isEditing = Number(editingRowId) === Number(r.id);
-      const draft = isEditing ? editDraft : r;
       const isProtectedSuperuser = isSuperuserUsername(r.username);
       rows.push({
         __disabledRow: isProtectedSuperuser,
         id: r.id,
-        username: isEditing ? renderInput("username", draft.username, true, false) : r.username,
-        password: isEditing
-          ? renderInput("password", draft.password || "********", false)
-          : "********",
-        pakNo: isEditing ? renderInput("pakNo", draft.pakNo, false, false) : r.pakNo,
-        name: isEditing ? renderInput("name", draft.name, false, false) : r.name,
-        rank: isEditing ? renderInput("rank", draft.rank, false, false) : r.rank,
-        appoint: isEditing
-          ? renderAppointSelect("appoint", draft.appoint ?? draft.Appoint ?? "")
-          : r.appoint ?? r.Appoint ?? "" ?? "",
-        category: isEditing ? renderCategorySelect("category", draft.category, false) : r.category,
-        cmdId: isEditing
-          ? renderCommandSelect("cmdId", draft.cmdId ? Number(draft.cmdId) : "", false)
-          : commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
-        baseId: isEditing
-          ? renderBaseSelect(
-              "baseId",
-              draft.baseId ? Number(draft.baseId) : "",
-              Number(draft.cmdId),
-              false
-            )
-          : baseOptions.find((base) => base.id === Number(r.baseId))?.name || r.baseId,
-        levelId: isEditing
-          ? renderLevelSelect(
-              "levelId",
-              Number(draft.levelId || (isAhqCommand(draft?.cmdId) ? 1 : 2)),
-              isAhqCommand(draft?.cmdId)
-            )
-          : LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(r.levelId))?.label ||
-            r.levelId ||
-            "-",
-        status: isEditing ? renderStatusSelect("status", draft.status) : r.status, // Keep raw status value, let Cell function render it
-        actions: isEditing ? (
-          <MDBox
-            display="flex"
-            flexDirection="row"
-            flexWrap="nowrap"
-            alignItems="center"
-            justifyContent="center"
-            gap="2px"
-            sx={{ whiteSpace: "nowrap" }}
-          >
-            <IconButton
-              size="small"
-              color="success"
-              onClick={handleEditSave}
-              onMouseDown={(e) => e.stopPropagation()}
-              title="Save"
-            >
-              <Icon>check</Icon>
-            </IconButton>
-            <IconButton
-              size="small"
-              color="error"
-              onClick={handleCancel}
-              onMouseDown={(e) => e.stopPropagation()}
-              title="Cancel"
-            >
-              <Icon>close</Icon>
-            </IconButton>
-          </MDBox>
-        ) : (
+        username: r.username,
+        password: "********",
+        pakNo: r.pakNo,
+        name: r.name,
+        rank: r.rank,
+        appoint: r.appoint ?? r.Appoint ?? "",
+        category: r.category,
+        cmdId: commandOptions.find((cmd) => cmd.id === Number(r.cmdId))?.name || r.cmdId,
+        baseId: baseOptions.find((base) => base.id === Number(r.baseId))?.name || r.baseId,
+        levelId:
+          LEVEL_OPTIONS.find((opt) => Number(opt.id) === Number(r.levelId))?.label ||
+          r.levelId ||
+          "-",
+        status: r.status, // Keep raw status value, let Cell function render it
+        actions: (
           <MDBox
             display="flex"
             flexDirection="row"
@@ -1255,19 +1173,40 @@ function UserMgmt() {
     });
 
     return rows;
-  }, [
-    tableRows,
-    editingRowId,
-    editDraft,
-    commandOptions,
-    baseOptions,
-    roleOptions,
-    appointOptions,
-    errors,
-    darkMode,
-  ]);
+  }, [tableRows, commandOptions, baseOptions, canEdit, canDelete]);
 
   const isRightsReadOnly = isSuperuserUsername(rightsUserName);
+  const isRightsOperatorUser = isOperatorCategoryUser(rightsUserCategory);
+  const rightsHeaderBg = darkMode ? "#1a2035" : "#eef2f6";
+  const rightsRowBorder = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
+  const rightsCellPad = { py: 1, px: 1.5 };
+  const rightsStickyHeadCellSx = {
+    ...rightsCellPad,
+    position: "sticky",
+    top: 0,
+    zIndex: 3,
+    backgroundColor: rightsHeaderBg,
+    color: darkMode ? "#ffffff" : "#344767",
+    fontWeight: 700,
+    fontSize: "0.8125rem",
+    lineHeight: 1.2,
+    whiteSpace: "nowrap",
+    borderBottom: `1px solid ${rightsRowBorder}`,
+    boxSizing: "border-box",
+  };
+  const rightsBodyCellSx = {
+    ...rightsCellPad,
+    verticalAlign: "middle",
+    boxSizing: "border-box",
+    borderBottom: `1px solid ${rightsRowBorder}`,
+  };
+  const rightsPermColSx = { width: 88, minWidth: 88, maxWidth: 88 };
+  const rightsDisabledCellSx = {
+    opacity: 0.45,
+    filter: "blur(0.4px)",
+    pointerEvents: "none",
+  };
+  const assignRightsRowBg = getAssignRightsRowBgColors(darkMode);
 
   return (
     <DashboardLayout>
@@ -1339,79 +1278,197 @@ function UserMgmt() {
         <WorkspaceLoadingOverlay active={loading} />
       </EnterpriseWorkspace>
 
-      <Dialog open={isRightsModalOpen} onClose={handleCloseRightsModal} fullWidth maxWidth="md">
-        <DialogTitle sx={{ color: "#344767" }}>
+      <Dialog
+        open={isRightsModalOpen}
+        onClose={handleCloseRightsModal}
+        fullWidth
+        maxWidth="md"
+        PaperProps={{
+          sx: {
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: "90vh",
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: "#344767", flexShrink: 0 }}>
           {`Assign Rights${rightsUserName ? ` - ${rightsUserName}` : ""}`}
         </DialogTitle>
-        <DialogContent>
+        <DialogContent
+          sx={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflow: "hidden",
+            pt: 1,
+            pb: 0,
+            px: 2,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           <TableContainer
-            component={Paper}
             sx={{
-              "& thead th": {
-                color: darkMode ? "#ffffff !important" : "#344767 !important",
-              },
-              "& tbody td:first-of-type": {
-                color: darkMode ? "#ffffff" : "inherit",
-                maxWidth: "60px",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              },
+              flex: "1 1 auto",
+              minHeight: 0,
+              maxHeight: "min(58vh, 500px)",
+              overflow: "auto",
+              border: `1px solid ${rightsRowBorder}`,
+              borderRadius: 1,
+              backgroundColor: darkMode ? "rgba(255,255,255,0.02)" : "#fff",
+              "--assign-rights-main-bg": assignRightsRowBg.main,
+              "--assign-rights-sub-bg": assignRightsRowBg.sub,
             }}
           >
-            <Table size="small">
-              <TableHead sx={{ display: "contents !important " }}>
+            <Table
+              stickyHeader
+              size="small"
+              className="erp-assign-rights-table"
+              sx={{
+                tableLayout: "fixed",
+                width: "100%",
+                minWidth: 560,
+                "& .MuiTableCell-root": {
+                  boxSizing: "border-box",
+                },
+              }}
+            >
+              <colgroup>
+                <col />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 88 }} />
+              </colgroup>
+              <TableHead>
                 <TableRow>
-                  <TableCell>Menu Name</TableCell>
-                  <TableCell align="center">View</TableCell>
-                  <TableCell align="center">Create</TableCell>
-                  <TableCell align="center">Edit</TableCell>
-                  <TableCell align="center">Delete</TableCell>
+                  <TableCell sx={{ ...rightsStickyHeadCellSx, textAlign: "left" }}>
+                    Menu Name
+                  </TableCell>
+                  <TableCell sx={{ ...rightsStickyHeadCellSx, ...rightsPermColSx }} align="center">
+                    View
+                  </TableCell>
+                  <TableCell sx={{ ...rightsStickyHeadCellSx, ...rightsPermColSx }} align="center">
+                    Create
+                  </TableCell>
+                  <TableCell sx={{ ...rightsStickyHeadCellSx, ...rightsPermColSx }} align="center">
+                    Edit
+                  </TableCell>
+                  <TableCell sx={{ ...rightsStickyHeadCellSx, ...rightsPermColSx }} align="center">
+                    Delete
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {rightsDraftRows.map((row) => (
-                  <TableRow key={row.menuName}>
-                    <TableCell>{row.menuName}</TableCell>
-                    <TableCell align="center">
-                      <Checkbox
-                        checked={row.view}
-                        onChange={() => handleRightsToggle(row.menuName, "view")}
-                        size="small"
-                        disabled={isRightsReadOnly || isDashboardRightsMenu(row.menuName)}
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Checkbox
-                        checked={row.create}
-                        onChange={() => handleRightsToggle(row.menuName, "create")}
-                        size="small"
-                        disabled={isRightsReadOnly}
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Checkbox
-                        checked={row.edit}
-                        onChange={() => handleRightsToggle(row.menuName, "edit")}
-                        size="small"
-                        disabled={isRightsReadOnly}
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Checkbox
-                        checked={row.delete}
-                        onChange={() => handleRightsToggle(row.menuName, "delete")}
-                        size="small"
-                        disabled={isRightsReadOnly}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {rightsDraftRows.map((row) => {
+                  const rowBg = getAssignRightsRowBackground(
+                    row.groupIndex,
+                    darkMode,
+                    row.isMainMenu
+                  );
+                  const rowCellBgSx = { backgroundColor: rowBg };
+                  return (
+                    <TableRow
+                      key={row.menuKey || row.menuName}
+                      className={
+                        row.isMainMenu
+                          ? "erp-assign-rights-row--main"
+                          : "erp-assign-rights-row--sub"
+                      }
+                    >
+                      <TableCell
+                        sx={{
+                          ...rightsBodyCellSx,
+                          ...rowCellBgSx,
+                          color: darkMode ? "#fff" : "inherit",
+                          pl: row.isMainMenu ? 1.5 : 2,
+                          fontWeight: row.isMainMenu ? 700 : 500,
+                          fontSize: row.isMainMenu ? "0.875rem" : "0.8125rem",
+                          fontStyle: row.isMainMenu ? "normal" : "italic",
+                        }}
+                      >
+                        {row.isMainMenu ? (
+                          row.menuName
+                        ) : (
+                          <MDBox display="flex" alignItems="center" gap={0.5}>
+                            <Icon
+                              sx={{
+                                fontSize: "1rem",
+                                lineHeight: 1,
+                                color: darkMode ? "rgba(255,255,255,0.75)" : "rgba(0,0,0,0.54)",
+                              }}
+                            >
+                              subdirectory_arrow_right
+                            </Icon>
+                            {row.menuName}
+                          </MDBox>
+                        )}
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ ...rightsBodyCellSx, ...rightsPermColSx, ...rowCellBgSx }}
+                      >
+                        <Checkbox
+                          checked={row.view}
+                          onChange={() => handleRightsToggle(row.menuName, "view")}
+                          size="small"
+                          disabled={isRightsReadOnly || isMandatoryViewRightsMenu(row.menuName)}
+                          sx={{ p: 0.25 }}
+                        />
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{ ...rightsBodyCellSx, ...rightsPermColSx, ...rowCellBgSx }}
+                      >
+                        <Checkbox
+                          checked={row.create}
+                          onChange={() => handleRightsToggle(row.menuName, "create")}
+                          size="small"
+                          disabled={isRightsReadOnly}
+                          sx={{ p: 0.25 }}
+                        />
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{
+                          ...rightsBodyCellSx,
+                          ...rightsPermColSx,
+                          ...rowCellBgSx,
+                          ...(isRightsOperatorUser ? rightsDisabledCellSx : undefined),
+                        }}
+                      >
+                        <Checkbox
+                          checked={row.edit}
+                          onChange={() => handleRightsToggle(row.menuName, "edit")}
+                          size="small"
+                          disabled={isRightsReadOnly || isRightsOperatorUser}
+                          sx={{ p: 0.25 }}
+                        />
+                      </TableCell>
+                      <TableCell
+                        align="center"
+                        sx={{
+                          ...rightsBodyCellSx,
+                          ...rightsPermColSx,
+                          ...rowCellBgSx,
+                          ...(isRightsOperatorUser ? rightsDisabledCellSx : undefined),
+                        }}
+                      >
+                        <Checkbox
+                          checked={row.delete}
+                          onChange={() => handleRightsToggle(row.menuName, "delete")}
+                          size="small"
+                          disabled={isRightsReadOnly || isRightsOperatorUser}
+                          sx={{ p: 0.25 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ flexShrink: 0 }}>
           <MDButton color="secondary" onClick={handleCloseRightsModal} disabled={isRightsSaving}>
             {isRightsReadOnly ? "Close" : "Cancel"}
           </MDButton>
@@ -1425,13 +1482,14 @@ function UserMgmt() {
 
       <AddUserForm
         open={isAddFormOpen}
+        mode={editingRowId ? "edit" : "add"}
         handleClose={handleCancel}
-        newRowDraft={newRowDraft}
-        setNewRowDraft={setNewRowDraft}
+        newRowDraft={editingRowId ? editDraft : newRowDraft}
+        setNewRowDraft={editingRowId ? setEditDraft : setNewRowDraft}
         commandOptions={commandOptions}
         baseOptions={baseOptions}
         roleOptions={roleOptions}
-        handleAddSave={handleAddSave}
+        handleAddSave={editingRowId ? handleEditSave : handleAddSave}
         errors={errors}
         setErrors={setErrors}
         appointOptions={appointOptions}

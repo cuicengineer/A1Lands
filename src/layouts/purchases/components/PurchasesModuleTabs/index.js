@@ -9,40 +9,34 @@ import PropTypes from "prop-types";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import ModuleTabsBrandRow from "components/ModuleTabsBrandRow";
+import {
+  canViewModuleTab,
+  resolveModuleTabIndex,
+  usePermittedModuleTabs,
+} from "utils/moduleTabsPermissionUtils";
 
 export const PURCHASES_MODULE_TABS = [
   { label: "Supplier", route: "/supplier" },
   { label: "Purchase Returns", route: "/purchases/purchase-returns" },
 ];
 
-function resolvePurchasesTabIndex(pathname) {
-  const path = (pathname || "").replace(/\/$/, "") || "/";
-  const exact = PURCHASES_MODULE_TABS.findIndex((tab) => path === tab.route);
-  if (exact >= 0) return exact;
-
-  const prefixMatch = [...PURCHASES_MODULE_TABS]
-    .sort((a, b) => b.route.length - a.route.length)
-    .find((tab) => path.startsWith(`${tab.route}/`));
-
-  if (prefixMatch) {
-    return PURCHASES_MODULE_TABS.findIndex((tab) => tab.route === prefixMatch.route);
-  }
-
-  return false;
-}
-
 function PurchasesModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const items = tabs && tabs.length ? tabs : PURCHASES_MODULE_TABS;
-  const activeIndex = useMemo(() => resolvePurchasesTabIndex(pathname), [pathname]);
+  const items = usePermittedModuleTabs(PURCHASES_MODULE_TABS, tabs);
+  const activeIndex = useMemo(() => resolveModuleTabIndex(pathname, items), [pathname, items]);
+
+  if (items.length === 0) {
+    return null;
+  }
 
   const handleChange = (_, index) => {
     const target = items[index]?.route;
-    if (target && target !== pathname.replace(/\/$/, "")) {
-      navigate(target);
+    if (!target || target === pathname.replace(/\/$/, "") || !canViewModuleTab(items[index])) {
+      return;
     }
+    navigate(target);
   };
 
   return (

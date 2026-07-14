@@ -44,6 +44,24 @@ export function deriveCollectionEntryStatus(row, { allowManualOverride = false }
   return vrNo ? "Received" : "Pending";
 }
 
+/** Saved collection with Received status and an assigned voucher number. */
+export function isCollectionReceivedWithAssignedVoucher(row, { allowManualOverride = false } = {}) {
+  if (!row || row.isLocalOnly) return false;
+  const status = deriveCollectionEntryStatus(row, { allowManualOverride });
+  if (status !== "Received") return false;
+  const vrNo = String(row?.vrNo ?? row?.VrNo ?? "").trim();
+  return Boolean(vrNo);
+}
+
+/** Edit/Delete on received+voucher rows is superuser-only. */
+export function collectionGridRowAllowsEditDelete(
+  row,
+  { isSuperuser = false, allowManualOverride = false } = {}
+) {
+  if (!isCollectionReceivedWithAssignedVoucher(row, { allowManualOverride })) return true;
+  return Boolean(isSuperuser);
+}
+
 export function isCollectionRowUnderEdit(row) {
   return Boolean(row?.isEditing || row?.isLocalOnly);
 }
@@ -60,7 +78,11 @@ export function matchesCollectionStatusFilter(row, filter, { allowManualOverride
 }
 
 export function normalizeReceiptCatalogRow(row) {
-  const lines = parseJsonArray(pickField(row, "linesJson", "LinesJson"), []);
+  const embedded = row?.lines ?? row?.Lines ?? row?.receiptLines ?? row?.ReceiptLines;
+  const lines =
+    Array.isArray(embedded) && embedded.length
+      ? embedded
+      : parseJsonArray(pickField(row, "linesJson", "LinesJson"), []);
   return {
     id: row?.id ?? row?.Id ?? null,
     date: toDateInputValue(pickField(row, "date", "Date")),

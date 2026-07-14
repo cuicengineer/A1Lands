@@ -124,7 +124,9 @@ function AddUserForm({
   setErrors,
   appointOptions = [],
   onAppointOptionsChange,
+  mode = "add",
 }) {
+  const isEditMode = mode === "edit";
   const LEVEL_OPTIONS = [
     { id: 1, label: "AHQ" },
     { id: 2, label: "Command" },
@@ -149,6 +151,15 @@ function AddUserForm({
     if (s.length < 6 || s.length > 12) return PASSWORD_POLICY_TEXT;
     if (!/[^a-zA-Z0-9]/.test(s)) return PASSWORD_POLICY_TEXT;
     return null;
+  };
+
+  const validatePasswordForMode = (value) => {
+    const passwordValue = String(value || "").trim();
+    if (isEditMode) {
+      if (!passwordValue || passwordValue === "********") return null;
+      return validatePasswordPolicy(passwordValue);
+    }
+    return validatePasswordPolicy(passwordValue);
   };
 
   useEffect(() => {
@@ -290,7 +301,7 @@ function AddUserForm({
       const trimmed = String(nextValue || "").trim();
       let msg = null;
       if (!trimmed) msg = "Username is required";
-      else if (isSuperuserUsername(trimmed))
+      else if (!isEditMode && isSuperuserUsername(trimmed))
         msg = 'Username "superuser" is reserved and cannot be used';
       setErrors((prev) => ({ ...prev, username: msg }));
     }
@@ -299,7 +310,7 @@ function AddUserForm({
       setErrors((prev) => ({ ...prev, name: msg }));
     }
     if (field === "password") {
-      const msg = validatePasswordPolicy(nextValue);
+      const msg = validatePasswordForMode(nextValue);
       setErrors((prev) => ({ ...prev, password: msg }));
     }
     if (field === "pakNo") {
@@ -600,7 +611,7 @@ function AddUserForm({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
-      <DialogTitle>Add New User</DialogTitle>
+      <DialogTitle>{isEditMode ? "Edit User" : "Add New User"}</DialogTitle>
       <DialogContent dividers>
         <MDBox display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
           <MDBox>
@@ -613,7 +624,12 @@ function AddUserForm({
             <MDTypography variant="caption" fontWeight="bold">
               Password
             </MDTypography>
-            {renderInput("password", newRowDraft?.password, true)}
+            {renderInput("password", newRowDraft?.password, !isEditMode)}
+            {isEditMode ? (
+              <MDTypography variant="caption" color="text" sx={{ display: "block", mt: 0.5 }}>
+                Leave as ******** to keep the current password.
+              </MDTypography>
+            ) : null}
           </MDBox>
           <MDBox>
             <MDTypography variant="caption" fontWeight="bold">
@@ -696,7 +712,7 @@ function AddUserForm({
         </MDButton>
         <MDButton
           onClick={() => {
-            const msg = validatePasswordPolicy(newRowDraft?.password);
+            const msg = validatePasswordForMode(newRowDraft?.password);
             if (msg) {
               alert(PASSWORD_POLICY_TEXT);
               setErrors((prev) => ({ ...prev, password: msg }));
@@ -808,6 +824,7 @@ AddUserForm.propTypes = {
   setErrors: PropTypes.func.isRequired,
   appointOptions: PropTypes.array,
   onAppointOptionsChange: PropTypes.func,
+  mode: PropTypes.oneOf(["add", "edit"]),
 };
 
 export default AddUserForm;

@@ -7,6 +7,7 @@ import {
 } from "layouts/income-agreements/collections/collectionsUtils";
 
 export const INTER_ACC_TRANSFER_VR_NO_PREFIX = "TE";
+export const INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH = 35;
 
 export function getInterAccTransferYearFromDate(dateValue) {
   const text = String(dateValue ?? "").trim();
@@ -319,8 +320,8 @@ export function validateInterAccTransferForm(form, accountById = {}, activeLockD
     }
   }
   const description = String(form?.description ?? "").trim();
-  if (description.length > 15) {
-    errors.description = "Description cannot exceed 15 characters";
+  if (description.length > INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH) {
+    errors.description = `Description cannot exceed ${INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH} characters`;
   }
   return errors;
 }

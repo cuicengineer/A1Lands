@@ -636,3 +636,64 @@ body.enterprise-ui .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableRow-root {
 body.enterprise-ui .erp-fiscal-kpi-table .MuiTableHead-root .MuiTableCell-root {
   display: table-cell !important;
 }
+
+/* Assign Rights dialog — restore table layout (theme sets thead to display:block) */
+body.enterprise-ui .erp-assign-rights-table,
+.erp-assign-rights-table {
+  width: 100% !important;
+  table-layout: fixed !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableHead-root,
+.erp-assign-rights-table .MuiTableHead-root {
+  display: table-header-group !important;
+  padding: 0 !important;
+  width: 100% !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableHead-root .MuiTableRow-root,
+.erp-assign-rights-table .MuiTableHead-root .MuiTableRow-root {
+  display: table-row !important;
+  width: 100% !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableHead-root .MuiTableCell-root,
+.erp-assign-rights-table .MuiTableHead-root .MuiTableCell-root {
+  display: table-cell !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root,
+.erp-assign-rights-table .MuiTableBody-root {
+  display: table-row-group !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root .MuiTableRow-root,
+.erp-assign-rights-table .MuiTableBody-root .MuiTableRow-root {
+  display: table-row !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root .MuiTableCell-root,
+.erp-assign-rights-table .MuiTableBody-root .MuiTableCell-root {
+  display: table-cell !important;
+}
+
+/* Assign Rights row bands — override enterprise grid body/hover/zebra rules */
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--main td,
+.erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--main td {
+  background-color: var(--assign-rights-main-bg, #f1f8ff) !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--sub td,
+.erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--sub td {
+  background-color: var(--assign-rights-sub-bg, #fffde7) !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--main:hover td,
+.erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--main:hover td {
+  background-color: var(--assign-rights-main-bg, #f1f8ff) !important;
+}
+
+body.enterprise-ui .erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--sub:hover td,
+.erp-assign-rights-table .MuiTableBody-root tr.erp-assign-rights-row--sub:hover td {
+  background-color: var(--assign-rights-sub-bg, #fffde7) !important;
+}

@@ -108,8 +108,7 @@ export function parseCustomerCode(code, prefixOptions = []) {
 
   if (!raw) return { codeAlpha: "", codeNumeric: "" };
 
-  const options = (prefixOptions || [])
-
+  const options = (Array.isArray(prefixOptions) ? prefixOptions : [])
     .map((row) => normalizeCodePrefixRow(row).prefixAlpha)
 
     .filter(Boolean)

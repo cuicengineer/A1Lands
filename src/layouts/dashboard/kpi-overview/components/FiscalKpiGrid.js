@@ -46,6 +46,7 @@ import {
 } from "../kpiDataUtils";
 import {
   KPI_FISCAL_BAR_CHART_COLORS,
+  KPI_AHQ_RAC_BASE_CHART_COLORS,
   KPI_BAR_INSIDE_LABEL_COLOR,
   KPI_BAR_INSIDE_LABEL_SHADOW,
 } from "../kpiBarChartColors";
@@ -54,6 +55,9 @@ import {
 const fiscalGroupedBarCompactPlugin = {
   id: "fiscalGroupedBarCompact",
   beforeUpdate(chart) {
+    const pluginOpts = chart.options?.plugins?.fiscalGroupedBarCompact;
+    if (pluginOpts?.enabled === false) return;
+
     const barDefaults = chart.options?.datasets?.bar || {};
     chart.data.datasets.forEach((dataset) => {
       dataset.skipNull = true;
@@ -147,6 +151,86 @@ const fiscalBarVerticalSeriesLabelPlugin = {
   },
 };
 
+/** Numeric value + unit at the end of each nested horizontal bar. */
+const fiscalNestedBarEndLabelPlugin = {
+  id: "fiscalNestedBarEndLabel",
+  afterDatasetsDraw(chart) {
+    const opts = chart?.options?.plugins?.fiscalNestedBarEndLabel;
+    if (!opts?.enabled) return;
+    if (chart.options?.indexAxis !== "y") return;
+
+    const { ctx, chartArea } = chart;
+    if (!ctx || !chartArea) return;
+
+    const fontSize = Number(opts.fontSize ?? 11);
+    const fontWeight = opts.fontWeight ?? 700;
+    const textColor = opts.color || (opts.darkMode ? "#e8e8e8" : "#344767");
+    const gap = Number(opts.gap ?? 6);
+    const fontFamily = "Inter, Roboto, Helvetica, Arial, sans-serif";
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) return;
+
+      const isGovtShare = dataset?.fiscalRowId === "fiscal-govt" || dataset?.label === "Govt Share";
+
+      meta.data.forEach((bar, dataIndex) => {
+        const raw = dataset?.data?.[dataIndex];
+        const n = coerceChartDataValue(raw);
+        if (n == null || n === 0) return;
+
+        const valueText = formatFiscalChartValue(n, dataset.fiscalRowId);
+        if (!valueText || valueText === "—") return;
+
+        const { x, y, base, height } = bar.getProps(["x", "y", "base", "height"], true);
+        const endX = Math.max(x, base);
+        const startX = Math.min(x, base);
+        const barWidth = Math.abs(endX - startX);
+        const barHeight = Math.abs(height ?? 0);
+        const barTop = y - barHeight / 2;
+        const barBottom = y + barHeight / 2;
+
+        // Govt Share value sits on the top edge of its thicker bar; PAF stays centered on its bar.
+        const labelY = isGovtShare ? barTop : y;
+        const textBaseline = isGovtShare ? "top" : "middle";
+
+        ctx.save();
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        const textWidth = ctx.measureText(valueText).width;
+        const outsideX = endX + gap;
+        const fitsOutside = outsideX + textWidth <= chartArea.right - 2;
+        const fitsInside = barWidth >= textWidth + gap * 2;
+
+        let drawX;
+        let align;
+        if (fitsOutside) {
+          drawX = outsideX;
+          align = "left";
+        } else if (fitsInside) {
+          drawX = endX - gap;
+          align = "right";
+        } else {
+          ctx.restore();
+          return;
+        }
+
+        // Keep label within the chart vertically when top-aligned.
+        const clampedY = isGovtShare
+          ? Math.min(Math.max(labelY, chartArea.top), barBottom)
+          : labelY;
+
+        ctx.fillStyle = textColor;
+        ctx.textAlign = align;
+        ctx.textBaseline = textBaseline;
+        ctx.shadowColor = KPI_BAR_INSIDE_LABEL_SHADOW;
+        ctx.shadowBlur = 2;
+        ctx.fillText(valueText, drawX, clampedY);
+        ctx.restore();
+      });
+    });
+  },
+};
+
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -154,7 +238,8 @@ ChartJS.register(
   Tooltip,
   Legend,
   fiscalGroupedBarCompactPlugin,
-  fiscalBarVerticalSeriesLabelPlugin
+  fiscalBarVerticalSeriesLabelPlugin,
+  fiscalNestedBarEndLabelPlugin
 );
 
 /** Row ids whose table values are in millions (vs integer receipts/payments). */
@@ -167,7 +252,29 @@ const FISCAL_MIL_ROW_IDS = new Set([
   "fiscal-base",
 ]);
 
-const FISCAL_CHART_TITLE = "KPI Analytics by fiscal year";
+const FISCAL_SHARE_OVERVIEW_LABEL = "Fiscal year shares";
+const FISCAL_SHARE_DRILL_LABEL = "Fiscal year share breakdown";
+const FISCAL_SHARE_DRILL_ROW_IDS = ["fiscal-ahq", "fiscal-rac", "fiscal-base"];
+const FISCAL_SHARE_DATASET_LABEL_TO_ROW_ID = {
+  "Govt Share": "fiscal-govt",
+  "PAF Share": "fiscal-paf",
+};
+const FISCAL_DETAIL_LABELS = {
+  "fiscal-ahq": "AHQ Share",
+  "fiscal-rac": "RAC Share",
+  "fiscal-base": "Base Share",
+};
+const FISCAL_DETAIL_COLORS = {
+  "fiscal-ahq": KPI_AHQ_RAC_BASE_CHART_COLORS.ahq,
+  "fiscal-rac": KPI_AHQ_RAC_BASE_CHART_COLORS.rac,
+  "fiscal-base": KPI_AHQ_RAC_BASE_CHART_COLORS.base,
+};
+
+/** Nested horizontal bar: thick background (Govt) + thin foreground (PAF). */
+const FISCAL_NESTED_GOVT_COLOR = "#CBD5E1";
+const FISCAL_NESTED_PAF_COLOR = "#3B82F6";
+const FISCAL_NESTED_GOVT_BAR_THICKNESS = 28;
+const FISCAL_NESTED_PAF_BAR_THICKNESS = 14;
 
 function formatFiscalCell(value) {
   if (value === "—" || value === null || value === undefined) return "—";
@@ -195,22 +302,8 @@ function formatFiscalChartValue(value, rowId) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function rowHasNumericFiscalData(row, periods) {
-  return periods.some((p) => isNumericFiscalValue(row[p.fieldKey]));
-}
-
-function fiscalPeriodHasNonZeroChartValue(chartRows, period) {
-  return chartRows.some((row) => {
-    const n = coerceChartDataValue(fiscalRowMil(row, period.fieldKey));
-    return n != null && n !== 0;
-  });
-}
-
-function fiscalRowHasNonZeroInPeriods(row, activePeriods) {
-  return activePeriods.some((period) => {
-    const n = coerceChartDataValue(fiscalRowMil(row, period.fieldKey));
-    return n != null && n !== 0;
-  });
+function findFiscalRow(rows, rowId) {
+  return (rows || []).find((row) => row?.id === rowId) || null;
 }
 
 function FiscalKpiGrid({
@@ -225,6 +318,7 @@ function FiscalKpiGrid({
   const { darkMode } = controller;
   const cardRef = useRef(null);
   const [chartZoomOpen, setChartZoomOpen] = useState(false);
+  const [selectedFiscalPeriodKey, setSelectedFiscalPeriodKey] = useState(null);
 
   const closeChartZoom = useCallback(() => setChartZoomOpen(false), []);
 
@@ -333,34 +427,220 @@ function FiscalKpiGrid({
   const textColor = darkMode ? "#e8e8e8" : "#344767";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
 
-  const fiscalTableChartData = useMemo(() => {
-    const chartRows = rows.filter((row) => rowHasNumericFiscalData(row, periods));
-    const activePeriods = periods.filter((p) => fiscalPeriodHasNonZeroChartValue(chartRows, p));
-    const activeChartRows = chartRows.filter((row) =>
-      fiscalRowHasNonZeroInPeriods(row, activePeriods)
-    );
+  const fiscalChartContext = useMemo(() => {
+    const govtRow = findFiscalRow(rows, "fiscal-govt");
+    const pafRow = findFiscalRow(rows, "fiscal-paf");
+    const chartPeriods = periods;
+
+    if (selectedFiscalPeriodKey) {
+      const period = periods.find((item) => item.fieldKey === selectedFiscalPeriodKey);
+      if (period) {
+        const detailRows = FISCAL_SHARE_DRILL_ROW_IDS.map((rowId) =>
+          findFiscalRow(rows, rowId)
+        ).filter((row) => row && isNumericFiscalValue(row[selectedFiscalPeriodKey]));
+        const detailDataset = detailRows.map((row) =>
+          nullIfZeroChartBarValue(fiscalRowMil(row, selectedFiscalPeriodKey))
+        );
+        const hasDetailData = detailDataset.some((value) => coerceChartDataValue(value) != null);
+
+        if (hasDetailData) {
+          return {
+            mode: "detail",
+            title: `${FISCAL_SHARE_DRILL_LABEL} — ${period.headerLabel}`,
+            data: {
+              labels: detailRows.map((row) => FISCAL_DETAIL_LABELS[row.id] || row.kpiName),
+              datasets: withCompactGroupedBarDatasets([
+                {
+                  label: period.headerLabel,
+                  fiscalRowId: period.fieldKey,
+                  data: detailDataset,
+                  backgroundColor: detailRows.map(
+                    (row, idx) => FISCAL_DETAIL_COLORS[row.id] || KPI_FISCAL_BAR_CHART_COLORS[idx]
+                  ),
+                  borderRadius: 6,
+                  categoryPercentage: 0.66,
+                  barPercentage: 1,
+                  barThickness: "flex",
+                  maxBarThickness: 1000,
+                  yAxisID: "y",
+                },
+              ]),
+            },
+          };
+        }
+      }
+    }
 
     return {
-      labels: activePeriods.map((p) => p.headerLabel),
-      datasets: withCompactGroupedBarDatasets(
-        activeChartRows.map((row, idx) => ({
-          label: row.kpiName,
-          fiscalRowId: row.id,
-          data: activePeriods.map((p) => nullIfZeroChartBarValue(fiscalRowMil(row, p.fieldKey))),
-          backgroundColor: KPI_FISCAL_BAR_CHART_COLORS[idx % KPI_FISCAL_BAR_CHART_COLORS.length],
-          borderRadius: 2,
-          categoryPercentage: 0.66,
-          barPercentage: 1,
-          barThickness: "flex",
-          maxBarThickness: 1000,
-          yAxisID: "y",
-        }))
-      ),
+      mode: "overview",
+      title: FISCAL_SHARE_OVERVIEW_LABEL,
+      data: {
+        labels: chartPeriods.map((period) => period.headerLabel),
+        datasets: [
+          {
+            label: "Govt Share",
+            fiscalRowId: "fiscal-govt",
+            data: chartPeriods.map((period) =>
+              nullIfZeroChartBarValue(fiscalRowMil(govtRow, period.fieldKey))
+            ),
+            backgroundColor: FISCAL_NESTED_GOVT_COLOR,
+            borderSkipped: false,
+            borderRadius: 4,
+            barThickness: FISCAL_NESTED_GOVT_BAR_THICKNESS,
+            maxBarThickness: FISCAL_NESTED_GOVT_BAR_THICKNESS,
+            categoryPercentage: 0.85,
+            barPercentage: 0.95,
+            grouped: false,
+            order: 2,
+            yAxisID: "y",
+          },
+          {
+            label: "PAF Share",
+            fiscalRowId: "fiscal-paf",
+            data: chartPeriods.map((period) =>
+              nullIfZeroChartBarValue(fiscalRowMil(pafRow, period.fieldKey))
+            ),
+            backgroundColor: FISCAL_NESTED_PAF_COLOR,
+            borderSkipped: false,
+            borderRadius: 4,
+            barThickness: FISCAL_NESTED_PAF_BAR_THICKNESS,
+            maxBarThickness: FISCAL_NESTED_PAF_BAR_THICKNESS,
+            categoryPercentage: 0.85,
+            barPercentage: 0.95,
+            grouped: false,
+            order: 1,
+            yAxisID: "y",
+          },
+        ],
+      },
     };
-  }, [rows, periods]);
+  }, [rows, periods, selectedFiscalPeriodKey]);
+
+  const fiscalTableChartData = fiscalChartContext.data;
+  const chartZoomEnabled =
+    Boolean(chartZoomOnClick) &&
+    !loading &&
+    periods.length > 0 &&
+    fiscalTableChartData.datasets.length > 0 &&
+    fiscalChartContext.mode === "overview";
 
   const fiscalTableChartOptions = useMemo(() => {
     const hasChartData = fiscalTableChartData.datasets.length > 0;
+    const isOverview = fiscalChartContext.mode === "overview";
+
+    if (isOverview) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: "y",
+        interaction: { mode: "index", intersect: false },
+        datasets: {
+          bar: {
+            skipNull: true,
+            grouped: false,
+          },
+        },
+        onClick: (_event, elements) => {
+          if (!elements?.length) return;
+          const { datasetIndex, index } = elements[0] || {};
+          const dataset = fiscalTableChartData.datasets?.[datasetIndex];
+          const selectedLabel = fiscalTableChartData.labels?.[index];
+          const fiscalRowId =
+            dataset?.fiscalRowId || FISCAL_SHARE_DATASET_LABEL_TO_ROW_ID[dataset?.label];
+          if (fiscalRowId !== "fiscal-paf" || !selectedLabel) return;
+          const period = periods.find((item) => item.headerLabel === selectedLabel);
+          if (!period?.fieldKey) return;
+          setSelectedFiscalPeriodKey(period.fieldKey);
+        },
+        onHover: (event, elements) => {
+          const target = event.native?.target;
+          if (!target) return;
+          if (!elements?.length) {
+            target.style.cursor = chartZoomEnabled ? "crosshair" : "default";
+            return;
+          }
+          const dataset = fiscalTableChartData.datasets?.[elements[0]?.datasetIndex];
+          target.style.cursor = dataset?.fiscalRowId === "fiscal-paf" ? "pointer" : "default";
+        },
+        plugins: {
+          legend: {
+            position: "top",
+            align: "end",
+            labels: {
+              color: textColor,
+              boxWidth: 12,
+              padding: 12,
+              font: { size: 11 },
+              usePointStyle: false,
+            },
+          },
+          fiscalBarVerticalSeriesLabel: {
+            enabled: false,
+          },
+          fiscalGroupedBarCompact: {
+            enabled: false,
+          },
+          fiscalNestedBarEndLabel: {
+            enabled: true,
+            darkMode,
+            color: textColor,
+            fontSize: 11,
+            fontWeight: 700,
+            gap: 6,
+          },
+          tooltip: {
+            mode: "index",
+            intersect: false,
+            callbacks: {
+              label: (ctx) => {
+                const n = coerceChartDataValue(ctx.raw);
+                if (n == null || n === 0) return null;
+                return `${ctx.dataset.label}: ${formatFiscalChartValue(
+                  n,
+                  ctx.dataset.fiscalRowId
+                )}`;
+              },
+            },
+          },
+        },
+        layout: {
+          padding: {
+            right: 56,
+          },
+        },
+        scales: {
+          x: {
+            stacked: false,
+            beginAtZero: true,
+            grid: { color: gridColor },
+            ticks: {
+              color: textColor,
+              font: { size: 11, weight: "bold" },
+              callback: (value) => formatKpiBarAxisTick(value),
+            },
+            title: {
+              display: true,
+              text: "Amount in Million",
+              color: textColor,
+              font: { size: 12, weight: "600" },
+            },
+          },
+          y: {
+            stacked: false,
+            display: hasChartData,
+            grid: { display: false },
+            ticks: {
+              color: textColor,
+              font: { size: 11, weight: "600" },
+              autoSkip: false,
+            },
+            title: {
+              display: false,
+            },
+          },
+        },
+      };
+    }
 
     return {
       responsive: true,
@@ -375,6 +655,11 @@ function FiscalKpiGrid({
           barPercentage: 1,
           maxBarThickness: 1000,
         },
+      },
+      onClick: undefined,
+      onHover: (event) => {
+        const target = event.native?.target;
+        if (target) target.style.cursor = "default";
       },
       plugins: {
         legend: {
@@ -417,7 +702,7 @@ function FiscalKpiGrid({
           },
           title: {
             display: true,
-            text: "Fiscal year",
+            text: "Share",
             color: textColor,
             font: { size: 12, weight: "600" },
           },
@@ -434,37 +719,58 @@ function FiscalKpiGrid({
           },
           title: {
             display: hasChartData,
-            text: "Amount (M / B)",
+            text: "Amount in Million",
             color: textColor,
             font: { size: 12, weight: "600" },
           },
         },
       },
     };
-  }, [darkMode, fiscalTableChartData.datasets, gridColor, textColor]);
+  }, [
+    chartZoomEnabled,
+    darkMode,
+    fiscalChartContext.mode,
+    fiscalTableChartData,
+    gridColor,
+    periods,
+    textColor,
+  ]);
 
   const fiscalCrosshairFormatValue = useCallback((value) => formatKpiCrosshairBarValue(value), []);
 
   const fiscalTableChartCrosshairOptions = useMemo(() => {
+    const isOverview = fiscalChartContext.mode === "overview";
     const enhanced = applyKpiCrosshairBarChartEnhancements(fiscalTableChartOptions, {
       darkMode,
       formatValue: fiscalCrosshairFormatValue,
       tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
-      fontSize: 10,
-      labelPlacement: "inside",
+      fontSize: isOverview ? 10 : 10,
+      labelPlacement: isOverview ? "end" : "inside",
     });
 
     return {
       ...enhanced,
+      indexAxis: fiscalTableChartOptions.indexAxis,
+      layout: fiscalTableChartOptions.layout,
+      scales: fiscalTableChartOptions.scales,
+      datasets: fiscalTableChartOptions.datasets,
       plugins: {
         ...enhanced.plugins,
         kpiZoomPermanentLabels: { enabled: false },
         fiscalBarVerticalSeriesLabel: fiscalTableChartOptions.plugins.fiscalBarVerticalSeriesLabel,
+        fiscalGroupedBarCompact: fiscalTableChartOptions.plugins.fiscalGroupedBarCompact || {
+          enabled: true,
+        },
+        fiscalNestedBarEndLabel: fiscalTableChartOptions.plugins.fiscalNestedBarEndLabel || {
+          enabled: false,
+        },
       },
     };
-  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue]);
+  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue, fiscalChartContext.mode]);
 
   const fiscalZoomedChartOptions = useMemo(() => {
+    const isOverview = fiscalChartContext.mode === "overview";
+    const nestedLabelOpts = fiscalTableChartOptions.plugins.fiscalNestedBarEndLabel;
     const enhanced = applyKpiCrosshairBarChartEnhancements(
       {
         ...fiscalTableChartOptions,
@@ -477,6 +783,9 @@ function FiscalKpiGrid({
               font: { size: 13, weight: "600" },
             },
           },
+          fiscalNestedBarEndLabel: nestedLabelOpts
+            ? { ...nestedLabelOpts, fontSize: 13 }
+            : { enabled: false },
         },
       },
       {
@@ -484,12 +793,16 @@ function FiscalKpiGrid({
         formatValue: fiscalCrosshairFormatValue,
         tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
         fontSize: 12,
-        labelPlacement: "inside",
+        labelPlacement: isOverview ? "end" : "inside",
       }
     );
 
     return {
       ...enhanced,
+      indexAxis: fiscalTableChartOptions.indexAxis,
+      layout: fiscalTableChartOptions.layout,
+      scales: fiscalTableChartOptions.scales,
+      datasets: fiscalTableChartOptions.datasets,
       plugins: {
         ...enhanced.plugins,
         kpiZoomPermanentLabels: { enabled: false },
@@ -497,15 +810,15 @@ function FiscalKpiGrid({
           ...fiscalTableChartOptions.plugins.fiscalBarVerticalSeriesLabel,
           valueFontSize: 10,
         },
+        fiscalGroupedBarCompact: fiscalTableChartOptions.plugins.fiscalGroupedBarCompact || {
+          enabled: true,
+        },
+        fiscalNestedBarEndLabel: nestedLabelOpts
+          ? { ...nestedLabelOpts, fontSize: 13 }
+          : { enabled: false },
       },
     };
-  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue]);
-
-  const chartZoomEnabled =
-    Boolean(chartZoomOnClick) &&
-    !loading &&
-    periods.length > 0 &&
-    fiscalTableChartData.datasets.length > 0;
+  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue, fiscalChartContext.mode]);
 
   useLayoutEffect(() => {
     const card = cardRef.current;
@@ -790,17 +1103,35 @@ function FiscalKpiGrid({
                   fontWeight="bold"
                   color={darkMode ? "white" : "dark"}
                 >
-                  {FISCAL_CHART_TITLE}
+                  {fiscalChartContext.title}
                 </MDTypography>
-                <ChartExportButton
-                  disabled={loading}
-                  ariaLabel="Export fiscal KPI chart to Excel"
-                  onExport={() =>
-                    exportGroupedBarChartDataToExcel(FISCAL_CHART_TITLE, fiscalTableChartData)
-                  }
-                />
+                <MDBox display="flex" alignItems="center" gap={1}>
+                  {fiscalChartContext.mode === "detail" ? (
+                    <MDButton
+                      variant="outlined"
+                      color="info"
+                      size="small"
+                      onClick={() => setSelectedFiscalPeriodKey(null)}
+                    >
+                      Back to fiscal years
+                    </MDButton>
+                  ) : null}
+                  <ChartExportButton
+                    disabled={loading}
+                    ariaLabel="Export fiscal KPI chart to Excel"
+                    onExport={() =>
+                      exportGroupedBarChartDataToExcel(
+                        fiscalChartContext.title,
+                        fiscalTableChartData
+                      )
+                    }
+                  />
+                </MDBox>
               </MDBox>
-              <MDBox height={280} sx={{ position: "relative" }}>
+              <MDBox
+                height={fiscalChartContext.mode === "overview" ? 360 : 280}
+                sx={{ position: "relative" }}
+              >
                 <ChartZoomSurface
                   enabled={chartZoomEnabled}
                   darkMode={darkMode}
@@ -841,14 +1172,25 @@ function FiscalKpiGrid({
           }}
         >
           <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
-            {FISCAL_CHART_TITLE}
+            {fiscalChartContext.title}
           </MDTypography>
           <MDBox display="flex" alignItems="center" gap={0.5}>
+            {fiscalChartContext.mode === "detail" ? (
+              <MDButton
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={() => setSelectedFiscalPeriodKey(null)}
+                sx={{ mr: 0.5 }}
+              >
+                Back to fiscal years
+              </MDButton>
+            ) : null}
             <ChartExportButton
               disabled={loading}
-              ariaLabel={`Export ${FISCAL_CHART_TITLE} to Excel`}
+              ariaLabel={`Export ${fiscalChartContext.title} to Excel`}
               onExport={() =>
-                exportGroupedBarChartDataToExcel(FISCAL_CHART_TITLE, fiscalTableChartData)
+                exportGroupedBarChartDataToExcel(fiscalChartContext.title, fiscalTableChartData)
               }
             />
             <IconButton onClick={closeChartZoom} size="small" aria-label="Close enlarged chart">

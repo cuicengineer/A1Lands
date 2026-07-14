@@ -30,6 +30,7 @@ import {
   getInterAccTransferAccountPairErrors,
   getInterAccTransferYearFromDate,
   INTER_ACC_TRANSFER_VR_NO_PREFIX,
+  INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH,
   normalizeInterAccTransferRecord,
   shouldRequireInterAccTransferParticulars,
   shouldShowInterAccTransferSettlementVrNo,
@@ -337,12 +338,22 @@ export default function InterAccTransferForm({
               <MDInput
                 label="Description"
                 value={form.description}
-                onChange={(e) => handleChange("description", e.target.value.slice(0, 15))}
+                onChange={(e) =>
+                  handleChange(
+                    "description",
+                    e.target.value.slice(0, INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH)
+                  )
+                }
                 error={Boolean(errors.description)}
-                helperText={errors.description || `${String(form.description || "").length}/15`}
+                helperText={
+                  errors.description ||
+                  `${
+                    String(form.description || "").length
+                  }/${INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH}`
+                }
                 fullWidth
                 disabled={readOnly}
-                inputProps={{ maxLength: 15 }}
+                inputProps={{ maxLength: INTER_ACC_TRANSFER_DESCRIPTION_MAX_LENGTH }}
                 sx={textFieldSx}
               />
             </Grid>

@@ -8,42 +8,39 @@ import PropTypes from "prop-types";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import ModuleTabsBrandRow from "components/ModuleTabsBrandRow";
+import {
+  canViewModuleTab,
+  resolveModuleTabIndex,
+  usePermittedModuleTabs,
+} from "utils/moduleTabsPermissionUtils";
 
 export const DASHBOARD_MODULE_TABS = [
   { label: "Home", route: "/dashboard" },
   { label: "KPI Overview", route: "/dashboard/kpi-overview" },
 ];
 
-function resolveDashboardTabIndex(pathname) {
-  const path = (pathname || "").replace(/\/$/, "") || "/";
-  const exact = DASHBOARD_MODULE_TABS.findIndex((tab) => path === tab.route);
-  if (exact >= 0) return exact;
-
-  const prefixMatch = [...DASHBOARD_MODULE_TABS]
-    .sort((a, b) => b.route.length - a.route.length)
-    .find((tab) => tab.route !== "/dashboard" && path.startsWith(`${tab.route}/`));
-
-  if (prefixMatch) {
-    return DASHBOARD_MODULE_TABS.findIndex((tab) => tab.route === prefixMatch.route);
-  }
-
-  return path === "/dashboard" ? 0 : false;
-}
-
 function DashboardModuleTabs({ tabs }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [, startTransition] = useTransition();
 
-  const items = tabs && tabs.length ? tabs : DASHBOARD_MODULE_TABS;
-  const activeIndex = useMemo(() => resolveDashboardTabIndex(pathname), [pathname]);
+  const items = usePermittedModuleTabs(DASHBOARD_MODULE_TABS, tabs);
+  const activeIndex = useMemo(
+    () => resolveModuleTabIndex(pathname, items, { rootRoute: "/dashboard" }),
+    [pathname, items]
+  );
+
+  if (items.length === 0) {
+    return null;
+  }
 
   const handleChange = (_, index) => {
     const target = items[index]?.route;
     const normalizedPath = pathname.replace(/\/$/, "") || "/";
-    if (target && target !== normalizedPath) {
-      startTransition(() => navigate(target));
+    if (!target || target === normalizedPath || !canViewModuleTab(items[index])) {
+      return;
     }
+    startTransition(() => navigate(target));
   };
 
   return (

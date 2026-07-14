@@ -815,6 +815,12 @@ function DataTable({
     "Receipts",
     "Receipts-Finalized",
     "Receipts-Pending",
+    "Journal-Entry",
+    "Agreements",
+    "Property-Grouping",
+    "Revenue-Rates",
+    "Rental-Properties",
+    "Guidelines",
   ];
   const shouldExcludeSNo = useMemo(() => {
     if (!exportFileName) return false;
@@ -2370,7 +2376,7 @@ DataTable.defaultProps = {
   autoHeight: false,
   contentFitTable: false,
   onVisibleRowCountChange: undefined,
-  autoResetFilters: true,
+  autoResetFilters: false,
   toolbarStart: null,
   toolbarStartInHeader: false,
   toolbarEnd: null,
