@@ -6,6 +6,7 @@ import {
   createAgreementProvPdfScaleHelpers,
   loadReceiptPdfMargins,
 } from "utils/agreementProvPdfMargins";
+import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { mapJournalEntryForVoucherPdf } from "./journalEntryUtils";
 
 const PDF_FONT_TITLE = 18;
@@ -525,12 +526,14 @@ export async function generateJournalEntryPdf(
       const blockRight = marginLeft + (index + 1) * blockWidth - 6;
       drawPdfLine(blockLeft, signatureLineY, blockRight, signatureLineY);
       drawBodyText(label, (blockLeft + blockRight) / 2, signatureLabelY, {
+        fontSize: PDF_FONT_BODY - 2,
         textOptions: { align: "center" },
       });
     });
   };
 
   drawSignatureBlocks();
+  addContractPdfWatermarks(doc);
 
   const pdfBlob = doc.output("blob");
   if (openNewTab) {

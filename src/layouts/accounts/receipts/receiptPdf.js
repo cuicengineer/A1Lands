@@ -8,6 +8,7 @@ import {
   loadReceiptPdfMargins,
 } from "utils/agreementProvPdfMargins";
 import { getCashAndBankLedgerDropdownLabel } from "layouts/cash-fund-flow/cash-and-bank/cashAndBankUtils";
+import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { computeGrandTotal, computeLineTotal } from "./receiptUtils";
 
 const PDF_FONT_TITLE = 18;
@@ -730,12 +731,14 @@ export async function generateReceiptPdf(
       const blockRight = marginLeft + (index + 1) * blockWidth - 6;
       drawPdfLine(blockLeft, signatureLineY, blockRight, signatureLineY);
       drawBodyText(label, (blockLeft + blockRight) / 2, signatureLabelY, {
+        fontSize: PDF_FONT_BODY - 2,
         textOptions: { align: "center" },
       });
     });
   };
 
   drawReceiptSignatureBlocks();
+  addContractPdfWatermarks(doc);
 
   const pdfBlob = doc.output("blob");
   if (openNewTab) {

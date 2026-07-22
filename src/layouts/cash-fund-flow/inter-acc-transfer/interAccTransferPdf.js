@@ -6,6 +6,7 @@ import {
   createAgreementProvPdfScaleHelpers,
   loadInterAccTransferPdfMargins,
 } from "utils/agreementProvPdfMargins";
+import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { mapInterAccTransferForVoucherPdf } from "./interAccTransferUtils";
 
 const PDF_FONT_TITLE = 18;
@@ -151,15 +152,6 @@ function pickTransferVrNo(transfer) {
   return textValue(transfer?.vrNo);
 }
 
-function pickTransferAccounts(transfer) {
-  const paidFrom = textValue(transfer?.paidFrom);
-  const receivedIn = textValue(transfer?.receivedInAccount || transfer?.receivedFromAccountLabel);
-  if (paidFrom === "—" && receivedIn === "—") return "—";
-  if (paidFrom === "—") return receivedIn;
-  if (receivedIn === "—") return paidFrom;
-  return `${paidFrom} / ${receivedIn}`;
-}
-
 function pickTransferAmount(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -200,7 +192,10 @@ export async function generateInterAccTransferPdf(
   const vrNoDisplay = pickTransferVrNo(mapped);
   const vrDateDisplay = formatPdfDate(mapped?.date);
   const descriptionText = String(mapped?.description ?? "").trim();
-  const accountsDisplay = pickTransferAccounts(mapped);
+  const paidFromDisplay = textValue(mapped?.paidFrom);
+  const receivedInDisplay = textValue(
+    mapped?.receivedInAccount || mapped?.receivedFromAccountLabel
+  );
   const outflowTotal = pickTransferAmount(mapped?.paidFromAmount);
   const inflowTotal = pickTransferAmount(mapped?.receivedInAmount);
 
@@ -506,7 +501,8 @@ export async function generateInterAccTransferPdf(
   };
 
   drawVoucherTableHeader();
-  drawVoucherTableRow(accountsDisplay, outflowTotal, inflowTotal, textValue(mapped?.tinFtn));
+  drawVoucherTableRow(receivedInDisplay, null, inflowTotal, textValue(mapped?.tinFtn));
+  drawVoucherTableRow(paidFromDisplay, outflowTotal, null, textValue(mapped?.tinFtn));
 
   yPos = ensurePageSpace(yPos + 4, lineHeight * 3);
   yPos += 4;
@@ -552,12 +548,14 @@ export async function generateInterAccTransferPdf(
       const blockRight = marginLeft + (index + 1) * blockWidth - 6;
       drawPdfLine(blockLeft, signatureLineY, blockRight, signatureLineY);
       drawBodyText(label, (blockLeft + blockRight) / 2, signatureLabelY, {
+        fontSize: PDF_FONT_BODY - 2,
         textOptions: { align: "center" },
       });
     });
   };
 
   drawSignatureBlocks();
+  addContractPdfWatermarks(doc);
 
   const pdfBlob = doc.output("blob");
   if (openNewTab) {

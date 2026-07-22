@@ -29,6 +29,21 @@ import guidelinesApi from "services/api.guidelines.service";
 import GuidelineForm from "./GuidelineForm";
 import { GUIDELINES_MAX_ROWS, fetchGuidelinesUploadedFiles } from "./guidelinesAttachmentUtils";
 
+function guidelinesGridIconButtonSx(color) {
+  return {
+    ...COLLECTIONS_GRID_ICON_BUTTON_SX,
+    color: `${color} !important`,
+    "& .MuiSvgIcon-root": {
+      color: `${color} !important`,
+      fontSize: "0.95rem !important",
+    },
+  };
+}
+
+const GUIDELINES_VIEW_ICON_SX = guidelinesGridIconButtonSx("#2e7d32");
+const GUIDELINES_EDIT_ICON_SX = guidelinesGridIconButtonSx("#0288d1");
+const GUIDELINES_DELETE_ICON_SX = guidelinesGridIconButtonSx("#d32f2f");
+
 export default function Guidelines() {
   const canManage = isSuperuserOrAhqSupervisorUser();
   const [records, setRecords] = useState([]);
@@ -228,8 +243,7 @@ export default function Guidelines() {
               <Tooltip title="View / download attachments">
                 <IconButton
                   size="small"
-                  color="success"
-                  sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
+                  sx={GUIDELINES_VIEW_ICON_SX}
                   onClick={() => handleOpenAttachments(row)}
                 >
                   <Icon fontSize="small">visibility</Icon>
@@ -243,8 +257,7 @@ export default function Guidelines() {
                 <Tooltip title="Edit">
                   <IconButton
                     size="small"
-                    color="info"
-                    sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
+                    sx={GUIDELINES_EDIT_ICON_SX}
                     onClick={() => handleViewOrEdit(row, false)}
                   >
                     <Icon fontSize="small">edit</Icon>
@@ -255,8 +268,7 @@ export default function Guidelines() {
                 <Tooltip title="Delete">
                   <IconButton
                     size="small"
-                    color="error"
-                    sx={COLLECTIONS_GRID_ICON_BUTTON_SX}
+                    sx={GUIDELINES_DELETE_ICON_SX}
                     onClick={() => handleDelete(id)}
                   >
                     <Icon fontSize="small">delete</Icon>

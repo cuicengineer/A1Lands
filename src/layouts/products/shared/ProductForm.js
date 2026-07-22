@@ -111,7 +111,9 @@ export default function ProductForm({ open, onClose, onSubmit, initialData, mode
           isGood ? fetchGoodsControlAccountOptions() : Promise.resolve([]),
         ];
         if (api?.getAll) {
-          requests.push(api.getAll(1, 0));
+          requests.push(
+            typeof api.getAllUnpaged === "function" ? api.getAllUnpaged() : api.getAll(1, 0)
+          );
         }
         const results = await Promise.all(requests);
         if (!alive) return;
@@ -402,6 +404,7 @@ ProductForm.propTypes = {
   mode: PropTypes.oneOf(["service", "good"]).isRequired,
   api: PropTypes.shape({
     getAll: PropTypes.func,
+    getAllUnpaged: PropTypes.func,
   }),
 };
 

@@ -18,6 +18,8 @@ import MDButton from "components/MDButton";
 import MDInput from "components/MDInput";
 import SearchableSelect from "components/SearchableSelect";
 import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -59,6 +61,7 @@ import {
   fetchNormalizedContractRiseTerms,
   resolveAgreementContract,
 } from "utils/agreementDetailsSupport";
+import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
 import { format, parseISO, isValid, addDays, addMonths, addYears } from "date-fns";
@@ -367,6 +370,25 @@ function unwrapContractInvoiceScheduleList(res) {
   return [];
 }
 
+/** Schedule grid only: one row per ContractNo + InvoiceNo (JOIN fan-out guard). */
+function dedupeAgreementProvScheduleRowsByInvoice(rows = []) {
+  const seen = new Set();
+  const output = [];
+  (rows || []).forEach((row) => {
+    const contractNo = String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+    const invoiceNo = String(row?.InvoiceNo ?? row?.invoiceNo ?? "").trim();
+    if (!contractNo || !invoiceNo) {
+      output.push(row);
+      return;
+    }
+    const key = `${contractNo}|${invoiceNo}`.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(row);
+  });
+  return output;
+}
+
 function readAgreementProvInvoiceUrlParams() {
   const readFromSearch = (searchText) => {
     try {
@@ -569,7 +591,7 @@ const EDIT_INVOICE_LINES_TABLE_COLUMNS = [
     pascal: "SortOrder",
     camel: "sortOrder",
     numeric: true,
-    align: "right",
+    align: "left",
     compact: true,
   },
   {
@@ -580,26 +602,70 @@ const EDIT_INVOICE_LINES_TABLE_COLUMNS = [
     compact: true,
   },
   { label: "Item with Code", pascal: "ItemwithCode", camel: "itemwithCode", align: "left" },
-  { label: "Particular", pascal: "Description", camel: "description", align: "left", wide: true },
-  { label: "Acc Head", pascal: "AccHead", camel: "accHead", align: "left" },
-  { label: "Quantity", pascal: "Months", camel: "months", numeric: true, align: "right" },
+  {
+    label: "Particular",
+    pascal: "Description",
+    camel: "description",
+    align: "left",
+    wide: true,
+    showFull: true,
+  },
+  { label: "Acc Head", pascal: "AccHead", camel: "accHead", align: "left", showFull: true },
+  {
+    label: "Qty",
+    pascal: "Months",
+    camel: "months",
+    numeric: true,
+    align: "right",
+    compact: true,
+  },
   {
     label: "Unit Price",
     pascal: "CalculatedRentPM",
     camel: "calculatedRentPM",
     numeric: true,
     align: "right",
+    compact: true,
   },
-  { label: "Discount %", pascal: "Discount", camel: "discount", numeric: true, align: "center" },
-  { label: "Total", pascal: "Total", camel: "total", numeric: true, align: "right" },
+  {
+    label: "Disc",
+    pascal: "Discount",
+    camel: "discount",
+    numeric: true,
+    align: "center",
+    compact: true,
+  },
+  {
+    label: "Total",
+    pascal: "Total",
+    camel: "total",
+    numeric: true,
+    align: "right",
+    compact: true,
+    showFull: true,
+  },
 ];
 
+// Fixed fr tracks (not max-content) so header and draft/body rows share identical column positions.
+// Order | Sub Inv | Item Code | Particular | Acc Head | Qty | Unit Price | Disc | Total
 const INVOICE_LINES_DATA_GRID_COLUMNS =
-  "minmax(36px, 0.38fr) minmax(52px, 0.48fr) minmax(88px, 1fr) minmax(128px, 2.5fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(80px, 0.9fr) minmax(64px, 0.75fr) minmax(88px, 0.95fr)";
+  "minmax(30px, 0.25fr) minmax(44px, 0.36fr) minmax(160px, 1.8fr) minmax(280px, 2.3fr) minmax(160px, 1.4fr) minmax(64px, 0.55fr) minmax(140px, 1.15fr) 58px minmax(120px, 0.95fr)";
 
-const INVOICE_LINES_GRID_COLUMNS = `${INVOICE_LINES_DATA_GRID_COLUMNS} 150px`;
+const INVOICE_LINES_GRID_COLUMNS = `${INVOICE_LINES_DATA_GRID_COLUMNS} 96px`;
 
 const INVOICE_LINES_GRID_COLUMNS_READONLY = INVOICE_LINES_DATA_GRID_COLUMNS;
+
+const INVOICE_LINES_GRID_MIN_WIDTH = 1280;
+
+const INVOICE_LINE_ACTION_BUTTON_SX = {
+  p: 0,
+  width: 18,
+  height: 18,
+  minWidth: 18,
+  minHeight: 18,
+};
+
+const INVOICE_LINE_ACTION_ICON_SX = { fontSize: "0.85rem !important" };
 
 function isMainInvoiceScheduleRow(lineRow) {
   if (!lineRow) return false;
@@ -614,10 +680,83 @@ function findMainInvoiceScheduleRow(lines) {
   return lines.find(isMainInvoiceScheduleRow) || null;
 }
 
+/** Acc Head saved on the finalized invoice (main schedule row), with safe fallbacks. */
+function resolveFinalizedInvoiceAccHead(parentRow, invoiceLinesRows) {
+  const mainRow = findMainInvoiceScheduleRow(invoiceLinesRows);
+  const fromMain = String(pickScheduleRowField(mainRow, "AccHead", "accHead") || "").trim();
+  if (fromMain) return fromMain;
+
+  const fromParent = String(pickScheduleRowField(parentRow, "AccHead", "accHead") || "").trim();
+  if (fromParent) return fromParent;
+
+  for (const row of getInvoiceItemRecordRows(invoiceLinesRows)) {
+    const value = String(pickScheduleRowField(row, "AccHead", "accHead") || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
 /** Tenant chart-of-account label (AcctId-AcctName) for agreement invoice Acc Head. */
 export function resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions) {
   const { accountLabel } = resolveCollectionTenantAccount(contractRow, tenants, coaOptions);
   return String(accountLabel || "").trim();
+}
+
+/** Acc Head label linked to a product/service Item with Code (Sale Account). */
+export function resolveItemWithCodeAccHead(productOrService) {
+  if (!productOrService) return "";
+  return String(productOrService.saleAccountDisplay || "").trim();
+}
+
+function normalizeInvoiceAccHeadKey(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase();
+}
+
+/** Unique Acc Head labels linked to active Item with Code products. */
+function buildInvoiceAccHeadOptions(productServiceOptions = [], savedAccHead = "") {
+  const byKey = new Map();
+  (productServiceOptions || []).forEach((option) => {
+    const label = resolveItemWithCodeAccHead(option);
+    if (!label) return;
+    const key = normalizeInvoiceAccHeadKey(label);
+    if (!byKey.has(key)) {
+      byKey.set(key, { value: label, label });
+    }
+  });
+  const saved = String(savedAccHead || "").trim();
+  if (saved) {
+    const key = normalizeInvoiceAccHeadKey(saved);
+    if (!byKey.has(key)) {
+      byKey.set(key, { value: saved, label: saved });
+    }
+  }
+  return [...byKey.values()].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+  );
+}
+
+function findInvoiceProductByAccHead(options, accHead, preferredItemCode = "") {
+  const key = normalizeInvoiceAccHeadKey(accHead);
+  if (!key) return null;
+  const matches = (options || []).filter(
+    (option) => normalizeInvoiceAccHeadKey(resolveItemWithCodeAccHead(option)) === key
+  );
+  if (matches.length === 0) return null;
+  const preferred = String(preferredItemCode || "")
+    .trim()
+    .toUpperCase();
+  if (preferred) {
+    const keep = matches.find(
+      (option) =>
+        String(option?.itemCode || "")
+          .trim()
+          .toUpperCase() === preferred
+    );
+    if (keep) return keep;
+  }
+  return matches[0];
 }
 
 export function withInvoiceScheduleAccHead(payload, accHead) {
@@ -627,13 +766,27 @@ export function withInvoiceScheduleAccHead(payload, accHead) {
 }
 
 /** Header-level Description on invoice schedule (not line-item Desc). */
+const AGREEMENT_PROV_PARTICULAR_PREFIX = "Rent/Fee for the Period: ";
+
+function withAgreementProvParticularPrefix(value) {
+  const prefix = AGREEMENT_PROV_PARTICULAR_PREFIX;
+  const prefixTrimmed = prefix.trim();
+  const raw = String(value ?? "").trim();
+  if (!raw) return prefix;
+  if (raw.toLowerCase().startsWith(prefixTrimmed.toLowerCase())) {
+    const rest = raw.slice(prefixTrimmed.length).replace(/^\s*/, "");
+    return rest ? `${prefix}${rest}` : prefix;
+  }
+  return `${prefix}${raw}`;
+}
+
 function pickAgreementProvHeaderDescription(row) {
-  if (!row) return "";
-  return String(
+  if (!row) return withAgreementProvParticularPrefix("");
+  return withAgreementProvParticularPrefix(
     pickScheduleRowField(row, "Description", "description") ||
       pickScheduleRowField(row, "Desc", "desc") ||
       ""
-  ).trim();
+  );
 }
 
 /** Contract-level field from schedule header row (parent grid row), then optional fallback row. */
@@ -747,7 +900,9 @@ function applyInvoiceLinesToForm(parentRow, lines, prevForm = {}) {
         fromSource.invoiceNo ||
         String(pickScheduleRowField(sourceRow, "InvoiceNo", "invoiceNo") || ""),
       cod: pickScheduleCodDate(parentRow) || pickScheduleCodDate(sourceRow) || prevForm.cod || "",
-      description: keptDescription !== "" ? keptDescription : headerDescription,
+      description: withAgreementProvParticularPrefix(
+        keptDescription !== "" ? keptDescription : headerDescription
+      ),
       cmdName:
         prevForm.cmdName ||
         fromSource.cmdName ||
@@ -827,7 +982,7 @@ function buildEmptyDraftInvoiceAddForm(parentForm, parentRow, invoiceLinesRows) 
     sortOrder: String(suggestNextInvoiceSortOrder(invoiceLinesRows || [])),
     itemCode: "",
     desc: "",
-    accHead: "",
+    accHead: resolveFinalizedInvoiceAccHead(parentRow, invoiceLinesRows),
     months: "",
     calculatedRentPM: "",
     discountPercent: "0",
@@ -879,7 +1034,7 @@ function buildDuplicateDraftInvoiceAddForm(sourceLine, parentForm, parentRow, in
       ? "0"
       : sanitizeIntegerInputValue(String(discountRaw));
   const monthsStr =
-    months === "" || months == null ? "" : sanitizeIntegerInputValue(String(months));
+    months === "" || months == null ? "" : sanitizeSignedIntegerInputValue(String(months));
   const calculatedRentPMStr =
     calculatedRentPM === "" || calculatedRentPM == null
       ? ""
@@ -981,8 +1136,8 @@ function getInvoiceLineComputedTotal(draftForm) {
 
 function validateInvoiceLineDraftTotal(draftForm) {
   const total = getInvoiceLineComputedTotal(draftForm);
-  if (total === null || !Number.isFinite(total) || total <= 0) {
-    return "Total must be greater than 0.";
+  if (total === null || !Number.isFinite(total) || total === 0) {
+    return "Total must be a non-zero amount.";
   }
   return "";
 }
@@ -1001,8 +1156,15 @@ function validateInvoiceLineDraftForm(draftForm, parentForm) {
   if (!isInvoiceLineDraftFieldFilled(draftForm?.desc)) {
     return "Particular is required.";
   }
-  if (!isInvoiceLineDraftFieldFilled(draftForm?.months)) {
-    return "Quantity is required.";
+  if (
+    !isInvoiceLineDraftFieldFilled(draftForm?.months) ||
+    String(draftForm?.months).trim() === "-"
+  ) {
+    return "Qty is required.";
+  }
+  const qty = Number(draftForm?.months);
+  if (!Number.isFinite(qty) || qty === 0) {
+    return "Qty must be a non-zero number.";
   }
   if (!isInvoiceLineDraftFieldFilled(draftForm?.calculatedRentPM)) {
     return "Unit Price is required.";
@@ -1070,8 +1232,8 @@ function buildLocalLineRowFromDraft(draftForm, parentForm, parentRow) {
     dueDate,
     PeriodStart: invoiceDate,
     periodStart: invoiceDate,
-    PeriodEnd: periodEndFromStartAndMonths(invoiceDate, months) || null,
-    periodEnd: periodEndFromStartAndMonths(invoiceDate, months) || null,
+    PeriodEnd: resolveInvoiceLinePeriodEnd(invoiceDate, months),
+    periodEnd: resolveInvoiceLinePeriodEnd(invoiceDate, months),
     ItemwithCode: itemCode,
     itemwithCode: itemCode,
     ItemCode: itemCode,
@@ -1319,12 +1481,15 @@ async function persistAllInvoiceScheduleLines({
     editingLineDraft,
   });
 
+  // Keep main invoice AmountReceivable in sync with the sum of item line totals.
+  await contractApi.updateInvoiceSchedule(
+    contractNo,
+    invoiceNo,
+    buildInvoiceSchedulePutPayload(rowData, form)
+  );
+
   if (!persistingItemLines) {
-    await contractApi.updateInvoiceSchedule(
-      contractNo,
-      invoiceNo,
-      buildInvoiceSchedulePutPayload(rowData, form)
-    );
+    return;
   }
 
   const deleteSubs = [
@@ -1393,7 +1558,7 @@ function buildDraftInvoiceEditFormFromLine(lineRow, parentForm, parentRow, lineK
       ? "0"
       : sanitizeIntegerInputValue(String(discountRaw));
   const monthsStr =
-    months === "" || months == null ? "" : sanitizeIntegerInputValue(String(months));
+    months === "" || months == null ? "" : sanitizeSignedIntegerInputValue(String(months));
   const calculatedRentPMStr =
     calculatedRentPM === "" || calculatedRentPM == null
       ? ""
@@ -1508,6 +1673,7 @@ function AgreementProvInvoiceLineDraftRow({
   productServiceOptions,
   onDraftFieldChange,
   onDraftItemServiceChange,
+  onDraftAccHeadChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
   onDraftCancel,
@@ -1519,6 +1685,14 @@ function AgreementProvInvoiceLineDraftRow({
   const subLabel = draftForm.pendingSubInvoiceNo || "—";
   const serviceOptions = productServiceOptions || [];
   const selectedService = findInvoiceProductServiceOption(serviceOptions, draftForm.itemCode);
+  const linkedAccHead = resolveItemWithCodeAccHead(selectedService);
+  const currentAccHead = String(draftForm.accHead || linkedAccHead || "").trim();
+  const accHeadOptions = buildInvoiceAccHeadOptions(serviceOptions, currentAccHead);
+  const selectedAccHeadOption =
+    accHeadOptions.find(
+      (option) =>
+        normalizeInvoiceAccHeadKey(option.value) === normalizeInvoiceAccHeadKey(currentAccHead)
+    ) || null;
   const itemCodeOptions =
     selectedService || !String(draftForm.itemCode || "").trim()
       ? serviceOptions
@@ -1534,6 +1708,12 @@ function AgreementProvInvoiceLineDraftRow({
           ...serviceOptions,
         ];
 
+  useEffect(() => {
+    if (!linkedAccHead) return;
+    if (String(draftForm.accHead || "").trim() === linkedAccHead) return;
+    onDraftFieldChange?.("accHead")?.({ target: { value: linkedAccHead } });
+  }, [linkedAccHead, draftForm.accHead, onDraftFieldChange]);
+
   return (
     <MDBox
       sx={{
@@ -1542,7 +1722,7 @@ function AgreementProvInvoiceLineDraftRow({
         "& > *": { borderBottom: "1px solid rgba(0,0,0,0.08)" },
       }}
     >
-      <MDBox sx={{ ...bodyCellSx, px: 0.5, py: 0.5, textAlign: "right", fontWeight: 600 }}>
+      <MDBox sx={{ ...bodyCellSx, px: 0.5, py: 0.5, textAlign: "left", fontWeight: 600 }}>
         {draftForm.sortOrder || "1"}
       </MDBox>
       <MDBox
@@ -1603,49 +1783,158 @@ function AgreementProvInvoiceLineDraftRow({
           )}
         />
       </MDBox>
-      <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
+      <MDBox
+        sx={{ ...bodyCellSx, textAlign: "left", px: 0.5, py: 0.5, minWidth: 0, overflow: "hidden" }}
+      >
         <MDInput
           value={draftForm.desc ?? ""}
           onChange={onDraftFieldChange("desc")}
           fullWidth
           size="small"
           placeholder="Particular"
-          sx={invoiceLineDraftInputSx}
+          title={draftForm.desc || undefined}
+          sx={{
+            ...invoiceLineDraftInputSx,
+            width: "100%",
+            minWidth: 0,
+            maxWidth: "100%",
+            "& .MuiInputBase-root": {
+              fontSize: "0.8125rem",
+              minHeight: 30,
+              width: "100%",
+              maxWidth: "100%",
+            },
+            "& .MuiInputBase-input": {
+              py: 0.5,
+              px: 0.75,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            },
+          }}
         />
       </MDBox>
-      <MDBox sx={{ ...bodyCellSx, textAlign: "left", p: 0.5 }}>
-        <MDInput
-          value={draftForm.accHead ?? ""}
-          onChange={onDraftFieldChange("accHead")}
-          fullWidth
+      <MDBox
+        sx={{ ...bodyCellSx, textAlign: "left", px: 0.5, py: 0.5, minWidth: 0, overflow: "hidden" }}
+      >
+        <Autocomplete
           size="small"
-          placeholder="Acc Head"
-          sx={invoiceLineDraftInputSx}
+          fullWidth
+          options={accHeadOptions}
+          value={selectedAccHeadOption}
+          getOptionLabel={(option) => String(option?.label || option?.value || "").trim()}
+          isOptionEqualToValue={(a, b) =>
+            normalizeInvoiceAccHeadKey(a?.value ?? a) === normalizeInvoiceAccHeadKey(b?.value ?? b)
+          }
+          onChange={(_, newValue) =>
+            onDraftAccHeadChange?.(String(newValue?.value || newValue || "").trim())
+          }
+          renderOption={(props, option) => (
+            <li {...props} key={option.value}>
+              <MDTypography
+                component="span"
+                variant="caption"
+                sx={{
+                  display: "block",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  fontSize: "0.8125rem",
+                }}
+                title={option.label}
+              >
+                {option.label}
+              </MDTypography>
+            </li>
+          )}
+          renderInput={(params) => (
+            <MDInput
+              {...params}
+              placeholder="Acc Head"
+              title={currentAccHead || undefined}
+              sx={invoiceLineDraftInputSx}
+            />
+          )}
         />
       </MDBox>
-      <MDBox sx={{ ...bodyCellSx, textAlign: "right", p: 0.5 }}>
+      <MDBox
+        sx={{
+          ...bodyCellSx,
+          textAlign: "right",
+          px: 0.5,
+          py: 0.5,
+          minWidth: 0,
+          overflow: "hidden",
+        }}
+      >
         <MDInput
           value={draftForm.months ?? ""}
           onChange={onDraftIntegerFieldChange("months")}
           fullWidth
           size="small"
           placeholder="Qty"
-          inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
-          sx={invoiceLineDraftInputSx}
+          inputProps={{ inputMode: "text", pattern: "-?[0-9]*" }}
+          sx={{
+            ...invoiceLineDraftInputSx,
+            width: "100%",
+            minWidth: 0,
+            maxWidth: "100%",
+            "& .MuiInputBase-root": { fontSize: "0.8125rem", minHeight: 30, width: "100%" },
+            "& .MuiInputBase-input": { py: 0.5, px: 0.5, textAlign: "right" },
+          }}
         />
       </MDBox>
-      <MDBox sx={{ ...bodyCellSx, textAlign: "right", p: 0.5 }}>
+      <MDBox
+        sx={{
+          ...bodyCellSx,
+          textAlign: "right",
+          px: 0.5,
+          py: 0.5,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 0.5,
+          overflow: "hidden",
+        }}
+      >
         <MDInput
           value={draftForm.calculatedRentPM ?? ""}
           onChange={onDraftNumericFieldChange("calculatedRentPM")}
-          fullWidth
           size="small"
           placeholder="Unit Price"
           inputProps={{ inputMode: "decimal" }}
-          sx={invoiceLineDraftInputSx}
+          sx={{
+            ...invoiceLineDraftInputSx,
+            flex: "1 1 auto",
+            width: "auto",
+            minWidth: 0,
+            maxWidth: "100%",
+            "& .MuiInputBase-root": { fontSize: "0.8125rem", minHeight: 30, width: "100%" },
+            "& .MuiInputBase-input": { py: 0.5, px: 0.5, textAlign: "right" },
+          }}
         />
+        <MDTypography
+          component="span"
+          variant="caption"
+          color="text"
+          sx={{
+            flex: "0 0 auto",
+            maxWidth: "42%",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            fontSize: "0.75rem",
+            lineHeight: 1.2,
+            textAlign: "left",
+          }}
+          title={
+            String(selectedService?.uomLabel || selectedService?.uom || "").trim() || undefined
+          }
+        >
+          {String(selectedService?.uomLabel || selectedService?.uom || "").trim() || "—"}
+        </MDTypography>
       </MDBox>
-      <MDBox sx={{ ...bodyCellSx, textAlign: "center", p: 0.5 }}>
+      <MDBox sx={{ ...bodyCellSx, textAlign: "center", p: 0.5, minWidth: 0, overflow: "hidden" }}>
         <MDInput
           value={draftForm.discountPercent ?? ""}
           onChange={onDraftIntegerFieldChange("discountPercent")}
@@ -1653,7 +1942,13 @@ function AgreementProvInvoiceLineDraftRow({
           size="small"
           placeholder="Disc %"
           inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
-          sx={invoiceLineDraftInputSx}
+          sx={{
+            ...invoiceLineDraftInputSx,
+            width: "100%",
+            minWidth: 0,
+            "& .MuiInputBase-root": { fontSize: "0.8125rem", minHeight: 30, width: "100%" },
+            "& .MuiInputBase-input": { py: 0.5, px: 0.35, textAlign: "center" },
+          }}
         />
       </MDBox>
       <MDBox
@@ -1662,6 +1957,10 @@ function AgreementProvInvoiceLineDraftRow({
           textAlign: "right",
           fontVariantNumeric: "tabular-nums",
           fontWeight: 600,
+          overflow: "visible",
+          textOverflow: "clip",
+          whiteSpace: "nowrap",
+          px: 0.75,
         }}
       >
         {(() => {
@@ -1679,7 +1978,8 @@ function AgreementProvInvoiceLineDraftRow({
           textAlign: "center",
           display: "flex",
           justifyContent: "center",
-          gap: 0.25,
+          gap: 0.15,
+          px: 0.25,
         }}
       >
         <Tooltip title="Duplicate">
@@ -1689,9 +1989,9 @@ function AgreementProvInvoiceLineDraftRow({
               color="secondary"
               disabled={saving || hasIncompleteNewLineDrafts}
               onClick={() => onDuplicateLine?.(draftForm)}
-              sx={{ padding: "2px" }}
+              sx={INVOICE_LINE_ACTION_BUTTON_SX}
             >
-              <Icon fontSize="small">content_copy</Icon>
+              <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>content_copy</Icon>
             </IconButton>
           </span>
         </Tooltip>
@@ -1702,9 +2002,9 @@ function AgreementProvInvoiceLineDraftRow({
               color="secondary"
               disabled={saving || disableCancel}
               onClick={onDraftCancel}
-              sx={{ padding: "2px" }}
+              sx={INVOICE_LINE_ACTION_BUTTON_SX}
             >
-              <Icon fontSize="small">close</Icon>
+              <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>close</Icon>
             </IconButton>
           </span>
         </Tooltip>
@@ -1720,6 +2020,7 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
   productServiceOptions: PropTypes.arrayOf(PropTypes.object),
   onDraftFieldChange: PropTypes.func.isRequired,
   onDraftItemServiceChange: PropTypes.func,
+  onDraftAccHeadChange: PropTypes.func,
   onDraftIntegerFieldChange: PropTypes.func.isRequired,
   onDraftNumericFieldChange: PropTypes.func.isRequired,
   onDraftCancel: PropTypes.func.isRequired,
@@ -1732,6 +2033,7 @@ AgreementProvInvoiceLineDraftRow.propTypes = {
 AgreementProvInvoiceLineDraftRow.defaultProps = {
   productServiceOptions: [],
   onDraftItemServiceChange: undefined,
+  onDraftAccHeadChange: undefined,
   onDuplicateLine: undefined,
   hasIncompleteNewLineDrafts: false,
   disableCancel: false,
@@ -1756,6 +2058,7 @@ function AgreementProvInvoiceLinesGrid({
   productServiceOptions,
   onDraftFieldChange,
   onDraftItemServiceChange,
+  onDraftAccHeadChange,
   onDraftIntegerFieldChange,
   onDraftNumericFieldChange,
   onDraftCancel,
@@ -1770,6 +2073,7 @@ function AgreementProvInvoiceLinesGrid({
       ? INVOICE_LINES_GRID_COLUMNS_READONLY
       : INVOICE_LINES_GRID_COLUMNS,
     width: "100%",
+    minWidth: INVOICE_LINES_GRID_MIN_WIDTH,
     alignItems: "center",
     columnGap: 0,
   };
@@ -1800,11 +2104,27 @@ function AgreementProvInvoiceLinesGrid({
 
   const getInvoiceLineColumnCellSx = (col, variant = "body") => {
     const base = variant === "header" ? headerCellSx : bodyCellSx;
+    const isTotalCol = col.camel === "total";
     return {
       ...base,
-      textAlign: col.align === "right" ? "right" : "left",
+      textAlign: col.align === "right" ? "right" : col.align === "center" ? "center" : "left",
       ...(col.compact ? { px: 0.5, py: 0.5 } : {}),
-      ...(col.wide ? { minWidth: 0 } : {}),
+      ...(col.wide || col.showFull
+        ? {
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }
+        : {}),
+      ...(isTotalCol
+        ? {
+            overflow: "visible",
+            textOverflow: "clip",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+          }
+        : {}),
       ...(col.numeric && variant === "body" ? { fontVariantNumeric: "tabular-nums" } : {}),
     };
   };
@@ -1825,9 +2145,9 @@ function AgreementProvInvoiceLinesGrid({
     );
   }
 
-  const linesBodySx = fillHeight
-    ? { flex: "1 1 0", minHeight: 0, overflow: "auto" }
-    : { maxHeight: 240, overflow: "auto" };
+  const linesScrollSx = fillHeight
+    ? { flex: "1 1 0", minHeight: 0, overflowX: "auto", overflowY: "auto" }
+    : { maxHeight: 240, overflowX: "auto", overflowY: "auto" };
 
   return (
     <TableContainer
@@ -1842,180 +2162,206 @@ function AgreementProvInvoiceLinesGrid({
         minHeight: fillHeight ? 0 : undefined,
       }}
     >
-      <MDBox sx={gridRowSx}>
-        {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
-          <MDBox key={col.camel} sx={getInvoiceLineColumnCellSx(col, "header")}>
-            {col.label}
-          </MDBox>
-        ))}
-        {!readOnly && <MDBox sx={{ ...headerCellSx, textAlign: "center" }}>Action</MDBox>}
-      </MDBox>
-
-      <MDBox sx={linesBodySx}>
-        {!readOnly &&
-          pendingNewDrafts.map((draftForm) => (
-            <AgreementProvInvoiceLineDraftRow
-              key={draftForm.__draftId || draftForm.pendingSubInvoiceNo}
-              gridRowSx={gridRowSx}
-              bodyCellSx={bodyCellSx}
-              draftForm={draftForm}
-              productServiceOptions={productServiceOptions}
-              onDraftFieldChange={onDraftFieldChange(draftForm.__draftId)}
-              onDraftItemServiceChange={onDraftItemServiceChange?.(draftForm.__draftId)}
-              onDraftIntegerFieldChange={onDraftIntegerFieldChange(draftForm.__draftId)}
-              onDraftNumericFieldChange={onDraftNumericFieldChange(draftForm.__draftId)}
-              onDraftCancel={() => onDraftCancel?.(draftForm.__draftId)}
-              onDuplicateLine={onDuplicateLine}
-              hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
-              disableCancel={Boolean(draftForm.__isDefaultMandatory)}
-              saving={saving}
-            />
-          ))}
-        {itemRows.length === 0 && pendingNewDrafts.length === 0 ? (
-          <MDTypography variant="caption" color="text" display="block" textAlign="center" py={2}>
-            No records found for this invoice.
-          </MDTypography>
-        ) : (
-          itemRows.map((lineRow, idx) => {
-            const lineKey = getInvoiceLineDraftRowKey(lineRow, idx);
-            const isEditingRow = isInvoiceLineDraftEditing(lineRow, editingLineDraft);
-
-            if (isEditingRow && !readOnly && editingLineDraft) {
-              const editDraftId = editingLineDraft.__draftId || editingLineDraft.editingLineKey;
-              return (
-                <AgreementProvInvoiceLineDraftRow
-                  key={lineKey}
-                  gridRowSx={gridRowSx}
-                  bodyCellSx={bodyCellSx}
-                  draftForm={editingLineDraft}
-                  productServiceOptions={productServiceOptions}
-                  onDraftFieldChange={onDraftFieldChange(editDraftId)}
-                  onDraftItemServiceChange={onDraftItemServiceChange?.(editDraftId)}
-                  onDraftIntegerFieldChange={onDraftIntegerFieldChange(editDraftId)}
-                  onDraftNumericFieldChange={onDraftNumericFieldChange(editDraftId)}
-                  onDraftCancel={() => onDraftCancel?.(editDraftId)}
-                  onDuplicateLine={onDuplicateLine}
-                  hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
-                  saving={saving}
-                />
-              );
-            }
-
-            const lineSubInvoiceNo = pickInvoiceLineSubInvoiceNo(lineRow);
-            const lineMoveIndex = moveRows.findIndex(
-              (r) => pickInvoiceLineSubInvoiceNo(r) === lineSubInvoiceNo
-            );
-            const canMoveUp = lineMoveIndex > 0;
-            const canMoveDown = lineMoveIndex >= 0 && lineMoveIndex < moveRows.length - 1;
-
-            return (
-              <MDBox
-                key={lineKey}
-                sx={{
-                  ...gridRowSx,
-                  "&:hover": { bgcolor: "rgba(25, 118, 210, 0.04)" },
-                  "&:last-of-type > *": { borderBottom: "none" },
-                }}
-              >
-                {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
-                  <MDBox key={col.camel} sx={getInvoiceLineColumnCellSx(col, "body")}>
-                    {col.camel === "description" ? (
-                      <AgreementProvLongTextCell
-                        compact
-                        maxVisibleChars={30}
-                        value={
-                          pickScheduleRowField(lineRow, "Description", "description") ||
-                          pickScheduleRowField(lineRow, "Desc", "desc")
-                        }
-                      />
-                    ) : (
-                      formatEditInvoiceLineCellValue(lineRow, col)
-                    )}
-                  </MDBox>
-                ))}
-                {!readOnly && (
-                  <MDBox
-                    sx={{
-                      ...bodyCellSx,
-                      textAlign: "center",
-                      display: "flex",
-                      justifyContent: "center",
-                      gap: 0.25,
-                    }}
-                  >
-                    <Tooltip title="Move up">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="info"
-                          disabled={!canMoveUp || saving || Boolean(editingLineDraft)}
-                          onClick={() => onMoveLine?.(lineRow, "up")}
-                          sx={{ padding: "2px" }}
-                        >
-                          <Icon fontSize="small">keyboard_arrow_up</Icon>
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Move down">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="info"
-                          disabled={!canMoveDown || saving || Boolean(editingLineDraft)}
-                          onClick={() => onMoveLine?.(lineRow, "down")}
-                          sx={{ padding: "2px" }}
-                        >
-                          <Icon fontSize="small">keyboard_arrow_down</Icon>
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Edit">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="info"
-                          disabled={saving || Boolean(editingLineDraft)}
-                          onClick={() => onEditLine?.(lineRow, lineKey)}
-                          sx={{ padding: "2px" }}
-                        >
-                          <Icon fontSize="small">edit</Icon>
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Duplicate">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="secondary"
-                          disabled={
-                            saving || Boolean(editingLineDraft) || hasIncompleteNewLineDrafts
-                          }
-                          onClick={() => onDuplicateLine?.(lineRow)}
-                          sx={{ padding: "2px" }}
-                        >
-                          <Icon fontSize="small">content_copy</Icon>
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                      <span>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          disabled={saving || Boolean(editingLineDraft)}
-                          onClick={() => onDeleteLine?.(lineRow)}
-                          sx={{ padding: "2px" }}
-                        >
-                          <Icon fontSize="small">delete</Icon>
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  </MDBox>
-                )}
+      <MDBox sx={{ ...linesScrollSx, minWidth: 0 }}>
+        <MDBox
+          sx={{
+            width: "100%",
+            minWidth: INVOICE_LINES_GRID_MIN_WIDTH,
+          }}
+        >
+          <MDBox sx={gridRowSx}>
+            {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => (
+              <MDBox key={col.camel} sx={getInvoiceLineColumnCellSx(col, "header")}>
+                {col.label}
               </MDBox>
-            );
-          })
-        )}
+            ))}
+            {!readOnly && <MDBox sx={{ ...headerCellSx, textAlign: "center" }}>Action</MDBox>}
+          </MDBox>
+
+          {!readOnly &&
+            pendingNewDrafts.map((draftForm) => (
+              <AgreementProvInvoiceLineDraftRow
+                key={draftForm.__draftId || draftForm.pendingSubInvoiceNo}
+                gridRowSx={gridRowSx}
+                bodyCellSx={bodyCellSx}
+                draftForm={draftForm}
+                productServiceOptions={productServiceOptions}
+                onDraftFieldChange={onDraftFieldChange(draftForm.__draftId)}
+                onDraftItemServiceChange={onDraftItemServiceChange?.(draftForm.__draftId)}
+                onDraftAccHeadChange={onDraftAccHeadChange?.(draftForm.__draftId)}
+                onDraftIntegerFieldChange={onDraftIntegerFieldChange(draftForm.__draftId)}
+                onDraftNumericFieldChange={onDraftNumericFieldChange(draftForm.__draftId)}
+                onDraftCancel={() => onDraftCancel?.(draftForm.__draftId)}
+                onDuplicateLine={onDuplicateLine}
+                hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+                disableCancel={Boolean(draftForm.__isDefaultMandatory)}
+                saving={saving}
+              />
+            ))}
+          {itemRows.length === 0 && pendingNewDrafts.length === 0 ? (
+            <MDTypography variant="caption" color="text" display="block" textAlign="center" py={2}>
+              No records found for this invoice.
+            </MDTypography>
+          ) : (
+            itemRows.map((lineRow, idx) => {
+              const lineKey = getInvoiceLineDraftRowKey(lineRow, idx);
+              const isEditingRow = isInvoiceLineDraftEditing(lineRow, editingLineDraft);
+
+              if (isEditingRow && !readOnly && editingLineDraft) {
+                const editDraftId = editingLineDraft.__draftId || editingLineDraft.editingLineKey;
+                return (
+                  <AgreementProvInvoiceLineDraftRow
+                    key={lineKey}
+                    gridRowSx={gridRowSx}
+                    bodyCellSx={bodyCellSx}
+                    draftForm={editingLineDraft}
+                    productServiceOptions={productServiceOptions}
+                    onDraftFieldChange={onDraftFieldChange(editDraftId)}
+                    onDraftItemServiceChange={onDraftItemServiceChange?.(editDraftId)}
+                    onDraftAccHeadChange={onDraftAccHeadChange?.(editDraftId)}
+                    onDraftIntegerFieldChange={onDraftIntegerFieldChange(editDraftId)}
+                    onDraftNumericFieldChange={onDraftNumericFieldChange(editDraftId)}
+                    onDraftCancel={() => onDraftCancel?.(editDraftId)}
+                    onDuplicateLine={onDuplicateLine}
+                    hasIncompleteNewLineDrafts={hasIncompleteNewLineDrafts}
+                    saving={saving}
+                  />
+                );
+              }
+
+              const lineSubInvoiceNo = pickInvoiceLineSubInvoiceNo(lineRow);
+              const lineMoveIndex = moveRows.findIndex(
+                (r) => pickInvoiceLineSubInvoiceNo(r) === lineSubInvoiceNo
+              );
+              const canMoveUp = lineMoveIndex > 0;
+              const canMoveDown = lineMoveIndex >= 0 && lineMoveIndex < moveRows.length - 1;
+
+              return (
+                <MDBox
+                  key={lineKey}
+                  sx={{
+                    ...gridRowSx,
+                    "&:hover": { bgcolor: "rgba(25, 118, 210, 0.04)" },
+                    "&:last-of-type > *": { borderBottom: "none" },
+                  }}
+                >
+                  {EDIT_INVOICE_LINES_TABLE_COLUMNS.map((col) => {
+                    const cellValue = formatEditInvoiceLineCellValue(
+                      lineRow,
+                      col,
+                      productServiceOptions
+                    );
+                    const fullText = cellValue && cellValue !== "—" ? String(cellValue) : undefined;
+                    return (
+                      <MDBox
+                        key={col.camel}
+                        sx={getInvoiceLineColumnCellSx(col, "body")}
+                        title={
+                          (col.camel === "itemwithCode" || col.showFull) && fullText
+                            ? fullText
+                            : undefined
+                        }
+                      >
+                        {cellValue}
+                      </MDBox>
+                    );
+                  })}
+                  {!readOnly && (
+                    <MDBox
+                      sx={{
+                        ...bodyCellSx,
+                        textAlign: "center",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 0.1,
+                        px: 0.25,
+                      }}
+                    >
+                      <MDBox
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          lineHeight: 0,
+                          "& > span": { display: "flex", height: 14 },
+                        }}
+                      >
+                        <Tooltip title="Move up">
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="info"
+                              disabled={!canMoveUp || saving || Boolean(editingLineDraft)}
+                              onClick={() => onMoveLine?.(lineRow, "up")}
+                              sx={{ ...INVOICE_LINE_ACTION_BUTTON_SX, height: 14, minHeight: 14 }}
+                            >
+                              <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>keyboard_arrow_up</Icon>
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Move down">
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="info"
+                              disabled={!canMoveDown || saving || Boolean(editingLineDraft)}
+                              onClick={() => onMoveLine?.(lineRow, "down")}
+                              sx={{ ...INVOICE_LINE_ACTION_BUTTON_SX, height: 14, minHeight: 14 }}
+                            >
+                              <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>keyboard_arrow_down</Icon>
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </MDBox>
+                      <Tooltip title="Edit">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="info"
+                            disabled={saving || Boolean(editingLineDraft)}
+                            onClick={() => onEditLine?.(lineRow, lineKey)}
+                            sx={INVOICE_LINE_ACTION_BUTTON_SX}
+                          >
+                            <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>edit</Icon>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Duplicate">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            disabled={
+                              saving || Boolean(editingLineDraft) || hasIncompleteNewLineDrafts
+                            }
+                            onClick={() => onDuplicateLine?.(lineRow)}
+                            sx={INVOICE_LINE_ACTION_BUTTON_SX}
+                          >
+                            <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>content_copy</Icon>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            disabled={saving || Boolean(editingLineDraft)}
+                            onClick={() => onDeleteLine?.(lineRow)}
+                            sx={INVOICE_LINE_ACTION_BUTTON_SX}
+                          >
+                            <Icon sx={INVOICE_LINE_ACTION_ICON_SX}>delete</Icon>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </MDBox>
+                  )}
+                </MDBox>
+              );
+            })
+          )}
+        </MDBox>
       </MDBox>
     </TableContainer>
   );
@@ -2039,6 +2385,7 @@ AgreementProvInvoiceLinesGrid.propTypes = {
   productServiceOptions: PropTypes.arrayOf(PropTypes.object),
   onDraftFieldChange: PropTypes.func,
   onDraftItemServiceChange: PropTypes.func,
+  onDraftAccHeadChange: PropTypes.func,
   onDraftIntegerFieldChange: PropTypes.func,
   onDraftNumericFieldChange: PropTypes.func,
   onDraftCancel: PropTypes.func,
@@ -2326,7 +2673,18 @@ function formatEditInvoiceLineCell(row, col) {
   return raw === "" ? "—" : String(raw);
 }
 
-function formatEditInvoiceLineCellValue(lineRow, col) {
+function formatInvoiceItemWithCodeDisplay(rawCode, productServiceOptions = []) {
+  const raw = String(rawCode ?? "").trim();
+  if (!raw) return "—";
+  const matched = findInvoiceProductServiceOption(productServiceOptions, raw);
+  if (matched) {
+    const label = getInvoiceProductServiceOptionLabel(matched);
+    if (label) return label;
+  }
+  return raw;
+}
+
+function formatEditInvoiceLineCellValue(lineRow, col, productServiceOptions = []) {
   if (col.camel === "subInvoiceNo") {
     const sub = pickInvoiceLineSubInvoiceNo(lineRow);
     return sub || "—";
@@ -2335,13 +2693,24 @@ function formatEditInvoiceLineCellValue(lineRow, col) {
     const raw =
       pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
       pickScheduleRowField(lineRow, "ItemCode", "itemCode");
-    return raw === "" ? "—" : String(raw);
+    return formatInvoiceItemWithCodeDisplay(raw, productServiceOptions);
   }
   if (col.camel === "description") {
     const raw =
       pickScheduleRowField(lineRow, "Description", "description") ||
       pickScheduleRowField(lineRow, "Desc", "desc");
     return raw === "" ? "—" : String(raw);
+  }
+  if (col.camel === "calculatedRentPM") {
+    const raw = pickScheduleRowField(lineRow, "CalculatedRentPM", "calculatedRentPM");
+    const price = raw === "" ? "—" : formatScheduleGridNumber(raw);
+    const itemCode =
+      pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
+      pickScheduleRowField(lineRow, "ItemCode", "itemCode");
+    const matched = findInvoiceProductServiceOption(productServiceOptions, itemCode);
+    const uom = String(matched?.uomLabel || matched?.uom || "").trim();
+    if (!uom) return price;
+    return price === "—" ? uom : `${price} ${uom}`;
   }
   if (col.camel === "discount") {
     const raw =
@@ -2418,14 +2787,26 @@ function addDaysToYyyyMmDd(dateStr, days) {
 function periodEndFromStartAndMonths(periodStart, months) {
   if (!periodStart || months === null || months === undefined || months === "") return "";
   const n = Number(months);
-  if (!Number.isFinite(n) || n <= 0) return "";
+  // Period length uses |Qty| so negative (credit) qty still yields a valid PeriodEnd for the API.
+  if (!Number.isFinite(n) || n === 0) return "";
+  const spanMonths = Math.abs(n);
   try {
     const parsed = parseISO(String(periodStart).trim());
     if (!isValid(parsed)) return "";
-    return format(addMonths(parsed, n), "yyyy-MM-dd");
+    // Inclusive period: 01-Jul-2024 + 1 month => 31-Jul-2024 (not 01-Aug-2024).
+    return format(addDays(addMonths(parsed, spanMonths), -1), "yyyy-MM-dd");
   } catch {
     return "";
   }
+}
+
+/** Always returns a yyyy-MM-dd (or null) suitable for non-nullable API PeriodEnd. */
+function resolveInvoiceLinePeriodEnd(periodStart, months, fallbackPeriodEnd = null) {
+  const computed = periodEndFromStartAndMonths(periodStart, months);
+  if (computed) return computed;
+  const fallback = toScheduleDateInputValue(fallbackPeriodEnd);
+  if (fallback) return fallback;
+  return toScheduleDateInputValue(periodStart) || null;
 }
 
 function buildCreateAgreementInvoiceDateDefaults(invoiceDate, sourceRow) {
@@ -2439,7 +2820,7 @@ function buildCreateAgreementInvoiceDateDefaults(invoiceDate, sourceRow) {
   const periodText = periodEnd ? formatInvoicePeriodDisplay(date, periodEnd) : "";
   return {
     dueDate: date ? addDaysToYyyyMmDd(date, 9) : "",
-    description: periodText === "—" ? "" : periodText,
+    description: withAgreementProvParticularPrefix(periodText === "—" ? "" : periodText),
   };
 }
 
@@ -2493,6 +2874,168 @@ const AGREEMENT_PROV_PDF_DEFAULT_MARGINS = {
   rightIn: AGREEMENT_PROV_PDF_MARGIN_OTHER_IN,
   contentScale: 1,
 };
+
+/** Selectable PDF body columns. Total is always shown and is not listed here. */
+const AGREEMENT_PROV_PDF_SELECTABLE_COLUMNS = [
+  { key: "subInvoiceNo", label: "Sub Invoice" },
+  { key: "itemWithCode", label: "Item with Code" },
+  { key: "particular", label: "Particular" },
+  { key: "accHead", label: "Acc Head" },
+  { key: "qty", label: "Qty" },
+  { key: "unitPrice", label: "Unit Price" },
+  { key: "discount", label: "Disc" },
+];
+
+const AGREEMENT_PROV_PDF_DEFAULT_COLUMN_KEYS = ["particular", "qty", "unitPrice"];
+
+function createDefaultAgreementProvPdfColumnKeys() {
+  return new Set(AGREEMENT_PROV_PDF_DEFAULT_COLUMN_KEYS);
+}
+
+function countPdfAmountIntegerDigits(value) {
+  const n = Math.abs(Math.trunc(Number(String(value ?? "").replace(/,/g, "")) || 0));
+  return String(n).length;
+}
+
+const AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS = new Set(["qty", "unitPrice", "discount", "total"]);
+
+const AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM = {
+  subInvoiceNo: 16,
+  itemWithCode: 34,
+  particular: 40,
+  accHead: 28,
+  qty: 14,
+  unitPrice: 28,
+  discount: 14,
+};
+
+/**
+ * Build body-table column geometry. Total is always included.
+ * When totals exceed 5 integer digits, Total gets extra reserved width.
+ */
+function buildAgreementProvPdfBodyColumns({
+  contentWidth,
+  marginLeft,
+  selectedKeys,
+  maxTotalValue,
+  doc,
+  bodyFontSize,
+}) {
+  const selected = selectedKeys instanceof Set ? selectedKeys : new Set(selectedKeys || []);
+  const orderedKeys = [
+    ...AGREEMENT_PROV_PDF_SELECTABLE_COLUMNS.map((c) => c.key).filter((key) => selected.has(key)),
+    "total",
+  ];
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(bodyFontSize);
+  const totalSample = formatPdfCurrency(maxTotalValue);
+  const totalTextWidth = Math.max(doc.getTextWidth(String(totalSample)), 1);
+  const totalDigits = countPdfAmountIntegerDigits(maxTotalValue);
+  const totalMinWidth = totalDigits > 5 ? 36 : 22;
+  const totalWidth = Math.max(totalTextWidth + 4, totalMinWidth);
+
+  const fixedKeys = orderedKeys.filter((key) => key !== "particular");
+  let fixedSum = 0;
+  fixedKeys.forEach((key) => {
+    if (key === "total") {
+      fixedSum += totalWidth;
+      return;
+    }
+    fixedSum += AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM[key] || 20;
+  });
+
+  const hasParticular = orderedKeys.includes("particular");
+  let particularWidth = hasParticular ? Math.max(contentWidth - fixedSum, 28) : 0;
+  let leftover = hasParticular ? 0 : Math.max(contentWidth - fixedSum, 0);
+
+  if (leftover > 0) {
+    const expandKey =
+      orderedKeys.find(
+        (key) => key !== "total" && !AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(key)
+      ) || orderedKeys.find((key) => key !== "total");
+    if (expandKey === "particular") {
+      particularWidth += leftover;
+      leftover = 0;
+    }
+  }
+
+  const cols = [];
+  let x = marginLeft;
+  orderedKeys.forEach((key) => {
+    const meta =
+      key === "total"
+        ? { key: "total", label: "Total" }
+        : AGREEMENT_PROV_PDF_SELECTABLE_COLUMNS.find((c) => c.key === key);
+    let width =
+      key === "particular"
+        ? particularWidth
+        : key === "total"
+        ? totalWidth
+        : AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM[key] || 20;
+    if (leftover > 0 && key !== "total" && !AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(key)) {
+      width += leftover;
+      leftover = 0;
+    } else if (
+      leftover > 0 &&
+      key !== "total" &&
+      orderedKeys.every((k) => k === "total" || AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(k)) &&
+      key === orderedKeys[0]
+    ) {
+      width += leftover;
+      leftover = 0;
+    }
+    const align = AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(key) ? "right" : "left";
+    cols.push({
+      key,
+      label: meta?.label || key,
+      left: x,
+      width,
+      textX: align === "right" ? x + width : x,
+      align,
+    });
+    x += width;
+  });
+
+  return cols;
+}
+
+function getAgreementProvPdfLineCellValues(lineRow, productServiceOptions = []) {
+  const itemWithCode = String(
+    pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
+      pickScheduleRowField(lineRow, "ItemCode", "itemCode") ||
+      ""
+  ).trim();
+  const particularText = withAgreementProvParticularPrefix(
+    pickScheduleRowField(lineRow, "Description", "description") ||
+      pickScheduleRowField(lineRow, "Desc", "desc") ||
+      itemWithCode ||
+      ""
+  );
+  const accHead = String(pickScheduleRowField(lineRow, "AccHead", "accHead") || "").trim();
+  const qty = pickScheduleRowField(lineRow, "Months", "months");
+  const unitPrice = pickScheduleRowField(lineRow, "CalculatedRentPM", "calculatedRentPM");
+  const discountRaw =
+    pickScheduleRowField(lineRow, "Discount", "discount") ||
+    pickScheduleRowField(lineRow, "DiscountPercent", "discountPercent");
+  const discount =
+    discountRaw === null || discountRaw === undefined || discountRaw === ""
+      ? ""
+      : String(discountRaw);
+  const lineTotal = pickInvoiceLineTotalNumeric(lineRow);
+
+  return {
+    subInvoiceNo: pickInvoiceLineSubInvoiceNo(lineRow) || "—",
+    itemWithCode: itemWithCode || "—",
+    particular: particularText || "—",
+    accHead: accHead || "—",
+    qty: qty === null || qty === undefined || qty === "" ? "—" : String(qty),
+    unitPrice: formatPdfUnitPriceWithUom(unitPrice, lineRow, productServiceOptions),
+    discount: discount === "" ? "—" : discount,
+    total: lineTotal,
+  };
+}
+
 const AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN = 0.5;
 const AGREEMENT_PROV_PDF_CONTENT_SCALE_MAX = 1.5;
 const AGREEMENT_PROV_PDF_CONTENT_SCALE_STEP = 0.05;
@@ -2679,6 +3222,23 @@ function pickInvoiceLineTotalNumeric(lineRow) {
   return computed != null ? computed : 0;
 }
 
+function sumInvoiceItemRecordTotals(lines) {
+  return getInvoiceItemRecordRows(lines).reduce(
+    (sum, row) => sum + pickInvoiceLineTotalNumeric(row),
+    0
+  );
+}
+
+function formatPdfUnitPriceWithUom(unitPrice, lineRow, productServiceOptions = []) {
+  const priceText = formatPdfCurrency(unitPrice);
+  const itemCode =
+    pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
+    pickScheduleRowField(lineRow, "ItemCode", "itemCode");
+  const matched = findInvoiceProductServiceOption(productServiceOptions, itemCode);
+  const uom = String(matched?.uomLabel || matched?.uom || "").trim();
+  return uom ? `${priceText} ${uom}` : priceText;
+}
+
 function loadPafLogoIntoPdf(doc, x, y, widthMm = 18) {
   return new Promise((resolve) => {
     const logoPath = `${process.env.PUBLIC_URL || ""}/login_page/assets/img/PAF-Logo.gif`;
@@ -2724,7 +3284,11 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     parentForm?.invoiceDate ||
     null;
   const months = toScheduleIntOrNull(src.months ?? pickScheduleRowField(src, "Months", "months"));
-  const periodEnd = periodEndFromStartAndMonths(periodStart, months) || null;
+  const periodEnd = resolveInvoiceLinePeriodEnd(
+    periodStart,
+    months,
+    pickScheduleRowField(src, "PeriodEnd", "periodEnd") || parentForm?.periodEnd
+  );
   const calculatedRentPM = toScheduleNumberOrNull(
     src.calculatedRentPM ?? pickScheduleRowField(src, "CalculatedRentPM", "calculatedRentPM")
   );
@@ -2793,7 +3357,7 @@ function buildInvoiceScheduleCreatePayload(parentRow, parentForm, addForm) {
     SubInvoiceNo: subInvoiceNo || null,
     subInvoiceNo: subInvoiceNo || null,
     PeriodStart: periodStart,
-    PeriodEnd: periodEnd,
+    PeriodEnd: periodEnd || toScheduleDateInputValue(periodStart) || periodStart,
     DueDate:
       src.dueDate || pickScheduleRowField(src, "DueDate", "dueDate") || parentForm?.dueDate || null,
     CalculatedRentPM: calculatedRentPM,
@@ -2846,6 +3410,16 @@ function sanitizeIntegerInputValue(raw) {
   return s.replace(/\D/g, "");
 }
 
+/** Allows optional leading minus for Qty (credit / adjustment lines). */
+function sanitizeSignedIntegerInputValue(raw) {
+  const s = String(raw ?? "");
+  if (s === "" || s === "-") return s;
+  const negative = s.trimStart().startsWith("-");
+  const digits = s.replace(/\D/g, "");
+  if (!digits) return negative ? "-" : "";
+  return negative ? `-${digits}` : digits;
+}
+
 function sanitizeDecimalNumericInputValue(raw) {
   let s = String(raw ?? "").replace(/[^\d.]/g, "");
   const dot = s.indexOf(".");
@@ -2879,7 +3453,7 @@ function buildInvoiceSchedulePutPayload(rowData, form) {
     Months: toScheduleNumberOrNull(form.months),
     TotalRent: toScheduleNumberOrNull(form.totalRent),
     Remarks: form.remarks ?? "",
-    Description: String(form.description ?? "").trim(),
+    Description: withAgreementProvParticularPrefix(form.description),
     AmountReceived: toScheduleNumberOrNull(form.amountReceived),
     AmountReceivable: toScheduleNumberOrNull(form.amountReceivable),
     AmountPending: toScheduleNumberOrNull(form.amountPending),
@@ -3277,7 +3851,17 @@ function buildAgreementProvEditForm(row) {
     invoiceDate: toScheduleDateInputValue(pickScheduleInvoiceDate(row)),
     dueDate: toScheduleDateInputValue(pickScheduleRowField(row, "DueDate", "dueDate")),
     periodStart: toScheduleDateInputValue(pickScheduleRowField(row, "PeriodStart", "periodStart")),
-    periodEnd: toScheduleDateInputValue(pickScheduleRowField(row, "PeriodEnd", "periodEnd")),
+    periodEnd: (() => {
+      const start = toScheduleDateInputValue(
+        pickScheduleRowField(row, "PeriodStart", "periodStart")
+      );
+      const paymentTerm = pickScheduleRowField(row, "PaymentTermMonths", "paymentTermMonths");
+      const inclusiveEnd = periodEndFromStartAndMonths(start, paymentTerm);
+      return (
+        inclusiveEnd ||
+        toScheduleDateInputValue(pickScheduleRowField(row, "PeriodEnd", "periodEnd"))
+      );
+    })(),
     calculatedRentPM: pickScheduleRowField(row, "CalculatedRentPM", "calculatedRentPM"),
     months: pickScheduleRowField(row, "Months", "months"),
     totalRent: pickScheduleRowField(row, "TotalRent", "totalRent"),
@@ -3299,7 +3883,20 @@ function buildAgreementProvEditForm(row) {
     ),
     invoiceDateType: String(pickScheduleRowField(row, "InvoiceDateType", "invoiceDateType") || ""),
     invoiceStatus: String(pickScheduleRowField(row, "InvoiceStatus", "invoiceStatus") || ""),
-    description: pickAgreementProvHeaderDescription(row),
+    description: (() => {
+      const start = toScheduleDateInputValue(
+        pickScheduleRowField(row, "PeriodStart", "periodStart") || pickScheduleInvoiceDate(row)
+      );
+      const paymentTerm = pickScheduleRowField(row, "PaymentTermMonths", "paymentTermMonths");
+      const inclusiveEnd =
+        periodEndFromStartAndMonths(start, paymentTerm) ||
+        toScheduleDateInputValue(pickScheduleRowField(row, "PeriodEnd", "periodEnd"));
+      const periodText = formatInvoicePeriodDisplay(start, inclusiveEnd);
+      if (periodText && periodText !== "—") {
+        return withAgreementProvParticularPrefix(periodText);
+      }
+      return pickAgreementProvHeaderDescription(row);
+    })(),
     paymentTermMonths: pickScheduleRowField(row, "PaymentTermMonths", "paymentTermMonths"),
     riseTermType: String(pickScheduleRowField(row, "RiseTermType", "riseTermType") || ""),
     riseTerm: String(pickScheduleRowField(row, "RiseTerm", "riseTerm") || ""),
@@ -3373,7 +3970,7 @@ function AgreementProvInvoiceEditDialog({
   }, [pendingDeleteSubs]);
 
   useEffect(() => {
-    if (!open || viewMode) {
+    if (!open) {
       setProductServiceOptions([]);
       return undefined;
     }
@@ -3400,7 +3997,7 @@ function AgreementProvInvoiceEditDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, viewMode]);
+  }, [open]);
 
   const getScheduleLinesForSuggest = useCallback(
     () =>
@@ -3598,9 +4195,38 @@ function AgreementProvInvoiceEditDialog({
     });
   };
 
+  const canAddRecord = Boolean(
+    String(form.contractNo || "").trim() && String(form.invoiceNo || "").trim()
+  );
+
+  const hasIncompleteNewLineDrafts = useMemo(
+    () => Boolean(getFirstIncompleteNewLineDraftError(newLineDrafts, form)),
+    [newLineDrafts, form]
+  );
+
+  const invoiceItemRecordsTotalAmount = useMemo(() => {
+    const workingLines = mergeAllDraftsIntoWorkingInvoiceLines(
+      invoiceLinesRows,
+      newLineDrafts,
+      editingLineDraft,
+      form,
+      rowData
+    );
+    return sumInvoiceItemRecordTotals(workingLines);
+  }, [invoiceLinesRows, newLineDrafts, editingLineDraft, form, rowData]);
+
   const handleSave = async () => {
     if (!onSave) return;
-    const refreshedRow = await onSave(form, rowData, {
+    const formWithLineTotals = {
+      ...form,
+      amountReceivable: invoiceItemRecordsTotalAmount,
+      totalRent: invoiceItemRecordsTotalAmount,
+      amountPending: Math.max(
+        0,
+        Number(invoiceItemRecordsTotalAmount) - Number(form.amountReceived || 0)
+      ),
+    };
+    const refreshedRow = await onSave(formWithLineTotals, rowData, {
       invoiceLines: invoiceLinesRowsRef.current,
       pendingDeleteSubs: pendingDeleteSubsRef.current,
       newLineDrafts: newLineDraftsRef.current,
@@ -3611,15 +4237,6 @@ function AgreementProvInvoiceEditDialog({
     if (!refreshedRow) return;
     await reloadInvoiceLines(refreshedRow, { freshForm: true });
   };
-
-  const canAddRecord = Boolean(
-    String(form.contractNo || "").trim() && String(form.invoiceNo || "").trim()
-  );
-
-  const hasIncompleteNewLineDrafts = useMemo(
-    () => Boolean(getFirstIncompleteNewLineDraftError(newLineDrafts, form)),
-    [newLineDrafts, form]
-  );
 
   const appendNewLineDraft = (draftSeed) => {
     setNewLineDrafts((prev) => [
@@ -3753,7 +4370,7 @@ function AgreementProvInvoiceEditDialog({
   const handleDraftItemServiceChange = (draftId) => (service) => {
     updateDraftById(draftId, (prev) => {
       if (!service) {
-        return { ...prev, itemCode: "" };
+        return { ...prev, itemCode: "", accHead: "" };
       }
       const nextUnitPrice =
         service.defaultUnitPriceSales !== "" && service.defaultUnitPriceSales != null
@@ -3763,9 +4380,45 @@ function AgreementProvInvoiceEditDialog({
         String(service.defaultParticulars || "").trim() ||
         String(service.itemName || "").trim() ||
         prev.desc;
+      const linkedAccHead = resolveItemWithCodeAccHead(service);
       return recalcDraftTotal({
         ...prev,
         itemCode: String(service.itemCode || "").trim(),
+        desc: nextDesc,
+        accHead: linkedAccHead || prev.accHead || "",
+        calculatedRentPM: nextUnitPrice,
+      });
+    });
+  };
+
+  const handleDraftAccHeadChange = (draftId) => (accHeadValue) => {
+    const nextAccHead = String(accHeadValue || "").trim();
+    if (!nextAccHead) {
+      updateDraftById(draftId, (prev) => ({ ...prev, accHead: "", itemCode: "" }));
+      return;
+    }
+
+    updateDraftById(draftId, (prev) => {
+      const matched = findInvoiceProductByAccHead(
+        productServiceOptions,
+        nextAccHead,
+        prev.itemCode
+      );
+      if (!matched) {
+        return { ...prev, accHead: nextAccHead };
+      }
+      const nextUnitPrice =
+        matched.defaultUnitPriceSales !== "" && matched.defaultUnitPriceSales != null
+          ? String(matched.defaultUnitPriceSales)
+          : prev.calculatedRentPM;
+      const nextDesc =
+        String(matched.defaultParticulars || "").trim() ||
+        String(matched.itemName || "").trim() ||
+        prev.desc;
+      return recalcDraftTotal({
+        ...prev,
+        accHead: nextAccHead,
+        itemCode: String(matched.itemCode || "").trim(),
         desc: nextDesc,
         calculatedRentPM: nextUnitPrice,
       });
@@ -3773,7 +4426,10 @@ function AgreementProvInvoiceEditDialog({
   };
 
   const handleDraftIntegerFieldChange = (draftId) => (field) => (e) => {
-    const value = sanitizeIntegerInputValue(e.target.value);
+    const value =
+      field === "months"
+        ? sanitizeSignedIntegerInputValue(e.target.value)
+        : sanitizeIntegerInputValue(e.target.value);
     updateDraftById(draftId, (prev) => recalcDraftTotal({ ...prev, [field]: value }));
   };
 
@@ -4074,7 +4730,7 @@ function AgreementProvInvoiceEditDialog({
                   sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
                 >
                   <MDTypography variant="button" fontWeight="medium">
-                    Total Amount: {formatScheduleGridNumber(form.amountReceivable)}
+                    Total Amount: {formatScheduleGridNumber(invoiceItemRecordsTotalAmount)}
                   </MDTypography>
                   {!viewMode && (
                     <Tooltip
@@ -4125,6 +4781,7 @@ function AgreementProvInvoiceEditDialog({
                   productServiceOptions={productServiceOptions}
                   onDraftFieldChange={handleDraftFieldChange}
                   onDraftItemServiceChange={handleDraftItemServiceChange}
+                  onDraftAccHeadChange={handleDraftAccHeadChange}
                   onDraftIntegerFieldChange={handleDraftIntegerFieldChange}
                   onDraftNumericFieldChange={handleDraftNumericFieldChange}
                   onDraftCancel={handleDraftCancel}
@@ -4207,7 +4864,14 @@ function normalizeAgreementProvInvoiceRow(row) {
     periodEnd: row.PeriodEnd ?? row.periodEnd ?? "",
     months: row.Months ?? row.months,
     calculatedRentPM: row.CalculatedRentPM ?? row.calculatedRentPM,
-    totalRent: row.TotalRent ?? row.totalRent,
+    // Receivable must match Edit dialog Total Amount (item-line sum / AmountReceivable).
+    totalRent: (() => {
+      const receivable = row.AmountReceivable ?? row.amountReceivable;
+      if (receivable !== null && receivable !== undefined && receivable !== "") {
+        return receivable;
+      }
+      return row.TotalRent ?? row.totalRent;
+    })(),
     remarks: row.Remarks ?? row.remarks ?? "",
     contractStartDate,
     contractEndDate,
@@ -4226,19 +4890,32 @@ function normalizeAgreementProvInvoiceRow(row) {
     baseId: row.BaseId ?? row.baseId,
     classId: row.ClassId ?? row.classId,
     amountReceived: row.AmountReceived ?? row.amountReceived ?? 0,
-    amountReceivable: row.AmountReceivable ?? row.amountReceivable ?? 0,
+    amountReceivable: (() => {
+      const receivable = row.AmountReceivable ?? row.amountReceivable;
+      if (receivable !== null && receivable !== undefined && receivable !== "") {
+        return receivable;
+      }
+      return row.TotalRent ?? row.totalRent ?? 0;
+    })(),
     invoiceStatus: row.InvoiceStatus ?? row.invoiceStatus ?? "",
     daysToDue: row.DaysToDue ?? row.daysToDue ?? row.daystodue ?? "",
     daysOverdue: row.DaysOverdue ?? row.daysOverdue ?? row.daysoverdue ?? "",
     description: pickAgreementProvHeaderDescription(row),
-    amountTotal: row.TotalRent ?? row.totalRent ?? 0,
+    amountTotal: (() => {
+      const receivable = row.AmountReceivable ?? row.amountReceivable;
+      if (receivable !== null && receivable !== undefined && receivable !== "") {
+        return receivable;
+      }
+      return row.TotalRent ?? row.totalRent ?? 0;
+    })(),
     amountPending:
       row.AmountPending ??
       row.amountPending ??
       Math.max(
         0,
-        Number(row.AmountReceivable ?? row.amountReceivable ?? 0) -
-          Number(row.AmountReceived ?? row.amountReceived ?? 0)
+        Number(
+          (row.AmountReceivable ?? row.amountReceivable ?? row.TotalRent ?? row.totalRent ?? 0) || 0
+        ) - Number(row.AmountReceived ?? row.amountReceived ?? 0)
       ),
   };
 }
@@ -4279,6 +4956,9 @@ export default function AgreementProvInvoice() {
   );
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const [pdfPreviewColumnKeys, setPdfPreviewColumnKeys] = useState(() =>
+    createDefaultAgreementProvPdfColumnKeys()
+  );
   const [salesReturnTotalsByInvoiceKey, setSalesReturnTotalsByInvoiceKey] = useState({});
   const [salesReturnFormOpen, setSalesReturnFormOpen] = useState(false);
   const [salesReturnFormRecord, setSalesReturnFormRecord] = useState(null);
@@ -4340,9 +5020,9 @@ export default function AgreementProvInvoice() {
 
   const reloadAllScheduleRows = useCallback(async () => {
     const response = await contractApi.getAgreementProvFinalizedInvoiceScheduleRecords();
-    const scheduleData = unwrapContractInvoiceScheduleList(response).map(
-      normalizeAgreementProvInvoiceRow
-    );
+    const scheduleData = dedupeAgreementProvScheduleRowsByInvoice(
+      unwrapContractInvoiceScheduleList(response)
+    ).map(normalizeAgreementProvInvoiceRow);
     setAllScheduleRows(scheduleData);
     return scheduleData;
   }, []);
@@ -4350,7 +5030,9 @@ export default function AgreementProvInvoice() {
   const executeFinalizedInvoiceSearch = useCallback(async (filterSnapshot, extra = {}) => {
     const apiFilters = buildAgreementProvSearchApiFilters(filterSnapshot, extra);
     const response = await contractApi.searchAgreementProvFinalizedInvoiceSchedule(apiFilters);
-    const rows = unwrapContractInvoiceScheduleList(response).map(normalizeAgreementProvInvoiceRow);
+    const rows = dedupeAgreementProvScheduleRowsByInvoice(
+      unwrapContractInvoiceScheduleList(response)
+    ).map(normalizeAgreementProvInvoiceRow);
     setSearchResultRows(rows);
     return rows;
   }, []);
@@ -4571,7 +5253,11 @@ export default function AgreementProvInvoice() {
     }
   };
 
-  const generatePDF = async (rowData, marginsInParam = null, { openNewTab = true } = {}) => {
+  const generatePDF = async (
+    rowData,
+    marginsInParam = null,
+    { openNewTab = true, columnKeys = null } = {}
+  ) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -4590,6 +5276,12 @@ export default function AgreementProvInvoice() {
     const contentWidth = contentRight - marginLeft;
     const lineHeight = AGREEMENT_PROV_PDF_LINE_HEIGHT_MM;
     const bodyFont = AGREEMENT_PROV_PDF_FONT_BODY;
+    const selectedPdfColumns =
+      columnKeys instanceof Set
+        ? columnKeys
+        : columnKeys
+        ? new Set(columnKeys)
+        : createDefaultAgreementProvPdfColumnKeys();
 
     const contractNo = String(pickScheduleRowField(rowData, "ContractNo", "contractNo") || "");
     const invoiceNo = String(pickScheduleRowField(rowData, "InvoiceNo", "invoiceNo") || "");
@@ -4604,7 +5296,16 @@ export default function AgreementProvInvoice() {
       pickScheduleRowField(rowData, "PaymentTermMonths", "paymentTermMonths") || 12;
     const tenantNo = String(pickScheduleRowField(rowData, "TenantNo", "tenantNo") || "").trim();
     const customerDisplay = formatPrefixNoDisplay(rowData) || tenantNo || "—";
-    const descriptionText = pickAgreementProvHeaderDescription(rowData) || "Sales Invoice";
+    const periodStartForDesc = toScheduleDateInputValue(
+      pickScheduleRowField(rowData, "PeriodStart", "periodStart") ||
+        pickScheduleInvoiceDate(rowData)
+    );
+    const inclusivePeriodEnd =
+      periodEndFromStartAndMonths(periodStartForDesc, paymentTermMonths) ||
+      toScheduleDateInputValue(pickScheduleRowField(rowData, "PeriodEnd", "periodEnd"));
+    const descriptionText = withAgreementProvParticularPrefix(
+      formatInvoicePeriodDisplay(periodStartForDesc, inclusivePeriodEnd)
+    );
     const invoiceDateDisplay = formatPdfInvoiceDate(pickScheduleInvoiceDate(rowData));
     const dueDateDisplay = formatPdfInvoiceDate(
       pickScheduleRowField(rowData, "DueDate", "dueDate")
@@ -4660,6 +5361,21 @@ export default function AgreementProvInvoice() {
       } catch (error) {
         console.error("Error loading invoice item records for PDF:", error);
       }
+    }
+
+    let pdfProductServiceOptions = [];
+    try {
+      const [servicesResponse, uomRows] = await Promise.all([
+        productServiceApi.getAll(1, 10000),
+        fetchProductUomOptions().catch(() => []),
+      ]);
+      const uomLookup = buildProductUomLookup(Array.isArray(uomRows) ? uomRows : []);
+      pdfProductServiceOptions = buildActiveProductServiceOptions(
+        unwrapProductListResponse(servicesResponse),
+        uomLookup
+      );
+    } catch (error) {
+      console.error("Error loading product services for PDF unit price UoM:", error);
     }
 
     const LOGO_WIDTH_MM = 18;
@@ -4778,7 +5494,7 @@ export default function AgreementProvInvoice() {
       return underlineY - rowTop + 1.75;
     };
 
-    drawUnderlinedCustomerRow("Customer", customerDisplay, true, { singleLine: true });
+    drawUnderlinedCustomerRow("Tenant", customerDisplay, true, { singleLine: true });
     drawUnderlinedCustomerRow("Contract", contractDisplay, true, {
       singleLine: true,
       shrinkFont: true,
@@ -4787,86 +5503,115 @@ export default function AgreementProvInvoice() {
 
     yPos += lineHeight;
 
-    const pdfBodyColQtyX = marginLeft + contentWidth * 0.58;
-    const pdfBodyColUnitPriceX = marginLeft + contentWidth * 0.72;
-    const pdfBodyDescWidth = pdfBodyColQtyX - marginLeft - 2;
+    const pmMonthsFallback = paymentTermMonths || 12;
+    const fallbackLineTotal = Number(initialRentPM) * Number(pmMonthsFallback);
+    const lineCellRows =
+      invoiceLineRows.length > 0
+        ? invoiceLineRows.map((lineRow) =>
+            getAgreementProvPdfLineCellValues(lineRow, pdfProductServiceOptions)
+          )
+        : [
+            {
+              subInvoiceNo: "—",
+              itemWithCode: "—",
+              particular: withAgreementProvParticularPrefix("MR Monthly Rent"),
+              accHead: "—",
+              qty: String(pmMonthsFallback),
+              unitPrice: formatPdfCurrency(initialRentPM),
+              discount: "—",
+              total: Number.isFinite(fallbackLineTotal) ? fallbackLineTotal : 0,
+            },
+          ];
+
+    let calculatedTotal = 0;
+    let maxLineTotal = 0;
+    lineCellRows.forEach((cells) => {
+      const lineTotal = Number(cells.total) || 0;
+      calculatedTotal += lineTotal;
+      if (lineTotal > maxLineTotal) maxLineTotal = lineTotal;
+    });
+
+    const amountReceivable = Number(
+      pickScheduleRowField(rowData, "AmountReceivable", "amountReceivable") || 0
+    );
+    const displayTotal =
+      invoiceLineRows.length > 0
+        ? calculatedTotal
+        : Number.isFinite(amountReceivable) && amountReceivable > 0
+        ? amountReceivable
+        : Number(pickScheduleRowField(rowData, "TotalRent", "totalRent") || 0) || calculatedTotal;
+
+    const pdfBodyColumns = buildAgreementProvPdfBodyColumns({
+      contentWidth,
+      marginLeft,
+      selectedKeys: selectedPdfColumns,
+      maxTotalValue: Math.max(maxLineTotal, displayTotal, 0),
+      doc,
+      bodyFontSize: sf(bodyFont),
+    });
+    const wrapColumn =
+      pdfBodyColumns.find((col) => col.key === "particular") ||
+      pdfBodyColumns.find((col) => !AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(col.key));
+
+    const formatCellDisplay = (colKey, cells) => {
+      if (colKey === "total") return formatPdfCurrency(cells.total);
+      return String(cells[colKey] ?? "—");
+    };
 
     const drawBodyTableHeader = () => {
       const rowTop = yPos;
-      drawBodyText("Particular", marginLeft, rowTop, { bold: true });
-      drawBodyText("Qty", pdfBodyColQtyX, rowTop, { bold: true });
-      drawBodyText("Unit price", pdfBodyColUnitPriceX, rowTop, { bold: true });
-      drawBodyText("Total", contentRight, rowTop, { bold: true, textOptions: { align: "right" } });
+      pdfBodyColumns.forEach((col) => {
+        drawBodyText(col.label, col.textX, rowTop, {
+          bold: true,
+          textOptions: col.align === "right" ? { align: "right" } : undefined,
+        });
+      });
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(sf(bodyFont));
-      const headerTextHeight = doc.getTextDimensions("Particular").h;
+      const headerTextHeight = doc.getTextDimensions(pdfBodyColumns[0]?.label || "Total").h;
       const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
       drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
       yPos = underlineY + lineHeight;
     };
 
-    const drawBodyTableRow = (description, qty, unitPrice, total) => {
+    const drawBodyTableRow = (cells) => {
       yPos = ensurePageSpace(yPos, lineHeight + 2);
       if (yPos === marginTop) {
         drawBodyTableHeader();
       }
 
-      const descLines = doc.splitTextToSize(String(description || "—"), pdfBodyDescWidth);
+      const wrapWidth = Math.max((wrapColumn?.width || contentWidth) - 1, 20);
+      const wrapText = wrapColumn ? formatCellDisplay(wrapColumn.key, cells) : "";
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(sf(bodyFont));
-      descLines.forEach((line, index) => {
+      const wrapLines = wrapColumn ? doc.splitTextToSize(String(wrapText || "—"), wrapWidth) : [""];
+
+      wrapLines.forEach((line, index) => {
         if (index > 0) {
           yPos = ensurePageSpace(yPos, lineHeight);
           if (yPos === marginTop) {
             drawBodyTableHeader();
           }
         }
-        drawBodyText(line, marginLeft, yPos);
-        if (index === 0) {
-          drawBodyText(String(qty ?? "—"), pdfBodyColQtyX, yPos);
-          drawBodyText(formatPdfCurrency(unitPrice), pdfBodyColUnitPriceX, yPos);
-          drawBodyText(formatPdfCurrency(total), contentRight, yPos, {
-            textOptions: { align: "right" },
+        pdfBodyColumns.forEach((col) => {
+          if (wrapColumn && col.key === wrapColumn.key) {
+            drawBodyText(line, col.textX, yPos, {
+              textOptions: col.align === "right" ? { align: "right" } : undefined,
+            });
+            return;
+          }
+          if (index !== 0) return;
+          drawBodyText(formatCellDisplay(col.key, cells), col.textX, yPos, {
+            textOptions: col.align === "right" ? { align: "right" } : undefined,
           });
-        }
+        });
         yPos += lineHeight;
       });
     };
 
-    let calculatedTotal = 0;
-
     drawBodyTableHeader();
-
-    if (invoiceLineRows.length > 0) {
-      invoiceLineRows.forEach((lineRow) => {
-        const desc =
-          pickScheduleRowField(lineRow, "Description", "description") ||
-          pickScheduleRowField(lineRow, "Desc", "desc") ||
-          pickScheduleRowField(lineRow, "ItemwithCode", "itemwithCode") ||
-          pickScheduleRowField(lineRow, "ItemCode", "itemCode") ||
-          "—";
-        const qty = pickScheduleRowField(lineRow, "Months", "months") || "—";
-        const unitPrice = pickScheduleRowField(lineRow, "CalculatedRentPM", "calculatedRentPM");
-        const lineTotal = pickInvoiceLineTotalNumeric(lineRow);
-        calculatedTotal += lineTotal;
-        drawBodyTableRow(desc, qty, unitPrice, lineTotal);
-      });
-    } else {
-      const pmMonths = paymentTermMonths || 12;
-      const fallbackTotal = Number(initialRentPM) * Number(pmMonths);
-      calculatedTotal = Number.isFinite(fallbackTotal) ? fallbackTotal : 0;
-      drawBodyTableRow("MR Monthly Rent", pmMonths, initialRentPM, calculatedTotal);
-    }
-
-    const amountReceivable = Number(
-      pickScheduleRowField(rowData, "AmountReceivable", "amountReceivable") || 0
-    );
-    const displayTotal =
-      calculatedTotal > 0
-        ? calculatedTotal
-        : Number.isFinite(amountReceivable) && amountReceivable > 0
-        ? amountReceivable
-        : Number(pickScheduleRowField(rowData, "TotalRent", "totalRent") || 0);
+    lineCellRows.forEach((cells) => drawBodyTableRow(cells));
 
     yPos = ensurePageSpace(yPos + 4, lineHeight * 3);
     yPos += 4;
@@ -4907,6 +5652,7 @@ export default function AgreementProvInvoice() {
       }
     }
 
+    addContractPdfWatermarks(doc);
     const pdfBlob = doc.output("blob");
     if (!openNewTab) return pdfBlob;
     const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -4929,12 +5675,15 @@ export default function AgreementProvInvoice() {
     revokePdfPreviewObjectUrl();
   };
 
-  const regeneratePdfPreview = async (rowData, marginsIn) => {
+  const regeneratePdfPreview = async (rowData, marginsIn, columnKeys = pdfPreviewColumnKeys) => {
     if (!rowData) return;
     setPdfPreviewLoading(true);
     try {
       saveAgreementProvPdfMargins(marginsIn);
-      const pdfBlob = await generatePDF(rowData, marginsIn, { openNewTab: false });
+      const pdfBlob = await generatePDF(rowData, marginsIn, {
+        openNewTab: false,
+        columnKeys,
+      });
       revokePdfPreviewObjectUrl();
       const nextUrl = URL.createObjectURL(pdfBlob);
       pdfPreviewUrlRef.current = nextUrl;
@@ -4949,14 +5698,30 @@ export default function AgreementProvInvoice() {
 
   const handleOpenPdfPreview = async (rowData) => {
     const marginsIn = loadAgreementProvPdfMargins();
+    const columnKeys = createDefaultAgreementProvPdfColumnKeys();
     setPdfPreviewRowData(rowData);
     setPdfPreviewMarginsIn(marginsIn);
+    setPdfPreviewColumnKeys(columnKeys);
     setPdfPreviewOpen(true);
-    await regeneratePdfPreview(rowData, marginsIn);
+    await regeneratePdfPreview(rowData, marginsIn, columnKeys);
   };
 
   const handleApplyPdfMargins = async () => {
-    await regeneratePdfPreview(pdfPreviewRowData, pdfPreviewMarginsIn);
+    await regeneratePdfPreview(pdfPreviewRowData, pdfPreviewMarginsIn, pdfPreviewColumnKeys);
+  };
+
+  const togglePdfPreviewColumn = (columnKey) => {
+    setPdfPreviewColumnKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnKey)) next.delete(columnKey);
+      else next.add(columnKey);
+      return next;
+    });
+  };
+
+  const handleResetPdfPreviewOptions = () => {
+    setPdfPreviewMarginsIn({ ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS });
+    setPdfPreviewColumnKeys(createDefaultAgreementProvPdfColumnKeys());
   };
 
   const adjustPdfPreviewContentScale = (delta) => {
@@ -5833,7 +6598,8 @@ export default function AgreementProvInvoice() {
     periodColumn,
     scheduleNumberColumn("calculatedRentPM", "Rate PM", "CalculatedRentPM", "calculatedRentPM"),
     scheduleNumberColumn("months", "Months", "Months", "months"),
-    scheduleNumberColumn("totalRent", "Receivable", "TotalRent", "totalRent", true),
+    // Prefer AmountReceivable (item-line Total Amount); totalRent is normalized to the same value.
+    scheduleNumberColumn("totalRent", "Receivable", "AmountReceivable", "totalRent", true),
     scheduleTextColumn("remarks", "Remarks", "Remarks", "remarks"),
     scheduleNumberColumn(
       "amountReceived",
@@ -6709,12 +7475,46 @@ export default function AgreementProvInvoice() {
               A4 size is 100% scale.
             </MDTypography>
 
+            <MDTypography variant="h6" sx={{ mt: 2, mb: 1 }}>
+              PDF columns
+            </MDTypography>
+            <MDBox display="flex" flexDirection="column" gap={0.25}>
+              {AGREEMENT_PROV_PDF_SELECTABLE_COLUMNS.map((col) => (
+                <FormControlLabel
+                  key={col.key}
+                  sx={{ m: 0, alignItems: "center" }}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={pdfPreviewColumnKeys.has(col.key)}
+                      onChange={() => togglePdfPreviewColumn(col.key)}
+                      disabled={pdfPreviewLoading}
+                    />
+                  }
+                  label={
+                    <MDTypography variant="body2" sx={{ fontSize: "0.8125rem" }}>
+                      {col.label}
+                    </MDTypography>
+                  }
+                />
+              ))}
+              <FormControlLabel
+                sx={{ m: 0, alignItems: "center" }}
+                control={<Checkbox size="small" checked disabled />}
+                label={
+                  <MDTypography variant="body2" sx={{ fontSize: "0.8125rem" }}>
+                    Total (always shown)
+                  </MDTypography>
+                }
+              />
+            </MDBox>
+
             <MDBox mt={2} display="flex" gap={1} alignItems="center">
               <MDButton
                 variant="outlined"
                 color="dark"
                 size="small"
-                onClick={() => setPdfPreviewMarginsIn({ ...AGREEMENT_PROV_PDF_DEFAULT_MARGINS })}
+                onClick={handleResetPdfPreviewOptions}
                 disabled={pdfPreviewLoading}
               >
                 Reset
@@ -6734,8 +7534,8 @@ export default function AgreementProvInvoice() {
               variant="caption"
               sx={{ mt: 1, color: "text.secondary", display: "block" }}
             >
-              Margins and content scale are applied when you click Update. Scale adjusts fonts,
-              spacing, and layout in the generated PDF (not just the preview display).
+              Margins, content scale, and columns are applied when you click Update. Scale adjusts
+              fonts, spacing, and layout in the generated PDF (not just the preview display).
             </MDTypography>
           </MDBox>
 

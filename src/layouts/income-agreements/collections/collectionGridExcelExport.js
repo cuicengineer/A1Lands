@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { logExcelExport } from "services/api.auditLog.service";
 import { deriveCollectionEntryStatus } from "./collectionReceiptUtils";
 import {
   enrichCollectionGridRow,
@@ -19,6 +20,7 @@ export const COLLECTION_EXPORT_COLUMNS = [
   { header: "Balance", key: "balance", gridKey: "balance" },
   { header: "Amount", key: "amount", gridKey: "amount" },
   { header: "TIN-TRN", key: "tinTrn", gridKey: "tinTrn" },
+  { header: "Remarks", key: "remarks", gridKey: "remarks" },
   { header: "Status", key: "status", gridKey: "status" },
   { header: "Vr No", key: "vrNo", gridKey: "vrNo" },
   { header: "Vr Date", key: "vrDate", gridKey: "vrDate" },
@@ -64,6 +66,7 @@ export function buildCollectionGridExportSheetRows(
       balance: formatAmount(enriched.balance),
       amount: formatAmount(enriched.amount),
       tinTrn: enriched.tinTrn || "",
+      remarks: enriched.remarks || "",
       status,
       vrNo: enriched.vrNo || "",
       vrDate: enriched.vrDate ? formatDisplayDate(enriched.vrDate) : "",
@@ -84,5 +87,12 @@ export function exportCollectionsGridToExcel(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Collections");
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  XLSX.writeFile(wb, `${fileName}-${ts}.xlsx`);
+  const fullFileName = `${fileName}-${ts}.xlsx`;
+  XLSX.writeFile(wb, fullFileName);
+  logExcelExport({
+    moduleName: fileName || "Collections",
+    fileName: fullFileName,
+    rowCount: bodyRows.length,
+    exportType: "collectionsGrid",
+  });
 }

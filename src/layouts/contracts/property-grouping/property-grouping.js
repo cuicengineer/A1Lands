@@ -73,6 +73,12 @@ import {
 let revenueRatesCatalogPromise = null;
 let govtShareRatesCatalogPromise = null;
 
+function getDisplayPropertyGroupId(value) {
+  return String(value || "")
+    .split(/#INACTIVE#/i)[0]
+    .trim();
+}
+
 function resetRevenueRatesCatalogCache() {
   revenueRatesCatalogPromise = null;
 }
@@ -900,7 +906,13 @@ function PropertyGroupingForm({
       return pid !== null && Number(pid) === Number(propertyId);
     });
     if (fromSelectable) {
-      return String(fromSelectable.PropertyName || fromSelectable.PId || propertyId);
+      return String(
+        fromSelectable.PropertyName ||
+          fromSelectable.propertyName ||
+          fromSelectable.PId ||
+          fromSelectable.pId ||
+          propertyId
+      );
     }
 
     // Fallback to rentalProperties
@@ -908,13 +920,19 @@ function PropertyGroupingForm({
       const pid = getPropertyId(p);
       return pid !== null && Number(pid) === Number(propertyId);
     });
-    return String(prop?.PropertyName || prop?.PId || propertyId);
+    return String(prop?.PropertyName || prop?.propertyName || prop?.PId || prop?.pId || propertyId);
   };
   const getPropertyId = (property) => {
     if (!property) return null;
-    // API returns Id or PropertyId (PascalCase)
-    const id = property.Id || property.PropertyId || property.PropId;
-    return id ? Number(id) : null;
+    // Generic /api/rentalproperty is camelCase; dedicated endpoints may be PascalCase.
+    const id =
+      property.Id ??
+      property.id ??
+      property.PropertyId ??
+      property.propertyId ??
+      property.PropId ??
+      property.propId;
+    return id !== undefined && id !== null && id !== "" ? Number(id) : null;
   };
 
   const getPropertyScopeValue = (property, keys) => {
@@ -1179,14 +1197,19 @@ function PropertyGroupingForm({
           options = [response];
         }
 
-        // API returns PascalCase: Id, PropertyId, PropertyName, PId
+        // Dedicated NotGroupedProperties uses PascalCase; tolerate camelCase too.
         const normalizedOptions = options
-          .map((opt) => ({
-            ...opt,
-            id: opt.Id || opt.PropertyId || null,
-            PId: opt.PId || opt.PropertyName || "",
-            PropertyName: opt.PropertyName || opt.PId || "",
-          }))
+          .map((opt) => {
+            const resolvedId = opt.Id ?? opt.id ?? opt.PropertyId ?? opt.propertyId ?? null;
+            const resolvedName = opt.PropertyName || opt.propertyName || opt.PId || opt.pId || "";
+            return {
+              ...opt,
+              Id: resolvedId,
+              id: resolvedId,
+              PId: opt.PId || opt.pId || resolvedName,
+              PropertyName: resolvedName,
+            };
+          })
           .filter((opt) => opt.id !== null);
 
         const classIdNum = Number(form.classid);
@@ -1214,12 +1237,17 @@ function PropertyGroupingForm({
       // In edit mode, combine rentalProperties with linked properties
       // Start with rentalProperties - API returns PascalCase
       const allProperties = (rentalProperties || [])
-        .map((p) => ({
-          ...p,
-          Id: p.Id || p.PropertyId || null,
-          PId: p.PId || p.PropertyName || "",
-          PropertyName: p.PropertyName || p.PId || "",
-        }))
+        .map((p) => {
+          const resolvedId = p.Id ?? p.id ?? p.PropertyId ?? p.propertyId ?? null;
+          const resolvedName = p.PropertyName || p.propertyName || p.PId || p.pId || "";
+          return {
+            ...p,
+            Id: resolvedId,
+            id: resolvedId,
+            PId: p.PId || p.pId || resolvedName,
+            PropertyName: resolvedName,
+          };
+        })
         .filter((p) => p.Id !== null);
 
       // Add linked properties if they're not already in rentalProperties
@@ -1269,12 +1297,17 @@ function PropertyGroupingForm({
     });
 
     (rentalProperties || [])
-      .map((p) => ({
-        ...p,
-        Id: p.Id || p.PropertyId || null,
-        PId: p.PId || p.PropertyName || "",
-        PropertyName: p.PropertyName || p.PId || "",
-      }))
+      .map((p) => {
+        const resolvedId = p.Id ?? p.id ?? p.PropertyId ?? p.propertyId ?? null;
+        const resolvedName = p.PropertyName || p.propertyName || p.PId || p.pId || "";
+        return {
+          ...p,
+          Id: resolvedId,
+          id: resolvedId,
+          PId: p.PId || p.pId || resolvedName,
+          PropertyName: resolvedName,
+        };
+      })
       .filter((p) => {
         const id = getPropertyId(p);
         if (id === null) return false;
@@ -1610,7 +1643,8 @@ function PropertyGroupingForm({
             ? ""
             : Number(v)
           : f === "status" || f === "isDeleted"
-          ? Boolean(v)
+          ? // Avoid Boolean("false") === true — Select may coerce values to strings
+            v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true"
           : v,
       ...(f === "cmdid" && { baseid: "", classid: "", property: [], uoM: "" }),
       ...(f === "baseid" && { classid: "", property: [], uoM: "" }),
@@ -1674,24 +1708,33 @@ function PropertyGroupingForm({
       return true; // Skip validation if required fields are missing
     }
 
-    // Block only when another non-deleted group already uses this Group ID for same class + base
+    // Block only when another active, non-deleted group uses this Group ID.
     const duplicate = allPropertyGroupings.find((pg) => {
-      const sameGroupId = (pg.gId || pg.GId || "").toString().trim() === form.gId.toString().trim();
+      const sameGroupId =
+        getDisplayPropertyGroupId(pg.gId || pg.GId) === getDisplayPropertyGroupId(form.gId);
       const sameClass = Number(pg.classId || pg.ClassId || pg.classid) === Number(form.classid);
       const sameBase = Number(pg.baseId || pg.BaseId || pg.baseid) === Number(form.baseid);
       const isNotDeletedRecord = !toBool(pg?.isDeleted ?? pg?.IsDeleted);
+      const isActiveRecord = toBool(pg?.status ?? pg?.Status);
       const isDifferentRecord = initialData
         ? Number(pg.id || pg.Id) !== Number(initialData.id || initialData.Id)
         : true;
 
-      return sameGroupId && sameClass && sameBase && isNotDeletedRecord && isDifferentRecord;
+      return (
+        sameGroupId &&
+        sameClass &&
+        sameBase &&
+        isNotDeletedRecord &&
+        isActiveRecord &&
+        isDifferentRecord
+      );
     });
 
     if (duplicate) {
       setErrors((prev) => ({
         ...prev,
         groupNumber:
-          "Same Group ID already exists for this class and base. Delete the existing group first to reuse it.",
+          "An active group with the same Group ID already exists for this class and base.",
       }));
       return false;
     }
@@ -2411,8 +2454,8 @@ function PropertyGroupingForm({
               />
             </Grid>
 
-            {/* Total Area, UoM, Rate - same row */}
-            <Grid item xs={12} sm={4}>
+            {/* Total Area, UoM - same row */}
+            <Grid item xs={12} sm={6}>
               <MDInput
                 label="Total Area"
                 type="number"
@@ -2432,7 +2475,7 @@ function PropertyGroupingForm({
               />
             </Grid>
 
-            <Grid item xs={12} sm={4}>
+            <Grid item xs={12} sm={6}>
               <MDInput
                 label="UoM"
                 type="text"
@@ -2440,37 +2483,6 @@ function PropertyGroupingForm({
                 size="small"
                 InputProps={{ readOnly: true }}
                 fullWidth
-                sx={{
-                  "& .MuiInputBase-input": {
-                    fontSize: "1rem",
-                  },
-                  "& .MuiInputLabel-root": {
-                    fontSize: "1rem",
-                  },
-                }}
-              />
-            </Grid>
-
-            <Grid item xs={12} sm={4}>
-              <MDInput
-                label="Rate"
-                type="number"
-                value={!isEditMode && isRevenueGroupAveragePending ? 0 : form.rate || 0}
-                onChange={
-                  canSuperuserEditBoundRate
-                    ? (e) => handleChange("rate", e.target.value)
-                    : undefined
-                }
-                size="small"
-                InputProps={{ readOnly: !canSuperuserEditBoundRate }}
-                fullWidth
-                helperText={
-                  canSuperuserEditBoundRate
-                    ? "Superuser: you may update the group rate while a contract is linked."
-                    : !isEditMode && isRevenueGroupAveragePending
-                    ? "Recalculating average rate…"
-                    : undefined
-                }
                 sx={{
                   "& .MuiInputBase-input": {
                     fontSize: "1rem",
@@ -2642,7 +2654,7 @@ function PropertyGroupingForm({
             variant="gradient"
             color="info"
             onClick={handleSave}
-            disabled={!canCreateCurrentMenu()}
+            disabled={isEditMode ? !canEditCurrentMenu() : !canCreateCurrentMenu()}
           >
             <Icon>save</Icon>&nbsp;Save
           </MDButton>
@@ -2714,6 +2726,8 @@ export default function PropertyGrouping() {
   const [activeContracts, setActiveContracts] = useState([]);
   const [loadingContracts, setLoadingContracts] = useState(false);
   const [currentViewingGroupId, setCurrentViewingGroupId] = useState("");
+  const [pendingGroupDeactivation, setPendingGroupDeactivation] = useState(null);
+  const [deactivatingGroup, setDeactivatingGroup] = useState(false);
   const [loadingLinkedProperties, setLoadingLinkedProperties] = useState(false);
   const [currentGroupId, setCurrentGroupId] = useState("");
   const [currentGroupRecordId, setCurrentGroupRecordId] = useState(null);
@@ -2892,15 +2906,17 @@ export default function PropertyGrouping() {
     if (propertyGrouping) {
       const cmdId = propertyGrouping.CmdId || propertyGrouping.cmdId;
       const baseId = propertyGrouping.BaseId || propertyGrouping.baseId;
+      const classId = propertyGrouping.ClassId || propertyGrouping.classId;
       setCurrentGroupCmdId(cmdId ? Number(cmdId) : null);
       setCurrentGroupBaseId(baseId ? Number(baseId) : null);
 
-      // Fetch not-grouped properties for this cmd and base
+      // Fetch not-grouped properties for this cmd/base/class
       if (cmdId && baseId) {
         try {
           const notGroupedResponse = await propertyGroupingApi.notGroupedProperties(
             Number(cmdId),
-            Number(baseId)
+            Number(baseId),
+            classId ? Number(classId) : undefined
           );
           let options = [];
           if (notGroupedResponse && notGroupedResponse.pagination) {
@@ -2915,23 +2931,31 @@ export default function PropertyGrouping() {
             options = [notGroupedResponse];
           }
 
-          // Normalize options (API returns PascalCase)
+          // Normalize options (API returns PascalCase; also accept camelCase)
           const normalizedOptions = options
-            .map((opt) => ({
-              ...opt,
-              Id: opt.Id || opt.PropertyId || null,
-              PropertyId: opt.Id || opt.PropertyId || null,
-              PId: opt.PId || opt.PropertyName || "",
-              PropertyName: opt.PropertyName || opt.PId || "",
-            }))
+            .map((opt) => {
+              const id = opt.Id ?? opt.id ?? opt.PropertyId ?? opt.propertyId ?? null;
+              const name = opt.PropertyName || opt.propertyName || opt.PId || opt.pId || "";
+              return {
+                ...opt,
+                Id: id,
+                PropertyId: id,
+                PId: opt.PId || opt.pId || name,
+                PropertyName: name,
+                ClassId: opt.ClassId ?? opt.classId ?? null,
+              };
+            })
             .filter((opt) => opt.Id !== null);
 
-          const classIdNum = Number(classId);
-          const scopedToClass = normalizedOptions.filter((opt) => {
-            const cid = opt.ClassId ?? opt.classId;
-            if (cid === undefined || cid === null || cid === "") return true;
-            return Number(cid) === classIdNum;
-          });
+          const classIdNum = classId ? Number(classId) : null;
+          const scopedToClass =
+            classIdNum === null || !Number.isFinite(classIdNum)
+              ? normalizedOptions
+              : normalizedOptions.filter((opt) => {
+                  const cid = opt.ClassId ?? opt.classId;
+                  if (cid === undefined || cid === null || cid === "") return true;
+                  return Number(cid) === classIdNum;
+                });
 
           setAvailablePropertiesForLinking(scopedToClass);
         } catch (error) {
@@ -3006,7 +3030,8 @@ export default function PropertyGrouping() {
     setCurrentGroupBaseId(null);
   };
 
-  const getRentalPropertyLabel = (rp) => String(rp?.PropertyName || rp?.PId || "");
+  const getRentalPropertyLabel = (rp) =>
+    String(rp?.PropertyName || rp?.propertyName || rp?.PId || rp?.pId || "");
 
   const getLinkedPropertyLabel = (item) => {
     if (!item) return "";
@@ -3021,8 +3046,8 @@ export default function PropertyGrouping() {
 
   const getPropertyLabelById = (propertyId) => {
     const rp = rentalProperties.find((p) => {
-      const pid = p.Id || p.PropertyId;
-      return pid && Number(pid) === Number(propertyId);
+      const pid = p.Id ?? p.id ?? p.PropertyId ?? p.propertyId;
+      return pid !== undefined && pid !== null && pid !== "" && Number(pid) === Number(propertyId);
     });
     return rp ? getRentalPropertyLabel(rp) : `Property ID: ${propertyId}`;
   };
@@ -3523,13 +3548,21 @@ export default function PropertyGrouping() {
     }
 
     try {
-      const response = await contractApi.searchByGrpName(groupId.trim());
+      const response = await contractApi.searchByGrpName(getDisplayPropertyGroupId(groupId.trim()));
       const contracts = response?.data || (Array.isArray(response) ? response : []);
 
-      // Filter for active contracts (status = true, not deleted)
+      // searchByGrpName already returns active, non-deleted contracts; keep a defensive filter
+      // that treats null/undefined IsDeleted as not deleted.
       const activeContractsList = contracts.filter((contract) => {
-        const isActive = contract.Status === true || contract.Status === 1;
-        const isNotDeleted = contract.IsDeleted === false || contract.IsDeleted === 0;
+        const status = contract.Status !== undefined ? contract.Status : contract.status;
+        const isActive =
+          status === undefined ||
+          status === null ||
+          status === true ||
+          status === 1 ||
+          status === "1";
+        const isDeleted = contract.IsDeleted ?? contract.isDeleted;
+        const isNotDeleted = !(isDeleted === true || isDeleted === 1 || isDeleted === "1");
         return isActive && isNotDeleted;
       });
 
@@ -3550,20 +3583,13 @@ export default function PropertyGrouping() {
       return;
     }
 
-    // Check for active contracts before allowing edit
+    // Active contracts no longer block opening the form: setting the group inactive
+    // launches the linked-contract deactivation confirmation workflow.
     const grpId = propertyGrouping.GId || propertyGrouping.gId || "";
     if (grpId) {
       const contractCheck = await checkActiveContractsForGroup(grpId);
       if (contractCheck.hasActiveContracts) {
-        if (!isSuperuserUser()) {
-          alert(
-            `Cannot edit property group "${grpId}".\n\n` +
-              `There are ${contractCheck.count} active contract(s) associated with this group.\n` +
-              `Please deactivate or delete the active contracts first before editing this group.`
-          );
-          return;
-        }
-        setBoundContractRateEdit(true);
+        setBoundContractRateEdit(isSuperuserUser());
       } else {
         setBoundContractRateEdit(false);
       }
@@ -3612,15 +3638,27 @@ export default function PropertyGrouping() {
       const cmdId = pg.CmdId || "";
       const baseId = pg.BaseId || "";
       const classId = pg.ClassId || "";
-      const gId = pg.GId || "";
+      const gId = getDisplayPropertyGroupId(pg.GId);
       const uoM = pg.UoM || "";
       const location = pg.Location || "";
       const remarks = pg.Remarks || "";
       const area = pg.Area || "";
       const rate = pg.Rate || 0;
       const ptRaw = pg.PropertyType ?? pg.propertyType ?? "";
-      const status = pg.Status !== undefined ? pg.Status : true;
-      const isDeleted = pg.IsDeleted !== undefined ? pg.IsDeleted : false;
+      const statusRaw = pg.Status !== undefined ? pg.Status : pg.status;
+      const status =
+        statusRaw === undefined ||
+        statusRaw === null ||
+        statusRaw === true ||
+        statusRaw === 1 ||
+        statusRaw === "1" ||
+        String(statusRaw).toLowerCase() === "true";
+      const isDeletedRaw = pg.IsDeleted !== undefined ? pg.IsDeleted : pg.isDeleted;
+      const isDeleted =
+        isDeletedRaw === true ||
+        isDeletedRaw === 1 ||
+        isDeletedRaw === "1" ||
+        String(isDeletedRaw).toLowerCase() === "true";
 
       return {
         ...pg,
@@ -3639,8 +3677,8 @@ export default function PropertyGrouping() {
         property: normalizePropertyIds(pg),
         area: area ? (typeof area === "number" ? area : Number(area) || "") : "",
         rate: Number(rate) || 0,
-        status: Boolean(status),
-        isDeleted: Boolean(isDeleted),
+        status,
+        isDeleted,
       };
     };
 
@@ -3728,18 +3766,19 @@ export default function PropertyGrouping() {
           v === true || v === 1 || v === "1" || String(v).toLowerCase() === "true";
         const duplicateGroup = allPropertyGroupings.find((pg) => {
           const sameGroupId =
-            (pg.GId || pg.gId || "").toString().trim() === (data.gId || "").toString().trim();
+            getDisplayPropertyGroupId(pg.GId || pg.gId) === getDisplayPropertyGroupId(data.gId);
           const sameClass = Number(pg.ClassId || pg.classId) === Number(data.classid);
           const sameBase = Number(pg.BaseId || pg.baseId) === Number(data.baseid);
           const isNotDeleted = !toBool(pg.IsDeleted ?? pg.isDeleted);
+          const isActive = toBool(pg.Status ?? pg.status);
 
-          return sameGroupId && sameClass && sameBase && isNotDeleted;
+          return sameGroupId && sameClass && sameBase && isNotDeleted && isActive;
         });
 
         if (duplicateGroup) {
           alert(
             `Group ID "${data.gId}" already exists for this class and base.\n\n` +
-              `Delete the existing group first to reuse this Group ID.`
+              `Only inactive groups may reuse a Group ID.`
           );
           return;
         }
@@ -3768,10 +3807,65 @@ export default function PropertyGrouping() {
         PropertyType: propertyTypeValue,
         property: data.property.join(", "), // Keep existing property field as joined string
         PropertyGroupLinkings: propertyGroupLinkings, // New field: list of property IDs
-        status: Boolean(data.status),
-        isDeleted: Boolean(data.isDeleted),
+        status:
+          data.status === true ||
+          data.status === 1 ||
+          data.status === "1" ||
+          String(data.status).toLowerCase() === "true",
+        isDeleted:
+          data.isDeleted === true ||
+          data.isDeleted === 1 ||
+          data.isDeleted === "1" ||
+          String(data.isDeleted).toLowerCase() === "true",
       };
       if (currentPropertyGrouping) {
+        const wasActive =
+          currentPropertyGrouping.Status === true ||
+          currentPropertyGrouping.Status === 1 ||
+          currentPropertyGrouping.Status === "1" ||
+          currentPropertyGrouping.status === true ||
+          currentPropertyGrouping.status === 1 ||
+          currentPropertyGrouping.status === "1" ||
+          // null/undefined Status is treated as active in the grid
+          (currentPropertyGrouping.Status === undefined &&
+            currentPropertyGrouping.status === undefined) ||
+          currentPropertyGrouping.Status === null;
+        if (wasActive && !formattedData.status) {
+          const groupName = getDisplayPropertyGroupId(
+            currentPropertyGrouping.GId || currentPropertyGrouping.gId
+          );
+          const response = await contractApi.searchByGrpName(groupName);
+          const contracts = response?.data || (Array.isArray(response) ? response : []);
+          const linkedActiveContracts = contracts.filter((contract) => {
+            const active =
+              contract.Status === true ||
+              contract.Status === 1 ||
+              contract.status === true ||
+              contract.status === 1;
+            const notDeleted = !(
+              contract.IsDeleted === true ||
+              contract.IsDeleted === 1 ||
+              contract.isDeleted === true ||
+              contract.isDeleted === 1
+            );
+            return active && notDeleted;
+          });
+
+          if (linkedActiveContracts.length > 0) {
+            setPendingGroupDeactivation({
+              groupId: currentPropertyGrouping.Id,
+              groupName,
+              contracts: linkedActiveContracts,
+            });
+            return;
+          }
+
+          await propertyGroupingApi.deactivate(currentPropertyGrouping.Id);
+          await fetchPropertyGroupings();
+          setCurrentPropertyGrouping(null);
+          handleCloseForm();
+          return;
+        }
         await propertyGroupingApi.update(currentPropertyGrouping.Id, formattedData);
       } else {
         await propertyGroupingApi.create(formattedData);
@@ -3812,6 +3906,23 @@ export default function PropertyGrouping() {
         return;
       }
       alert("ERROR:  Check Group ID duplicate or Contracts Binded.");
+    }
+  };
+
+  const handleConfirmGroupDeactivation = async () => {
+    if (!pendingGroupDeactivation?.groupId || deactivatingGroup) return;
+    setDeactivatingGroup(true);
+    try {
+      await propertyGroupingApi.deactivate(pendingGroupDeactivation.groupId);
+      setPendingGroupDeactivation(null);
+      await fetchPropertyGroupings();
+      setCurrentPropertyGrouping(null);
+      handleCloseForm();
+    } catch (error) {
+      console.error("Error deactivating property group and linked contracts:", error);
+      alert("Failed to deactivate the property group and linked contracts. Please try again.");
+    } finally {
+      setDeactivatingGroup(false);
     }
   };
 
@@ -3866,14 +3977,6 @@ export default function PropertyGrouping() {
         Cell: PropertyGroupingTypeCell,
       },
       { Header: "Group ID", accessor: "gId", align: "left" },
-      {
-        id: "rate",
-        Header: "Rate",
-        accessor: "rate",
-        align: "center",
-        filter: "propertyGroupingMoneyCompare",
-        Filter: PropertyGroupingMoneyColumnFilter,
-      },
       {
         Header: "Area (UoM)",
         accessor: "areaDisplay",
@@ -3938,7 +4041,7 @@ export default function PropertyGrouping() {
           resolveClassNameById(classes, row.ClassId ?? row.classId) ||
           String(row.ClassName ?? row.className ?? "").trim(),
         propertyTypeName,
-        gId: row.GId || "",
+        gId: getDisplayPropertyGroupId(row.GId || row.gId),
         rate: Number(row.Rate || 0),
         area: areaValue,
         uoM,
@@ -4206,6 +4309,66 @@ export default function PropertyGrouping() {
         propertyTypes={propertyTypes}
         boundContractRateEdit={boundContractRateEdit}
       />
+      <Dialog
+        open={Boolean(pendingGroupDeactivation)}
+        onClose={() => {
+          if (!deactivatingGroup) setPendingGroupDeactivation(null);
+        }}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Deactivate Property Group and Linked Contracts</DialogTitle>
+        <DialogContent>
+          <MDTypography variant="body2" sx={{ mb: 2 }}>
+            Group <strong>{pendingGroupDeactivation?.groupName || ""}</strong> has active linked
+            contracts. Confirming will mark the group, its property links, and all contracts below
+            inactive. Its properties and Group ID will then be available for a new grouping.
+          </MDTypography>
+          <TableContainer component={Paper} sx={{ maxHeight: 360 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Contract No</TableCell>
+                  <TableCell>Tenant No</TableCell>
+                  <TableCell>Business Name</TableCell>
+                  <TableCell>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(pendingGroupDeactivation?.contracts || []).map((contract) => (
+                  <TableRow key={contract.Id ?? contract.id}>
+                    <TableCell>{contract.ContractNo ?? contract.contractNo ?? "-"}</TableCell>
+                    <TableCell>{contract.TenantNo ?? contract.tenantNo ?? "-"}</TableCell>
+                    <TableCell>{contract.BusinessName ?? contract.businessName ?? "-"}</TableCell>
+                    <TableCell>
+                      <StatusBadge value={contract.Status ?? contract.status ?? true} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <MDButton
+            variant="outlined"
+            color="secondary"
+            disabled={deactivatingGroup}
+            onClick={() => setPendingGroupDeactivation(null)}
+          >
+            Cancel
+          </MDButton>
+          <MDButton
+            variant="gradient"
+            color="warning"
+            disabled={deactivatingGroup}
+            onClick={handleConfirmGroupDeactivation}
+          >
+            <Icon>block</Icon>&nbsp;
+            {deactivatingGroup ? "Deactivating..." : "Mark All Inactive"}
+          </MDButton>
+        </DialogActions>
+      </Dialog>
       {/* Linked Properties Dialog */}
       <Dialog
         open={linkedPropertiesDialogOpen}

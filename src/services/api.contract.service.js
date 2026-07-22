@@ -301,9 +301,14 @@ function getShareDistributionByAsOfDate(asOfDateYyyyMmDd) {
 }
 
 function createShareDistributionWorkbook(contractIds = []) {
+  // Only the caller-supplied contract IDs are assigned — never expand to other grid rows.
   const payload = {
     contractIds: [
-      ...new Set(contractIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)),
+      ...new Set(
+        (Array.isArray(contractIds) ? contractIds : [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      ),
     ],
   };
   return requestWithPagination("POST", "/api/Contracts/ShareDistribution/Workbooks", payload);

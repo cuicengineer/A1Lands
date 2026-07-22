@@ -170,7 +170,7 @@ export function normalizeProductUomOption(row) {
   return {
     id: row?.id ?? row?.Id,
     value: code,
-    label: name || code,
+    label: code,
     name,
     code,
     status: pickField(row, "status", "Status") || "Active",
@@ -194,8 +194,7 @@ export function validateProductUomForm(form) {
 }
 
 export async function fetchProductUomOptions() {
-  const params = new URLSearchParams({ pageNumber: "1", pageSize: "10000" }).toString();
-  const response = await api.request("GET", `/api/ProductUoms?${params}`);
+  const response = await api.request("GET", "/api/ProductUoms");
   const list = Array.isArray(response) ? response : response?.data ?? [];
   return list.map(normalizeProductUomOption).filter(Boolean);
 }
@@ -214,8 +213,8 @@ export function formatProductUomLabel(code, uomLookup = {}) {
   const raw = String(code ?? "").trim();
   if (!raw) return "-";
   const match = uomLookup[raw.toUpperCase()];
-  if (match?.label) return match.label;
-  if (match?.name) return match.name;
+  if (match?.code) return match.code;
+  if (match?.value) return match.value;
   return raw;
 }
 
@@ -252,8 +251,7 @@ export async function updateProductUom(id, form) {
 }
 
 export async function fetchTaxCodeOptions() {
-  const params = new URLSearchParams({ pageNumber: "1", pageSize: "10000" }).toString();
-  const response = await api.request("GET", `/api/TaxCodes?${params}`);
+  const response = await api.request("GET", "/api/TaxCodes");
   const list = Array.isArray(response) ? response : response?.data ?? [];
   return list
     .map((row) => ({
@@ -308,7 +306,8 @@ export async function fetchGoodsRevenueExpenseOptions() {
 
 export async function fetchProductItemCodes(api) {
   if (!api?.getAll) return [];
-  const response = await api.getAll(1, 0);
+  const response =
+    typeof api.getAllUnpaged === "function" ? await api.getAllUnpaged() : await api.getAll(1, 0);
   const rows = Array.isArray(response) ? response : response?.data ?? [];
   return Array.isArray(rows) ? rows : [];
 }

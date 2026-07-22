@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 
 // @mui material components
 import Dialog from "@mui/material/Dialog";
@@ -60,26 +60,14 @@ function BanksList() {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [newErrors, setNewErrors] = useState({});
 
-  useEffect(() => {
-    fetchBanks(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
-
-  const fetchBanks = async (page = pageNumber, size = pageSize) => {
+  const fetchBanks = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        pageNumber: page.toString(),
-        pageSize: size.toString(),
-      }).toString();
-      const res = await api.requestRaw("GET", `/api/BankLists?${params}`);
+      const res = await api.requestRaw("GET", "/api/BankLists");
       const contentType = res.headers.get("content-type");
       const payload =
         contentType && contentType.includes("application/json") ? await res.json() : [];
       const data = Array.isArray(payload) ? payload : payload?.data ?? [];
-      const headerTotal = res.headers.get("X-Total-Count");
-      const paginationTotal = headerTotal
-        ? parseInt(headerTotal, 10)
-        : Number(payload?.pagination?.totalCount);
 
       // Normalize status: convert byte (0/1) to boolean for UI
       const normalizedData = Array.isArray(data)
@@ -90,11 +78,7 @@ function BanksList() {
         : [];
 
       setTableRows(normalizedData);
-      setTotalCount(
-        Number.isFinite(paginationTotal) && paginationTotal > 0
-          ? paginationTotal
-          : normalizedData.length
-      );
+      setTotalCount(normalizedData.length);
     } catch (error) {
       console.error("Error fetching banks:", error);
       setTableRows([]);
@@ -102,7 +86,11 @@ function BanksList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchBanks();
+  }, [fetchBanks]);
 
   const handleAddBank = () => {
     if (!canCreate) return;
@@ -174,7 +162,7 @@ function BanksList() {
         };
         console.log("Creating BankList with payload:", payload);
         await api.create("BankLists", payload);
-        fetchBanks(pageNumber, pageSize);
+        fetchBanks();
         setEditingRowId(null);
         setNewRowDraft(null);
       } catch (error) {
@@ -196,7 +184,7 @@ function BanksList() {
         };
         console.log("Updating BankList with payload:", payload);
         await api.update("BankLists", editingRowId, payload);
-        fetchBanks(pageNumber, pageSize);
+        fetchBanks();
         setEditingRowId(null);
         setEditDraft(null);
       } catch (error) {
@@ -230,7 +218,7 @@ function BanksList() {
     if (!recordToDelete) return;
     try {
       await api.remove("BankLists", recordToDelete);
-      fetchBanks(pageNumber, pageSize);
+      fetchBanks();
     } catch (error) {
       console.error("Error deleting bank:", error);
       alert("Failed to delete bank. Please try again.");
@@ -353,7 +341,7 @@ function BanksList() {
       const draft = isEditing ? editDraft : r;
       rows.push({
         id: r.id,
-        sno: (pageNumber - 1) * pageSize + index + 1,
+        sno: index + 1,
         name: isEditing ? (
           renderInput("name", draft.name, "text", true)
         ) : (
@@ -453,7 +441,7 @@ function BanksList() {
     });
 
     return rows;
-  }, [tableRows, searchQuery, editingRowId, editDraft, newRowDraft, pageNumber, pageSize]);
+  }, [tableRows, searchQuery, editingRowId, editDraft, newRowDraft]);
 
   // Memoize the table object to prevent DataTable from resetting pagination
   const tableData = useMemo(() => ({ columns, rows: computedRows }), [columns, computedRows]);

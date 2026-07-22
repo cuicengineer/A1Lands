@@ -89,9 +89,11 @@ export function isSupplierPartyCoaOption(option) {
   return isSupplierPayableCoaOption(option) || isSupplierReceiptCoaOption(option);
 }
 
-/** Assets-group receipt accounts for tenant, customer, and supplier parties (collections grid). */
+/** Assets and Liabilities receipt/payable accounts for tenant, customer, and supplier parties. */
 export function isCollectionAccountCoaOption(option) {
-  if (!isCoaGroupAssets(option?.groupName)) return false;
+  const isAssetsOrLiabilities =
+    isCoaGroupAssets(option?.groupName) || isCoaGroupLiabilities(option?.groupName);
+  if (!isAssetsOrLiabilities) return false;
   return (
     isTenantOrTenantsControlAccount(option?.controlAccount) ||
     isCustomersControlAccount(option?.controlAccount) ||

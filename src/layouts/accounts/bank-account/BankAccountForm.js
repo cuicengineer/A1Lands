@@ -315,8 +315,6 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
   const [racOptions, setRacOptions] = useState([]);
   const [baseOptions, setBaseOptions] = useState([]);
-  const [catalogCommands, setCatalogCommands] = useState([]);
-  const [catalogBases, setCatalogBases] = useState([]);
   const [bankOptions, setBankOptions] = useState([]);
   const [loadingLists, setLoadingLists] = useState(true);
   const [loadingBases, setLoadingBases] = useState(false);
@@ -472,26 +470,19 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
       setLoadingLists(true);
       try {
         const savedRacId = toAccRacBaseId(initialDataToFormOverrides(initialData).racId);
-        const [racRes, commandRes, baseRes, banks, savedRacRes] = await Promise.all([
+        const [racRes, banks, savedRacRes] = await Promise.all([
           api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }).catch(() => []),
-          api.list("command").catch(() => []),
-          api.list("base").catch(() => []),
           fetchBankListsForDropdown().catch(() => []),
           savedRacId ? api.get(ACC_RAC_BASES_ENTITY, savedRacId).catch(() => null) : null,
         ]);
         if (!alive) return;
         const customRacRows = unwrapAccRacBasesList(racRes);
-        const commands = Array.isArray(commandRes) ? commandRes : [];
-        const bases = Array.isArray(baseRes) ? baseRes : [];
         const savedRacRow = unwrapAccRacBaseRow(savedRacRes);
         const savedRacOption =
           mapAccRacBaseToRacOption(savedRacRow, savedRacId) ||
           mapAccRacBasesRow(savedRacRow, savedRacId);
-        setCatalogCommands(commands);
-        setCatalogBases(bases);
         setRacOptions(
           buildScopedRacDropdownOptions({
-            catalogCommands: commands,
             customRacRows,
             savedOption: savedRacOption,
           })
@@ -590,7 +581,6 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
           mapAccRacBasesRow(savedBaseRow, savedBaseId);
         setBaseOptions(
           buildScopedBaseDropdownOptions({
-            catalogBases,
             customBaseRows,
             selectedRacId: rid,
             savedOption: savedBaseOption,
@@ -608,7 +598,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     return () => {
       cancelled = true;
     };
-  }, [open, form.racId, form.baseId, catalogBases]);
+  }, [open, form.racId, form.baseId]);
 
   const onChange = useCallback(
     (field) => (event) => {
@@ -688,20 +678,14 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   }, [open, closeQuickAdd]);
 
   const refreshRacOptions = useCallback(async () => {
-    const [racRes, commandRes] = await Promise.all([
-      api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }),
-      api.list("command").catch(() => catalogCommands),
-    ]);
-    const commands = Array.isArray(commandRes) ? commandRes : catalogCommands;
+    const racRes = await api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" });
     const customRacRows = unwrapAccRacBasesList(racRes);
     const racArr = buildScopedRacDropdownOptions({
-      catalogCommands: commands,
       customRacRows,
     });
-    setCatalogCommands(commands);
     setRacOptions(racArr);
     return racArr;
-  }, [catalogCommands]);
+  }, []);
 
   const refreshBaseOptionsAfterRacUnitRename = useCallback(async () => {
     const rid = form.racId;
@@ -719,7 +703,6 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
         mapAccRacBasesRow(savedBaseRow, savedBaseId);
       setBaseOptions(
         buildScopedBaseDropdownOptions({
-          catalogBases,
           customBaseRows,
           selectedRacId: rid,
           savedOption: savedBaseOption,
@@ -728,7 +711,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     } catch (err) {
       console.error("Bank form bases refresh:", err);
     }
-  }, [form.racId, form.baseId, catalogBases]);
+  }, [form.racId, form.baseId]);
 
   const closeRacUnitNameEdit = useCallback(() => {
     if (racUnitNameEditSaving) return;
@@ -817,7 +800,6 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
         const customBaseRows = unwrapAccRacBasesList(raw);
         setBaseOptions(
           buildScopedBaseDropdownOptions({
-            catalogBases,
             customBaseRows,
             selectedRacId: parentId,
           })
@@ -833,7 +815,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     } finally {
       setQuickAddSubmitting(false);
     }
-  }, [quickAddName, quickAddType, form.racId, catalogBases, refreshRacOptions, closeQuickAdd]);
+  }, [quickAddName, quickAddType, form.racId, refreshRacOptions, closeQuickAdd]);
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return "0 Bytes";

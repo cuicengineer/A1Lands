@@ -31,6 +31,9 @@ function createApi(basePath) {
       }).toString();
       return requestWithPagination("GET", `${basePath}?${params}`);
     },
+    getAllUnpaged() {
+      return requestWithPagination("GET", basePath);
+    },
     async create(data) {
       const actionBy = await getActionBy();
       return requestWithPagination("POST", basePath, {

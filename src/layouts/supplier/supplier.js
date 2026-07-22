@@ -304,6 +304,13 @@ export default function Supplier() {
         Cell: ({ value }) => txt(value),
       },
       {
+        id: "titleAccount",
+        Header: "Title of Acc",
+        accessor: "titleAccount",
+        align: "left",
+        Cell: ({ value }) => txt(value),
+      },
+      {
         id: "representative",
         Header: "Representative",
         accessor: "representative",

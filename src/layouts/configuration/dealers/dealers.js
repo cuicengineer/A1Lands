@@ -25,12 +25,25 @@ import {
   buildCollectionsGridTableBodySx,
   COLLECTIONS_GRID_ACTION_BOX_SX,
   COLLECTIONS_GRID_ICON_BUTTON_SX,
+  formatGridCellText,
   renderCollectionsGridSno,
   renderCollectionsGridText,
 } from "utils/collectionsGridTableSx";
 import { usePartyGridBulkStatus } from "layouts/shared/partyGridBulkStatus";
 import DealerForm, { formatDealerDisplayName, getProvinceLabel } from "./DealerForm";
-import { normalizeDealerRecord } from "./dealerUtils";
+import {
+  buildDealerDuplicateFieldSets,
+  normalizeDealerDuplicateKey,
+  normalizeDealerRecord,
+} from "./dealerUtils";
+
+const DEALERS_DUPLICATE_CELL_CLASS = "saas-grid-duplicate-value";
+
+function renderDealerMaybeDuplicateText(value, isDuplicate) {
+  const text = formatGridCellText(value);
+  if (!isDuplicate || text === "-") return text;
+  return <span className={DEALERS_DUPLICATE_CELL_CLASS}>{text}</span>;
+}
 
 export default function Dealers() {
   const [records, setRecords] = useState([]);
@@ -111,11 +124,14 @@ export default function Dealers() {
     onRefresh: fetchDealers,
   });
 
+  const duplicateFieldSets = useMemo(() => buildDealerDuplicateFieldSets(records), [records]);
+
   const columns = useMemo(() => {
     const allRowIds = records.map((row) => row.id ?? row.Id).filter((id) => id != null);
     const statusColumns = [buildSelectColumn(allRowIds), buildStatusColumn(allRowIds)].filter(
       Boolean
     );
+    const { duplicateNtnCnic, duplicateGstNo } = duplicateFieldSets;
 
     return [
       {
@@ -183,14 +199,22 @@ export default function Dealers() {
         Header: "NTN / CNIC",
         accessor: "ntnCnic",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ value }) =>
+          renderDealerMaybeDuplicateText(
+            value,
+            duplicateNtnCnic.has(normalizeDealerDuplicateKey(value))
+          ),
       },
       {
         id: "gstNo",
         Header: "GST No",
         accessor: "gstNo",
         align: "left",
-        Cell: ({ value }) => txt(value),
+        Cell: ({ value }) =>
+          renderDealerMaybeDuplicateText(
+            value,
+            duplicateGstNo.has(normalizeDealerDuplicateKey(value))
+          ),
       },
       {
         id: "telNo",
@@ -203,6 +227,13 @@ export default function Dealers() {
         id: "mobileNo",
         Header: "Mobile No",
         accessor: "mobileNo",
+        align: "left",
+        Cell: ({ value }) => txt(value),
+      },
+      {
+        id: "titleAccount",
+        Header: "Title of Acc",
+        accessor: "titleAccount",
         align: "left",
         Cell: ({ value }) => txt(value),
       },
@@ -221,7 +252,18 @@ export default function Dealers() {
         Cell: ({ value }) => txt(value),
       },
     ];
-  }, [buildSelectColumn, buildStatusColumn, records]);
+  }, [buildSelectColumn, buildStatusColumn, duplicateFieldSets, records]);
+
+  const dealersGridBodySx = useMemo(
+    () => ({
+      ...buildCollectionsGridTableBodySx({ leadingCompactColumnCount: 1 }),
+      [`& .MuiTable-root tbody td .${DEALERS_DUPLICATE_CELL_CLASS}`]: {
+        color: "#d32f2f !important",
+        fontWeight: "700 !important",
+      },
+    }),
+    []
+  );
 
   const computedRows = useMemo(
     () =>
@@ -283,7 +325,7 @@ export default function Dealers() {
             </MDButton>
           ) : null
         }
-        bodySx={buildCollectionsGridTableBodySx({ leadingCompactColumnCount: 1 })}
+        bodySx={dealersGridBodySx}
       >
         {loading ? (
           <MDBox display="flex" justifyContent="center" alignItems="center" py={6}>

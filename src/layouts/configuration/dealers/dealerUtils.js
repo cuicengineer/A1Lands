@@ -17,6 +17,7 @@ export function buildDealerFormState(overrides = {}) {
     telNo: "",
     mobileNo: "",
     representative: "",
+    titleAccount: "",
     bankListsId: "",
     iban: "",
     status: true,
@@ -47,6 +48,7 @@ export function normalizeDealerRecord(row, codePrefixOptions = []) {
     telNo: row.telNo ?? row.TelNo ?? "",
     mobileNo: row.mobileNo ?? row.MobileNo ?? "",
     representative: row.representative ?? row.Representative ?? "",
+    titleAccount: row.titleAccount ?? row.TitleAccount ?? "",
     bankListsId: row.bankListsId ?? row.BankListsId ?? "",
     iban: row.iban ?? row.IBAN ?? "",
     status: normalizePartyStatus(row.status ?? row.Status),
@@ -73,6 +75,38 @@ export function validateDealerForm(form) {
   if (!String(form.city || "").trim()) errors.city = "City is required";
   if (!String(form.ntnCnic || "").trim()) errors.ntnCnic = "NTN / CNIC is required";
   return errors;
+}
+
+/** Normalized key for duplicate NTN/CNIC or GST comparisons (case-insensitive). */
+export function normalizeDealerDuplicateKey(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed ? trimmed.toUpperCase() : "";
+}
+
+/**
+ * Returns Sets of normalized NTN/CNIC and GST No values that appear more than once.
+ * Empty values are ignored. Duplicates are allowed to save; these sets drive grid highlighting.
+ */
+export function buildDealerDuplicateFieldSets(records = []) {
+  const ntnCounts = new Map();
+  const gstCounts = new Map();
+
+  (records || []).forEach((row) => {
+    const ntnKey = normalizeDealerDuplicateKey(row?.ntnCnic ?? row?.NtnCnic);
+    if (ntnKey) ntnCounts.set(ntnKey, (ntnCounts.get(ntnKey) || 0) + 1);
+
+    const gstKey = normalizeDealerDuplicateKey(row?.gstNo ?? row?.GSTNo);
+    if (gstKey) gstCounts.set(gstKey, (gstCounts.get(gstKey) || 0) + 1);
+  });
+
+  const duplicateNtnCnic = new Set(
+    [...ntnCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key)
+  );
+  const duplicateGstNo = new Set(
+    [...gstCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key)
+  );
+
+  return { duplicateNtnCnic, duplicateGstNo };
 }
 
 export function buildDealerPayload(form) {
@@ -103,6 +137,14 @@ export function buildDealerPayload(form) {
     mobileNo: String(form.mobileNo || "").trim() || null,
     Representative: String(form.representative || "").trim() || null,
     representative: String(form.representative || "").trim() || null,
+    TitleAccount:
+      String(form.titleAccount || "")
+        .trim()
+        .slice(0, 100) || null,
+    titleAccount:
+      String(form.titleAccount || "")
+        .trim()
+        .slice(0, 100) || null,
     BankListsId:
       form.bankListsId !== "" && form.bankListsId != null ? Number(form.bankListsId) : null,
     bankListsId:

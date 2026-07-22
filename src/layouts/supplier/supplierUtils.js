@@ -116,6 +116,7 @@ export function buildSupplierFormState(overrides = {}) {
     coaId: "",
     coaId2: "",
     representative: "",
+    titleAccount: "",
     bankListsId: "",
     iban: "",
     status: true,
@@ -148,6 +149,7 @@ export function normalizeSupplierRecord(row, prefixOptions = []) {
     coaId: row.coaId ?? row.CoaId ?? "",
     coaId2: row.coaId2 ?? row.CoaId2 ?? "",
     representative: row.representative ?? row.Representative ?? "",
+    titleAccount: row.titleAccount ?? row.TitleAccount ?? "",
     bankListsId: row.bankListsId ?? row.BankListsId ?? "",
     iban: row.iban ?? row.IBAN ?? "",
     status: normalizePartyStatus(row.status ?? row.Status),
@@ -263,6 +265,7 @@ export function flattenSupplierForGrid(record, index, coaLabelById = {}) {
     controlAccount: coaLabel,
     controlAccount2: coaLabel2,
     representative: normalized.representative || "-",
+    titleAccount: normalized.titleAccount || "-",
     _record: normalized,
   };
 }

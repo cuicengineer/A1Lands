@@ -691,6 +691,18 @@ export default function DealerForm({ open, onClose, onSubmit, initialData }) {
               />
             </Grid>
 
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField
+                fullWidth
+                label="Title of Acc"
+                value={form.titleAccount}
+                onChange={(e) => updateField("titleAccount", e.target.value)}
+                inputProps={{ maxLength: 100 }}
+                size="small"
+                sx={textFieldSx}
+              />
+            </Grid>
+
             <Grid item xs={12} sm={6} md={8}>
               <TextField
                 fullWidth

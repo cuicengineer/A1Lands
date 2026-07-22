@@ -549,6 +549,7 @@ export default function Collections() {
         invoiceKey: source.invoiceKey,
         amount: source.amount,
         tinTrn: source.tinTrn,
+        remarks: source.remarks,
         status: source.status,
         vrNo: source.vrNo,
         vrDate: source.vrDate,

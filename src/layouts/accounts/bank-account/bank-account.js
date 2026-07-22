@@ -830,8 +830,6 @@ export default function BankAccounts() {
   const [openForm, setOpenForm] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(null);
   const [tableRows, setTableRows] = useState([]);
-  const [racById, setRacById] = useState({});
-  const [baseById, setBaseById] = useState({});
   const [bankList, setBankList] = useState([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -844,17 +842,9 @@ export default function BankAccounts() {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsFiles, setAttachmentsFiles] = useState([]);
   const [attachmentsForId, setAttachmentsForId] = useState(null);
-  const requestedRacIdsRef = useRef(new Set());
-  const requestedBaseIdsRef = useRef(new Set());
   const bankAccountsGridHostRef = useRef(null);
   const [controller] = useMaterialUIController();
   const darkMode = Boolean(controller?.darkMode);
-
-  const toIdKey = (value) => {
-    if (value == null) return "";
-    const key = String(value).trim();
-    return key;
-  };
 
   const getAttachmentPath = (file) =>
     file?.Path ||
@@ -884,19 +874,18 @@ export default function BankAccounts() {
     setAttachmentsFiles(normalized);
   };
 
-  const fetchBankAccounts = async (page = pageNumber, size = pageSize) => {
+  const fetchBankAccounts = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await bankAccountApi.getAll(page, size);
+      const response = await bankAccountApi.getAllUnpaged();
       if (Array.isArray(response)) {
         setTableRows(response);
         setTotalCount(response.length);
         return;
       }
       const data = response?.data ?? [];
-      const pagination = response?.pagination;
       setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(Number(pagination?.totalCount ?? 0));
+      setTotalCount(Array.isArray(data) ? data.length : 0);
     } catch (error) {
       console.error("Error fetching bank accounts:", error);
       setTableRows([]);
@@ -904,7 +893,7 @@ export default function BankAccounts() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -923,77 +912,8 @@ export default function BankAccounts() {
   }, []);
 
   useEffect(() => {
-    fetchBankAccounts(pageNumber, pageSize);
-  }, [pageNumber, pageSize]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const parseAccRacBase = (res, fallbackId) => {
-      const row = Array.isArray(res?.data)
-        ? res.data[0]
-        : res?.data && typeof res.data === "object"
-        ? res.data
-        : res && typeof res === "object"
-        ? res
-        : null;
-      if (!row) return null;
-      const id = toIdKey(row.id ?? row.Id ?? fallbackId);
-      const name = String(row.name ?? row.Name ?? row.value ?? row.Value ?? "").trim();
-      if (id === "" || !name) return null;
-      return { id, name };
-    };
-    const racIds = Array.from(
-      new Set(
-        tableRows
-          .map((row) => toIdKey(row?.racId ?? row?.RacId ?? row?.cmdId ?? row?.CmdId))
-          .filter((id) => id && !racById[id] && !requestedRacIdsRef.current.has(id))
-      )
-    );
-    const baseIds = Array.from(
-      new Set(
-        tableRows
-          .map((row) => toIdKey(row?.baseId ?? row?.BaseId ?? row?.formationId ?? row?.FormationId))
-          .filter((id) => id && !baseById[id] && !requestedBaseIdsRef.current.has(id))
-      )
-    );
-    if (!racIds.length && !baseIds.length) return undefined;
-    racIds.forEach((id) => requestedRacIdsRef.current.add(id));
-    baseIds.forEach((id) => requestedBaseIdsRef.current.add(id));
-    (async () => {
-      try {
-        const [racResults, baseResults] = await Promise.all([
-          Promise.all(racIds.map((id) => api.get("AccRacBase", id).catch(() => null))),
-          Promise.all(baseIds.map((id) => api.get("AccRacBase", id).catch(() => null))),
-        ]);
-        if (cancelled) return;
-        if (racResults.length) {
-          setRacById((prev) => {
-            const next = { ...prev };
-            racResults.forEach((res, idx) => {
-              const parsed = parseAccRacBase(res, racIds[idx]);
-              if (parsed) next[parsed.id] = parsed.name;
-            });
-            return next;
-          });
-        }
-        if (baseResults.length) {
-          setBaseById((prev) => {
-            const next = { ...prev };
-            baseResults.forEach((res, idx) => {
-              const parsed = parseAccRacBase(res, baseIds[idx]);
-              if (parsed) next[parsed.id] = parsed.name;
-            });
-            return next;
-          });
-        }
-      } catch (error) {
-        if (!cancelled) console.error("Error loading AccRacBases names:", error);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tableRows]);
+    fetchBankAccounts();
+  }, [fetchBankAccounts]);
 
   const handleOpenForm = () => {
     setCurrentRecord(null);
@@ -1037,7 +957,7 @@ export default function BankAccounts() {
     if (!recordToDelete) return;
     try {
       await bankAccountApi.remove(recordToDelete);
-      fetchBankAccounts(pageNumber, pageSize);
+      fetchBankAccounts();
       setDeleteDialogOpen(false);
       setRecordToDelete(null);
     } catch (error) {
@@ -1076,7 +996,7 @@ export default function BankAccounts() {
     const existingId = currentRecord?.id ?? currentRecord?.Id;
     if (existingId) {
       await bankAccountApi.update(existingId, payload);
-      await fetchBankAccounts(pageNumber, pageSize);
+      await fetchBankAccounts();
       handleCloseForm();
       return { id: existingId, ids: [existingId] };
     }
@@ -1087,7 +1007,7 @@ export default function BankAccounts() {
       res?.data?.id ||
       res?.data?.Id ||
       (Array.isArray(res?.data) && res.data[0] ? res.data[0].id || res.data[0].Id : null);
-    await fetchBankAccounts(pageNumber, pageSize);
+    await fetchBankAccounts();
     handleCloseForm();
     return { id: newId, ids: newId ? [newId] : [] };
   };
@@ -1376,18 +1296,16 @@ export default function BankAccounts() {
 
   const computedRows = tableRows.map((row, index) => {
     const normalizedId = row?.id ?? row?.Id;
-    const sno = (pageNumber - 1) * pageSize + index + 1;
+    const sno = index + 1;
     const racId = row.racId ?? row.RacId ?? row.cmdId ?? row.CmdId;
     const baseId = row.baseId ?? row.BaseId ?? row.unitId ?? row.UnitId;
     const bankId = row.bankId ?? row.BankId;
 
     const racDisplay =
-      String(racById[toIdKey(racId)] || "").trim() ||
       String(row.cmdName ?? row.CmdName ?? "").trim() ||
       (racId != null && racId !== "" ? String(racId) : "-");
 
     const baseDisplay =
-      String(baseById[toIdKey(baseId)] || "").trim() ||
       String(row.baseName ?? row.BaseName ?? "").trim() ||
       (baseId != null && baseId !== "" ? String(baseId) : "-");
 
@@ -1627,12 +1545,10 @@ export default function BankAccounts() {
             pageSize={pageSize}
             onPageChange={(newPage) => {
               setPageNumber(newPage + 1);
-              fetchBankAccounts(newPage + 1, pageSize);
             }}
             onEntriesPerPageChange={(value) => {
               setPageSize(value);
               setPageNumber(1);
-              fetchBankAccounts(1, value);
             }}
             showTotalEntries={false}
             noEndBorder
@@ -1655,7 +1571,7 @@ export default function BankAccounts() {
         onSubmit={handleSubmit}
         initialData={currentRecord}
         onUploadSuccess={() => {
-          fetchBankAccounts(pageNumber, pageSize);
+          fetchBankAccounts();
         }}
       />
 

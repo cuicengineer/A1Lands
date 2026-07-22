@@ -240,6 +240,7 @@ export default function SupplierForm({
       telNo: dealer.telNo || "",
       mobileNo: dealer.mobileNo || "",
       representative: dealer.representative || "",
+      titleAccount: dealer.titleAccount || "",
       bankListsId: dealer.bankListsId ?? "",
       iban: dealer.iban || "",
       status: normalizePartyStatus(dealer.status),
@@ -638,6 +639,18 @@ export default function SupplierForm({
                 size="small"
                 disabled={dealerBiodataReadOnly}
                 sx={dealerFieldSx}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <TextField
+                fullWidth
+                label="Title of Acc"
+                value={form.titleAccount}
+                onChange={(e) => updateField("titleAccount", e.target.value)}
+                size="small"
+                disabled={dealerBiodataReadOnly}
+                sx={dealerFieldSx}
+                InputProps={{ readOnly: dealerBiodataReadOnly }}
               />
             </Grid>
             <Grid item xs={12} sm={6} md={8}>

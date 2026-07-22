@@ -20,6 +20,7 @@ import InputAdornment from "@mui/material/InputAdornment";
 import Autocomplete from "@mui/material/Autocomplete";
 import IconButton from "@mui/material/IconButton";
 import Popover from "@mui/material/Popover";
+import Tooltip from "@mui/material/Tooltip";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
@@ -155,13 +156,35 @@ function mergeTenantCoaOption(options, option) {
 function extractTenantNoDigits(value) {
   return String(value || "")
     .trim()
-    .replace(/^T-/i, "")
-    .replace(/\D/g, "");
+    .replace(/^T-?/i, "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
 }
 
 function normalizeTenantNoForSave(value) {
   const digits = extractTenantNoDigits(value);
-  return digits ? `T-${digits}` : "";
+  return digits ? `T${digits.padStart(4, "0")}` : "";
+}
+
+function isTruthyRecordFlag(value) {
+  return (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    String(value || "")
+      .trim()
+      .toLowerCase() === "true"
+  );
+}
+
+function isActiveNotDeletedContract(contract) {
+  const status = contract?.status ?? contract?.Status;
+  const isDeleted = contract?.isDeleted ?? contract?.IsDeleted;
+  const normalizedStatus = String(status || "")
+    .trim()
+    .toLowerCase();
+  const isActive = isTruthyRecordFlag(status) || normalizedStatus === "active";
+  return isActive && !isTruthyRecordFlag(isDeleted);
 }
 
 function findTenantsMainHorizontalScrollEl(root) {
@@ -859,11 +882,11 @@ function TenantsForm({
               ? "Only superuser can edit Tenant No"
               : form.tenantNo
               ? `Will save as ${normalizeTenantNoForSave(form.tenantNo)}`
-              : "Enter numeric value only; T- will be added automatically")
+              : "Enter up to 4 digits; T and leading zeros will be added automatically")
           }
-          inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
+          inputProps={{ inputMode: "numeric", pattern: "[0-9]*", maxLength: 4 }}
           InputProps={{
-            startAdornment: <InputAdornment position="start">T-</InputAdornment>,
+            startAdornment: <InputAdornment position="start">T</InputAdornment>,
           }}
           sx={{
             flex: "1 1 240px",
@@ -1470,12 +1493,19 @@ export default function Tenants() {
 
       const contractTenantByNo = new Map();
       const contractCountsByTenant = new Map();
+      const activeContractCountsByTenant = new Map();
       contractRows.forEach((contract) => {
         const contractNo = String(contract?.contractNo ?? contract?.ContractNo ?? "").trim();
         const tenantNo = String(contract?.tenantNo ?? contract?.TenantNo ?? "").trim();
         if (contractNo && tenantNo) contractTenantByNo.set(contractNo, tenantNo);
         if (tenantNo) {
           contractCountsByTenant.set(tenantNo, (contractCountsByTenant.get(tenantNo) || 0) + 1);
+          if (isActiveNotDeletedContract(contract)) {
+            activeContractCountsByTenant.set(
+              tenantNo,
+              (activeContractCountsByTenant.get(tenantNo) || 0) + 1
+            );
+          }
         }
       });
 
@@ -1495,11 +1525,14 @@ export default function Tenants() {
         const tenantNo = String(tenant?.tenantNo ?? tenant?.TenantNo ?? "").trim();
         const totalInvoices = invoiceSetsByTenant.get(tenantNo)?.size ?? 0;
         const fallbackContractCount = contractCountsByTenant.get(tenantNo) || 0;
+        const activeContractCount = activeContractCountsByTenant.get(tenantNo) || 0;
         const currentTotalContracts = Number(tenant?.totalContracts ?? tenant?.TotalContracts);
         return {
           ...tenant,
           totalInvoices,
           TotalInvoices: totalInvoices,
+          activeContractCount,
+          ActiveContractCount: activeContractCount,
           totalContracts: Number.isFinite(currentTotalContracts)
             ? currentTotalContracts
             : fallbackContractCount,
@@ -1571,6 +1604,14 @@ export default function Tenants() {
 
   const handleDeleteTenant = (id) => {
     if (!canDelete) return;
+    const tenant = rows.find((row) => Number(row?.id ?? row?.Id) === Number(id));
+    const activeContractCount = Number(
+      tenant?.activeContractCount ?? tenant?.ActiveContractCount ?? 0
+    );
+    if (activeContractCount > 0) {
+      alert("Cannot delete this tenant while active contracts exist.");
+      return;
+    }
     setRecordToDelete(id);
     setDeleteDialogOpen(true);
   };
@@ -1578,6 +1619,17 @@ export default function Tenants() {
   const handleConfirmDelete = async () => {
     if (!canDelete) return;
     if (!recordToDelete) return;
+
+    const tenant = rows.find((row) => Number(row?.id ?? row?.Id) === Number(recordToDelete));
+    const activeContractCount = Number(
+      tenant?.activeContractCount ?? tenant?.ActiveContractCount ?? 0
+    );
+    if (activeContractCount > 0) {
+      setDeleteDialogOpen(false);
+      setRecordToDelete(null);
+      alert("Cannot delete this tenant while active contracts exist.");
+      return;
+    }
 
     try {
       await api.remove("tenant", recordToDelete);
@@ -1808,6 +1860,8 @@ export default function Tenants() {
     const coaId2 = row.coaId2 ?? row.CoaId2 ?? "";
     const accountLabel2 =
       coaId2 !== "" && coaId2 != null ? coaLabelById[Number(coaId2)] || "-" : "-";
+    const hasActiveContracts =
+      Number(row?.activeContractCount ?? row?.ActiveContractCount ?? 0) > 0;
 
     return {
       ...row,
@@ -1836,15 +1890,26 @@ export default function Tenants() {
             </IconButton>
           )}
           {canDelete && (
-            <IconButton
-              size="small"
-              color="error"
-              onClick={() => handleDeleteTenant(row.id)}
-              title="Delete"
-              sx={{ padding: "1px" }}
+            <Tooltip
+              title={
+                hasActiveContracts
+                  ? "Tenant cannot be deleted while active contracts exist"
+                  : "Delete"
+              }
             >
-              <Icon>delete</Icon>
-            </IconButton>
+              <span>
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handleDeleteTenant(row.id)}
+                  title={hasActiveContracts ? undefined : "Delete"}
+                  disabled={hasActiveContracts}
+                  sx={{ padding: "1px" }}
+                >
+                  <Icon>delete</Icon>
+                </IconButton>
+              </span>
+            </Tooltip>
           )}
         </MDBox>
       ),

@@ -35,6 +35,10 @@ function getAll(pageNumber = 1, pageSize = 850) {
   return requestWithPagination("GET", `/api/BankAccounts?${params}`);
 }
 
+function getAllUnpaged() {
+  return requestWithPagination("GET", "/api/BankAccounts");
+}
+
 async function create(data) {
   const actionBy = await getActionBy();
   const payload = {
@@ -65,13 +69,9 @@ async function remove(id) {
   return requestWithPagination("DELETE", `/api/BankAccounts/${id}`, body);
 }
 
-/** Same source as configuration/banks-list: GET /api/BankLists (paginated). */
+/** Same unpaginated source as configuration/banks-list. */
 export async function fetchBankListsForDropdown() {
-  const params = new URLSearchParams({
-    pageNumber: "1",
-    pageSize: "10000",
-  }).toString();
-  const response = await api.request("GET", `/api/BankLists?${params}`);
+  const response = await api.request("GET", "/api/BankLists");
   const data = response?.data ?? (Array.isArray(response) ? response : []);
   const list = Array.isArray(data) ? data : [];
   return list
@@ -88,6 +88,7 @@ export async function fetchBankListsForDropdown() {
 
 const bankAccountApi = {
   getAll,
+  getAllUnpaged,
   create,
   update,
   remove,

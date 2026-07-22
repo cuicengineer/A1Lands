@@ -23,6 +23,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import CurrencyLoading from "components/CurrencyLoading";
 import * as XLSX from "xlsx";
+import { logExcelExport } from "services/api.auditLog.service";
 import MDBox from "components/MDBox";
 import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
@@ -340,7 +341,14 @@ function FiscalKpiGrid({
     const ws = XLSX.utils.json_to_sheet(exportRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Fiscal KPIs");
-    XLSX.writeFile(wb, `Fiscal-KPIs-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const fileName = `Fiscal-KPIs-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    logExcelExport({
+      moduleName: "Fiscal KPIs",
+      fileName,
+      rowCount: exportRows.length,
+      exportType: "fiscalKpiGrid",
+    });
   }, [rows, periods]);
 
   const headerBg = darkMode ? "rgba(255,255,255,0.06)" : "#f4f6f8";
@@ -459,7 +467,7 @@ function FiscalKpiGrid({
                   ),
                   borderRadius: 6,
                   categoryPercentage: 0.66,
-                  barPercentage: 1,
+                  barPercentage: 0.25,
                   barThickness: "flex",
                   maxBarThickness: 1000,
                   yAxisID: "y",
@@ -652,7 +660,7 @@ function FiscalKpiGrid({
         bar: {
           ...COMPACT_GROUPED_BAR_OPTIONS.datasets.bar,
           categoryPercentage: 0.66,
-          barPercentage: 1,
+          barPercentage: 0.25,
           maxBarThickness: 1000,
         },
       },

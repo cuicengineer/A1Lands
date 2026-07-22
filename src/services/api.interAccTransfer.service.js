@@ -33,6 +33,10 @@ function getAll(pageNumber = 1, pageSize = 50) {
   return requestWithPagination("GET", `/api/InterAccTransfers?${params}`);
 }
 
+function getAllUnpaged() {
+  return requestWithPagination("GET", "/api/InterAccTransfers");
+}
+
 async function create(data) {
   const actionBy = await getActionBy();
   return requestWithPagination("POST", "/api/InterAccTransfers", {
@@ -64,6 +68,7 @@ async function remove(id) {
 
 const interAccTransferApi = {
   getAll,
+  getAllUnpaged,
   create,
   update,
   remove,

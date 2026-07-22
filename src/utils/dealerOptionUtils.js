@@ -38,6 +38,7 @@ export function normalizeDealerFormOption(row, codePrefixOptions = []) {
     telNo: row?.telNo ?? row?.TelNo ?? "",
     mobileNo: row?.mobileNo ?? row?.MobileNo ?? "",
     representative: row?.representative ?? row?.Representative ?? "",
+    titleAccount: row?.titleAccount ?? row?.TitleAccount ?? "",
     bankListsId: row?.bankListsId ?? row?.BankListsId ?? "",
     iban: row?.iban ?? row?.IBAN ?? "",
     status: row?.status ?? row?.Status ?? true,

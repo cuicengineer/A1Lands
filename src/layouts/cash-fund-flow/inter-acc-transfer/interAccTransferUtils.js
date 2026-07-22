@@ -56,7 +56,10 @@ export async function fetchInterAccTransferVrNos(api) {
 
 export async function fetchInterAccTransferRecordsForVrNo(api) {
   if (!api?.getAll) return [];
-  const response = await api.getAll(1, 10000);
+  const response =
+    typeof api.getAllUnpaged === "function"
+      ? await api.getAllUnpaged()
+      : await api.getAll(1, 10000);
   const rows = Array.isArray(response) ? response : response?.data ?? [];
   return Array.isArray(rows) ? rows : [];
 }
@@ -136,7 +139,7 @@ export function isActiveCashAndBankAccount(row) {
 }
 
 export async function fetchCashAndBankAccountsForDropdown() {
-  const response = await cashAndBankApi.getAll(1, 10000);
+  const response = await cashAndBankApi.getAllUnpaged();
   const data = Array.isArray(response) ? response : response?.data ?? [];
   return (Array.isArray(data) ? data : [])
     .map(normalizeCashAndBankAccountOption)

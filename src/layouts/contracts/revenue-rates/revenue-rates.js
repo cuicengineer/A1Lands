@@ -24,12 +24,14 @@ import Menu from "@mui/material/Menu";
 import InputAdornment from "@mui/material/InputAdornment";
 import Chip from "@mui/material/Chip";
 import Autocomplete from "@mui/material/Autocomplete";
+import Checkbox from "@mui/material/Checkbox";
 import MDSnackbar from "components/MDSnackbar";
 import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
   getLoggedInUsername,
+  isSuperuserOrAhqSupervisorUser,
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import revenueRatesApi from "services/api.revenuerates.service";
@@ -125,6 +127,66 @@ function formatDateDDMMMYYYY(dateValue) {
   } catch {
     return raw;
   }
+}
+
+/**
+ * Pakistan financial year ends on 30 June.
+ * Jul–Dec: ends next calendar year (15-Jul-2026 → 30-Jun-2027).
+ * Jan–Jun: ends previous calendar year (29-Jun-2026 → 30-Jun-2025).
+ */
+function getFinancialYearEndDate(applicableDate) {
+  const match = String(applicableDate || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || month < 1 || month > 12) return "";
+  const endYear = month >= 7 ? year + 1 : year - 1;
+  return `${endYear}-06-30`;
+}
+
+/** Matches API Fiscal/RRFY from ApplicableDate (e.g. Jul 2025 → "2025-26"). */
+function getFiscalFromApplicableDate(applicableDate) {
+  const match = String(applicableDate || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || month < 1 || month > 12) return "";
+  if (month >= 7) return `${year}-${String(year + 1).slice(-2)}`;
+  return `${year - 1}-${String(year).slice(-2)}`;
+}
+
+function isRevenueRateActiveRecord(row) {
+  if (!row) return false;
+  const isDeleted = row.isDeleted ?? row.IsDeleted;
+  if (isDeleted === true || isDeleted === 1 || isDeleted === "1") return false;
+  const status = row.status ?? row.Status;
+  return (
+    status === undefined || status === null || status === true || status === 1 || status === "1"
+  );
+}
+
+function getRevenueRatePropertyId(row) {
+  const id = row?.propertyId ?? row?.PropertyId;
+  if (id === null || id === undefined || id === "") return null;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getRevenueRateFiscal(row) {
+  const stored = String(row?.fiscal ?? row?.Fiscal ?? "").trim();
+  if (stored) return stored;
+  const applicable = row?.applicableDate ?? row?.ApplicableDate ?? "";
+  const iso =
+    typeof applicable === "string"
+      ? applicable.split("T")[0]
+      : applicable
+      ? String(applicable).slice(0, 10)
+      : "";
+  return getFiscalFromApplicableDate(iso);
 }
 
 function revenueRatesGridDateCompare(rowsToFilter, id, filterValue) {
@@ -783,9 +845,10 @@ const RevenueRatesAreaCell = React.memo(function RevenueRatesAreaCell({ row }) {
   const isPropertyDash = propId === 0 || propId === null || propId === undefined || propId === "";
   if (isPropertyDash) return "-";
   const property = revenueRatesGridDataRef.current.rentalPropertyById.get(Number(propId));
-  const area = property?.area ?? property?.Area ?? "";
-  const uoM = property?.uoM ?? property?.UoM ?? "";
-  const areaStr = area ? Number(area).toLocaleString() : "";
+  // Prefer live values from RevenueRates API join; fall back to rental-property catalog.
+  const area = row?.original?.area ?? row?.original?.Area ?? property?.area ?? property?.Area ?? "";
+  const uoM = row?.original?.uoM ?? row?.original?.UoM ?? property?.uoM ?? property?.UoM ?? "";
+  const areaStr = area !== "" && area != null ? Number(area).toLocaleString() : "";
   const uoMStr = uoM || "";
   if (!areaStr && !uoMStr) return "-";
   return [areaStr, uoMStr].filter(Boolean).join("  ");
@@ -891,13 +954,15 @@ function RevenueRatesForm({
   baseOptions,
   classOptions,
   govtShareRates,
+  existingRevenueRates,
+  canEditRevenueRate,
   onUploadSuccess,
 }) {
   const [form, setForm] = useState({
     cmdId: "",
     baseId: "",
     classId: "",
-    propertyId: "",
+    propertyId: [],
     applicableDate: "",
     deactiveDate: "",
     rate: "",
@@ -909,6 +974,20 @@ function RevenueRatesForm({
   const [existingFiles, setExistingFiles] = useState([]);
   const [loadingExistingFiles, setLoadingExistingFiles] = useState(false);
   const isEditMode = Boolean(initialData && (initialData.id || initialData.Id));
+  const mayEdit = Boolean(canEditRevenueRate);
+  const propertySelectMultiple = !isEditMode;
+
+  /** Keep Select `value` shape in sync with `multiple` (avoids MUI crash across create/edit). */
+  const normalizePropertySelectValue = (raw, { multiple, baseAll }) => {
+    if (baseAll) return multiple ? [] : 0;
+    if (multiple) {
+      if (Array.isArray(raw)) return raw;
+      if (raw === "" || raw == null) return [];
+      return [raw];
+    }
+    if (Array.isArray(raw)) return raw.length > 0 ? raw[0] : "";
+    return raw ?? "";
+  };
 
   const getSaveErrorMessage = (error) => {
     if (error?.response?.status === 400) {
@@ -976,14 +1055,22 @@ function RevenueRatesForm({
       const isPropertyDash =
         propId === 0 || propId === null || propId === undefined || propId === "";
       const selectedProp = (rentalProperties || []).find(
-        (p) => Number(p.id) === Number(initialData.propertyId)
+        (p) => Number(p.id ?? p.Id) === Number(propId)
       );
       const resolvedCmdId =
-        initialData.cmdId ?? initialData.cmdid ?? selectedProp?.cmdId ?? selectedProp?.cmdid ?? "";
+        initialData.cmdId ??
+        initialData.CmdId ??
+        initialData.cmdid ??
+        selectedProp?.cmdId ??
+        selectedProp?.CmdId ??
+        selectedProp?.cmdid ??
+        "";
       const resolvedBaseId =
         initialData.baseId ??
+        initialData.BaseId ??
         initialData.baseid ??
         selectedProp?.baseId ??
+        selectedProp?.BaseId ??
         selectedProp?.baseid ??
         "";
       const resolvedClassId =
@@ -995,7 +1082,8 @@ function RevenueRatesForm({
       const cmdIdValue = isPropertyDash ? 0 : resolvedCmdId ? Number(resolvedCmdId) : "";
       const baseIdValue = isPropertyDash ? 0 : resolvedBaseId ? Number(resolvedBaseId) : "";
       const classIdValue = isPropertyDash ? "" : resolvedClassId ? Number(resolvedClassId) : "";
-      const propertyIdValue = isPropertyDash ? 0 : initialData.propertyId || "";
+      // Edit uses a single id; create uses an array — never leave [] in edit mode.
+      const propertyIdValue = isPropertyDash ? 0 : Number(propId) || "";
 
       const rawDeactive = initialData.deactiveDate ?? initialData.DeactiveDate ?? "";
       const deactiveDateValue =
@@ -1016,8 +1104,8 @@ function RevenueRatesForm({
       // Reset new files when editing
       setSelectedFiles([]);
       // Fetch existing uploaded files
-      if (initialData.id) {
-        fetchExistingFiles(initialData.id);
+      if (initialData.id || initialData.Id) {
+        fetchExistingFiles(initialData.id ?? initialData.Id);
       } else {
         setExistingFiles([]);
       }
@@ -1026,7 +1114,7 @@ function RevenueRatesForm({
         cmdId: "",
         baseId: "",
         classId: "",
-        propertyId: "",
+        propertyId: [],
         applicableDate: "",
         deactiveDate: "",
         rate: "",
@@ -1085,18 +1173,16 @@ function RevenueRatesForm({
         const cmdIsAll = value === 0 || value === "0";
         next.baseId = cmdIsAll ? 0 : "";
         next.classId = cmdIsAll ? "" : "";
-        next.propertyId = cmdIsAll ? 0 : "";
+        next.propertyId = cmdIsAll ? 0 : isEditMode ? "" : [];
       } else if (field === "baseId") {
         const baseIsAll = value === 0 || value === "0";
         next.classId = baseIsAll ? "" : "";
-        next.propertyId = baseIsAll ? 0 : "";
+        next.propertyId = baseIsAll ? 0 : isEditMode ? "" : [];
       } else if (field === "classId") {
-        next.propertyId = "";
+        next.propertyId = isEditMode ? "" : [];
       } else if (field === "applicableDate") {
         if (value && !isEditMode) {
-          // Default Deactive Date to 30 June of the Applicable Date year (user-editable).
-          const year = Number(String(value).slice(0, 4));
-          next.deactiveDate = Number.isFinite(year) && year > 0 ? `${year}-06-30` : "";
+          next.deactiveDate = getFinancialYearEndDate(value);
         } else if (!value && !isEditMode) {
           next.deactiveDate = "";
         } else if (next.deactiveDate && value) {
@@ -1184,9 +1270,9 @@ function RevenueRatesForm({
       (cls) => Number(cls?.id ?? cls?.Id) === Number(form.classId)
     );
     if (!stillValid) {
-      setForm((prev) => ({ ...prev, classId: "", propertyId: "" }));
+      setForm((prev) => ({ ...prev, classId: "", propertyId: isEditMode ? "" : [] }));
     }
-  }, [isClassScopeReady, form.classId, classSelectOptions]);
+  }, [isClassScopeReady, form.classId, classSelectOptions, isEditMode]);
 
   const filteredBaseOptions = useMemo(() => {
     if (form.cmdId === 0 || form.cmdId === "0") return baseOptions || [];
@@ -1222,8 +1308,8 @@ function RevenueRatesForm({
     const numBaseId = Number(form.baseId || 0);
     const numClassId = Number(form.classId || 0);
     return (rentalProperties || []).filter((p) => {
-      const cmdId = Number(p?.cmdId ?? p?.cmdid ?? p?.commandId ?? 0);
-      const baseId = Number(p?.baseId ?? p?.baseid ?? 0);
+      const cmdId = Number(p?.cmdId ?? p?.CmdId ?? p?.cmdid ?? p?.commandId ?? p?.CommandId ?? 0);
+      const baseId = Number(p?.baseId ?? p?.BaseId ?? p?.baseid ?? 0);
       const classId = Number(p?.classId ?? p?.ClassId ?? 0);
       if (!isCmdAll && numCmdId && cmdId !== numCmdId) return false;
       if (!isBaseAll && numBaseId && baseId !== numBaseId) return false;
@@ -1243,7 +1329,7 @@ function RevenueRatesForm({
   ]);
 
   const getPropertyPrimaryLabel = (property) =>
-    String(property?.pId ?? property?.pid ?? property?.PId ?? property?.id ?? "");
+    String(property?.pId ?? property?.pid ?? property?.PId ?? property?.id ?? property?.Id ?? "");
 
   const renderPropertyOptionLabel = (property) => {
     const primary = getPropertyPrimaryLabel(property);
@@ -1358,6 +1444,10 @@ function RevenueRatesForm({
   };
 
   const handleSave = async () => {
+    if (isEditMode && !mayEdit) {
+      alert("Only AHQ supervisors can edit revenue rates.");
+      return;
+    }
     if (isClassScopeReady && !isClassSelected) {
       alert("Class is required.");
       return;
@@ -1365,7 +1455,9 @@ function RevenueRatesForm({
     if (
       isClassScopeReady &&
       isClassSelected &&
-      (form.propertyId === "" || form.propertyId == null)
+      (isEditMode
+        ? form.propertyId === "" || form.propertyId == null
+        : !Array.isArray(form.propertyId) || form.propertyId.length === 0)
     ) {
       alert("Property is required.");
       return;
@@ -1376,17 +1468,67 @@ function RevenueRatesForm({
       return;
     }
     const deactiveDate = String(form.deactiveDate ?? "").trim();
-    if (applicableDate && deactiveDate) {
+    // Create mode uses FY-end auto-fill (Jan–Jun may be before Applicable Date).
+    if (isEditMode && applicableDate && deactiveDate) {
       const appDate = new Date(applicableDate);
       const deactDate = new Date(deactiveDate);
-      if (deactDate.getTime() <= appDate.getTime()) {
-        alert("Deactive Date must be greater than Applicable Date.");
+      if (deactDate.getTime() < appDate.getTime()) {
+        alert("Deactive Date must be on or after Applicable Date.");
         return;
       }
     }
+
+    // Add New: one active revenue rate per property per RRFY/fiscal year
+    if (!isEditMode) {
+      const rrfy = getFiscalFromApplicableDate(applicableDate);
+      if (!rrfy) {
+        alert("Unable to determine RRFY from Applicable Date.");
+        return;
+      }
+      const isBothAll =
+        (form.cmdId === 0 || form.cmdId === "0") && (form.baseId === 0 || form.baseId === "0");
+      const isBaseAll = form.baseId === 0 || form.baseId === "0";
+      const selectedPropertyIds =
+        isBothAll || isBaseAll
+          ? [0]
+          : (Array.isArray(form.propertyId) ? form.propertyId : [form.propertyId])
+              .map(Number)
+              .filter((id) => Number.isInteger(id) && id >= 0);
+
+      const conflicts = [];
+      selectedPropertyIds.forEach((propertyId) => {
+        const duplicate = (existingRevenueRates || []).find((row) => {
+          if (!isRevenueRateActiveRecord(row)) return false;
+          if (getRevenueRatePropertyId(row) !== Number(propertyId)) return false;
+          return getRevenueRateFiscal(row) === rrfy;
+        });
+        if (duplicate) {
+          const prop = (rentalProperties || []).find(
+            (p) => Number(p.id ?? p.Id) === Number(propertyId)
+          );
+          const propertyLabel =
+            propertyId === 0
+              ? "All"
+              : prop?.pId ?? prop?.PId ?? prop?.pid ?? prop?.propertyName ?? String(propertyId);
+          conflicts.push(propertyLabel);
+        }
+      });
+
+      if (conflicts.length > 0) {
+        alert(
+          `An active revenue rate already exists for RRFY ${rrfy} for: ${conflicts.join(
+            ", "
+          )}.\n\nA property can have only one active record per fiscal year.`
+        );
+        return;
+      }
+    }
+
     try {
       // First save the form data
-      await onSubmit(form);
+      await onSubmit(
+        isEditMode ? form : { ...form, deactiveDate: getFinancialYearEndDate(form.applicableDate) }
+      );
     } catch (error) {
       console.error("Error saving revenue rate:", error);
       alert(getSaveErrorMessage(error));
@@ -1488,7 +1630,7 @@ function RevenueRatesForm({
             />
           </Grid>
 
-          {/* Class Dropdown — only classes with Govt Share Factor = Annual Rent */}
+          {/* Class Dropdown — only classes with Govt Share Factor = Revenue Rate */}
           <Grid item xs={12} sm={4}>
             <FormControl size="small" fullWidth>
               <InputLabel id="class-label" sx={{ fontSize: "1.1rem" }}>
@@ -1548,18 +1690,48 @@ function RevenueRatesForm({
           <Grid item xs={12} sm={6}>
             <FormControl size="small" fullWidth>
               <InputLabel id="property-label" sx={{ fontSize: "1.1rem" }}>
-                Property
+                {isEditMode ? "Property" : "Property (Multiple Selection)"}
               </InputLabel>
               <SearchableSelect
                 labelId="property-label"
-                value={isBaseAll ? 0 : form.propertyId ?? ""}
-                label="Property"
+                multiple={propertySelectMultiple}
+                value={normalizePropertySelectValue(form.propertyId, {
+                  multiple: propertySelectMultiple,
+                  baseAll: isBaseAll,
+                })}
+                label={isEditMode ? "Property" : "Property (Multiple Selection)"}
                 onChange={(e) => handleChange("propertyId", e.target.value)}
                 disabled={isBaseAll || (isClassScopeReady && !isClassSelected)}
                 renderValue={(v) => {
                   if (isBaseAll) return "—";
-                  if (v === "" || v == null) return "";
-                  const opt = filteredRentalProperties.find((p) => Number(p.id) === Number(v));
+                  const selectedIds = propertySelectMultiple
+                    ? Array.isArray(v)
+                      ? v
+                      : []
+                    : v === "" || v == null
+                    ? []
+                    : [v];
+                  if (selectedIds.length === 0 || selectedIds[0] === "" || selectedIds[0] == null)
+                    return "";
+                  const selectedOptions = selectedIds
+                    .map((id) =>
+                      filteredRentalProperties.find((p) => Number(p.id ?? p.Id) === Number(id))
+                    )
+                    .filter(Boolean);
+                  if (propertySelectMultiple) {
+                    return (
+                      <MDBox sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                        {selectedOptions.map((option) => (
+                          <Chip
+                            key={option.id ?? option.Id}
+                            label={getPropertyPrimaryLabel(option)}
+                            size="small"
+                          />
+                        ))}
+                      </MDBox>
+                    );
+                  }
+                  const opt = selectedOptions[0];
                   if (!opt) return String(v);
                   const fullAddress = getPropertyAddressFull(opt);
                   const { truncated: addressTruncated } = truncatePropertyAddress(fullAddress);
@@ -1636,12 +1808,13 @@ function RevenueRatesForm({
                 )}
                 {!isBaseAll &&
                   filteredRentalProperties.map((option) => {
+                    const optionId = option.id ?? option.Id;
                     const fullAddress = getPropertyAddressFull(option);
                     const { truncated: addressTruncated } = truncatePropertyAddress(fullAddress);
                     return (
                       <MenuItem
-                        key={option.id}
-                        value={option.id}
+                        key={optionId}
+                        value={optionId}
                         title={addressTruncated ? fullAddress : undefined}
                         sx={{
                           fontSize: "1.1rem",
@@ -1650,6 +1823,14 @@ function RevenueRatesForm({
                           maxWidth: 560,
                         }}
                       >
+                        {!propertySelectMultiple ? null : (
+                          <Checkbox
+                            checked={
+                              Array.isArray(form.propertyId) &&
+                              form.propertyId.some((id) => Number(id) === Number(optionId))
+                            }
+                          />
+                        )}
                         {renderPropertyOptionLabel(option)}
                       </MenuItem>
                     );
@@ -1734,7 +1915,9 @@ function RevenueRatesForm({
                 ref={deactiveDateInputRef}
                 value={form.deactiveDate || ""}
                 onChange={(e) => handleChange("deactiveDate", e.target.value)}
-                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
+                disabled={
+                  !isEditMode || !form.applicableDate || !String(form.applicableDate).trim()
+                }
                 min={
                   form.applicableDate
                     ? (() => {
@@ -1762,8 +1945,12 @@ function RevenueRatesForm({
                 readOnly
                 fullWidth
                 size="small"
-                disabled={!form.applicableDate || !String(form.applicableDate).trim()}
-                onClick={() => openDatePicker(deactiveDateInputRef)}
+                disabled={
+                  !isEditMode || !form.applicableDate || !String(form.applicableDate).trim()
+                }
+                onClick={() => {
+                  if (isEditMode) openDatePicker(deactiveDateInputRef);
+                }}
                 InputProps={{
                   readOnly: true,
                   endAdornment: (
@@ -1985,7 +2172,7 @@ function RevenueRatesForm({
           variant="gradient"
           color="info"
           onClick={handleSave}
-          disabled={isUploading || (isEditMode ? !canEditCurrentMenu() : !canCreateCurrentMenu())}
+          disabled={isUploading || (isEditMode ? !mayEdit : !canCreateCurrentMenu())}
         >
           <Icon>save</Icon>&nbsp;{isUploading ? "Uploading..." : "Save"}
         </MDButton>
@@ -2004,6 +2191,8 @@ RevenueRatesForm.propTypes = {
   baseOptions: PropTypes.array.isRequired,
   classOptions: PropTypes.array.isRequired,
   govtShareRates: PropTypes.array.isRequired,
+  existingRevenueRates: PropTypes.array,
+  canEditRevenueRate: PropTypes.bool,
   onUploadSuccess: PropTypes.func,
 };
 
@@ -2035,6 +2224,8 @@ export default function RevenueRates() {
       .trim()
       .toLowerCase()
       .replace(/\s+/g, "") === "superuser";
+  // Edit: AHQ supervisor (category supervisor + AHQ level) or superuser
+  const canEditRevenueRate = isSuperuserOrAhqSupervisorUser();
 
   const openSuccessSB = () => setSuccessSB(true);
   const closeSuccessSB = () => setSuccessSB(false);
@@ -2148,6 +2339,10 @@ export default function RevenueRates() {
   };
 
   const handleEditRevenueRate = (id) => {
+    if (!canEditRevenueRate) {
+      alert("Only AHQ supervisors can edit revenue rates.");
+      return;
+    }
     // Handle both camelCase and PascalCase for id lookup
     const revenueRate = tableRows.find(
       (row) => (row.id ?? row.Id) === id || Number(row.id ?? row.Id) === Number(id)
@@ -2163,6 +2358,8 @@ export default function RevenueRates() {
     // Handle both camelCase and PascalCase for all fields
     const propertyId = revenueRate.propertyId ?? revenueRate.PropertyId ?? null;
     const classId = revenueRate.classId ?? revenueRate.ClassId ?? null;
+    const cmdId = revenueRate.cmdId ?? revenueRate.CmdId ?? null;
+    const baseId = revenueRate.baseId ?? revenueRate.BaseId ?? null;
     const applicableDate = revenueRate.applicableDate ?? revenueRate.ApplicableDate ?? null;
     const rate = revenueRate.rate ?? revenueRate.Rate ?? "";
     const attachments = revenueRate.attachments ?? revenueRate.Attachments ?? "";
@@ -2171,8 +2368,10 @@ export default function RevenueRates() {
     setCurrentRevenueRate({
       ...revenueRate,
       id: revenueRate.id ?? revenueRate.Id,
-      propertyId: propertyId,
-      classId: classId,
+      cmdId,
+      baseId,
+      propertyId: propertyId == null || propertyId === "" ? propertyId : Number(propertyId),
+      classId: classId == null || classId === "" ? classId : Number(classId),
       applicableDate: applicableDate
         ? typeof applicableDate === "string"
           ? applicableDate.split("T")[0]
@@ -2347,7 +2546,6 @@ export default function RevenueRates() {
             : data.baseId !== "" && data.baseId != null
             ? Number(data.baseId)
             : null,
-        propertyId: isBothAll || isBaseAll ? 0 : Number(data.propertyId) || null,
         applicableDate: data.applicableDate || null,
         rate: data.rate !== "" && data.rate != null ? Number(data.rate) : null,
         attachments: data.attachments || null,
@@ -2355,9 +2553,24 @@ export default function RevenueRates() {
         DeactiveDate: deactiveDateValue,
       };
       if (currentRevenueRate) {
-        await revenueRatesApi.update(currentRevenueRate.id, formattedData);
+        await revenueRatesApi.update(currentRevenueRate.id, {
+          ...formattedData,
+          propertyId: isBothAll || isBaseAll ? 0 : Number(data.propertyId) || null,
+        });
       } else {
-        await revenueRatesApi.create(formattedData);
+        const propertyIds =
+          isBothAll || isBaseAll
+            ? [0]
+            : (Array.isArray(data.propertyId) ? data.propertyId : [data.propertyId])
+                .map(Number)
+                .filter((id) => Number.isInteger(id) && id > 0);
+        const batchSize = 5;
+        for (let i = 0; i < propertyIds.length; i += batchSize) {
+          const batch = propertyIds.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map((propertyId) => revenueRatesApi.create({ ...formattedData, propertyId }))
+          );
+        }
       }
       setOpenForm(false);
       await fetchRevenueRates({ silent: true });
@@ -2406,7 +2619,7 @@ export default function RevenueRates() {
     onViewAttachments: handleViewAttachments,
     attachmentLoading,
     attachmentLoadingId,
-    canEdit: canEditCurrentMenu(),
+    canEdit: canEditRevenueRate && canEditCurrentMenu(),
     canDelete: canDeleteCurrentMenu(),
   };
 
@@ -2539,10 +2752,11 @@ export default function RevenueRates() {
       const deactiveDateRaw = row.deactiveDate ?? row.DeactiveDate ?? null;
       const rateRaw = row.rate ?? row.Rate ?? 0;
       let areaDisplay = "-";
-      if (!isPropertyDash && prop) {
-        const area = prop.area ?? prop.Area ?? "";
-        const uoM = prop.uoM ?? prop.UoM ?? "";
-        const areaStr = area ? Number(area).toLocaleString() : "";
+      if (!isPropertyDash) {
+        // Prefer live Area/UoM from RevenueRates API join over cached rental-property catalog.
+        const area = row.area ?? row.Area ?? prop?.area ?? prop?.Area ?? "";
+        const uoM = row.uoM ?? row.UoM ?? prop?.uoM ?? prop?.UoM ?? "";
+        const areaStr = area !== "" && area != null ? Number(area).toLocaleString() : "";
         const uoMStr = uoM || "";
         if (areaStr || uoMStr) areaDisplay = [areaStr, uoMStr].filter(Boolean).join("  ");
       }
@@ -2689,6 +2903,8 @@ export default function RevenueRates() {
         baseOptions={baseOptions}
         classOptions={classOptions}
         govtShareRates={govtShareRates}
+        existingRevenueRates={tableRows}
+        canEditRevenueRate={canEditRevenueRate}
         onUploadSuccess={openSuccessSB}
       />
       <Dialog

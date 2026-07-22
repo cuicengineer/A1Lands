@@ -33,9 +33,10 @@ const COMBINED_TABLE_COLUMNS = [
   { label: "Due", key: "due", width: 0.06 },
   { label: "Balance", key: "balance", width: 0.06 },
   { label: "Date", key: "date", width: 0.07 },
-  { label: "TIN-TRN", key: "tinTrn", width: 0.1 },
-  { label: "Amount", key: "amount", width: 0.07 },
-  { label: "Receipt", key: "receipt", width: 0.11 },
+  { label: "TIN-TRN", key: "tinTrn", width: 0.08 },
+  { label: "Remarks", key: "remarks", width: 0.09 },
+  { label: "Amount", key: "amount", width: 0.06 },
+  { label: "Receipt", key: "receipt", width: 0.08 },
 ];
 
 function cellText(value) {
@@ -93,6 +94,7 @@ function buildCombinedCollectionPdfRows(parent) {
         ...collectionFields,
         date: "—",
         tinTrn: "—",
+        remarks: "—",
         amount: "—",
         receipt: "—",
       },
@@ -104,6 +106,7 @@ function buildCombinedCollectionPdfRows(parent) {
     ...collectionFields,
     date: formatDisplayDate(line?.date) || cellText(line?.date),
     tinTrn: cellText(line?.tinTrn),
+    remarks: cellText(line?.remarks),
     amount: formatReceiptLineAmount(line?.amount),
     receipt: formatReceiptAttachmentLabel(line),
   }));

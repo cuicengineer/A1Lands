@@ -53,6 +53,7 @@ import Divider from "@mui/material/Divider";
 import Tooltip from "@mui/material/Tooltip";
 
 import * as XLSX from "xlsx";
+import { logExcelExport } from "services/api.auditLog.service";
 
 // Material Dashboard 2 React components
 import MDBox from "components/MDBox";
@@ -1212,6 +1213,12 @@ function DataTable({
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const fileName = exportFileName ? `${exportFileName}-${ts}.xlsx` : `Export-${ts}.xlsx`;
       XLSX.writeFile(wb, fileName);
+      logExcelExport({
+        moduleName: exportFileName || "DataTable",
+        fileName,
+        rowCount: bodyRows.length,
+        exportType: "datatable",
+      });
     } catch (e) {
       console.error("Export failed", e);
       alert("Export failed. Please try again.");

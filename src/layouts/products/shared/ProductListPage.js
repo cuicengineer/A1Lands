@@ -63,6 +63,7 @@ function renderStatusLabel(value) {
 
 export default function ProductListPage({ title, subtitle, mode, api, exportFileName }) {
   const isGood = mode === "good";
+  const useClientPagination = mode === "service";
   const normalize = isGood ? normalizeGoodRecord : normalizeServiceRecord;
 
   const [tableRows, setTableRows] = useState([]);
@@ -82,14 +83,20 @@ export default function ProductListPage({ title, subtitle, mode, api, exportFile
   const txt = (v) => renderCollectionsGridText(v);
 
   const fetchRecords = useCallback(
-    async (page = pageNumber, size = pageSize) => {
+    async (page, size) => {
       setLoading(true);
       try {
-        const response = await api.getAll(page, size);
+        const response = useClientPagination
+          ? await api.getAllUnpaged()
+          : await api.getAll(page ?? 1, size ?? 50);
         const data = Array.isArray(response) ? response : response?.data ?? [];
         setTableRows(Array.isArray(data) ? data : []);
         setTotalCount(
-          Number(response?.pagination?.totalCount ?? (Array.isArray(data) ? data.length : 0))
+          useClientPagination
+            ? Array.isArray(data)
+              ? data.length
+              : 0
+            : Number(response?.pagination?.totalCount ?? (Array.isArray(data) ? data.length : 0))
         );
       } catch (error) {
         console.error(`Error fetching ${mode} products:`, error);
@@ -99,7 +106,7 @@ export default function ProductListPage({ title, subtitle, mode, api, exportFile
         setLoading(false);
       }
     },
-    [api, mode, pageNumber, pageSize]
+    [api, mode, useClientPagination]
   );
 
   useEffect(() => {
@@ -185,7 +192,7 @@ export default function ProductListPage({ title, subtitle, mode, api, exportFile
         const flat = normalize(row);
         const recordId = flat.id;
         return {
-          sno: (pageNumber - 1) * pageSize + index + 1,
+          sno: useClientPagination ? index + 1 : (pageNumber - 1) * pageSize + index + 1,
           itemCode: flat.itemCode || "-",
           itemName: flat.itemName || "-",
           uom: formatProductUomLabel(flat.uom, uomLookup),
@@ -231,7 +238,7 @@ export default function ProductListPage({ title, subtitle, mode, api, exportFile
           ),
         };
       }),
-    [tableRows, pageNumber, pageSize, normalize, uomLookup]
+    [tableRows, pageNumber, pageSize, normalize, uomLookup, useClientPagination]
   );
 
   const displayTotal = totalCount > 0 ? totalCount : tableRows.length;
@@ -300,20 +307,25 @@ export default function ProductListPage({ title, subtitle, mode, api, exportFile
             isSorted={false}
             stickyToolbarAndHeader
             entriesPerPage={{ defaultValue: 50, entries: [10, 25, 50, 100, 500] }}
-            page={pageNumber - 1}
-            pageSize={pageSize}
-            onPageChange={(p) => setPageNumber(p + 1)}
-            onEntriesPerPageChange={(value) => {
-              setPageSize(value);
-              setPageNumber(1);
-            }}
+            pagination={useClientPagination ? { variant: "gradient", color: "info" } : undefined}
+            page={useClientPagination ? undefined : pageNumber - 1}
+            pageSize={useClientPagination ? undefined : pageSize}
+            onPageChange={useClientPagination ? undefined : (p) => setPageNumber(p + 1)}
+            onEntriesPerPageChange={
+              useClientPagination
+                ? undefined
+                : (value) => {
+                    setPageSize(value);
+                    setPageNumber(1);
+                  }
+            }
             showTotalEntries={false}
             noEndBorder
             canSearch
             exportFileName={exportFileName}
             contentFitTable
             disableHeaderMetrics
-            paginationFooter={serverPaginationFooter}
+            paginationFooter={useClientPagination ? undefined : serverPaginationFooter}
             paginationHost={paginationHost}
           />
           <WorkspaceLoadingOverlay active={loading} />

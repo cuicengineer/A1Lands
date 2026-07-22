@@ -69,6 +69,13 @@ async function update(id, data) {
   return requestWithPagination("PUT", `/api/PropertyGroup/${id}`, payload);
 }
 
+async function deactivate(id) {
+  const actionBy = await getActionBy();
+  return requestWithPagination("POST", `/api/PropertyGroup/${id}/deactivate`, {
+    ActionBy: actionBy,
+  });
+}
+
 async function remove(id) {
   const actionBy = await getActionBy();
   const payload = { Action: "Delete", ActionBy: actionBy, ActionDate: new Date().toISOString() };
@@ -123,6 +130,7 @@ const propertyGroupingApi = {
   get,
   create,
   update,
+  deactivate,
   remove,
   getByGroup,
   notGroupedProperties,

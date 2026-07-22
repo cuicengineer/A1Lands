@@ -419,20 +419,29 @@ export default function ShareDistribution() {
   const handleCreateWorkbook = useCallback(async () => {
     if (selectedCount === 0 || creatingWorkbook) return;
 
-    const selectedKeys = new Set(selectedRowIds);
-    const assignedRows = rows.filter((row) => selectedKeys.has(getShareDistributionRowKey(row)));
-    const eligibleRows = assignedRows.filter((row) => !isShareDistributionWorkbookAssigned(row));
+    // Resolve only the explicitly checked rows (never the full grid / page).
+    const rowByKey = new Map(
+      rows.map((row) => [getShareDistributionRowKey(row), row]).filter(([key]) => Boolean(key))
+    );
+    const selectedRows = [...selectedRowIds]
+      .map((key) => rowByKey.get(String(key)))
+      .filter(Boolean);
+    const eligibleRows = selectedRows.filter((row) => !isShareDistributionWorkbookAssigned(row));
 
     if (eligibleRows.length === 0) {
       setWorkbookError("Selected records already have a workbook and cannot be reassigned.");
       return;
     }
 
-    const contractIds = [
-      ...new Set(
-        eligibleRows.map((row) => getShareDistributionContractId(row)).filter((id) => id != null)
-      ),
-    ];
+    // Preserve selection order; one workbook assignment per selected contract only.
+    const contractIds = [];
+    const seenContractIds = new Set();
+    eligibleRows.forEach((row) => {
+      const contractId = getShareDistributionContractId(row);
+      if (contractId == null || seenContractIds.has(contractId)) return;
+      seenContractIds.add(contractId);
+      contractIds.push(contractId);
+    });
 
     if (contractIds.length === 0) {
       setWorkbookError("Selected rows do not have valid contract IDs.");
@@ -445,11 +454,17 @@ export default function ShareDistribution() {
       const response = await contractApi.createShareDistributionWorkbook(contractIds);
       const result = response?.data && !response?.workbookNo ? response.data : response;
       const workbookNumber = result?.workbookNo || result?.WorkbookNo || "";
+      const assignedContractIds = new Set(
+        (result?.contractIds || result?.ContractIds || contractIds).map((id) => Number(id))
+      );
 
       setLastCreatedWorkbook({
         number: workbookNumber,
-        rowCount: result?.assignedCount ?? contractIds.length,
-        caIds: eligibleRows.map((row) => row.caId).filter(Boolean),
+        rowCount: assignedContractIds.size || contractIds.length,
+        caIds: eligibleRows
+          .filter((row) => assignedContractIds.has(getShareDistributionContractId(row)))
+          .map((row) => row.caId)
+          .filter(Boolean),
       });
       setWorkbookDialogOpen(true);
       setSelectedRowIds(new Set());

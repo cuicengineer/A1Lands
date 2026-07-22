@@ -64,7 +64,8 @@ export const KPI_OVERVIEW_WIDE_BAR_DATASET_DEFAULTS = {
   barThickness: "flex",
   maxBarThickness: 1000,
   categoryPercentage: 0.66,
-  barPercentage: 1,
+  /** Vertical bar width = 25% of previous full-width (barPercentage: 1) sizing. */
+  barPercentage: 0.25,
 };
 
 export const KPI_OVERVIEW_WIDE_BAR_OPTIONS = {

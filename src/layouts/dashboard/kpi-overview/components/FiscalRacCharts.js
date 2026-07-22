@@ -398,20 +398,20 @@ const OUTSTANDING_INCOME_CLASS_COLORS = {
   hb: KPI_FISCAL_BAR_CHART_COLORS[6],
 };
 
-/** Matches KPI Analytics by fiscal year chart bar proportions. */
+/** Matches KPI Analytics by fiscal year chart bar proportions (25% of prior full width). */
 const FISCAL_SHARE_BAR_OPTIONS = {
   categoryPercentage: 0.66,
-  barPercentage: 1,
+  barPercentage: 0.25,
   barThickness: "flex",
   maxBarThickness: 1000,
 };
 
-/** Nature of Activity chart — 50% of default fiscal bar width. */
+/** Nature of Activity chart — 2× prior nature bar width (half category slot, full fiscal bar %). */
 const NATURE_ACTIVITY_BAR_OPTIONS = {
   categoryPercentage: FISCAL_SHARE_BAR_OPTIONS.categoryPercentage * 0.5,
-  barPercentage: FISCAL_SHARE_BAR_OPTIONS.barPercentage * 0.5,
+  barPercentage: FISCAL_SHARE_BAR_OPTIONS.barPercentage,
   barThickness: "flex",
-  maxBarThickness: FISCAL_SHARE_BAR_OPTIONS.maxBarThickness * 0.5,
+  maxBarThickness: FISCAL_SHARE_BAR_OPTIONS.maxBarThickness,
 };
 
 const TENURE_LABELS = {

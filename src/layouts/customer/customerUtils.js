@@ -171,6 +171,8 @@ export function buildCustomerFormState(overrides = {}) {
 
     representative: "",
 
+    titleAccount: "",
+
     bankListsId: "",
 
     iban: "",
@@ -226,6 +228,8 @@ export function normalizeCustomerRecord(row, prefixOptions = []) {
     coaId2: row.coaId2 ?? row.CoaId2 ?? "",
 
     representative: row.representative ?? row.Representative ?? "",
+
+    titleAccount: row.titleAccount ?? row.TitleAccount ?? "",
 
     bankListsId: row.bankListsId ?? row.BankListsId ?? "",
 
@@ -410,6 +414,8 @@ export function flattenCustomerForGrid(record, index, coaLabelById = {}) {
     controlAccount2: coaLabel2,
 
     representative: normalized.representative || "-",
+
+    titleAccount: normalized.titleAccount || "-",
 
     _record: normalized,
   };

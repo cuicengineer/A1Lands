@@ -39,6 +39,18 @@ function getAll(pageNumber = 1, pageSize = 50, options = {}) {
   return requestWithPagination("GET", `/api/CashAndBanks?${params.toString()}`);
 }
 
+function getAllUnpaged(options = {}) {
+  const params = new URLSearchParams();
+  if (options.parentCashAndBankId != null && options.parentCashAndBankId !== "") {
+    params.set("parentCashAndBankId", String(options.parentCashAndBankId));
+  }
+  if (options.topLevelOnly) {
+    params.set("topLevelOnly", "true");
+  }
+  const query = params.toString();
+  return requestWithPagination("GET", `/api/CashAndBanks${query ? `?${query}` : ""}`);
+}
+
 async function create(data) {
   const actionBy = await getActionBy();
   const payload = {
@@ -72,6 +84,7 @@ async function remove(id) {
 
 const cashAndBankApi = {
   getAll,
+  getAllUnpaged,
   create,
   update,
   remove,

@@ -248,29 +248,12 @@ export function formatInvoiceLabel(invoice) {
   return invoiceDate ? `${head}(${invoiceDate})` : head;
 }
 
-/** Collection entry invoice dropdown: invoice no, then Gen date, then Due date (no contract no). */
+/** Collection entry invoice dropdown: invoice no and Due date (no Gen date). */
 export function formatCollectionInvoiceDropdownLabel(invoice) {
   const invoiceNo = String(pickField(invoice, "invoiceNo", "InvoiceNo") || "").trim();
   if (!invoiceNo) return "";
   const dueDate = formatDisplayDateLong(pickField(invoice, "dueDate", "DueDate"));
-  const generationDate = formatDisplayDateLong(
-    pickField(
-      invoice,
-      "invoiceDate",
-      "InvoiceDate",
-      "periodStart",
-      "PeriodStart",
-      "createdAt",
-      "CreatedAt",
-      "Cod",
-      "cod"
-    )
-  );
-  const parts = [];
-  if (generationDate) parts.push(`Gen: ${generationDate}`);
-  if (dueDate) parts.push(`Due: ${dueDate}`);
-  if (!parts.length) return invoiceNo;
-  return `${invoiceNo} (${parts.join(", ")})`;
+  return dueDate ? `${invoiceNo} (Due: ${dueDate})` : invoiceNo;
 }
 
 export function formatTenantBusinessLabel(contract, tenant) {
@@ -403,7 +386,7 @@ export function getCollectionAgreementsForClass(contracts, classId) {
   return sourceRows.filter(isNotArchivedRecord).filter((row) => formatContractNoLabel(row));
 }
 
-/** Unlocked invoice headers available for collection entry (all contracts). */
+/** Unlocked finalized invoice headers available for collection entry (all contracts). */
 export function getCollectionInvoiceOptions(invoices, { includeInvoiceKey = "" } = {}) {
   const includeKey = String(includeInvoiceKey || "").trim();
   const byInvoiceKey = new Map();
@@ -412,6 +395,11 @@ export function getCollectionInvoiceOptions(invoices, { includeInvoiceKey = "" }
     .map(normalizeCatalogRow)
     .filter((row) => isNotDeletedRecord(row))
     .filter((row) => !pickInvoiceIsLocked(row))
+    .filter((row) => {
+      const invoiceKey = buildInvoiceKey(row);
+      if (includeKey && invoiceKey === includeKey) return true;
+      return pickInvoiceIsExplicitlyFinalized(row);
+    })
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -458,6 +446,7 @@ export function normalizeCollectionPartyOption(row, partyType = "Tenant") {
     tenantNo,
     partyType,
     coaId: getCollectionPartyReceiptCoaId(normalized, partyType),
+    coaId2: normalized.coaId2 ?? normalized.CoaId2 ?? "",
   };
 }
 
@@ -494,14 +483,29 @@ export function getCollectionTenantOptionsForAccount(
     .filter((row) => isActiveRecord(row) && isNotDeletedRecord(row))
     .filter((row) => String(row.tenantNo || "").trim())
     .filter((row) => {
-      const rowCoaId = row?.coaId;
-      const matchesAccount = rowCoaId !== "" && rowCoaId != null && Number(rowCoaId) === accountId;
+      const receiptCoaId = row?.coaId;
+      const payableCoaId = row?.coaId2 ?? row?.CoaId2;
+      const matchesAccount =
+        (receiptCoaId !== "" && receiptCoaId != null && Number(receiptCoaId) === accountId) ||
+        (payableCoaId !== "" && payableCoaId != null && Number(payableCoaId) === accountId);
       const isIncluded =
         includeTn &&
         String(row.tenantNo || "")
           .trim()
           .toLowerCase() === includeTn;
       return matchesAccount || isIncluded;
+    })
+    .map((row) => {
+      const payableCoaId = row?.coaId2 ?? row?.CoaId2;
+      if (
+        payableCoaId !== "" &&
+        payableCoaId != null &&
+        Number(payableCoaId) === accountId &&
+        Number(row.coaId) !== accountId
+      ) {
+        return { ...row, coaId: payableCoaId };
+      }
+      return row;
     })
     .sort((a, b) =>
       formatCollectionPartyDropdownLabel(a).localeCompare(formatCollectionPartyDropdownLabel(b))
@@ -608,6 +612,15 @@ export function pickInvoiceIsFinalized(row) {
   return false;
 }
 
+/** Strict finalized check for collection invoice dropdowns (full schedule catalog). */
+export function pickInvoiceIsExplicitlyFinalized(row) {
+  if (!row) return false;
+  const value = row?.IsFinalized ?? row?.isFinalized ?? row?.IsFinalize ?? row?.isFinalize;
+  if (value === true || value === 1 || value === "1") return true;
+  if (typeof value === "string" && value.trim().toLowerCase() === "true") return true;
+  return false;
+}
+
 export function pickInvoiceIsLocked(row) {
   if (!row) return false;
   const value = row?.IsLocked ?? row?.isLocked;
@@ -686,7 +699,7 @@ export function findInvoiceByKey(invoices, invoiceKey) {
   );
 }
 
-/** Unlocked invoice headers for a contract (for new collection entry). */
+/** Unlocked finalized invoice headers for a contract (for new collection entry). */
 export function getCollectionInvoicesForContract(
   invoices,
   contractRef,
@@ -703,6 +716,11 @@ export function getCollectionInvoicesForContract(
     .filter((row) => isNotDeletedRecord(row))
     .filter((row) => invoiceMatchesCollectionContract(row, contractMatch))
     .filter((row) => !pickInvoiceIsLocked(row))
+    .filter((row) => {
+      const invoiceKey = buildInvoiceKey(row);
+      if (includeKey && invoiceKey === includeKey) return true;
+      return pickInvoiceIsExplicitlyFinalized(row);
+    })
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -725,7 +743,7 @@ export function getCollectionInvoicesForContract(
   );
 }
 
-/** Unlocked invoices for any contract belonging to the tenant (when no agreement is selected). */
+/** Unlocked finalized invoices for any contract belonging to the tenant (when no agreement is selected). */
 export function getCollectionInvoicesForTenant(
   invoices,
   contracts,
@@ -750,6 +768,11 @@ export function getCollectionInvoicesForTenant(
     .filter((row) => isNotDeletedRecord(row))
     .filter((row) => !pickInvoiceIsLocked(row))
     .filter((row) => tenantContractNos.has(String(row.contractNo || "").trim()))
+    .filter((row) => {
+      const invoiceKey = buildInvoiceKey(row);
+      if (includeKey && invoiceKey === includeKey) return true;
+      return pickInvoiceIsExplicitlyFinalized(row);
+    })
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -775,11 +798,28 @@ export function getCollectionInvoicesForTenant(
 export function findTenantByContract(tenants, contract) {
   const tenantNo = resolveContractTenantNo(contract);
   if (!tenantNo) return null;
-  return (
+  const exact =
     (tenants || []).find(
       (row) => String(pickField(row, "tenantNo", "TenantNo")).trim() === tenantNo
+    ) || null;
+  if (exact) return exact;
+
+  const matchKey = normalizeTenantNoMatchKey(tenantNo);
+  if (!matchKey) return null;
+  return (
+    (tenants || []).find(
+      (row) => normalizeTenantNoMatchKey(pickField(row, "tenantNo", "TenantNo")) === matchKey
     ) || null
   );
+}
+
+function normalizeTenantNoMatchKey(value) {
+  const digits = String(value || "")
+    .trim()
+    .replace(/^T-?/i, "")
+    .replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.replace(/^0+/, "") || digits;
 }
 
 export function resolveContractTenantNo(contract) {
@@ -791,7 +831,7 @@ export function resolveContractTenantNo(contract) {
 
 export function findCoaById(coaOptions, coaId) {
   if (coaId === "" || coaId == null) return null;
-  return (coaOptions || []).find((row) => Number(row.id) === Number(coaId)) ?? null;
+  return (coaOptions || []).find((row) => Number(row?.id ?? row?.Id) === Number(coaId)) ?? null;
 }
 
 /** @deprecated Use findCoaById — kept for callers outside collections. */
@@ -808,12 +848,15 @@ export function resolveCollectionTenantAccount(contract, tenants, coaOptions) {
     ? String(pickField(tenant, "tenantNo", "TenantNo") || "").trim()
     : resolveContractTenantNo(contract);
   const coaId = tenant?.coaId ?? tenant?.CoaId ?? "";
-  const coa = findCoaById(coaOptions, coaId);
+  const coa =
+    findCoaById(coaOptions, coaId) ||
+    (coaOptions || []).find((row) => Number(row?.id ?? row?.Id) === Number(coaId)) ||
+    null;
 
   return {
     tenantNo,
     tenantBusiness: formatTenantBusinessLabel(contract, tenant),
-    coaId: coa?.id ?? coaId ?? "",
+    coaId: coa?.id ?? coa?.Id ?? coaId ?? "",
     accountLabel: formatAccountLabel(coa),
   };
 }
@@ -890,6 +933,7 @@ export function createEmptyCollectionLineItem(overrides = {}) {
     date: today,
     amount: "",
     tinTrn: "",
+    remarks: "",
     status: "Pending",
     vrNo: "",
     vrDate: "",
@@ -944,6 +988,7 @@ export function groupCollectionEntries(entries = []) {
       date: entry.date,
       amount: entry.amount,
       tinTrn: entry.tinTrn,
+      remarks: entry.remarks,
       status: entry.status,
       vrNo: entry.vrNo,
       vrDate: entry.vrDate,
@@ -1041,6 +1086,7 @@ export function flattenCollectionGroupItems(group, amounts) {
     date: item.date,
     amount: item.amount,
     tinTrn: item.tinTrn,
+    remarks: item.remarks,
     isLocalOnly: item.isLocalOnly,
     isEditing: false,
   }));
@@ -1056,6 +1102,7 @@ export function buildCollectionLinePayload(group, item, amounts) {
     amount: normalizeCollectionLineAmount(item.amount),
     date: item.date,
     tinTrn: item.tinTrn,
+    remarks: item.remarks,
     status: item.status,
     vrNo: item.vrNo,
     vrDate: item.vrDate,
@@ -1084,6 +1131,7 @@ export function createEmptyCollectionRow(overrides = {}) {
     date: today,
     amount: "",
     tinTrn: "",
+    remarks: "",
     status: "Pending",
     vrNo: "",
     vrDate: "",
@@ -1286,6 +1334,7 @@ export function normalizeCollectionEntryRow(row) {
     date: toDateInputValue(row?.collectionDate ?? row?.CollectionDate),
     amount: row?.amount ?? row?.Amount ?? "",
     tinTrn: normalizeTinTrn(row?.tinTrn ?? row?.TinTrn ?? ""),
+    remarks: String(row?.remarks ?? row?.Remarks ?? "").trim(),
     status: normalizedStatus || String(statusRaw || "").trim(),
     vrNo: pickField(row, "vrNo", "VrNo"),
     vrDate: toDateInputValue(row?.vrDate ?? row?.VrDate),
@@ -1341,6 +1390,14 @@ export function buildCollectionEntryPayload(row) {
     amount: parseAmount(row?.amount),
     TinTrn: normalizeTinTrn(row?.tinTrn).trim() || null,
     tinTrn: normalizeTinTrn(row?.tinTrn).trim() || null,
+    Remarks:
+      String(row?.remarks || "")
+        .trim()
+        .slice(0, 500) || null,
+    remarks:
+      String(row?.remarks || "")
+        .trim()
+        .slice(0, 500) || null,
     Status: status,
     status,
     VrNo: String(row?.vrNo || "").trim() || null,

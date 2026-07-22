@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { logExcelExport } from "services/api.auditLog.service";
 
 function slugFileName(title) {
   return String(title || "chart")
@@ -8,9 +9,16 @@ function slugFileName(title) {
     .slice(0, 60);
 }
 
-function downloadWorkbook(wb, title) {
+function downloadWorkbook(wb, title, rowCount = null) {
   const date = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `${slugFileName(title)}-${date}.xlsx`);
+  const fileName = `${slugFileName(title)}-${date}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  logExcelExport({
+    moduleName: title || "KPI Chart",
+    fileName,
+    rowCount,
+    exportType: "kpiChart",
+  });
 }
 
 /** Grouped / stacked bar chart (Chart.js shape: labels + datasets[]). */
@@ -29,7 +37,7 @@ export function exportGroupedBarChartDataToExcel(title, chartData) {
   const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
-  downloadWorkbook(wb, title);
+  downloadWorkbook(wb, title, rows.length);
 }
 
 /** Donut / pie chart (Chart.js shape: labels + datasets[0].data). */
@@ -49,7 +57,7 @@ export function exportDonutChartDataToExcel(title, chartData) {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
-  downloadWorkbook(wb, title);
+  downloadWorkbook(wb, title, rows.length);
 }
 
 /** Single-series bar chart (ReportsBarChart shape: labels + datasets.label + datasets.data). */
@@ -64,5 +72,5 @@ export function exportSingleSeriesBarChartToExcel(title, chart) {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
-  downloadWorkbook(wb, title);
+  downloadWorkbook(wb, title, rows.length);
 }

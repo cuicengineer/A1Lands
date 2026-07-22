@@ -25,7 +25,6 @@ import {
   formatCollectionLockDateValidationMessage,
   getCollectionAgreementsForClass,
   getCollectionInvoicesForContract,
-  getCollectionInvoicesForTenant,
   getCollectionTenantOptions,
   getMinCollectionReceiptDateAfterLock,
   isCollectedCollectionInvoiceKey,
@@ -319,7 +318,7 @@ ReceiptLineAmountCell.defaultProps = {
 };
 
 const receiptLineGridColumns =
-  "minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr) 72px 96px";
+  "minmax(120px, 0.9fr) minmax(100px, 0.85fr) minmax(140px, 1.2fr) minmax(100px, 0.75fr) 72px 96px";
 
 function ReceiptLineAttachmentCell({ line, readOnly, disabled, onSelectFile, onClearPending }) {
   const inputRef = useRef(null);
@@ -588,13 +587,12 @@ export default function CollectionEntryDialog({
 
   const invoiceOptions = useMemo(() => {
     if (!isCreateMode) return [];
+    // Invoice list is agreement-scoped; clearing agreement clears the dropdown options.
     const invoiceRows = selectedAgreement
       ? getCollectionInvoicesForContract(invoices, selectedAgreement, {
           includeInvoiceKey: draftParent.invoiceKey,
         })
-      : getCollectionInvoicesForTenant(invoices, contracts, draftParent.tenantNo, {
-          includeInvoiceKey: draftParent.invoiceKey,
-        });
+      : [];
     return invoiceRows.map((option) => {
       const key = buildInvoiceKey(option);
       const isCollected = isCollectedCollectionInvoiceKey(key, collectedInvoiceKeys);
@@ -621,10 +619,8 @@ export default function CollectionEntryDialog({
   }, [
     isCreateMode,
     invoices,
-    contracts,
     selectedAgreement,
     draftParent.invoiceKey,
-    draftParent.tenantNo,
     collectedInvoiceKeys,
   ]);
 
@@ -746,6 +742,7 @@ export default function CollectionEntryDialog({
         date: source.date,
         amount: source.amount,
         tinTrn: source.tinTrn,
+        remarks: source.remarks,
       });
       const index = prev.findIndex((line) => line.id === lineId);
       const next = [...prev];
@@ -948,6 +945,7 @@ export default function CollectionEntryDialog({
           >
             <MDBox sx={{ px: 1, py: 0.75 }}>Date</MDBox>
             <MDBox sx={{ px: 1, py: 0.75 }}>TIN-TRN</MDBox>
+            <MDBox sx={{ px: 1, py: 0.75 }}>Remarks</MDBox>
             <MDBox sx={{ px: 1, py: 0.75, textAlign: "right" }}>Amount</MDBox>
             <MDBox sx={{ px: 1, py: 0.75, textAlign: "center" }}>Receipt</MDBox>
             <MDBox sx={{ px: 1, py: 0.75, textAlign: "center" }}>Action</MDBox>
@@ -997,6 +995,35 @@ export default function CollectionEntryDialog({
                       placeholder="TIN-TRN"
                       disabled={saving}
                       inputProps={{ maxLength: TIN_TRN_MAX_LENGTH }}
+                      sx={inputSx}
+                    />
+                  )}
+                </MDBox>
+                <MDBox sx={{ p: 0.5 }}>
+                  {readOnly ? (
+                    <MDTypography
+                      variant="caption"
+                      sx={{
+                        ...readOnlySx,
+                        display: "block",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={line.remarks || undefined}
+                    >
+                      {line.remarks || "—"}
+                    </MDTypography>
+                  ) : (
+                    <MDInput
+                      value={line.remarks ?? ""}
+                      onChange={(e) => updateLine(line.id, "remarks", e.target.value)}
+                      fullWidth
+                      size="small"
+                      placeholder="Remarks"
+                      disabled={saving}
+                      inputProps={{ maxLength: 500 }}
+                      title={line.remarks || undefined}
                       sx={inputSx}
                     />
                   )}

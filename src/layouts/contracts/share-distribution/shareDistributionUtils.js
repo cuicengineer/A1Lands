@@ -202,10 +202,13 @@ export function getShareDistributionRowKey(row = {}) {
   if (row?.selectionKey != null && row.selectionKey !== "") {
     return String(row.selectionKey);
   }
-  const contractId = pickField(row, "contractId", "ContractId") ?? pickField(row, "id", "Id");
+  const contractId = getShareDistributionContractId(row);
+  if (contractId != null) {
+    return `contract-${contractId}`;
+  }
   const sn = pickField(row, "sn", "SN");
-  if (contractId != null && contractId !== "" && sn != null && sn !== "") {
-    return `${contractId}-${sn}`;
+  if (sn != null && sn !== "") {
+    return `row-${sn}`;
   }
   return String(row?.id ?? "");
 }
@@ -494,19 +497,21 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
 
   const preparedRows = sourceRows
     .map((raw, index) => {
-      const contractId = pickField(raw, "id", "Id");
+      const rawContractId = pickField(raw, "id", "Id", "contractId", "ContractId");
+      const parsedContractId = Number(rawContractId);
+      const contractId =
+        Number.isFinite(parsedContractId) && parsedContractId > 0 ? parsedContractId : null;
       const contractNo = String(pickField(raw, "contractNo", "ContractNo") || "").trim();
       const catalog =
-        (contractId != null && contractById.get(Number(contractId))) ||
+        (contractId != null && contractById.get(contractId)) ||
         (contractNo && contractByNo.get(contractNo)) ||
         null;
       const row = mergeContractRow(raw, catalog);
       const tenant = findTenant(tenants, row);
       const sn = pickField(raw, "sn", "SN") || index + 1;
+      // Stable unique key per contract so checkbox selection matches workbook assignment grain.
       const selectionKey =
-        contractId != null && contractId !== ""
-          ? `${contractId}-${sn}`
-          : `${contractNo || "row"}-${index}`;
+        contractId != null ? `contract-${contractId}` : `${contractNo || "row"}-${index}`;
 
       const caArea1 = pickField(row, "vaArea", "VaArea", "groupArea", "GroupArea");
       const caArea2 = pickField(
@@ -639,5 +644,18 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       __sortReceiptDate,
     }));
 
-  return finalizeShareDistributionRows(preparedRows);
+  // One grid row per contract — prevents Create Workbook from appearing to bind
+  // unselected sibling rows that shared the same ContractId.
+  const uniqueByContract = [];
+  const seenContractIds = new Set();
+  preparedRows.forEach((row) => {
+    const contractId = getShareDistributionContractId(row);
+    if (contractId != null) {
+      if (seenContractIds.has(contractId)) return;
+      seenContractIds.add(contractId);
+    }
+    uniqueByContract.push(row);
+  });
+
+  return finalizeShareDistributionRows(uniqueByContract);
 }

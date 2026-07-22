@@ -114,6 +114,31 @@ function NoticeRichTextEditor({ value, onChange, disabled, maxPlainLength }) {
             </IconButton>
           </span>
         </Tooltip>
+        <Tooltip title="Align left">
+          <span>
+            <IconButton size="small" disabled={disabled} onClick={() => runCommand("justifyLeft")}>
+              <Icon fontSize="small">format_align_left</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Align center">
+          <span>
+            <IconButton
+              size="small"
+              disabled={disabled}
+              onClick={() => runCommand("justifyCenter")}
+            >
+              <Icon fontSize="small">format_align_center</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Align right">
+          <span>
+            <IconButton size="small" disabled={disabled} onClick={() => runCommand("justifyRight")}>
+              <Icon fontSize="small">format_align_right</Icon>
+            </IconButton>
+          </span>
+        </Tooltip>
         <Tooltip title="Text color">
           <span>
             <MDBox display="inline-flex" alignItems="center" ml={0.5}>
@@ -191,6 +216,7 @@ function NoticeRichTextEditor({ value, onChange, disabled, maxPlainLength }) {
           py: 1.25,
           fontSize: "0.95rem",
           lineHeight: 1.5,
+          textAlign: "left",
           outline: "none",
           bgcolor: disabled ? "grey.50" : "background.paper",
           "&:focus": {

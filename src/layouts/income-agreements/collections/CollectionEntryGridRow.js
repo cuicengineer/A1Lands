@@ -40,9 +40,7 @@ import {
   formatDisplayDate,
   formatTenantBusinessLabel,
   getCollectionAgreementsForClass,
-  getCollectionInvoiceOptions,
   getCollectionInvoicesForContract,
-  getCollectionInvoicesForTenant,
   getCollectionTenantOptions,
   getCollectionTenantOptionsForAccount,
   isCollectionRowLockedByVrDate,
@@ -92,7 +90,7 @@ GridSelect.defaultProps = {
   sx: undefined,
 };
 
-function ReadOnlyCell({ value, align = "left" }) {
+function ReadOnlyCell({ value, align = "left", showFull = false }) {
   return (
     <MDTypography
       variant="caption"
@@ -102,8 +100,8 @@ function ReadOnlyCell({ value, align = "left" }) {
         width: "100%",
         textAlign: align,
         whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
+        overflow: showFull ? "visible" : "hidden",
+        textOverflow: showFull ? "clip" : "ellipsis",
         fontVariantNumeric: align === "right" ? "tabular-nums" : undefined,
         color: `${readOnlySx.color} !important`,
       }}
@@ -116,6 +114,12 @@ function ReadOnlyCell({ value, align = "left" }) {
 ReadOnlyCell.propTypes = {
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   align: PropTypes.string,
+  showFull: PropTypes.bool,
+};
+
+ReadOnlyCell.defaultProps = {
+  align: "left",
+  showFull: false,
 };
 
 function GridCell({ align = "left", compact = false, bodyCellSx, sx, children }) {
@@ -344,15 +348,12 @@ function CollectionEntryGridRow({
             (item) => Number(item.id) === Number(enriched.contractId)
           )
         : null);
+    // Invoice list is agreement-scoped; clearing agreement clears the dropdown options.
     const invoiceRows = contract
       ? getCollectionInvoicesForContract(invoices, contract, {
           includeInvoiceKey: enriched.invoiceKey,
         })
-      : enriched.tenantNo
-      ? getCollectionInvoicesForTenant(invoices, contracts, enriched.tenantNo, {
-          includeInvoiceKey: enriched.invoiceKey,
-        })
-      : getCollectionInvoiceOptions(invoices, { includeInvoiceKey: enriched.invoiceKey });
+      : [];
     return invoiceRows.map((option) => {
       const key = buildInvoiceKey(option);
       return (
@@ -538,11 +539,7 @@ function CollectionEntryGridRow({
         : null);
     const invoiceRows = contract
       ? getCollectionInvoicesForContract(invoices, contract, { includeInvoiceKey: invoiceKey })
-      : enriched.tenantNo
-      ? getCollectionInvoicesForTenant(invoices, contracts, enriched.tenantNo, {
-          includeInvoiceKey: invoiceKey,
-        })
-      : getCollectionInvoiceOptions(invoices, { includeInvoiceKey: invoiceKey });
+      : [];
     const selectedInvoice =
       invoiceRows.find((item) => buildInvoiceKey(item) === String(invoiceKey || "").trim()) || null;
     const receivable = selectedInvoice ? computeInvoiceDue(selectedInvoice) : 0;
@@ -724,8 +721,9 @@ function CollectionEntryGridRow({
         hiddenColumnKeys={hiddenColumnKeys}
         align="right"
         bodyCellSx={bodyCellSx}
+        sx={{ overflow: "visible" }}
       >
-        <ReadOnlyCell value={formatAmount(enriched.receivable)} align="right" />
+        <ReadOnlyCell value={formatAmount(enriched.receivable)} align="right" showFull />
       </Col>
 
       <Col
@@ -733,8 +731,9 @@ function CollectionEntryGridRow({
         hiddenColumnKeys={hiddenColumnKeys}
         align="right"
         bodyCellSx={bodyCellSx}
+        sx={{ overflow: "visible" }}
       >
-        <ReadOnlyCell value={formatAmount(enriched.balance)} align="right" />
+        <ReadOnlyCell value={formatAmount(enriched.balance)} align="right" showFull />
       </Col>
 
       <Col
@@ -743,6 +742,7 @@ function CollectionEntryGridRow({
         align="right"
         compact={isRowEditing}
         bodyCellSx={bodyCellSx}
+        sx={{ overflow: "visible" }}
       >
         {isRowEditing ? (
           <MDInput
@@ -757,7 +757,7 @@ function CollectionEntryGridRow({
             sx={inputSx}
           />
         ) : (
-          <ReadOnlyCell value={formatAmount(enriched.amount)} align="right" />
+          <ReadOnlyCell value={formatAmount(enriched.amount)} align="right" showFull />
         )}
       </Col>
 
@@ -781,6 +781,30 @@ function CollectionEntryGridRow({
           />
         ) : (
           <ReadOnlyCell value={enriched.tinTrn} />
+        )}
+      </Col>
+
+      <Col
+        columnKey="remarks"
+        hiddenColumnKeys={hiddenColumnKeys}
+        align="left"
+        compact={isRowEditing}
+        bodyCellSx={bodyCellSx}
+      >
+        {isRowEditing ? (
+          <MDInput
+            value={enriched.remarks ?? ""}
+            onChange={(e) => patch({ remarks: e.target.value })}
+            fullWidth
+            size="small"
+            placeholder="Remarks"
+            disabled={readOnly}
+            inputProps={{ maxLength: 500 }}
+            title={enriched.remarks || undefined}
+            sx={inputSx}
+          />
+        ) : (
+          <ReadOnlyCell value={enriched.remarks} />
         )}
       </Col>
 

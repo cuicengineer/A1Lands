@@ -75,7 +75,7 @@ import CompactMultiSelectFilter from "components/CompactMultiSelectFilter";
 import { useMaterialUIController } from "context";
 import PropTypes from "prop-types";
 import jsPDF from "jspdf";
-import { addMonths, format, parseISO, isValid } from "date-fns";
+import { addMonths, addDays, format, parseISO, isValid } from "date-fns";
 import {
   getBaseDropdownLabel,
   hasContractsKpiGridFilters,
@@ -91,6 +91,7 @@ import {
   getAgreementProvSaveErrorMessage,
   persistAllInvoiceScheduleLines,
   resolveAgreementProvTenantAccHead,
+  resolveItemWithCodeAccHead,
   withInvoiceScheduleAccHead,
 } from "layouts/contracts/agreement-prov-invoice/agreement-prov-invoice";
 import chartOfAccountsApi from "services/api.chartofaccounts.service";
@@ -99,18 +100,23 @@ import {
   formatAccountLabel,
   openAppRouteInNewTab,
 } from "layouts/income-agreements/collections/collectionsUtils";
-import { fetchReceiptProductOptions } from "layouts/accounts/receipts/receiptUtils";
 import {
-  getPartyCoaDropdownLabel,
-  isTenantReceiptCoaOption,
-  normalizePartyCoaOption,
-} from "utils/partyCoaUtils";
+  fetchReceiptProductOptions,
+  resolveReceiptProductAccountOption,
+} from "layouts/accounts/receipts/receiptUtils";
+import { getPartyCoaDropdownLabel, normalizePartyCoaOption } from "utils/partyCoaUtils";
 import {
   buildContractNo,
   isValidContractNumber,
   parseContractNumberFromContractNo,
   sanitizeContractNumberInput,
 } from "./contractNoId";
+import {
+  fetchContractAnnotationsForPdf,
+  renderContractAgreementPdfFirstPage,
+} from "./contractAgreementPdf";
+import { addContractPdfWatermarks } from "./contractPdfWatermark";
+import { appendProvisionalAccountStatementPdfPage } from "./contractProvAccountStatementPdf";
 
 const AHQ_APPROVAL_CHECKBOX_SX = {
   p: 0.25,
@@ -284,11 +290,11 @@ function isRiseMonthsIntervalWithinContractDuration(
 const CONTRACT_PAYMENT_TERM_OPTIONS = [
   { value: 1, label: "Monthly" },
   { value: 3, label: "Quarterly" },
-  { value: 6, label: "BiAnnual" },
+  { value: 6, label: "Sixmonthly" },
   { value: 12, label: "Annual" },
 ];
 
-const CONTRACT_SD_RATE_MONTH_VALUES = [1, 2, 3, 4, 6, 9, 12];
+const CONTRACT_SD_RATE_MONTH_VALUES = [0, 1, 2, 3, 4, 6, 9, 12];
 
 const CONTRACT_PAYMENT_TIMING_OPTIONS = ["Start", "End"];
 
@@ -535,8 +541,13 @@ function ContractsForm({
         classId: initialData.ClassId || "",
         grpId: initialData.GrpId || "",
         tenantNo: initialData.TenantNo || "",
-        businessName: initialData.BusinessName || "",
-        natureOfBusiness: initialData.NatureOfBusiness || "",
+        businessName: initialData.BusinessName || initialData.businessName || "",
+        natureOfBusiness:
+          initialData.NatureOfBusiness ||
+          initialData.natureOfBusiness ||
+          initialData.Nature ||
+          initialData.nature ||
+          "",
         contractStartDate: initialData.ContractStartDate
           ? initialData.ContractStartDate.split("T")[0]
           : "",
@@ -557,7 +568,13 @@ function ContractsForm({
         term: initialData.Term || "",
         increaseRatePercent: initialData.IncreaseRatePercent || "",
         increaseIntervalMonths: initialData.IncreaseIntervalMonths || "",
-        sdRateMonths: initialData.SDRateMonths || "",
+        sdRateMonths:
+          initialData.SDRateMonths === 0 ||
+          initialData.SDRateMonths === "0" ||
+          initialData.sdRateMonths === 0 ||
+          initialData.sdRateMonths === "0"
+            ? 0
+            : initialData.SDRateMonths ?? initialData.sdRateMonths ?? "",
         paymentTiming: getContractPaymentTimingFromRow(initialData),
         dpc:
           initialData.Dpc !== undefined && initialData.Dpc !== null
@@ -784,16 +801,22 @@ function ContractsForm({
   // Auto-calculate securityDepositAmount when sdRateMonths or initialRentPM changes (rounded to integer)
   useEffect(() => {
     if (shouldUseStoredCalculatedValues) return;
-    const sdRate = Number(form.sdRateMonths);
+    const sdRateRaw = form.sdRateMonths;
+    const sdRateMissing =
+      sdRateRaw === "" ||
+      sdRateRaw === null ||
+      sdRateRaw === undefined ||
+      Number.isNaN(Number(sdRateRaw));
+    const sdRate = Number(sdRateRaw);
     const initialRent = Number(form.initialRentPM);
 
-    if (sdRate && initialRent && !isNaN(sdRate) && !isNaN(initialRent)) {
+    if (!sdRateMissing && initialRent && !Number.isNaN(initialRent)) {
       const calculated = Math.round(sdRate * initialRent);
       setForm((prev) => ({
         ...prev,
         securityDepositAmount: String(calculated),
       }));
-    } else if ((!sdRate || isNaN(sdRate)) && (!initialRent || isNaN(initialRent))) {
+    } else if (sdRateMissing && (!initialRent || Number.isNaN(initialRent))) {
       setForm((prev) => ({
         ...prev,
         securityDepositAmount: "",
@@ -1137,7 +1160,14 @@ function ContractsForm({
     if (!form.initialRentPM) newErrors.initialRentPM = "Initial Rent PM is required";
     // initialRentPA is auto-calculated, no validation needed
     if (!form.paymentTermMonths) newErrors.paymentTermMonths = "Payment Term is required";
-    if (!form.sdRateMonths) newErrors.sdRateMonths = "SD Rate is required";
+    if (
+      form.sdRateMonths === "" ||
+      form.sdRateMonths === null ||
+      form.sdRateMonths === undefined ||
+      Number.isNaN(Number(form.sdRateMonths))
+    ) {
+      newErrors.sdRateMonths = "SD Rate is required";
+    }
     if (!form.paymentTiming) newErrors.paymentTiming = "Payment Timing is required";
     if (form.remarks && form.remarks.length > 500) {
       newErrors.remarks = "Remarks cannot exceed 500 characters";
@@ -1207,15 +1237,36 @@ function ContractsForm({
           : form.increaseIntervalMonths
           ? Number(form.increaseIntervalMonths)
           : null,
-      sdRateMonths: form.sdRateMonths ? Number(form.sdRateMonths) : null,
+      sdRateMonths:
+        form.sdRateMonths === "" || form.sdRateMonths === null || form.sdRateMonths === undefined
+          ? null
+          : Number(form.sdRateMonths),
+      SDRateMonths:
+        form.sdRateMonths === "" || form.sdRateMonths === null || form.sdRateMonths === undefined
+          ? null
+          : Number(form.sdRateMonths),
       paymentTiming: form.paymentTiming || null,
       PaymentTiming: form.paymentTiming || null,
       dpc: form.dpc != null && String(form.dpc).trim() !== "" ? Number(form.dpc) : null,
       signatory: form.signatory?.trim() || null,
-      securityDepositAmount: form.securityDepositAmount ? Number(form.securityDepositAmount) : null,
-      rentalValue: form.rentalValue ? Number(form.rentalValue) : null,
-      govtShare: form.govtShare ? Number(form.govtShare) : null,
-      pafShare: form.pafShare ? Number(form.pafShare) : null,
+      securityDepositAmount:
+        form.securityDepositAmount === "" ||
+        form.securityDepositAmount === null ||
+        form.securityDepositAmount === undefined
+          ? null
+          : Number(form.securityDepositAmount),
+      rentalValue:
+        form.rentalValue === "" || form.rentalValue === null || form.rentalValue === undefined
+          ? null
+          : Number(form.rentalValue),
+      govtShare:
+        form.govtShare === "" || form.govtShare === null || form.govtShare === undefined
+          ? null
+          : Number(form.govtShare),
+      pafShare:
+        form.pafShare === "" || form.pafShare === null || form.pafShare === undefined
+          ? null
+          : Number(form.pafShare),
       feasible:
         shouldUseStoredCalculatedValues && storedFeasibleValue
           ? storedFeasibleValue
@@ -1903,7 +1954,6 @@ function ContractsForm({
     setEditingRiseTermIndex(null);
   };
 
-  const increaseIntervalOptions = [1, 2, 3, 4, 6, 12, 15, 24];
   const hasRentInTerm = String(form.term || "")
     .toLowerCase()
     .includes("rent");
@@ -1915,12 +1965,42 @@ function ContractsForm({
       v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
     const isDeleted = (v) =>
       v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+    const getNatureName = (item) =>
+      String(item?.name ?? item?.Name ?? item?.natureName ?? item?.NatureName ?? "").trim();
 
-    return (natures || []).filter((item) => {
-      const name = item?.name ?? item?.Name ?? item?.natureName ?? item?.NatureName ?? "";
-      return Boolean(String(name).trim()) && isActive(item?.status) && !isDeleted(item?.isDeleted);
+    const active = (natures || []).filter((item) => {
+      const name = getNatureName(item);
+      const status = item?.status ?? item?.Status;
+      const deleted = item?.isDeleted ?? item?.IsDeleted;
+      return Boolean(name) && isActive(status) && !isDeleted(deleted);
     });
-  }, [natures]);
+
+    // Keep the saved contract value selectable even if the nature is inactive/missing
+    // from the active list (otherwise MUI Select renders blank in edit mode).
+    const current = String(form.natureOfBusiness || "").trim();
+    if (
+      current &&
+      !active.some((item) => getNatureName(item).toLowerCase() === current.toLowerCase())
+    ) {
+      return [{ id: `saved:${current}`, name: current, Name: current, status: 1 }, ...active];
+    }
+    return active;
+  }, [natures, form.natureOfBusiness]);
+
+  const natureOfBusinessSelectValue = useMemo(() => {
+    const current = String(form.natureOfBusiness || "").trim();
+    if (!current) return "";
+    const match = activeNatureOptions.find((item) => {
+      const name = String(
+        item?.name ?? item?.Name ?? item?.natureName ?? item?.NatureName ?? ""
+      ).trim();
+      return name.toLowerCase() === current.toLowerCase();
+    });
+    if (!match) return current;
+    return String(
+      match?.name ?? match?.Name ?? match?.natureName ?? match?.NatureName ?? current
+    ).trim();
+  }, [form.natureOfBusiness, activeNatureOptions]);
 
   // Shared compact styling to keep all inputs/lookups consistent and simple
   const labelSx = { fontSize: "1rem" };
@@ -2272,7 +2352,7 @@ function ContractsForm({
                 </InputLabel>
                 <SearchableSelect
                   labelId="nature-of-business-label"
-                  value={form.natureOfBusiness || ""}
+                  value={natureOfBusinessSelectValue}
                   label="Nature of Business"
                   onChange={(e) => handleChange("natureOfBusiness", e.target.value)}
                   sx={selectSx}
@@ -2534,13 +2614,18 @@ function ContractsForm({
                 <SearchableSelect
                   labelId="sd-rate-label"
                   value={
-                    CONTRACT_SD_RATE_MONTH_VALUES.includes(Number(form.sdRateMonths))
+                    form.sdRateMonths === "" ||
+                    form.sdRateMonths === null ||
+                    form.sdRateMonths === undefined
+                      ? ""
+                      : CONTRACT_SD_RATE_MONTH_VALUES.includes(Number(form.sdRateMonths))
                       ? Number(form.sdRateMonths)
                       : ""
                   }
                   label="SD Rate"
                   onChange={(e) => handleChange("sdRateMonths", e.target.value)}
                   sx={selectSx}
+                  displayEmpty
                 >
                   {CONTRACT_SD_RATE_MONTH_VALUES.map((n) => (
                     <MenuItem key={n} value={n} sx={menuItemSx}>
@@ -2748,9 +2833,9 @@ function ContractsForm({
                         onChange={(e) => handleChange("increaseIntervalMonths", e.target.value)}
                         sx={selectSx}
                       >
-                        {increaseIntervalOptions.map((option) => (
-                          <MenuItem key={option} value={option} sx={menuItemSx}>
-                            {option}
+                        {CONTRACT_PAYMENT_TERM_OPTIONS.map((option) => (
+                          <MenuItem key={option.value} value={option.value} sx={menuItemSx}>
+                            {option.label}
                           </MenuItem>
                         ))}
                       </SearchableSelect>
@@ -2950,7 +3035,10 @@ function ContractsForm({
                     <MDTypography variant="h6" fontWeight="bold">
                       {displayGroupRate || 0}
                     </MDTypography>
-                    <MDTypography variant="caption" color="text">
+                    <MDTypography
+                      variant="caption"
+                      color={initialData && !isClone ? "text" : "error"}
+                    >
                       {initialData && !isClone
                         ? "Stored value from this contract"
                         : "From selected property group"}
@@ -3789,9 +3877,20 @@ function ContractsForm({
         maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 1,
+          }}
+        >
           <MDTypography variant="h5" fontWeight="medium">
             {editingRiseTermIndex !== null ? "Edit Rise Term" : "Add Rise Term"}
+          </MDTypography>
+          <MDTypography variant="body2" color="text" fontWeight="medium">
+            Note: Rise Term from COD: {toDisplayDate(form.commercialOperationDate) || "—"}
           </MDTypography>
         </DialogTitle>
         <DialogContent>
@@ -3799,12 +3898,12 @@ function ContractsForm({
             <Grid item xs={12} sm={4}>
               <FormControl size="small" fullWidth error={!!riseTermErrors.monthsInterval}>
                 <InputLabel id="months-interval-label" sx={labelSx}>
-                  Months Interval
+                  Interval
                 </InputLabel>
                 <SearchableSelect
                   labelId="months-interval-label"
                   value={riseTermForm.monthsInterval || ""}
-                  label="Months Interval"
+                  label="Interval"
                   onChange={(e) => handleRiseTermChange("monthsInterval", e.target.value)}
                   sx={selectSx}
                 >
@@ -3826,7 +3925,7 @@ function ContractsForm({
                           ...(disabled ? { opacity: 0.45, color: "text.disabled" } : {}),
                         }}
                       >
-                        {value}
+                        {value} Months
                       </MenuItem>
                     );
                   })}
@@ -4494,7 +4593,8 @@ function computeAgreementInvoicePeriodEnd(periodStartYyyyMmDd, paymentTermMonths
   if (!months) return "";
   const parsedStart = parseISO(start);
   if (!isValid(parsedStart)) return "";
-  return format(addMonths(parsedStart, months), "yyyy-MM-dd");
+  // Inclusive period: 01-Jul-2024 + 1 month => 31-Jul-2024 (not 01-Aug-2024).
+  return format(addDays(addMonths(parsedStart, months), -1), "yyyy-MM-dd");
 }
 
 const CONTRACT_SCH_MONTH_SHORT = [
@@ -4650,6 +4750,16 @@ function isInvoiceRowAllowedByLockDateConstraint(invoiceRow, lockDateYyyyMmDd) {
   return invTs > lockTs;
 }
 
+/** Undo finalize blocked while any amount has been received against the invoice. */
+function pickScheduleAmountReceived(invoiceRow) {
+  const n = Number(pickSchField(invoiceRow, "AmountReceived", "amountReceived") || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isInvoiceRowBlockedFromUndoByAmountReceived(invoiceRow) {
+  return pickScheduleAmountReceived(invoiceRow) > 0;
+}
+
 function buildContractInvoiceDraftRow(templateRow, contractRow, allRows) {
   const template = templateRow || contractRow || {};
   const invoiceNo = generateNextContractInvoiceNo(allRows);
@@ -4787,13 +4897,34 @@ function hasDuplicateInvoicePeriod(rows, periodStart, periodEnd, currentInvoiceN
 
 function assignContractInvoiceFinalizeKeys(rows) {
   const seen = new Map();
-  return (rows || []).map((row, index) => {
+  // Collapse schedule JOIN duplicates (same ContractNo + InvoiceNo) before keying.
+  const uniqueRows = dedupeContractInvoiceScheduleRowsByInvoice(rows);
+  return uniqueRows.map((row, index) => {
     let key = buildContractInvoiceFinalizeRowKey(row, index);
     const count = seen.get(key) ?? 0;
     if (count > 0) key = `${key}#${count}`;
     seen.set(buildContractInvoiceFinalizeRowKey(row, index), count + 1);
     return { ...row, __finalizeKey: key };
   });
+}
+
+/** One grid row per ContractNo + InvoiceNo (guards against schedule JOIN fan-out). */
+function dedupeContractInvoiceScheduleRowsByInvoice(rows = []) {
+  const seen = new Set();
+  const output = [];
+  (rows || []).forEach((row) => {
+    const contractNo = String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+    const invoiceNo = String(row?.InvoiceNo ?? row?.invoiceNo ?? "").trim();
+    if (!contractNo || !invoiceNo) {
+      output.push(row);
+      return;
+    }
+    const key = `${contractNo}|${invoiceNo}`.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(row);
+  });
+  return output;
 }
 
 function pickSchField(sch, pascal, camel) {
@@ -4850,7 +4981,15 @@ function buildFinalizeInvoiceSchedulePayload(contractRow, sch) {
   const invoiceNo = str("InvoiceNo", "invoiceNo");
   const contractId = pickNum(sch, "ContractId", "contractId", pickNum(cr, "Id", "id", null));
   const periodStart = pickSchField(sch, "PeriodStart", "periodStart") || null;
-  const periodEnd = pickSchField(sch, "PeriodEnd", "periodEnd") || null;
+  const paymentTermMonths = pickNum(
+    sch,
+    "PaymentTermMonths",
+    "paymentTermMonths",
+    cr?.PaymentTermMonths ?? cr?.paymentTermMonths
+  );
+  const storedPeriodEnd = pickSchField(sch, "PeriodEnd", "periodEnd") || null;
+  const correctedPeriodEnd =
+    computeAgreementInvoicePeriodEnd(periodStart, paymentTermMonths) || storedPeriodEnd;
   const totalRent = pickNum(sch, "TotalRent", "totalRent", pickNum(sch, "Total", "total", null));
   const amountReceivable = pickNum(sch, "AmountReceivable", "amountReceivable", totalRent);
   const amountPending = pickNum(sch, "AmountPending", "amountPending", amountReceivable);
@@ -4874,7 +5013,7 @@ function buildFinalizeInvoiceSchedulePayload(contractRow, sch) {
       null,
     InvoiceNo: invoiceNo,
     PeriodStart: periodStart || null,
-    PeriodEnd: periodEnd || null,
+    PeriodEnd: correctedPeriodEnd || null,
     DueDate: pickSchField(sch, "DueDate", "dueDate") || null,
     CalculatedRentPM: pickNum(sch, "CalculatedRentPM", "calculatedRentPM", null),
     Months: pickNum(sch, "Months", "months", null),
@@ -4897,12 +5036,7 @@ function buildFinalizeInvoiceSchedulePayload(contractRow, sch) {
       "initialRentPM",
       cr?.InitialRentPM ?? cr?.initialRentPM
     ),
-    PaymentTermMonths: pickNum(
-      sch,
-      "PaymentTermMonths",
-      "paymentTermMonths",
-      cr?.PaymentTermMonths ?? cr?.paymentTermMonths
-    ),
+    PaymentTermMonths: paymentTermMonths,
     RiseTermType: str("RiseTermType", "riseTermType"),
     RiseTerm: str("RiseTerm", "riseTerm"),
     RiseRate: pickNum(sch, "RiseRate", "riseRate", cr?.RiseRate ?? cr?.riseRate),
@@ -4939,51 +5073,27 @@ async function fetchAgreementProvFinalizeProductOptions() {
       return {
         value: itemCode,
         label,
+        saleAccountRef: row.saleAccountRef,
+        saleAccountDisplay: row.saleAccountDisplay,
       };
     })
     .filter(Boolean);
 }
 
-function buildAgreementProvFinalizeAccountOptions(coaRows) {
-  return (coaRows || [])
-    .map(normalizePartyCoaOption)
-    .filter(isTenantReceiptCoaOption)
-    .map((option) => ({
-      value: formatAccountLabel(option),
-      label: getPartyCoaDropdownLabel(option),
-      id: option.id,
-    }))
-    .filter((option) => option.value)
-    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+function resolveFinalizeItemWithCodeAccHead(productOption, accountOptions = []) {
+  const fromDisplay = resolveItemWithCodeAccHead(productOption);
+  if (fromDisplay) return fromDisplay;
+  const resolved = resolveReceiptProductAccountOption(productOption, accountOptions);
+  return String(resolved?.label || resolved?.value || "").trim();
 }
 
-/** Ensure the tenant-bound control account is present and used as the finalize Account value. */
-function resolveAgreementProvFinalizeAccountBinding(contractRow, tenants, coaRows) {
-  const coaOptions = (coaRows || []).map(normalizePartyCoaOption);
-  const accountOptions = buildAgreementProvFinalizeAccountOptions(coaRows);
-  const defaultAccHead = resolveAgreementProvTenantAccHead(contractRow, tenants, coaRows);
-  if (!defaultAccHead) {
-    return { accountOptions, defaultAccHead: "" };
-  }
-
-  const hasDefault = accountOptions.some((option) => option.value === defaultAccHead);
-  if (hasDefault) {
-    return { accountOptions, defaultAccHead };
-  }
-
-  const matched =
-    coaOptions.find((option) => formatAccountLabel(option) === defaultAccHead) || null;
-  return {
-    accountOptions: [
-      {
-        value: defaultAccHead,
-        label: matched ? getPartyCoaDropdownLabel(matched) : defaultAccHead,
-        id: matched?.id ?? defaultAccHead,
-      },
-      ...accountOptions,
-    ],
-    defaultAccHead,
-  };
+function unwrapTenantList(response) {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (Array.isArray(response?.items)) return response.items;
+  if (Array.isArray(response?.Items)) return response.Items;
+  return [];
 }
 
 function withInvoiceScheduleItemWithCode(payload, itemWithCode) {
@@ -5047,7 +5157,6 @@ function AgreementProvFinalizeOptionsDialog({
   onClose,
   onConfirm,
   busy,
-  defaultAccHead,
   accountOptions,
   productOptions,
   loadingOptions,
@@ -5060,10 +5169,31 @@ function AgreementProvFinalizeOptionsDialog({
   useEffect(() => {
     if (!open) return;
     setItemWithCode("");
-    setAccHead(String(defaultAccHead || "").trim());
+    setAccHead("");
     setItemError("");
     setAccountError("");
-  }, [open, defaultAccHead]);
+  }, [open]);
+
+  const applyItemWithCode = (nextItem) => {
+    const itemValue = String(nextItem || "").trim();
+    setItemWithCode(itemValue);
+    if (itemError) setItemError("");
+    if (!itemValue) {
+      setAccHead("");
+      if (accountError) setAccountError("");
+      return;
+    }
+    const matched =
+      (productOptions || []).find(
+        (option) =>
+          String(option?.value || "")
+            .trim()
+            .toUpperCase() === itemValue.toUpperCase()
+      ) || null;
+    const nextAccHead = resolveFinalizeItemWithCodeAccHead(matched, accountOptions);
+    setAccHead(nextAccHead);
+    if (nextAccHead && accountError) setAccountError("");
+  };
 
   const handleConfirm = () => {
     const nextItem = String(itemWithCode || "").trim();
@@ -5071,7 +5201,7 @@ function AgreementProvFinalizeOptionsDialog({
     const nextItemError = nextItem ? "" : "Select Item with Code.";
     const nextAccountError = nextAccount
       ? ""
-      : "Tenant control account is required. Bind a control account on the tenant.";
+      : "Item with Code Account is required. Link a Sale Account on the selected item.";
     setItemError(nextItemError);
     setAccountError(nextAccountError);
     if (nextItemError || nextAccountError) return;
@@ -5098,10 +5228,7 @@ function AgreementProvFinalizeOptionsDialog({
                 labelId="agreement-prov-finalize-item-label"
                 label="Item with Code"
                 value={itemWithCode}
-                onChange={(e) => {
-                  setItemWithCode(e.target.value);
-                  if (itemError) setItemError("");
-                }}
+                onChange={(e) => applyItemWithCode(e.target.value)}
                 disabled={busy}
               >
                 <MenuItem value="">
@@ -5123,22 +5250,42 @@ function AgreementProvFinalizeOptionsDialog({
                 value={accHead}
                 onChange={() => {}}
                 disabled
+                sx={{
+                  "& .MuiSelect-select": {
+                    color: "#000000",
+                    fontWeight: 700,
+                    WebkitTextFillColor: "#000000",
+                  },
+                  "&.Mui-disabled .MuiSelect-select": {
+                    color: "#000000",
+                    fontWeight: 700,
+                    WebkitTextFillColor: "#000000",
+                    opacity: 1,
+                  },
+                  "&.Mui-disabled": {
+                    opacity: 1,
+                  },
+                }}
               >
                 {!accHead ? (
                   <MenuItem value="">
-                    <em>No tenant control account</em>
+                    <em>No Item with Code Account</em>
                   </MenuItem>
-                ) : null}
-                {(accountOptions || []).map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
+                ) : (
+                  <MenuItem value={accHead}>{accHead}</MenuItem>
+                )}
+                {(accountOptions || [])
+                  .filter((option) => option.value && option.value !== accHead)
+                  .map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
               </SearchableSelect>
               {accountError ? (
                 <FormHelperText>{accountError}</FormHelperText>
               ) : (
-                <FormHelperText>Bound to the tenant control account (read-only)</FormHelperText>
+                <FormHelperText>Bound to Item with Code Account</FormHelperText>
               )}
             </FormControl>
           </MDBox>
@@ -5166,7 +5313,6 @@ AgreementProvFinalizeOptionsDialog.propTypes = {
   onClose: PropTypes.func.isRequired,
   onConfirm: PropTypes.func.isRequired,
   busy: PropTypes.bool,
-  defaultAccHead: PropTypes.string,
   accountOptions: PropTypes.arrayOf(PropTypes.object),
   productOptions: PropTypes.arrayOf(PropTypes.object),
   loadingOptions: PropTypes.bool,
@@ -5174,7 +5320,6 @@ AgreementProvFinalizeOptionsDialog.propTypes = {
 
 AgreementProvFinalizeOptionsDialog.defaultProps = {
   busy: false,
-  defaultAccHead: "",
   accountOptions: [],
   productOptions: [],
   loadingOptions: false,
@@ -5477,7 +5622,12 @@ function ContractInvoiceFinalizeGrid({
     if (!selectable) return [];
     if (undoSelectable) {
       return filteredRows
-        .filter((r) => pickScheduleRowIsFinalize(r) && !r?.__isDraftNewInvoice)
+        .filter(
+          (r) =>
+            pickScheduleRowIsFinalize(r) &&
+            !r?.__isDraftNewInvoice &&
+            !isInvoiceRowBlockedFromUndoByAmountReceived(r)
+        )
         .map(getContractInvoiceFinalizeRowKey)
         .filter(Boolean);
     }
@@ -5776,11 +5926,14 @@ function ContractInvoiceFinalizeGrid({
                   !isFinalized &&
                   Boolean(allowedSelectionKeySet) &&
                   (!rowKey || !allowedSelectionKeySet.has(rowKey));
+                const amountReceivedBlocksUndo =
+                  undoSelectable && isInvoiceRowBlockedFromUndoByAmountReceived(r);
                 const canSelectRow = undoSelectable
-                  ? isFinalized && !r?.__isDraftNewInvoice
+                  ? isFinalized && !r?.__isDraftNewInvoice && !amountReceivedBlocksUndo
                   : !isFinalized && !sequenceBlocked;
                 const rowDisabled =
-                  selectable && !undoSelectable && (isFinalized || sequenceBlocked);
+                  (selectable && !undoSelectable && (isFinalized || sequenceBlocked)) ||
+                  amountReceivedBlocksUndo;
                 const rowBlurred = blurNonSelectableRows && !undoSelectable && sequenceBlocked;
                 return (
                   <MDBox
@@ -6092,7 +6245,6 @@ export default function Contracts() {
   const [finalizeOptionsLoading, setFinalizeOptionsLoading] = useState(false);
   const [finalizeProductOptions, setFinalizeProductOptions] = useState([]);
   const [finalizeAccountOptions, setFinalizeAccountOptions] = useState([]);
-  const [finalizeDefaultAccHead, setFinalizeDefaultAccHead] = useState("");
   const asOfDateInputRef = useRef(null);
 
   const openDatePicker = (ref) => {
@@ -6451,7 +6603,7 @@ export default function Contracts() {
 
   const fetchNatures = async () => {
     try {
-      const response = await api.list("nature");
+      const response = await api.list("Nature");
       setNatures(Array.isArray(response) ? response : []);
     } catch (error) {
       console.error("Error fetching natures:", error);
@@ -6802,14 +6954,16 @@ export default function Contracts() {
     setAgreementProvEditRowData(null);
     setInvoiceFinalizeSearch("");
     try {
-      const [scheduleRes, lockDateRes] = await Promise.all([
+      const [scheduleRes, lockDateRes, tenantRes] = await Promise.all([
         contractApi.getInvoiceSchedule({ contractNo }),
         lockDateApi.getAll().catch(() => null),
+        api.list("tenant"),
       ]);
       setInvoiceScheduleRows(
         assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(scheduleRes))
       );
       setInvoiceFinalizeLockDate(pickActiveLockDateYyyyMmDd(unwrapLockDateConfigList(lockDateRes)));
+      setTenants(unwrapTenantList(tenantRes));
     } catch (error) {
       console.error("Error loading invoice schedule:", error);
       alert("Failed to load invoice schedule for this contract.");
@@ -6835,7 +6989,6 @@ export default function Contracts() {
     setFinalizeOptionsOpen(false);
     setFinalizeProductOptions([]);
     setFinalizeAccountOptions([]);
-    setFinalizeDefaultAccHead("");
   }, [invoiceFinalizeBusy, agreementProvEditSaving]);
 
   const invoiceFinalizePendingRows = useMemo(
@@ -6954,7 +7107,6 @@ export default function Contracts() {
     setFinalizeOptionsLoading(true);
     setFinalizeProductOptions([]);
     setFinalizeAccountOptions([]);
-    setFinalizeDefaultAccHead("");
 
     try {
       const [productOptions, coaResponse] = await Promise.all([
@@ -6962,21 +7114,21 @@ export default function Contracts() {
         chartOfAccountsApi.getAll().catch(() => null),
       ]);
       const coaOptions = chartOfAccountsApi.unwrapList(coaResponse);
-      const { accountOptions, defaultAccHead } = resolveAgreementProvFinalizeAccountBinding(
-        invoiceFinalizeContractRow,
-        tenants,
-        coaOptions
-      );
+      // Keep COA options available so Item Sale Account can resolve when display text is missing.
+      const accountOptions = (coaOptions || [])
+        .map(normalizePartyCoaOption)
+        .filter((option) => option?.id != null)
+        .map((option) => ({
+          value: formatAccountLabel(option),
+          label: getPartyCoaDropdownLabel(option) || formatAccountLabel(option),
+          id: option.id,
+          coaId: option.id,
+        }))
+        .filter((option) => option.value);
       setFinalizeProductOptions(productOptions);
       setFinalizeAccountOptions(accountOptions);
-      setFinalizeDefaultAccHead(defaultAccHead);
       if (productOptions.length === 0) {
         alert("No active services or goods found. Add products before finalizing.");
-      }
-      if (!defaultAccHead) {
-        alert(
-          "No control account is linked to this tenant. Bind a control account on the tenant before finalizing."
-        );
       }
     } catch (error) {
       console.error("Error loading finalize options:", error);
@@ -6985,12 +7137,7 @@ export default function Contracts() {
     } finally {
       setFinalizeOptionsLoading(false);
     }
-  }, [
-    invoiceFinalizeContractRow,
-    invoiceFinalizeSelectedKeys,
-    invoiceFinalizeAllowedPendingKeys,
-    tenants,
-  ]);
+  }, [invoiceFinalizeContractRow, invoiceFinalizeSelectedKeys, invoiceFinalizeAllowedPendingKeys]);
 
   const handleConfirmFinalizeOptions = useCallback(
     async (selection) => {
@@ -7231,6 +7378,19 @@ export default function Contracts() {
     );
     if (selected.length === 0) {
       alert("Selected rows are not finalized or invalid.");
+      return;
+    }
+    const amountReceivedBlocked = selected.filter(isInvoiceRowBlockedFromUndoByAmountReceived);
+    if (amountReceivedBlocked.length > 0) {
+      const invoiceLabels = amountReceivedBlocked
+        .map((r) => getContractInvoiceFinalizeInvoiceNo(r) || "—")
+        .filter(Boolean)
+        .join(", ");
+      alert(
+        `Cannot undo finalize while Amount Received is greater than 0. Set Amount Received to 0 first${
+          invoiceLabels ? ` (Invoice: ${invoiceLabels})` : ""
+        }.`
+      );
       return;
     }
     const blocked = selected.filter(
@@ -10306,27 +10466,7 @@ export default function Contracts() {
   })();
   const allColumns = columns; // Keep all columns for details dialog and export
 
-  const getUserId = () => {
-    try {
-      const raw = localStorage.getItem("auth");
-      if (!raw) return "Unknown";
-      const obj = JSON.parse(raw);
-      return (
-        obj?.username ||
-        obj?.Username ||
-        obj?.userName ||
-        obj?.userId ||
-        obj?.UserId ||
-        obj?.unique_name ||
-        obj?.UniqueName ||
-        "Unknown"
-      );
-    } catch {
-      return "Unknown";
-    }
-  };
-
-  const generateContractDetailsPDF = (viewOnly = false) => {
+  const generateContractDetailsPDF = async (viewOnly = false) => {
     if (!selectedContractDetails) return;
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -10337,22 +10477,6 @@ export default function Contracts() {
     const colWidth = (pageWidth - 2 * margin - 2 * boxGap) / 3;
     const boxPadding = 3;
     const boxMinHeight = 10;
-
-    const addWatermarks = () => {
-      const totalPages = doc.internal.getNumberOfPages();
-      const userId = getUserId();
-      const ip = getUserIPAddress() || "session";
-      doc.setTextColor(180, 180, 180, 0.4);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      for (let p = 1; p <= totalPages; p += 1) {
-        doc.setPage(p);
-        doc.text(`IP: ${ip}`, pageWidth - margin - 30, pageHeight - 8);
-        doc.text(`User: ${userId}`, margin, pageHeight - 8);
-      }
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(10);
-    };
 
     const getDisplayValue = (col, rowData) => {
       const accessor = col.accessor;
@@ -10459,266 +10583,11 @@ export default function Contracts() {
       selectedContractDetails.ContractNo || selectedContractDetails.contractNo || "-";
 
     if (viewOnly) {
-      // Plain text only - no UI formatting (no boxes, no grid)
-      const gap = 6;
-      const rightContentPad = 8;
-      const leftW = (pageWidth - 2 * margin - gap) * 0.56;
-      const rightW = (pageWidth - 2 * margin - gap) * 0.44;
-      const valueX = margin + leftW + gap;
-      const valueWrapWidth = Math.max(10, rightW - rightContentPad);
-
-      let yPos = margin;
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text("Agreement Details", margin, yPos);
-      yPos += lineHeight + 2;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-
-      const racBaseClassAccessors = ["cmdName", "baseName", "className"];
-      const racCol = detailsColumns.find((c) => c.accessor === "cmdName");
-      const baseCol = detailsColumns.find((c) => c.accessor === "baseName");
-      const classCol = detailsColumns.find((c) => c.accessor === "className");
-      if (racCol || baseCol || classCol) {
-        const usableW = pageWidth - 2 * margin;
-        const colGap = 4;
-        const contractBlockW = usableW * 0.3;
-        const rbcAreaW = usableW - contractBlockW - colGap;
-        const wCol = (rbcAreaW - 2 * colGap) / 3;
-        const xContract = margin;
-        const x1 = margin + contractBlockW + colGap;
-        const x2 = x1 + wCol + colGap;
-        const x3 = x2 + wCol + colGap;
-        const seg = (c) => (c ? `${c.Header}: ${getDisplayValue(c, selectedContractDetails)}` : "");
-        const contractLines = doc.splitTextToSize(`Contract No: ${contractNo}`, contractBlockW);
-        const lines1 = doc.splitTextToSize(seg(racCol), wCol);
-        const lines2 = doc.splitTextToSize(seg(baseCol), wCol);
-        const lines3 = doc.splitTextToSize(seg(classCol), wCol);
-        const maxHeadLines = Math.max(
-          contractLines.length,
-          lines1.length,
-          lines2.length,
-          lines3.length
-        );
-        doc.setFont("helvetica", "bold");
-        for (let i = 0; i < maxHeadLines; i += 1) {
-          if (yPos > pageHeight - 20) {
-            doc.addPage();
-            yPos = margin;
-          }
-          if (contractLines[i]) doc.text(contractLines[i], xContract, yPos);
-          if (lines1[i]) doc.text(lines1[i], x1, yPos);
-          if (lines2[i]) doc.text(lines2[i], x2, yPos);
-          if (lines3[i]) doc.text(lines3[i], x3, yPos);
-          yPos += lineHeight;
-        }
-        doc.setFont("helvetica", "normal");
-        yPos += 2;
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.5);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 4;
-      } else {
-        doc.setFont("helvetica", "bold");
-        doc.text(`Contract No: ${contractNo}`, margin, yPos);
-        doc.setFont("helvetica", "normal");
-        yPos += lineHeight + 2;
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.5);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 4;
-      }
-
-      const restColumns = detailsColumns.filter(
-        (col) =>
-          !racBaseClassAccessors.includes(col.accessor) &&
-          col.accessor !== "id" &&
-          col.Header !== "S.No"
-      );
-
-      const contractorAccessors = new Set([
-        "tenantNo",
-        "businessName",
-        "natureOfBusiness",
-        "status",
-        "remarks",
-        "signatory",
-      ]);
-      const propertyAccessors = new Set([
-        "grpId",
-        "grpName",
-        "totalArea",
-        "location",
-        "uoM",
-        "unitName",
-        "groupRate",
-        "vaArea",
-      ]);
-      const termsAccessors = new Set([
-        "contractStartDate",
-        "contractEndDate",
-        "commercialOperationDate",
-        "initialRentPM",
-        "initialRentPA",
-        "paymentTermMonths",
-        "term",
-        "increaseRatePercent",
-        "increaseIntervalMonths",
-        "sdRateMonths",
-        "securityDepositAmount",
-        "contractState",
-        "rentalValue",
-        "govtShare",
-        "pafShare",
-        "percentRate",
-        "dpc",
-      ]);
-
-      const getSectionName = (col) => {
-        const accessor = String(col?.accessor || "")
-          .trim()
-          .toLowerCase();
-        const header = String(col?.Header || "")
-          .trim()
-          .toLowerCase();
-        if (contractorAccessors.has(accessor)) return "Contractor";
-        if (propertyAccessors.has(accessor)) return "Property";
-        if (termsAccessors.has(accessor)) return "Terms";
-
-        if (
-          header.includes("tenant") ||
-          header.includes("business") ||
-          header.includes("nature") ||
-          header.includes("signatory") ||
-          header.includes("remark") ||
-          header === "status"
-        ) {
-          return "Contractor";
-        }
-        if (
-          header.includes("group") ||
-          header.includes("area") ||
-          header.includes("location") ||
-          header === "uom" ||
-          header.includes("unit")
-        ) {
-          return "Property";
-        }
-        return "Terms";
-      };
-
-      const sectionTitles = ["Contractor", "Property", "Terms"];
-      const sectionColumns = {
-        Contractor: [],
-        Property: [],
-        Terms: [],
-      };
-      restColumns.forEach((col) => {
-        sectionColumns[getSectionName(col)].push(col);
-      });
-
-      sectionTitles.forEach((sectionTitle) => {
-        const cols = sectionColumns[sectionTitle];
-        if (!cols || cols.length === 0) return;
-
-        if (yPos > pageHeight - 24) {
-          doc.addPage();
-          yPos = margin;
-        }
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text(sectionTitle, margin, yPos);
-        yPos += lineHeight + 1;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-
-        let fieldSerial = 0;
-        cols.forEach((col) => {
-          fieldSerial += 1;
-          const displayVal = getDisplayValue(col, selectedContractDetails);
-          const labelBlock = `${fieldSerial}. ${col.Header}:`;
-          const labelLines = doc.splitTextToSize(labelBlock, leftW);
-          const valueLines = doc.splitTextToSize(String(displayVal), valueWrapWidth);
-          const maxLines = Math.max(labelLines.length, valueLines.length);
-          for (let i = 0; i < maxLines; i += 1) {
-            if (yPos > pageHeight - 20) {
-              doc.addPage();
-              yPos = margin;
-            }
-            if (labelLines[i]) {
-              doc.text(labelLines[i], margin, yPos);
-            }
-            if (valueLines[i]) {
-              doc.text(valueLines[i], valueX, yPos);
-            }
-            yPos += lineHeight;
-          }
-          yPos += 2;
-        });
-
-        yPos += 1;
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.5);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 5;
-      });
-
-      if (contractDetailsRiseTerms.length > 0) {
-        yPos += 4;
-        if (yPos > pageHeight - 40) {
-          doc.addPage();
-          yPos = margin;
-        }
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text("Existing Rise Terms", margin, yPos);
-        yPos += lineHeight + 4;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-        doc.text("Sequence No    Months Interval    Rise Percent (%)", margin, yPos);
-        yPos += lineHeight + 2;
-        contractDetailsRiseTerms.forEach((term, riseIdx) => {
-          if (yPos > pageHeight - 20) {
-            doc.addPage();
-            yPos = margin;
-          }
-          doc.text(
-            `${riseIdx + 1}. ${term.sequenceNo ?? ""}    ${term.monthsInterval ?? ""}    ${
-              term.risePercent ?? ""
-            }%`,
-            margin,
-            yPos
-          );
-          yPos += lineHeight;
-        });
-
-        yPos += 2;
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.5);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 5;
-      }
-
-      if (yPos > pageHeight - 42) {
-        doc.addPage();
-        yPos = margin;
-      }
-
-      const signatureGap = 10;
-      const signatureWidth = (pageWidth - 2 * margin - 2 * signatureGap) / 3;
-      const signatureY = pageHeight - 24;
-      const signatureLabels = ["Signatory 1", "Signatory 2", "Counter Sign"];
-
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.3);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-
-      signatureLabels.forEach((label, index) => {
-        const x = margin + index * (signatureWidth + signatureGap);
-        doc.line(x, signatureY, x + signatureWidth, signatureY);
-        doc.text(label, x + signatureWidth / 2, signatureY + 6, { align: "center" });
+      const annotations = await fetchContractAnnotationsForPdf(selectedContractDetails);
+      renderContractAgreementPdfFirstPage(doc, selectedContractDetails, {
+        riseTerms: contractDetailsRiseTerms,
+        tenants,
+        annotations,
       });
     } else {
       // Formatted layout with boxes and grid (for download)
@@ -10855,7 +10724,28 @@ export default function Contracts() {
       }
     }
 
-    addWatermarks();
+    try {
+      const scheduleRes = await contractApi.getInvoiceSchedule({ contractNo });
+      const finalizedScheduleRows = unwrapContractInvoiceScheduleList(scheduleRes)
+        .filter((row) => pickScheduleRowIsFinalize(row) && !row?.__isDraftNewInvoice)
+        .sort((a, b) =>
+          String(pickSchField(a, "InvoiceNo", "invoiceNo") || "").localeCompare(
+            String(pickSchField(b, "InvoiceNo", "invoiceNo") || ""),
+            undefined,
+            { numeric: true }
+          )
+        );
+      await appendProvisionalAccountStatementPdfPage(
+        doc,
+        selectedContractDetails,
+        finalizedScheduleRows,
+        { tenants }
+      );
+    } catch (error) {
+      console.error("Error adding provisional account statement PDF page:", error);
+    }
+
+    addContractPdfWatermarks(doc);
     const fileName = `Contract-Details-${contractNo.replace(/\s/g, "-")}.pdf`;
     if (viewOnly) {
       const blob = doc.output("blob");
@@ -11822,7 +11712,6 @@ export default function Contracts() {
         onClose={handleCloseFinalizeOptionsDialog}
         onConfirm={handleConfirmFinalizeOptions}
         busy={invoiceFinalizeBusy}
-        defaultAccHead={finalizeDefaultAccHead}
         accountOptions={finalizeAccountOptions}
         productOptions={finalizeProductOptions}
         loadingOptions={finalizeOptionsLoading}
@@ -11856,7 +11745,7 @@ export default function Contracts() {
         footerActions={
           <>
             <MDButton
-              onClick={() => generateContractDetailsPDF(true)}
+              onClick={() => void generateContractDetailsPDF(true)}
               color="info"
               variant="gradient"
               disabled={!selectedContractDetails}

@@ -241,36 +241,30 @@ export default function CashAndBank() {
     }
   }, []);
 
-  const fetchRecords = useCallback(
-    async (page = pageNumber, size = pageSize) => {
-      setLoading(true);
-      try {
-        const isChildView = Boolean(routeFilters.parentId);
-        const effectivePage = isChildView ? 1 : page;
-        const effectiveSize = isChildView ? 1000 : size;
-        const response = await cashAndBankApi.getAll(effectivePage, effectiveSize, {
-          parentCashAndBankId: isChildView ? routeFilters.parentId : undefined,
-          topLevelOnly: !isChildView,
-        });
-        if (Array.isArray(response)) {
-          setTableRows(response);
-          setTotalCount(response.length);
-          return;
-        }
-        const data = response?.data ?? [];
-        const pagination = response?.pagination;
-        setTableRows(Array.isArray(data) ? data : []);
-        setTotalCount(Number(pagination?.totalCount ?? 0));
-      } catch (error) {
-        console.error("Error fetching Cash & Bank records:", error);
-        setTableRows([]);
-        setTotalCount(0);
-      } finally {
-        setLoading(false);
+  const fetchRecords = useCallback(async () => {
+    setLoading(true);
+    try {
+      const isChildView = Boolean(routeFilters.parentId);
+      const response = await cashAndBankApi.getAllUnpaged({
+        parentCashAndBankId: isChildView ? routeFilters.parentId : undefined,
+        topLevelOnly: !isChildView,
+      });
+      if (Array.isArray(response)) {
+        setTableRows(response);
+        setTotalCount(response.length);
+        return;
       }
-    },
-    [pageNumber, pageSize, routeFilters.parentId]
-  );
+      const data = response?.data ?? [];
+      setTableRows(Array.isArray(data) ? data : []);
+      setTotalCount(Array.isArray(data) ? data.length : 0);
+    } catch (error) {
+      console.error("Error fetching Cash & Bank records:", error);
+      setTableRows([]);
+      setTotalCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [routeFilters.parentId]);
 
   useEffect(() => {
     fetchCoaLabels();
@@ -278,8 +272,8 @@ export default function CashAndBank() {
   }, [fetchCoaLabels, fetchBankLabels]);
 
   useEffect(() => {
-    fetchRecords(pageNumber, pageSize);
-  }, [pageNumber, pageSize, fetchRecords]);
+    fetchRecords();
+  }, [fetchRecords]);
 
   const handleOpenForm = () => {
     setCurrentRecord(null);
@@ -310,7 +304,7 @@ export default function CashAndBank() {
     if (recordToDelete == null) return;
     try {
       await cashAndBankApi.remove(recordToDelete);
-      await fetchRecords(pageNumber, pageSize);
+      await fetchRecords();
     } catch (error) {
       console.error("Error deleting Cash & Bank record:", error);
       window.alert(error?.message || "Failed to delete record. Please try again.");
@@ -333,7 +327,7 @@ export default function CashAndBank() {
     } else {
       await cashAndBankApi.create(payload);
     }
-    await fetchRecords(pageNumber, pageSize);
+    await fetchRecords();
     handleCloseForm();
   };
 
@@ -427,12 +421,7 @@ export default function CashAndBank() {
   const computedRows = useMemo(
     () =>
       visibleTableRows.map((row, index) => {
-        const flat = flattenCashAndBankForGrid(
-          row,
-          (pageNumber - 1) * pageSize + index,
-          coaLabelById,
-          bankLabelById
-        );
+        const flat = flattenCashAndBankForGrid(row, index, coaLabelById, bankLabelById);
         const recordId = flat.id;
         const rowMode = String(flat.mode || "")
           .trim()
@@ -497,7 +486,7 @@ export default function CashAndBank() {
           ),
         };
       }),
-    [visibleTableRows, pageNumber, pageSize, coaLabelById, bankLabelById, routeFilters.parentId]
+    [visibleTableRows, coaLabelById, bankLabelById, routeFilters.parentId]
   );
 
   const displayTotal = routeFilters.parentId

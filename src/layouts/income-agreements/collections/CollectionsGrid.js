@@ -72,7 +72,7 @@ function CollectionsGrid({
     width: "100%",
     alignItems: "center",
     columnGap: 0,
-    minWidth: "1720px",
+    minWidth: "1860px",
   };
 
   const hiddenColumns = useMemo(() => new Set(hiddenColumnKeys || []), [hiddenColumnKeys]);

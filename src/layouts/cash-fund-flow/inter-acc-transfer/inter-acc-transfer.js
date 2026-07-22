@@ -152,25 +152,21 @@ export default function InterAccTransfer() {
     [activeLockDate]
   );
 
-  const fetchRecords = useCallback(
-    async (page = pageNumber, size = pageSize) => {
-      setLoading(true);
-      try {
-        const response = await interAccTransferApi.getAll(page, size);
-        const data = Array.isArray(response) ? response : response?.data ?? [];
-        const pagination = response?.pagination;
-        setTableRows(Array.isArray(data) ? data : []);
-        setTotalCount(Number(pagination?.totalCount ?? (Array.isArray(data) ? data.length : 0)));
-      } catch (error) {
-        console.error("Error fetching inter account transfers:", error);
-        setTableRows([]);
-        setTotalCount(0);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [pageNumber, pageSize]
-  );
+  const fetchRecords = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await interAccTransferApi.getAllUnpaged();
+      const data = Array.isArray(response) ? response : response?.data ?? [];
+      setTableRows(Array.isArray(data) ? data : []);
+      setTotalCount(Array.isArray(data) ? data.length : 0);
+    } catch (error) {
+      console.error("Error fetching inter account transfers:", error);
+      setTableRows([]);
+      setTotalCount(0);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,8 +187,8 @@ export default function InterAccTransfer() {
   }, []);
 
   useEffect(() => {
-    fetchRecords(pageNumber, pageSize);
-  }, [pageNumber, pageSize, fetchRecords]);
+    fetchRecords();
+  }, [fetchRecords]);
 
   const handleOpenForm = () => {
     setCurrentRecord(null);
@@ -249,7 +245,7 @@ export default function InterAccTransfer() {
     if (recordToDelete == null) return;
     try {
       await interAccTransferApi.remove(recordToDelete);
-      await fetchRecords(pageNumber, pageSize);
+      await fetchRecords();
     } catch (error) {
       console.error("Error deleting transfer:", error);
       window.alert("Failed to delete transfer.");
@@ -275,7 +271,7 @@ export default function InterAccTransfer() {
     } else {
       await interAccTransferApi.create(payload);
     }
-    await fetchRecords(pageNumber, pageSize);
+    await fetchRecords();
     handleCloseForm();
   };
 
@@ -299,7 +295,7 @@ export default function InterAccTransfer() {
           status: nextLocked ? "Lock" : "Unlock",
         });
         await interAccTransferApi.update(recordId, payload);
-        await fetchRecords(pageNumber, pageSize);
+        await fetchRecords();
       } catch (error) {
         console.error("Error updating transfer lock status:", error);
         window.alert(error?.message || "Failed to update transfer lock status.");
@@ -307,14 +303,7 @@ export default function InterAccTransfer() {
         setLockSavingId(null);
       }
     },
-    [
-      activeLockDate,
-      canManageTransferLock,
-      fetchRecords,
-      isTransferDateLocked,
-      pageNumber,
-      pageSize,
-    ]
+    [activeLockDate, canManageTransferLock, fetchRecords, isTransferDateLocked]
   );
 
   const handleOpenTransferPdfPreview = (record) => {
@@ -435,7 +424,7 @@ export default function InterAccTransfer() {
   const computedRows = useMemo(
     () =>
       tableRows.map((row, index) => {
-        const flat = flattenInterAccTransferForGrid(row, (pageNumber - 1) * pageSize + index);
+        const flat = flattenInterAccTransferForGrid(row, index);
         const recordId = flat.id;
         const locked = isTransferLocked(row);
         const dateLocked = isTransferDateLocked(row);
@@ -500,15 +489,7 @@ export default function InterAccTransfer() {
           ),
         };
       }),
-    [
-      tableRows,
-      pageNumber,
-      pageSize,
-      canManageTransferLock,
-      handleTransferLockChange,
-      isTransferDateLocked,
-      lockSavingId,
-    ]
+    [tableRows, canManageTransferLock, handleTransferLockChange, isTransferDateLocked, lockSavingId]
   );
 
   const displayTotal = totalCount > 0 ? totalCount : tableRows.length;

@@ -1,5 +1,5 @@
 /**
- * Bank account RAC / Unit dropdown helpers — merges AccRacBase custom list with Command/Base catalog (KPI-style).
+ * Bank account RAC / Unit dropdown helpers — options come from AccRacBase only.
  */
 
 import {
@@ -8,39 +8,6 @@ import {
   getLoggedInUserCmdId,
   getLoggedInUserLevelId,
 } from "services/api.service";
-import { getBaseDropdownLabel } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
-
-function getCatalogOptionName(option) {
-  return String(
-    option?.name ??
-      option?.Name ??
-      option?.cmdName ??
-      option?.CmdName ??
-      option?.baseName ??
-      option?.BaseName ??
-      ""
-  ).trim();
-}
-
-export function mapCommandToRacOption(command) {
-  const id = String(command?.id ?? command?.Id ?? "").trim();
-  const name = getCatalogOptionName(command);
-  if (!id || !name) return null;
-  return { id, name, source: "catalog" };
-}
-
-export function mapBaseToUnitOption(base) {
-  const id = String(base?.id ?? base?.Id ?? "").trim();
-  const name = getBaseDropdownLabel(base) || getCatalogOptionName(base);
-  const cmdId = base?.cmd ?? base?.Cmd ?? base?.cmdId ?? base?.CmdId ?? "";
-  if (!id || !name) return null;
-  return {
-    id,
-    name,
-    source: "catalog",
-    cmdId: cmdId === "" || cmdId == null ? "" : String(cmdId),
-  };
-}
 
 export function mapAccRacBaseToRacOption(row, fallbackId = "") {
   const id = String(row?.id ?? row?.Id ?? fallbackId ?? "").trim();
@@ -62,7 +29,7 @@ export function mapAccRacBaseToUnitOption(row, fallbackId = "") {
   };
 }
 
-function mergeOptionsById(options, preferredSource = "catalog") {
+function mergeOptionsById(options) {
   const byId = new Map();
   (options || []).forEach((raw) => {
     if (!raw?.id || !raw?.name) return;
@@ -73,8 +40,8 @@ function mergeOptionsById(options, preferredSource = "catalog") {
       byId.set(id, next);
       return;
     }
-    if (existing.source !== preferredSource && next.source === preferredSource) {
-      byId.set(id, { ...existing, ...next, name: next.name || existing.name });
+    if (!existing.name && next.name) {
+      byId.set(id, { ...existing, ...next });
     }
   });
   return [...byId.values()].sort((a, b) =>
@@ -82,13 +49,8 @@ function mergeOptionsById(options, preferredSource = "catalog") {
   );
 }
 
-export function mergeRacDropdownOptions({
-  catalogCommands = [],
-  customRacRows = [],
-  savedOption = null,
-} = {}) {
+export function mergeRacDropdownOptions({ customRacRows = [], savedOption = null } = {}) {
   const mapped = [
-    ...(catalogCommands || []).map(mapCommandToRacOption).filter(Boolean),
     ...(customRacRows || []).map((row) => mapAccRacBaseToRacOption(row)).filter(Boolean),
   ];
   if (savedOption?.id && savedOption?.name) {
@@ -102,19 +64,12 @@ export function mergeRacDropdownOptions({
 }
 
 export function mergeBaseDropdownOptions({
-  catalogBases = [],
   customBaseRows = [],
   selectedRacId = "",
   savedOption = null,
 } = {}) {
   const racKey = selectedRacId == null || selectedRacId === "" ? "" : String(selectedRacId);
   const mapped = [];
-
-  (catalogBases || []).forEach((base) => {
-    const option = mapBaseToUnitOption(base);
-    if (!option) return;
-    if (!racKey || option.cmdId === racKey) mapped.push(option);
-  });
 
   (customBaseRows || []).forEach((row) => {
     const option = mapAccRacBaseToUnitOption(row);
@@ -164,15 +119,7 @@ export function filterBaseOptionsForUserScope(
     scope?.userCmdId != null && scope.userCmdId !== "" ? String(scope.userCmdId) : "";
   if (userCmdKey && racKey !== userCmdKey) return [];
 
-  let filtered = (options || []).filter((option) => {
-    if (option.source === "catalog") {
-      return String(option.cmdId ?? "") === racKey || String(option.cmdId ?? "") === "";
-    }
-    if (option.source === "custom") {
-      return String(option.parentId ?? "") === racKey;
-    }
-    return true;
-  });
+  let filtered = (options || []).filter((option) => String(option.parentId ?? "") === racKey);
 
   if (Number(scope?.userLevelId) === 3 && scope?.userBaseId != null) {
     const baseKey = String(scope.userBaseId);
@@ -192,7 +139,7 @@ export function buildScopedBaseDropdownOptions(params) {
   return filterBaseOptionsForUserScope(merged, params?.selectedRacId);
 }
 
-/** User-added AccRacBase rows may be renamed; catalog Command/Base options may not. */
+/** AccRacBase rows may be renamed from the form. */
 export function isCustomAccRacBaseDropdownOption(option) {
   return option?.source === "custom";
 }

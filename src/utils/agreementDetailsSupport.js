@@ -5,7 +5,7 @@ import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 const CONTRACT_PAYMENT_TERM_OPTIONS = [
   { value: 1, label: "Monthly" },
   { value: 3, label: "Quarterly" },
-  { value: 6, label: "BiAnnual" },
+  { value: 6, label: "Sixmonthly" },
   { value: 12, label: "Annual" },
 ];
 

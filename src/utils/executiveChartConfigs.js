@@ -58,7 +58,7 @@ export function executiveBarConfigs(
                 barThickness: "flex",
                 maxBarThickness: 1000,
                 categoryPercentage: 0.66,
-                barPercentage: 1,
+                barPercentage: 0.25,
               }
             : { maxBarThickness: 40 }),
         },
@@ -77,7 +77,7 @@ export function executiveBarConfigs(
                 barThickness: "flex",
                 maxBarThickness: 1000,
                 categoryPercentage: 0.66,
-                barPercentage: 1,
+                barPercentage: 0.25,
               },
             },
           }

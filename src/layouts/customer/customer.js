@@ -289,6 +289,13 @@ export default function Customer() {
         Cell: ({ value }) => txt(value),
       },
       {
+        id: "titleAccount",
+        Header: "Title of Acc",
+        accessor: "titleAccount",
+        align: "left",
+        Cell: ({ value }) => txt(value),
+      },
+      {
         id: "representative",
         Header: "Representative",
         accessor: "representative",

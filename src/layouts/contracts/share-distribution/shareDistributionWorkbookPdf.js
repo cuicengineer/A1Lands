@@ -5,6 +5,7 @@ import {
   createAgreementProvPdfScaleHelpers,
   loadShareDistributionWorkbookPdfMargins,
 } from "utils/agreementProvPdfMargins";
+import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
@@ -17,6 +18,7 @@ const PDF_TABLE_CELL_PAD_X = 0.55;
 const PDF_TABLE_CELL_PAD_Y = 0.35;
 const PDF_TABLE_HEADER_LINE_GAP = 0.5;
 const PDF_TABLE_FLEX_GROW_COLUMN_KEYS = new Set([
+  "racName",
   "tenantAndBusiness",
   "agreement",
   "base",
@@ -231,7 +233,8 @@ function buildTightPdfTableColumns({
     if (col.key === columnDefs[0]?.key) {
       maxContentWidth = Math.max(
         maxContentWidth,
-        measurePdfTextWidth(doc, sf, "Total", true, tableFontSize)
+        measurePdfTextWidth(doc, sf, "Total", true, tableFontSize),
+        measurePdfTextWidth(doc, sf, "Grand Total", true, tableFontSize)
       );
     }
 
@@ -302,6 +305,48 @@ function parsePdfNumber(value) {
   if (!normalized) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getWorkbookPdfGroupValue(row, key) {
+  const text = String(row?.[key] ?? "").trim();
+  return text || "-";
+}
+
+function getWorkbookPdfGroupKey(row) {
+  return `${getWorkbookPdfGroupValue(row, "racName")}||${getWorkbookPdfGroupValue(row, "base")}`;
+}
+
+/** Group workbook rows by RAC + Base for PDF layout. */
+function buildWorkbookPdfGroupedSections(rows = []) {
+  const byKey = new Map();
+  rows.forEach((row) => {
+    const key = getWorkbookPdfGroupKey(row);
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        key,
+        racName: getWorkbookPdfGroupValue(row, "racName"),
+        base: getWorkbookPdfGroupValue(row, "base"),
+        rows: [],
+      });
+    }
+    byKey.get(key).rows.push(row);
+  });
+
+  return Array.from(byKey.values()).sort((a, b) => {
+    const racCmp = a.racName.localeCompare(b.racName, undefined, { sensitivity: "base" });
+    if (racCmp !== 0) return racCmp;
+    return a.base.localeCompare(b.base, undefined, { sensitivity: "base" });
+  });
+}
+
+function sumWorkbookPdfNumericRows(rows, numericColumnKeys) {
+  return (rows || []).reduce((acc, row) => {
+    numericColumnKeys.forEach((key) => {
+      const value = parsePdfNumber(row?.[key]);
+      if (value != null) acc[key] = (acc[key] || 0) + value;
+    });
+    return acc;
+  }, {});
 }
 
 /**
@@ -414,6 +459,7 @@ export async function generateShareDistributionWorkbookPdf(
   let yPos = Math.max(headerY, metaStartY + lineHeight) + lineHeight + 2;
 
   const columnDefs = [
+    { key: "racName", label: "RAC Name", align: "left" },
     { key: "base", label: "Base", align: "left" },
     { key: "className", label: "Class", align: "left" },
     { key: "agreement", label: "Agreement", align: "left" },
@@ -444,19 +490,16 @@ export async function generateShareDistributionWorkbookPdf(
     columnDefs.filter((col) => col.align === "right" && col.key !== "ratio").map((col) => col.key)
   );
 
-  const totalsRow = rows.reduce((acc, row) => {
-    numericColumnKeys.forEach((key) => {
-      const value = parsePdfNumber(row?.[key]);
-      if (value != null) acc[key] = (acc[key] || 0) + value;
-    });
-    return acc;
-  }, {});
+  const groupedSections = buildWorkbookPdfGroupedSections(rows);
+  const showGroupTotals = groupedSections.length > 1;
+  const orderedRows = groupedSections.flatMap((section) => section.rows);
+  const totalsRow = sumWorkbookPdfNumericRows(orderedRows, numericColumnKeys);
 
   const { columns, tableFontSize } = resolveShareDistributionPdfTableLayout({
     doc,
     sf,
     columnDefs,
-    rows,
+    rows: orderedRows,
     totalsRow,
     numericColumnKeys,
     contentWidth,
@@ -465,6 +508,11 @@ export async function generateShareDistributionWorkbookPdf(
 
   const tableTextLineHeight = getPdfTableTextLineHeight(doc, sf, tableFontSize);
   const singleBodyRowHeight = tableTextLineHeight + 2 * PDF_TABLE_CELL_PAD_Y;
+  const totalLabelSpan = (() => {
+    const firstNumericIndex = columns.findIndex((col) => numericColumnKeys.has(col.key));
+    if (firstNumericIndex > 0) return firstNumericIndex;
+    return Math.min(5, columns.length);
+  })();
 
   const measureHeaderRowHeight = () => {
     let maxLines = 1;
@@ -544,8 +592,7 @@ export async function generateShareDistributionWorkbookPdf(
     yPos = rowTop + rowHeight;
   };
 
-  const drawTotalsRow = () => {
-    const totalLabelSpan = Math.min(4, columns.length);
+  const drawTotalsRow = (totals = {}, label = "Total") => {
     const rowHeight = singleBodyRowHeight;
 
     yPos = ensurePageSpace(yPos, rowHeight);
@@ -559,14 +606,14 @@ export async function generateShareDistributionWorkbookPdf(
         if (index === 0) {
           const spanRightX = columns[totalLabelSpan - 1].rightX;
           drawTableCellBorder(col.leftX, rowTop, spanRightX - col.leftX, rowHeight);
-          drawTableBodyCellText(col, "Total", rowTop, { bold: true });
+          drawTableBodyCellText(col, label, rowTop, { bold: true });
         }
         return;
       }
 
       drawTableCellBorder(col.leftX, rowTop, col.width, rowHeight);
       if (numericColumnKeys.has(col.key)) {
-        drawTableBodyCellText(col, formatPdfCurrency(totalsRow[col.key] ?? 0), rowTop, {
+        drawTableBodyCellText(col, formatPdfCurrency(totals[col.key] ?? 0), rowTop, {
           bold: true,
         });
       }
@@ -576,9 +623,14 @@ export async function generateShareDistributionWorkbookPdf(
   };
 
   drawTableHeader();
-  if (rows.length > 0) {
-    rows.forEach((row) => drawTableRow(row));
-    drawTotalsRow();
+  if (orderedRows.length > 0) {
+    groupedSections.forEach((section) => {
+      section.rows.forEach((row) => drawTableRow(row));
+      if (showGroupTotals) {
+        drawTotalsRow(sumWorkbookPdfNumericRows(section.rows, numericColumnKeys), "Total");
+      }
+    });
+    drawTotalsRow(totalsRow, showGroupTotals ? "Grand Total" : "Total");
   } else {
     drawTableRow({});
   }
@@ -600,12 +652,14 @@ export async function generateShareDistributionWorkbookPdf(
       const blockRight = marginLeft + (index + 1) * blockWidth - 6;
       drawPdfLine(blockLeft, signatureLineY, blockRight, signatureLineY);
       drawBodyText(label, (blockLeft + blockRight) / 2, signatureLabelY, {
+        fontSize: PDF_FONT_BODY - 2,
         textOptions: { align: "center" },
       });
     });
   };
 
   drawSignatureBlocks();
+  addContractPdfWatermarks(doc);
 
   const pdfBlob = doc.output("blob");
   if (openNewTab) {
