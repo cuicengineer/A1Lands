@@ -9,3 +9,12 @@ export const PURCHASE_RETURNS_LABELS = {
   gridSupplier: "Supplier",
   gridPurchaseInvoice: "Purchase Invoice",
 };
+
+export const PURCHASE_INVOICE_LABELS = {
+  pageTitle: "Purchase Invoice",
+  pageSubtitle: "Record and manage purchase invoice transactions",
+  exportFileName: "Purchase Invoices",
+  addFormTitle: "Add New Purchase Invoice",
+  editFormTitle: "Edit Purchase Invoice",
+  deleteConfirm: "Are you sure you want to delete this purchase invoice?",
+};

@@ -62,6 +62,7 @@ import {
   resolveAgreementContract,
 } from "utils/agreementDetailsSupport";
 import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
+import receiptsApi from "services/api.receipts.service";
 import { useMaterialUIController } from "context";
 import jsPDF from "jspdf";
 import { format, parseISO, isValid, addDays, addMonths, addYears } from "date-fns";
@@ -2881,6 +2882,7 @@ const AGREEMENT_PROV_PDF_SELECTABLE_COLUMNS = [
   { key: "itemWithCode", label: "Item with Code" },
   { key: "particular", label: "Particular" },
   { key: "accHead", label: "Acc Head" },
+  { key: "tinFtn", label: "TIN-FTN" },
   { key: "qty", label: "Qty" },
   { key: "unitPrice", label: "Unit Price" },
   { key: "discount", label: "Disc" },
@@ -2904,6 +2906,7 @@ const AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM = {
   itemWithCode: 34,
   particular: 40,
   accHead: 28,
+  tinFtn: 22,
   qty: 14,
   unitPrice: 28,
   discount: 14,
@@ -2945,6 +2948,14 @@ function buildAgreementProvPdfBodyColumns({
     fixedSum += AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM[key] || 20;
   });
 
+  // Keep all selected columns on-page when base widths exceed content width.
+  let widthScale = 1;
+  const particularReserve = orderedKeys.includes("particular") ? 28 : 0;
+  if (fixedSum + particularReserve > contentWidth && fixedSum > 0) {
+    widthScale = Math.max(0.45, (contentWidth - particularReserve) / fixedSum);
+    fixedSum *= widthScale;
+  }
+
   const hasParticular = orderedKeys.includes("particular");
   let particularWidth = hasParticular ? Math.max(contentWidth - fixedSum, 28) : 0;
   let leftover = hasParticular ? 0 : Math.max(contentWidth - fixedSum, 0);
@@ -2971,8 +2982,8 @@ function buildAgreementProvPdfBodyColumns({
       key === "particular"
         ? particularWidth
         : key === "total"
-        ? totalWidth
-        : AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM[key] || 20;
+        ? totalWidth * widthScale
+        : (AGREEMENT_PROV_PDF_COLUMN_BASE_WIDTH_MM[key] || 20) * widthScale;
     if (leftover > 0 && key !== "total" && !AGREEMENT_PROV_PDF_RIGHT_COLUMN_KEYS.has(key)) {
       width += leftover;
       leftover = 0;
@@ -3029,11 +3040,171 @@ function getAgreementProvPdfLineCellValues(lineRow, productServiceOptions = []) 
     itemWithCode: itemWithCode || "—",
     particular: particularText || "—",
     accHead: accHead || "—",
+    tinFtn: "—",
     qty: qty === null || qty === undefined || qty === "" ? "—" : String(qty),
     unitPrice: formatPdfUnitPriceWithUom(unitPrice, lineRow, productServiceOptions),
     discount: discount === "" ? "—" : discount,
     total: lineTotal,
+    fromReceipt: false,
   };
+}
+
+function receiptLineHasLinkedTinFtn(line) {
+  return Boolean(String(line?.tinFtn ?? line?.TinFtn ?? line?.tinTrn ?? line?.TinTrn ?? "").trim());
+}
+
+function pickReceiptLineField(line, ...keys) {
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = line?.[keys[i]];
+    if (value !== null && value !== undefined && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function resolveReceiptLineInvoiceNo(line) {
+  const direct = String(pickReceiptLineField(line, "invoiceNo", "InvoiceNo") || "").trim();
+  if (direct) return direct;
+
+  const invoiceKey = String(pickReceiptLineField(line, "invoiceKey", "InvoiceKey") || "").trim();
+  if (!invoiceKey) return "";
+
+  // Collection-entry option values are not invoice numbers.
+  if (/^(ce|collectionentry|entry):/i.test(invoiceKey)) return "";
+
+  const parts = invoiceKey
+    .split("|")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+  if (parts.length > 1) return parts[parts.length - 1];
+  return invoiceKey;
+}
+
+function receiptLineMatchesAgreementInvoice(line, invoiceNo, contractNo = "") {
+  const targetInvoice = String(invoiceNo || "")
+    .trim()
+    .toLowerCase();
+  if (!targetInvoice) return false;
+
+  const lineInvoice = resolveReceiptLineInvoiceNo(line).toLowerCase();
+  if (lineInvoice && lineInvoice === targetInvoice) return true;
+
+  const invoiceKey = String(pickReceiptLineField(line, "invoiceKey", "InvoiceKey") || "").trim();
+  if (!invoiceKey) return false;
+
+  const keyLower = invoiceKey.toLowerCase();
+  if (keyLower === targetInvoice) return true;
+
+  const targetContract = String(contractNo || "")
+    .trim()
+    .toLowerCase();
+  if (targetContract && keyLower === `${targetContract}|${targetInvoice}`) return true;
+
+  // invoiceKey may be contract|invoice or id|contract|invoice
+  const parts = invoiceKey.split("|").map((part) =>
+    String(part || "")
+      .trim()
+      .toLowerCase()
+  );
+  if (parts.includes(targetInvoice)) return true;
+
+  return false;
+}
+
+function resolveReceiptLinePdfAmount(line) {
+  const total = Number(pickReceiptLineField(line, "total", "Total"));
+  if (Number.isFinite(total) && total !== 0) return total;
+  const amount = Number(pickReceiptLineField(line, "amount", "Amount"));
+  if (Number.isFinite(amount) && amount !== 0) return amount;
+  if (Number.isFinite(total)) return total;
+  if (Number.isFinite(amount)) return amount;
+  return 0;
+}
+
+function getAgreementProvPdfReceiptLineCellValues(line) {
+  const tinFtn = String(
+    pickReceiptLineField(line, "tinFtn", "TinFtn", "tinTrn", "TinTrn") || ""
+  ).trim();
+  const item = String(pickReceiptLineField(line, "item", "Item") || "").trim();
+  const productKey = String(pickReceiptLineField(line, "productKey", "ProductKey") || "").trim();
+  const account = String(pickReceiptLineField(line, "account", "Account") || "").trim();
+  const partyLabel = String(
+    pickReceiptLineField(line, "partyLabel", "PartyLabel", "partyName", "PartyName") || ""
+  ).trim();
+  const qty = pickReceiptLineField(line, "quantity", "Quantity");
+  const unitPriceRaw = pickReceiptLineField(line, "unitPrice", "UnitPrice");
+  const discountRaw = pickReceiptLineField(line, "discount", "Discount");
+  const amount = resolveReceiptLinePdfAmount(line);
+  // Do not use Rent/Fee period prefix — that is for invoice schedule particulars only.
+  const particularText = item || partyLabel || account || tinFtn || "Receipt line";
+  const unitPriceValue =
+    unitPriceRaw !== "" && unitPriceRaw != null ? unitPriceRaw : amount ? amount : "";
+
+  return {
+    subInvoiceNo: "—",
+    itemWithCode: item || productKey || "—",
+    particular: particularText || "—",
+    accHead: account || "—",
+    tinFtn: tinFtn || "—",
+    qty: qty === null || qty === undefined || qty === "" ? "—" : String(qty),
+    unitPrice: unitPriceValue === "" ? "—" : formatPdfCurrency(unitPriceValue),
+    discount:
+      discountRaw === null || discountRaw === undefined || String(discountRaw).trim() === ""
+        ? "—"
+        : String(discountRaw),
+    total: amount,
+    fromReceipt: true,
+  };
+}
+
+function resolveRawReceiptLinesForPdf(row) {
+  const embedded = row?.lines ?? row?.Lines ?? row?.receiptLines ?? row?.ReceiptLines;
+  if (Array.isArray(embedded) && embedded.length) return embedded;
+  const rawJson = row?.linesJson ?? row?.LinesJson;
+  if (typeof rawJson === "string" && rawJson.trim()) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(embedded) ? embedded : [];
+}
+
+/**
+ * Load receipt line items for an invoice only when Generate PDF runs.
+ * Prefers GET /api/Receipts/lines-by-invoice (same TIN filter as Received column),
+ * then falls back to scanning listReceipts if that endpoint is unavailable.
+ */
+async function fetchAgreementProvPdfReceiptTinFtnLines(invoiceNo, contractNo = "") {
+  const targetInvoice = String(invoiceNo || "").trim();
+  if (!targetInvoice) return [];
+
+  try {
+    if (typeof receiptsApi.listReceiptTinLinesByInvoice === "function") {
+      const response = await receiptsApi.listReceiptTinLinesByInvoice(targetInvoice, contractNo);
+      const rows = receiptsApi.unwrapList(response) || [];
+      if (rows.length) return rows;
+      // Empty array from dedicated endpoint is authoritative — do not fall back to a
+      // full receipts scan that may miss lines when invoiceKey is a collection-entry id.
+      return [];
+    }
+  } catch (error) {
+    console.error("lines-by-invoice failed; falling back to listReceipts for PDF:", error);
+  }
+
+  const response = await receiptsApi.listReceipts();
+  const receipts = receiptsApi.unwrapList(response) || [];
+
+  const matched = [];
+  receipts.forEach((receipt) => {
+    resolveRawReceiptLinesForPdf(receipt).forEach((line) => {
+      if (!receiptLineMatchesAgreementInvoice(line, targetInvoice, contractNo)) return;
+      if (!receiptLineHasLinkedTinFtn(line)) return;
+      matched.push(line);
+    });
+  });
+  return matched;
 }
 
 const AGREEMENT_PROV_PDF_CONTENT_SCALE_MIN = 0.5;
@@ -4221,10 +4392,7 @@ function AgreementProvInvoiceEditDialog({
       ...form,
       amountReceivable: invoiceItemRecordsTotalAmount,
       totalRent: invoiceItemRecordsTotalAmount,
-      amountPending: Math.max(
-        0,
-        Number(invoiceItemRecordsTotalAmount) - Number(form.amountReceived || 0)
-      ),
+      amountPending: Number(invoiceItemRecordsTotalAmount) - Number(form.amountReceived || 0),
     };
     const refreshedRow = await onSave(formWithLineTotals, rowData, {
       invoiceLines: invoiceLinesRowsRef.current,
@@ -4908,15 +5076,21 @@ function normalizeAgreementProvInvoiceRow(row) {
       }
       return row.TotalRent ?? row.totalRent ?? 0;
     })(),
-    amountPending:
-      row.AmountPending ??
-      row.amountPending ??
-      Math.max(
-        0,
-        Number(
-          (row.AmountReceivable ?? row.amountReceivable ?? row.TotalRent ?? row.totalRent ?? 0) || 0
-        ) - Number(row.AmountReceived ?? row.amountReceived ?? 0)
-      ),
+    // Balance = Receivable - Received (may be negative when over-received).
+    // Set both casings so grid pickScheduleRowField(AmountPending) is not stuck on API's clamped 0.
+    ...(() => {
+      const receivable = Number(
+        row.AmountReceivable ?? row.amountReceivable ?? row.TotalRent ?? row.totalRent ?? 0
+      );
+      const received = Number(row.AmountReceived ?? row.amountReceived ?? 0);
+      const safeReceivable = Number.isFinite(receivable) ? receivable : 0;
+      const safeReceived = Number.isFinite(received) ? received : 0;
+      const balance = safeReceivable - safeReceived;
+      return {
+        amountPending: balance,
+        AmountPending: balance,
+      };
+    })(),
   };
 }
 
@@ -5278,7 +5452,7 @@ export default function AgreementProvInvoice() {
     const bodyFont = AGREEMENT_PROV_PDF_FONT_BODY;
     const selectedPdfColumns =
       columnKeys instanceof Set
-        ? columnKeys
+        ? new Set(columnKeys)
         : columnKeys
         ? new Set(columnKeys)
         : createDefaultAgreementProvPdfColumnKeys();
@@ -5360,6 +5534,17 @@ export default function AgreementProvInvoice() {
         );
       } catch (error) {
         console.error("Error loading invoice item records for PDF:", error);
+      }
+    }
+
+    // Receipt TIN-FTN lines are loaded only when Generate PDF is clicked (not on page load).
+    let receiptTinFtnLines = [];
+    if (invoiceNo) {
+      try {
+        receiptTinFtnLines = await fetchAgreementProvPdfReceiptTinFtnLines(invoiceNo, contractNo);
+      } catch (error) {
+        console.error("Error loading receipt TIN-FTN lines for PDF:", error);
+        receiptTinFtnLines = [];
       }
     }
 
@@ -5505,7 +5690,7 @@ export default function AgreementProvInvoice() {
 
     const pmMonthsFallback = paymentTermMonths || 12;
     const fallbackLineTotal = Number(initialRentPM) * Number(pmMonthsFallback);
-    const lineCellRows =
+    const invoiceCellRows =
       invoiceLineRows.length > 0
         ? invoiceLineRows.map((lineRow) =>
             getAgreementProvPdfLineCellValues(lineRow, pdfProductServiceOptions)
@@ -5516,36 +5701,55 @@ export default function AgreementProvInvoice() {
               itemWithCode: "—",
               particular: withAgreementProvParticularPrefix("MR Monthly Rent"),
               accHead: "—",
+              tinFtn: "—",
               qty: String(pmMonthsFallback),
               unitPrice: formatPdfCurrency(initialRentPM),
               discount: "—",
               total: Number.isFinite(fallbackLineTotal) ? fallbackLineTotal : 0,
+              fromReceipt: false,
             },
           ];
+    const receiptCellRows = (receiptTinFtnLines || []).map((line) =>
+      getAgreementProvPdfReceiptLineCellValues(line)
+    );
+    if (receiptCellRows.length > 0) {
+      selectedPdfColumns.add("tinFtn");
+      selectedPdfColumns.add("particular");
+    }
+    const lineCellRows = [...invoiceCellRows, ...receiptCellRows];
 
-    let calculatedTotal = 0;
+    let invoiceLinesTotal = 0;
+    let receiptTinLinesTotal = 0;
     let maxLineTotal = 0;
     lineCellRows.forEach((cells) => {
       const lineTotal = Number(cells.total) || 0;
-      calculatedTotal += lineTotal;
-      if (lineTotal > maxLineTotal) maxLineTotal = lineTotal;
+      if (Math.abs(lineTotal) > maxLineTotal) maxLineTotal = Math.abs(lineTotal);
+      if (cells.fromReceipt) {
+        receiptTinLinesTotal += lineTotal;
+        return;
+      }
+      invoiceLinesTotal += lineTotal;
     });
 
     const amountReceivable = Number(
       pickScheduleRowField(rowData, "AmountReceivable", "amountReceivable") || 0
     );
+    // Footer total: invoice (Rent/Fee) lines − receipt TIN-TRN/TIN-FTN lines (may be negative).
+    const netTotal = invoiceLinesTotal - receiptTinLinesTotal;
     const displayTotal =
-      invoiceLineRows.length > 0
-        ? calculatedTotal
+      receiptCellRows.length > 0
+        ? netTotal
+        : invoiceLineRows.length > 0
+        ? invoiceLinesTotal
         : Number.isFinite(amountReceivable) && amountReceivable > 0
         ? amountReceivable
-        : Number(pickScheduleRowField(rowData, "TotalRent", "totalRent") || 0) || calculatedTotal;
+        : Number(pickScheduleRowField(rowData, "TotalRent", "totalRent") || 0) || invoiceLinesTotal;
 
     const pdfBodyColumns = buildAgreementProvPdfBodyColumns({
       contentWidth,
       marginLeft,
       selectedKeys: selectedPdfColumns,
-      maxTotalValue: Math.max(maxLineTotal, displayTotal, 0),
+      maxTotalValue: Math.max(maxLineTotal, Math.abs(displayTotal), 0),
       doc,
       bodyFontSize: sf(bodyFont),
     });
@@ -5581,7 +5785,8 @@ export default function AgreementProvInvoice() {
         drawBodyTableHeader();
       }
 
-      const wrapWidth = Math.max((wrapColumn?.width || contentWidth) - 1, 20);
+      const wrapWidthMm = Math.max((wrapColumn?.width || contentWidth) - 1, 12);
+      const wrapWidth = sc(wrapWidthMm);
       const wrapText = wrapColumn ? formatCellDisplay(wrapColumn.key, cells) : "";
       doc.setFont("helvetica", "normal");
       doc.setFontSize(sf(bodyFont));
@@ -5595,15 +5800,22 @@ export default function AgreementProvInvoice() {
           }
         }
         pdfBodyColumns.forEach((col) => {
+          const colMaxWidth = Math.max(sc(col.width - 1), 4);
           if (wrapColumn && col.key === wrapColumn.key) {
             drawBodyText(line, col.textX, yPos, {
-              textOptions: col.align === "right" ? { align: "right" } : undefined,
+              textOptions: {
+                ...(col.align === "right" ? { align: "right" } : {}),
+                maxWidth: colMaxWidth,
+              },
             });
             return;
           }
           if (index !== 0) return;
           drawBodyText(formatCellDisplay(col.key, cells), col.textX, yPos, {
-            textOptions: col.align === "right" ? { align: "right" } : undefined,
+            textOptions: {
+              ...(col.align === "right" ? { align: "right" } : {}),
+              maxWidth: colMaxWidth,
+            },
           });
         });
         yPos += lineHeight;
@@ -6603,7 +6815,7 @@ export default function AgreementProvInvoice() {
     scheduleTextColumn("remarks", "Remarks", "Remarks", "remarks"),
     scheduleNumberColumn(
       "amountReceived",
-      "Received",
+      "Received (TIN)",
       "AmountReceived",
       "amountReceived",
       true,

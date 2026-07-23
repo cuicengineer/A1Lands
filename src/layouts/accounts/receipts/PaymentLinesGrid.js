@@ -93,7 +93,7 @@ function buildPaymentColumns(
   if (simplified) {
     return [
       { label: "Account", key: "account", align: "left" },
-      { label: "Tenant", key: "tenant", align: "left" },
+      { label: "Tenant/Supplier", key: "tenant", align: "left" },
       { label: "Invoice No", key: "invoice", align: "left" },
       { label: "Amount", key: "amount", align: "right" },
       { label: "TIN-FTN", key: "tinFtn", align: "left" },
@@ -215,7 +215,7 @@ function PaymentLineRow({
   const effectiveMode = simplified ? lineMode : mode;
   const effectivePartyType = simplified ? linePartyType : partyType;
   const showInvoiceFields = simplified ? true : isPaymentInvoiceMode(mode);
-  const partyColumnLabel = getPaymentPartyColumnLabel(effectivePartyType) || "Tenant";
+  const partyColumnLabel = getPaymentPartyColumnLabel(effectivePartyType) || "Tenant/Supplier";
   const lineTotal = effectiveMode
     ? computePaymentLineTotal(line, effectiveMode)
     : computePaymentLineTotal(line, mode);

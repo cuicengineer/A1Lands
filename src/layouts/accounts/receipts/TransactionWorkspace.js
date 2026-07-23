@@ -42,6 +42,8 @@ import {
   formatAmount,
   isReceiptFinalizedByAhq,
   RECEIPT_AHQ_TAB,
+  buildReceiptCollectionEntryClearPayload,
+  collectionEntryMatchesDeletedReceipt,
 } from "./receiptUtils";
 import { flattenPaymentForGrid, mapPaymentForVoucherPdf } from "./paymentUtils";
 import {
@@ -50,9 +52,15 @@ import {
   PAYMENT_UPLOAD_FORM_NAME,
   RECEIPT_UPLOAD_FORM_NAME,
 } from "./receiptAttachmentUtils";
-import { generateReceiptPdf } from "./receiptPdf";
+import {
+  generateReceiptPdf,
+  RECEIPT_PDF_DEFAULT_COLUMN_KEYS,
+  RECEIPT_PDF_SELECTABLE_COLUMNS,
+  PAYMENT_PDF_SELECTABLE_COLUMNS,
+} from "./receiptPdf";
 import receiptsApi from "services/api.receipts.service";
 import paymentsApi from "services/api.payments.service";
+import collectionsApi from "services/api.collections.service";
 import { isSuperuserOrAhqSupervisorUser } from "services/api.service";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 import {
@@ -66,10 +74,27 @@ import {
 import {
   formatTransactionLockDateValidationMessage,
   isDateLockedByLockDate,
+  normalizeCollectionEntryRow,
   pickActiveLockDateYyyyMmDd,
   unwrapLockDateConfigList,
 } from "layouts/income-agreements/collections/collectionsUtils";
 import lockDateApi from "services/api.lockdate.service";
+
+async function clearCollectionEntriesLinkedToDeletedReceipt(receipt) {
+  if (!receipt) return;
+  const response = await collectionsApi.listCollections();
+  const rows = collectionsApi.unwrapList(response).map(normalizeCollectionEntryRow);
+  const linked = rows.filter((entry) => collectionEntryMatchesDeletedReceipt(entry, receipt));
+  if (!linked.length) return;
+
+  await Promise.all(
+    linked.map(async (entry) => {
+      const id = entry?.id ?? entry?.Id;
+      if (!id) return;
+      await collectionsApi.updateCollection(id, buildReceiptCollectionEntryClearPayload(entry));
+    })
+  );
+}
 
 function readReceiptRouteFilters() {
   if (typeof window === "undefined") {
@@ -427,12 +452,13 @@ function TransactionWorkspace({
   };
 
   const generateReceiptPdfBlob = useCallback(
-    (record, marginsIn) => {
+    (record, marginsIn, { columnKeys } = {}) => {
       const pdfRecord = usePaymentApi ? mapPaymentForVoucherPdf(record) : record;
       return generateReceiptPdf(pdfRecord, marginsIn, {
         openNewTab: false,
         documentTitle: usePaymentApi ? "Payment Voucher" : "Receipt Voucher",
         isPaymentVoucher: Boolean(usePaymentApi),
+        columnKeys,
       });
     },
     [usePaymentApi]
@@ -456,7 +482,22 @@ function TransactionWorkspace({
         if (usePaymentApi) {
           await paymentsApi.removePayment(recordToDelete);
         } else {
+          const receiptToDelete =
+            recordPendingDelete ||
+            records.find((row) => Number(row.id) === Number(recordToDelete)) ||
+            null;
           await receiptsApi.removeReceipt(recordToDelete);
+          try {
+            await clearCollectionEntriesLinkedToDeletedReceipt(receiptToDelete);
+          } catch (linkError) {
+            console.error(
+              "Failed to clear linked collection entries after receipt delete:",
+              linkError
+            );
+            window.alert(
+              "Receipt deleted, but failed to reset linked collection Vr No / Vr Date / Status. Refresh collections and check Pending entries."
+            );
+          }
         }
       } catch (error) {
         console.error(`Failed to delete ${usePaymentApi ? "payment" : "receipt"}:`, error);
@@ -703,9 +744,10 @@ function TransactionWorkspace({
         {
           id: "receivedFrom",
           Header: labels.gridPaidFrom,
-          accessor: "receivedFrom",
+          accessor: "paidFrom",
           align: "left",
-          Cell: ({ value }) => txt(value),
+          Cell: ({ row, value }) =>
+            txt(value || row?.original?.receivedFrom || row?.original?.paidFrom),
         },
         {
           id: "partyType",
@@ -1216,6 +1258,11 @@ function TransactionWorkspace({
         defaultMargins={RECEIPT_PDF_DEFAULT_MARGINS}
         loadMargins={loadReceiptPdfMargins}
         saveMargins={saveReceiptPdfMargins}
+        selectableColumns={
+          usePaymentApi ? PAYMENT_PDF_SELECTABLE_COLUMNS : RECEIPT_PDF_SELECTABLE_COLUMNS
+        }
+        defaultColumnKeys={RECEIPT_PDF_DEFAULT_COLUMN_KEYS}
+        alwaysOnColumnLabels={["Amount (always shown)"]}
       />
 
       <Dialog open={attachmentsDialogOpen} onClose={handleCloseAttachments} fullWidth maxWidth="sm">

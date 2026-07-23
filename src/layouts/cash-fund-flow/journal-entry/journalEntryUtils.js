@@ -16,11 +16,11 @@ import {
   createLineRow,
   formatAmount,
   formatLineAccountLabel,
+  getCoaGroupColor,
   parseReceiptReference,
   RECEIPT_REFERENCE_PREFIX,
 } from "layouts/accounts/receipts/receiptUtils";
 import {
-  isCoaGroupAssets,
   isCustomersControlAccount,
   isSupplierOrSuppliersControlAccount,
   isTenantOrTenantsControlAccount,
@@ -32,6 +32,7 @@ export { formatAmount, parseAmount };
 
 export const JOURNAL_ENTRY_DESCRIPTION_MAX_LENGTH = 50;
 export const JOURNAL_ENTRY_VR_NO_PREFIX = RECEIPT_REFERENCE_PREFIX;
+export const JOURNAL_ENTRY_PARTY_COLUMN_LABEL = "Tenant/Customer/Supplier";
 
 function unwrapList(response) {
   if (!response) return [];
@@ -81,6 +82,12 @@ export function createJournalEntryLineRow(overrides = {}) {
     accountSource: "",
     accountCoaId: "",
     accountLabel: "",
+    partyKey: "",
+    partyType: "",
+    partyId: "",
+    partyCode: "",
+    partyName: "",
+    partyLabel: "",
     contractId: "",
     contractNo: "",
     invoiceKey: "",
@@ -106,9 +113,8 @@ export function buildJournalEntryFormState(overrides = {}) {
   };
 }
 
-function isBalanceSheetAssetsControlAccount(row) {
+function hasControlAccount(row) {
   const option = normalizePartyCoaOption(row);
-  if (!isCoaGroupAssets(option.groupName)) return false;
   return Boolean(String(option.controlAccount || "").trim());
 }
 
@@ -120,8 +126,8 @@ function normalizeIncomeStatementAccountOption(row) {
   const groupName = pickField(row, "groupName", "GroupName") || "Income Statement";
   const subGroup = pickField(row, "subGroup", "SubGroup");
   const controlAccount = subGroup || groupName;
-  const label = formatLineAccountLabel(acctId, acctName, controlAccount);
-  if (!label) return null;
+  const baseLabel = formatLineAccountLabel(acctId, acctName, controlAccount);
+  if (!baseLabel) return null;
   return {
     id,
     coaId: String(id),
@@ -131,9 +137,10 @@ function normalizeIncomeStatementAccountOption(row) {
     controlAccount,
     groupName,
     subGroup,
-    groupColor: { bg: "rgba(46, 125, 50, 0.14)", accent: "#2e7d32" },
+    groupColor: getCoaGroupColor(groupName),
     value: `is:${id}`,
-    label,
+    label: baseLabel,
+    displayLabel: groupName ? `${baseLabel} (${groupName})` : baseLabel,
   };
 }
 
@@ -141,8 +148,9 @@ function normalizeBalanceSheetAccountOption(row) {
   const id = row?.id ?? row?.Id;
   if (id == null || id === "") return null;
   const option = normalizePartyCoaOption(row);
-  const label = formatLineAccountLabel(option.acctId, option.acctName, option.controlAccount);
-  if (!label) return null;
+  const baseLabel = formatLineAccountLabel(option.acctId, option.acctName, option.controlAccount);
+  if (!baseLabel) return null;
+  const groupName = option.groupName || "Balance Sheet";
   return {
     id,
     coaId: String(id),
@@ -150,13 +158,15 @@ function normalizeBalanceSheetAccountOption(row) {
     acctId: option.acctId,
     acctName: option.acctName,
     controlAccount: option.controlAccount,
-    groupName: option.groupName,
-    groupColor: { bg: "rgba(25, 118, 210, 0.14)", accent: "#1976d2" },
+    groupName,
+    groupColor: getCoaGroupColor(groupName),
     value: `coa:${id}`,
-    label,
+    label: baseLabel,
+    displayLabel: groupName ? `${baseLabel} (${groupName})` : baseLabel,
   };
 }
 
+/** All Balance Sheet control accounts + all Income Statement accounts. */
 export async function fetchJournalEntryAccountOptions() {
   const [coaResponse, incomeResponse] = await Promise.all([
     chartOfAccountsApi.getAll(COA_SECTION_TYPE),
@@ -164,7 +174,7 @@ export async function fetchJournalEntryAccountOptions() {
   ]);
 
   const balanceSheetOptions = (chartOfAccountsApi.unwrapList(coaResponse) || [])
-    .filter(isBalanceSheetAssetsControlAccount)
+    .filter(hasControlAccount)
     .map(normalizeBalanceSheetAccountOption)
     .filter(Boolean);
 
@@ -172,9 +182,17 @@ export async function fetchJournalEntryAccountOptions() {
     .map(normalizeIncomeStatementAccountOption)
     .filter(Boolean);
 
-  return [...balanceSheetOptions, ...incomeOptions].sort((a, b) =>
-    String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" })
-  );
+  return [...balanceSheetOptions, ...incomeOptions].sort((a, b) => {
+    const groupDiff = String(a.groupName || "").localeCompare(
+      String(b.groupName || ""),
+      undefined,
+      {
+        sensitivity: "base",
+      }
+    );
+    if (groupDiff !== 0) return groupDiff;
+    return String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" });
+  });
 }
 
 export function findJournalEntryAccountOption(options, line) {
@@ -211,14 +229,104 @@ export function isJournalEntryRevenueOrExpenseAccount(accountOption) {
   const group = String(accountOption.groupName || "")
     .trim()
     .toLowerCase();
-  return IS_GROUP_OPTIONS.some((name) => name.toLowerCase() === group);
+  if (group === "expense" || group === "expenses" || group === "revenue") return true;
+  return IS_GROUP_OPTIONS.some((name) => String(name).trim().toLowerCase() === group);
 }
 
 export function getJournalEntryLineMode(accountOption) {
   if (!accountOption) return "simple";
-  if (isJournalEntryPartyControlAccount(accountOption)) return "party";
+  // Income Statement Revenue / Expense takes precedence over party-style control names.
   if (isJournalEntryRevenueOrExpenseAccount(accountOption)) return "revenueExpense";
+  if (isJournalEntryPartyControlAccount(accountOption)) return "party";
   return "simple";
+}
+
+function formatJournalEntryPartyLabel(party, partyType) {
+  if (!party) return "";
+  if (partyType === "Tenant") {
+    const code = pickField(party, "tenantNo", "TenantNo");
+    const name =
+      pickField(party, "businessName", "BusinessName") ||
+      pickField(party, "ownerName", "OwnerName") ||
+      pickField(party, "name", "Name");
+    return [code, name].filter(Boolean).join(" - ") || name || code;
+  }
+  const code = pickField(
+    party,
+    "code",
+    "Code",
+    "customerCode",
+    "CustomerCode",
+    "supplierCode",
+    "SupplierCode"
+  );
+  const name = pickField(party, "name", "Name");
+  return [code, name].filter(Boolean).join(" - ") || name || code;
+}
+
+function getJournalEntryPartyId(party, partyType) {
+  if (partyType === "Tenant") {
+    return String(pickField(party, "id", "Id") || pickField(party, "tenantNo", "TenantNo") || "");
+  }
+  return String(pickField(party, "id", "Id") || "");
+}
+
+function getJournalEntryPartyCode(party, partyType) {
+  if (partyType === "Tenant") return pickField(party, "tenantNo", "TenantNo");
+  return pickField(
+    party,
+    "code",
+    "Code",
+    "customerCode",
+    "CustomerCode",
+    "supplierCode",
+    "SupplierCode"
+  );
+}
+
+/** Linked Tenant / Customer / Supplier rows for the selected control account. */
+export function buildJournalEntryPartyOptions({
+  tenants = [],
+  customers = [],
+  suppliers = [],
+  lineAccount,
+}) {
+  if (!lineAccount || !isJournalEntryPartyControlAccount(lineAccount)) return [];
+  const partyType = getJournalEntryPartyType(lineAccount);
+  const catalog =
+    partyType === "Tenant"
+      ? tenants || []
+      : partyType === "Customer"
+      ? customers || []
+      : partyType === "Supplier"
+      ? suppliers || []
+      : [];
+
+  return catalog
+    .filter((party) => partyMatchesAccountCoa(party, lineAccount))
+    .map((party) => {
+      const partyId = getJournalEntryPartyId(party, partyType);
+      const partyCode = getJournalEntryPartyCode(party, partyType);
+      const partyName =
+        partyType === "Tenant"
+          ? pickField(party, "businessName", "BusinessName") ||
+            pickField(party, "ownerName", "OwnerName") ||
+            pickField(party, "name", "Name")
+          : pickField(party, "name", "Name");
+      const label = formatJournalEntryPartyLabel(party, partyType);
+      const value = `${partyType}|${partyId || partyCode || label}`;
+      return {
+        value,
+        label,
+        partyType,
+        partyId,
+        partyCode,
+        partyName,
+        partyLabel: label,
+      };
+    })
+    .filter((option) => option.label)
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
 }
 
 function formatJournalEntryContractLabel(contract, tenants) {
@@ -253,6 +361,7 @@ export function buildJournalEntryContractOptions({
   customers = [],
   suppliers = [],
   lineAccount,
+  selectedParty = null,
 }) {
   if (!lineAccount || !isJournalEntryPartyControlAccount(lineAccount)) return [];
 
@@ -263,9 +372,20 @@ export function buildJournalEntryContractOptions({
     .filter(isNotArchivedRecord);
 
   if (partyType === "Tenant") {
-    const matchingTenants = (tenants || []).filter((tenant) =>
+    let matchingTenants = (tenants || []).filter((tenant) =>
       partyMatchesAccountCoa(tenant, lineAccount)
     );
+    if (selectedParty?.partyId || selectedParty?.partyCode) {
+      matchingTenants = matchingTenants.filter((tenant) => {
+        const id = getJournalEntryPartyId(tenant, "Tenant");
+        const code = getJournalEntryPartyCode(tenant, "Tenant");
+        return (
+          (selectedParty.partyId && String(id) === String(selectedParty.partyId)) ||
+          (selectedParty.partyCode &&
+            String(code).toLowerCase() === String(selectedParty.partyCode).toLowerCase())
+        );
+      });
+    }
     const tenantNos = new Set(
       matchingTenants
         .map((tenant) => String(pickField(tenant, "tenantNo", "TenantNo")).trim().toLowerCase())
@@ -288,7 +408,18 @@ export function buildJournalEntryContractOptions({
   const parties =
     partyType === "Customer" ? customers || [] : partyType === "Supplier" ? suppliers || [] : [];
 
-  const matchingParties = parties.filter((party) => partyMatchesAccountCoa(party, lineAccount));
+  let matchingParties = parties.filter((party) => partyMatchesAccountCoa(party, lineAccount));
+  if (selectedParty?.partyId || selectedParty?.partyCode) {
+    matchingParties = matchingParties.filter((party) => {
+      const id = getJournalEntryPartyId(party, partyType);
+      const code = getJournalEntryPartyCode(party, partyType);
+      return (
+        (selectedParty.partyId && String(id) === String(selectedParty.partyId)) ||
+        (selectedParty.partyCode &&
+          String(code).toLowerCase() === String(selectedParty.partyCode).toLowerCase())
+      );
+    });
+  }
   if (!matchingParties.length) return [];
 
   const partyCodes = new Set(
@@ -431,6 +562,9 @@ export function validateJournalEntryForm(form, accountOptions) {
       errors[`line-${index}-amount`] = "Enter either debit or credit, not both";
     }
     if (mode === "party") {
+      if (!String(line?.partyKey || line?.partyId || "").trim()) {
+        errors[`line-${index}-party`] = `${JOURNAL_ENTRY_PARTY_COLUMN_LABEL} is required`;
+      }
       if (!String(line?.contractId || "").trim()) {
         errors[`line-${index}-contract`] = "Contract is required";
       }
@@ -443,7 +577,7 @@ export function validateJournalEntryForm(form, accountOptions) {
         errors[`line-${index}-quantity`] = "Qty must be greater than 0";
       }
       if (parseAmount(line?.unitPrice) <= 0) {
-        errors[`line-${index}-unitPrice`] = "Unit price is required";
+        errors[`line-${index}-unitPrice`] = "Unit is required";
       }
     }
   });
@@ -486,11 +620,25 @@ function mapJournalEntryLineToApi(line, index) {
   const credit = parseAmount(line?.credit);
   const quantity = parseAmount(line?.quantity);
   const unitPrice = parseAmount(line?.unitPrice);
+  const partyType = String(line?.partyType || "").trim() || null;
+  const partyId = String(line?.partyId || "").trim() || null;
+  const partyCode = String(line?.partyCode || "").trim() || null;
+  const partyName = String(line?.partyName || "").trim() || null;
+  const partyLabel = String(line?.partyLabel || "").trim() || null;
+  const partyKey =
+    String(line?.partyKey || "").trim() ||
+    (partyType && (partyId || partyCode) ? `${partyType}|${partyId || partyCode}` : null);
   return {
     LineNo: index + 1,
     AccountSource: String(line?.accountSource || "").trim() || null,
     AccountCoaId: String(line?.accountCoaId || "").trim() || null,
     AccountLabel: String(line?.accountLabel || "").trim() || null,
+    PartyKey: partyKey,
+    PartyType: partyType,
+    PartyId: partyId,
+    PartyCode: partyCode,
+    PartyName: partyName,
+    PartyLabel: partyLabel,
     ContractId: String(line?.contractId || "").trim() || null,
     ContractNo: String(line?.contractNo || "").trim() || null,
     InvoiceKey: String(line?.invoiceKey || "").trim() || null,
@@ -505,6 +653,15 @@ function mapJournalEntryLineToApi(line, index) {
 
 export function normalizeJournalEntryLineFromApi(line) {
   if (!line || typeof line !== "object") return createJournalEntryLineRow();
+  const partyType = line.partyType || line.PartyType || "";
+  const partyId = String(line.partyId ?? line.PartyId ?? "");
+  const partyCode = line.partyCode || line.PartyCode || "";
+  const partyName = line.partyName || line.PartyName || "";
+  const partyLabel = line.partyLabel || line.PartyLabel || "";
+  const partyKey =
+    line.partyKey ||
+    line.PartyKey ||
+    (partyType && (partyId || partyCode) ? `${partyType}|${partyId || partyCode}` : "");
   return createJournalEntryLineRow({
     ...line,
     id:
@@ -514,6 +671,12 @@ export function normalizeJournalEntryLineFromApi(line) {
     accountSource: line.accountSource || line.AccountSource || "",
     accountCoaId: String(line.accountCoaId ?? line.AccountCoaId ?? ""),
     accountLabel: line.accountLabel || line.AccountLabel || "",
+    partyKey,
+    partyType,
+    partyId,
+    partyCode,
+    partyName,
+    partyLabel,
     contractId: String(line.contractId ?? line.ContractId ?? ""),
     contractNo: line.contractNo || line.ContractNo || "",
     invoiceKey: line.invoiceKey || line.InvoiceKey || "",
@@ -638,14 +801,16 @@ export function buildJournalEntryCopyState(record) {
 
 export function formatJournalEntryLineReference(line) {
   const parts = [];
+  const party = String(line?.partyLabel || line?.partyName || line?.partyCode || "").trim();
   const contractNo = String(line?.contractNo ?? "").trim();
   const invoice = String(line?.invoiceNo ?? line?.invoiceLabel ?? "").trim();
   const qty = String(line?.quantity ?? "").trim();
   const unitPrice = line?.unitPrice;
+  if (party) parts.push(party);
   if (contractNo) parts.push(`Contract ${contractNo}`);
   if (invoice) parts.push(`Invoice ${invoice}`);
   if (qty) parts.push(`Qty ${qty}`);
-  if (unitPrice !== "" && unitPrice != null) parts.push(`Rate ${formatAmount(unitPrice)}`);
+  if (unitPrice !== "" && unitPrice != null) parts.push(`Unit ${formatAmount(unitPrice)}`);
   return parts.join(" · ") || "";
 }
 

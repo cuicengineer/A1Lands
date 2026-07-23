@@ -33,6 +33,7 @@ import paymentsApi from "services/api.payments.service";
 import {
   buildInvoiceKey,
   computeInvoiceBalance,
+  formatContractNoLabel,
   formatTransactionLockDateValidationMessage,
   getMinCollectionReceiptDateAfterLock,
   isDateLockedByLockDate,
@@ -1073,9 +1074,10 @@ export default function ReceiptForm({
           ...unavailableCollectionEntryIds,
           ...selectedOnOtherLines,
         ]),
+        contracts: contractRows,
       });
     },
-    [collectionRows, form.lines, lineAccountOptions, unavailableCollectionEntryIds]
+    [collectionRows, contractRows, form.lines, lineAccountOptions, unavailableCollectionEntryIds]
   );
 
   const getLinePartyOptions = useCallback(
@@ -1159,6 +1161,7 @@ export default function ReceiptForm({
             ...unavailableCollectionEntryIds,
             ...selectedOnOtherLines,
           ]),
+          invoiceRowsByKey,
         }).map(({ value, label }) => ({ value, label }));
       }
 
@@ -1171,6 +1174,7 @@ export default function ReceiptForm({
           ...unavailableCollectionEntryIds,
           ...selectedOnOtherLines,
         ]),
+        invoiceRowsByKey,
       }).map(({ value, label }) => ({ value, label }));
     },
     [
@@ -1178,6 +1182,7 @@ export default function ReceiptForm({
       collectionEntriesById,
       collectionRows,
       form.lines,
+      invoiceRowsByKey,
       unavailableCollectionEntryIds,
     ]
   );
@@ -1226,6 +1231,7 @@ export default function ReceiptForm({
         }
         if (paymentLayout) {
           next.receivedFromAccountLabel = account?.label || "";
+          next.paidFromAccountDisplay = account?.label || "";
           next.paidFrom = account?.label || "";
           next.cashAndBankAccountId =
             ledgerId !== "" && ledgerId != null
@@ -1321,7 +1327,14 @@ export default function ReceiptForm({
               const entry = collectionEntriesById.get(collectionEntryId);
               if (entry) {
                 return applyReceiptLinePartyFromCollectionEntry(updated, entry, {
-                  duplicateTenantBusiness: true,
+                  contract:
+                    contractRows.find(
+                      (row) =>
+                        formatContractNoLabel(row).toLowerCase() ===
+                        String(pickCollectionField(entry, "contractNo", "ContractNo") || "")
+                          .trim()
+                          .toLowerCase()
+                    ) || null,
                 });
               }
             }
@@ -1895,11 +1908,11 @@ export default function ReceiptForm({
   const paymentReceivedFromSection = (
     <Grid item xs={12} sm={6} md={3}>
       <FormControl fullWidth size="small" error={Boolean(errors.receivedInCoaId)}>
-        <InputLabel id="payment-received-from-label" shrink>
+        <InputLabel id="payment-paid-from-label" shrink>
           {labels.paidFrom}
         </InputLabel>
         <SearchableSelect
-          labelId="payment-received-from-label"
+          labelId="payment-paid-from-label"
           label={labels.paidFrom}
           value={getReceivedInSelectValue(form)}
           displayEmpty
@@ -2075,7 +2088,7 @@ export default function ReceiptForm({
                   sx={paymentLayout && !isEditMode ? paymentVrNoFieldSx : textFieldSx}
                 />
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={5}>
                 <TextField
                   fullWidth
                   label={labels.payeePlaceholder || "Paid To"}

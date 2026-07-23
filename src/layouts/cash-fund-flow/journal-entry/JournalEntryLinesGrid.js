@@ -12,8 +12,10 @@ import {
   findJournalEntryAccountOption,
   formatAmount,
   getJournalEntryLineMode,
+  JOURNAL_ENTRY_PARTY_COLUMN_LABEL,
 } from "./journalEntryUtils";
 import { sanitizeNumericAmountInput } from "layouts/income-agreements/collections/collectionsUtils";
+import { partyDropdownOneLineSx } from "layouts/accounts/receipts/receiptUtils";
 
 const lineInputSx = {
   "& .MuiInputBase-root": { fontSize: "0.75rem", minHeight: 24 },
@@ -36,10 +38,11 @@ const lineCenterInputSx = {
 };
 
 const MIDDLE_COLUMN_DEFS = {
+  party: { label: JOURNAL_ENTRY_PARTY_COLUMN_LABEL, width: "minmax(160px, 1.1fr)" },
   contract: { label: "Contract", width: "minmax(160px, 1.1fr)" },
   invoice: { label: "Invoice No", width: "minmax(180px, 1.2fr)" },
   quantity: { label: "Qty", width: "minmax(60px, 0.45fr)" },
-  unitPrice: { label: "Unit Price", width: "minmax(72px, 0.55fr)" },
+  unitPrice: { label: "Unit", width: "minmax(72px, 0.55fr)" },
 };
 
 function getLineAccountSelectValue(line) {
@@ -47,6 +50,34 @@ function getLineAccountSelectValue(line) {
     return `${line.accountSource}:${line.accountCoaId}`;
   }
   return line?.accountCoaId || line?.account || "";
+}
+
+function getAccountMenuItemSx(option) {
+  const groupColor = option?.groupColor || { bg: "transparent", accent: "#9e9e9e" };
+  return {
+    bgcolor: groupColor.bg,
+    borderLeft: `4px solid ${groupColor.accent}`,
+    whiteSpace: "normal",
+    alignItems: "flex-start",
+    py: 0.75,
+    mb: 0.25,
+  };
+}
+
+function formatAccountOptionText(option, fallback = "") {
+  if (!option) return fallback;
+  return option.displayLabel || option.label || fallback;
+}
+
+function emptyPartyFields() {
+  return {
+    partyKey: "",
+    partyType: "",
+    partyId: "",
+    partyCode: "",
+    partyName: "",
+    partyLabel: "",
+  };
 }
 
 function resolveMiddleColumns(lines, accountOptions) {
@@ -61,7 +92,7 @@ function resolveMiddleColumns(lines, accountOptions) {
 
   const keys = [];
   if (showParty) {
-    keys.push("contract", "invoice");
+    keys.push("party", "contract", "invoice");
   }
   if (showRevenue) {
     keys.push("quantity", "unitPrice");
@@ -73,7 +104,7 @@ function buildGridTemplate(middleKeys) {
   const middleWidths = middleKeys.map((key) => MIDDLE_COLUMN_DEFS[key].width);
   return [
     "28px",
-    "minmax(180px, 1.4fr)",
+    "minmax(200px, 1.5fr)",
     ...middleWidths,
     "minmax(72px, 0.55fr)",
     "minmax(72px, 0.55fr)",
@@ -95,6 +126,7 @@ function JournalEntryLineRow({
   index,
   accountOptions,
   middleKeys,
+  getLinePartyOptions,
   getLineContractOptions,
   getLineInvoiceOptions,
   readOnly,
@@ -109,6 +141,7 @@ function JournalEntryLineRow({
 }) {
   const account = findJournalEntryAccountOption(accountOptions, line);
   const lineMode = getJournalEntryLineMode(account);
+  const partyOptions = lineMode === "party" ? getLinePartyOptions(line, account) : [];
   const contractOptions = lineMode === "party" ? getLineContractOptions(line, account) : [];
   const invoiceOptions = lineMode === "party" ? getLineInvoiceOptions(line, account) : [];
 
@@ -116,10 +149,11 @@ function JournalEntryLineRow({
     const selected = (accountOptions || []).find(
       (option) => String(option.value) === String(value)
     );
-    onLineChange(line.id, {
+    const nextAccountPatch = {
       accountSource: selected?.accountSource || "",
       accountCoaId: selected?.coaId || "",
       accountLabel: selected?.label || "",
+      ...emptyPartyFields(),
       contractId: "",
       contractNo: "",
       invoiceKey: "",
@@ -127,6 +161,48 @@ function JournalEntryLineRow({
       invoiceLabel: "",
       quantity: "",
       unitPrice: "",
+    };
+
+    const nextMode = getJournalEntryLineMode(selected);
+    if (nextMode === "party") {
+      const nextPartyOptions = getLinePartyOptions(
+        {
+          ...line,
+          accountSource: nextAccountPatch.accountSource,
+          accountCoaId: nextAccountPatch.accountCoaId,
+        },
+        selected
+      );
+      if (nextPartyOptions.length === 1) {
+        const only = nextPartyOptions[0];
+        Object.assign(nextAccountPatch, {
+          partyKey: only.value,
+          partyType: only.partyType || "",
+          partyId: only.partyId || "",
+          partyCode: only.partyCode || "",
+          partyName: only.partyName || "",
+          partyLabel: only.partyLabel || only.label || "",
+        });
+      }
+    }
+
+    onLineChange(line.id, nextAccountPatch);
+  };
+
+  const handlePartyChange = (value) => {
+    const selected = partyOptions.find((option) => String(option.value) === String(value));
+    onLineChange(line.id, {
+      partyKey: selected?.value || value || "",
+      partyType: selected?.partyType || "",
+      partyId: selected?.partyId || "",
+      partyCode: selected?.partyCode || "",
+      partyName: selected?.partyName || "",
+      partyLabel: selected?.partyLabel || selected?.label || "",
+      contractId: "",
+      contractNo: "",
+      invoiceKey: "",
+      invoiceNo: "",
+      invoiceLabel: "",
     });
   };
 
@@ -151,6 +227,52 @@ function JournalEntryLineRow({
   };
 
   const renderMiddleCell = (key) => {
+    if (key === "party") {
+      if (lineMode !== "party") {
+        return <MiddleCell key={key} bodyCellSx={bodyCellSx} />;
+      }
+      return (
+        <MiddleCell key={key} bodyCellSx={bodyCellSx}>
+          {readOnly ? (
+            <MDTypography variant="caption">
+              {line.partyLabel || line.partyName || line.partyCode || "—"}
+            </MDTypography>
+          ) : (
+            <SearchableSelect
+              fullWidth
+              size="small"
+              value={String(line.partyKey || "")}
+              displayEmpty
+              onChange={(e) => handlePartyChange(e.target.value)}
+              disabled={saving || !account}
+              error={Boolean(errors[`line-${index}-party`])}
+              sx={lineInputSx}
+              renderValue={(selected) => {
+                if (!selected) return `Select ${JOURNAL_ENTRY_PARTY_COLUMN_LABEL}`;
+                const option = partyOptions.find((row) => String(row.value) === String(selected));
+                return option?.label || line.partyLabel || selected;
+              }}
+            >
+              <MenuItem value="">
+                <em>
+                  {account ? `Select ${JOURNAL_ENTRY_PARTY_COLUMN_LABEL}` : "Select account first"}
+                </em>
+              </MenuItem>
+              {partyOptions.map((option) => (
+                <MenuItem
+                  key={option.value}
+                  value={option.value}
+                  sx={{ ...partyDropdownOneLineSx, whiteSpace: "normal" }}
+                >
+                  {option.label}
+                </MenuItem>
+              ))}
+            </SearchableSelect>
+          )}
+        </MiddleCell>
+      );
+    }
+
     if (key === "contract") {
       if (lineMode !== "party") {
         return <MiddleCell key={key} bodyCellSx={bodyCellSx} />;
@@ -166,12 +288,16 @@ function JournalEntryLineRow({
               value={String(line.contractId || "")}
               displayEmpty
               onChange={(e) => handleContractChange(e.target.value)}
-              disabled={saving || !account}
+              disabled={saving || !account || !line.partyKey}
               error={Boolean(errors[`line-${index}-contract`])}
               sx={lineInputSx}
             >
               <MenuItem value="">
-                <em>Select contract</em>
+                <em>
+                  {line.partyKey
+                    ? "Select contract"
+                    : `Select ${JOURNAL_ENTRY_PARTY_COLUMN_LABEL} first`}
+                </em>
               </MenuItem>
               {contractOptions.map((option) => (
                 <MenuItem key={option.value} value={option.value} sx={{ whiteSpace: "normal" }}>
@@ -271,7 +397,9 @@ function JournalEntryLineRow({
       <MDBox sx={{ ...bodyCellSx, textAlign: "right" }}>{index + 1}</MDBox>
       <MDBox sx={{ ...bodyCellSx, textAlign: "left" }}>
         {readOnly ? (
-          <MDTypography variant="caption">{line.accountLabel || line.account || "—"}</MDTypography>
+          <MDTypography variant="caption">
+            {formatAccountOptionText(account, line.accountLabel || line.account || "—")}
+          </MDTypography>
         ) : (
           <SearchableSelect
             fullWidth
@@ -287,15 +415,31 @@ function JournalEntryLineRow({
               const option = (accountOptions || []).find(
                 (row) => String(row.value) === String(selected)
               );
-              return option?.label || line.accountLabel || selected;
+              return formatAccountOptionText(option, line.accountLabel || selected);
             }}
           >
             <MenuItem value="">
               <em>Select account</em>
             </MenuItem>
             {(accountOptions || []).map((option) => (
-              <MenuItem key={option.value} value={option.value} sx={{ whiteSpace: "normal" }}>
-                {option.label}
+              <MenuItem key={option.value} value={option.value} sx={getAccountMenuItemSx(option)}>
+                <MDBox>
+                  <MDTypography variant="caption" display="block" fontWeight="medium">
+                    {option.label}
+                  </MDTypography>
+                  {option.groupName ? (
+                    <MDTypography
+                      variant="caption"
+                      display="block"
+                      sx={{
+                        color: option.groupColor?.accent || "text.secondary",
+                        fontSize: "0.65rem",
+                      }}
+                    >
+                      {option.groupName}
+                    </MDTypography>
+                  ) : null}
+                </MDBox>
               </MenuItem>
             ))}
           </SearchableSelect>
@@ -381,6 +525,7 @@ JournalEntryLineRow.propTypes = {
   index: PropTypes.number.isRequired,
   accountOptions: PropTypes.array.isRequired,
   middleKeys: PropTypes.arrayOf(PropTypes.string).isRequired,
+  getLinePartyOptions: PropTypes.func.isRequired,
   getLineContractOptions: PropTypes.func.isRequired,
   getLineInvoiceOptions: PropTypes.func.isRequired,
   readOnly: PropTypes.bool,
@@ -404,6 +549,7 @@ JournalEntryLineRow.defaultProps = {
 export default function JournalEntryLinesGrid({
   lines,
   accountOptions,
+  getLinePartyOptions,
   getLineContractOptions,
   getLineInvoiceOptions,
   errors,
@@ -488,6 +634,7 @@ export default function JournalEntryLinesGrid({
           index={index}
           accountOptions={accountOptions}
           middleKeys={middleKeys}
+          getLinePartyOptions={getLinePartyOptions}
           getLineContractOptions={getLineContractOptions}
           getLineInvoiceOptions={getLineInvoiceOptions}
           readOnly={readOnly}
@@ -545,6 +692,7 @@ export default function JournalEntryLinesGrid({
 JournalEntryLinesGrid.propTypes = {
   lines: PropTypes.arrayOf(PropTypes.object).isRequired,
   accountOptions: PropTypes.array.isRequired,
+  getLinePartyOptions: PropTypes.func.isRequired,
   getLineContractOptions: PropTypes.func.isRequired,
   getLineInvoiceOptions: PropTypes.func.isRequired,
   errors: PropTypes.object,

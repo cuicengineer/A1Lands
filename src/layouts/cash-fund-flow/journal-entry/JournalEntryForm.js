@@ -39,6 +39,7 @@ import {
   buildJournalEntryContractOptions,
   buildJournalEntryFormState,
   buildJournalEntryInvoiceOptions,
+  buildJournalEntryPartyOptions,
   computeNextJournalEntryVrNo,
   createJournalEntryLineRow,
   fetchJournalEntryAccountOptions,
@@ -405,6 +406,17 @@ export default function JournalEntryForm({
     }));
   };
 
+  const getLinePartyOptions = useCallback(
+    (line, account) =>
+      buildJournalEntryPartyOptions({
+        tenants: tenantRows,
+        customers: customerRows,
+        suppliers: supplierRows,
+        lineAccount: account,
+      }),
+    [tenantRows, customerRows, supplierRows]
+  );
+
   const getLineContractOptions = useCallback(
     (line, account) =>
       buildJournalEntryContractOptions({
@@ -413,6 +425,11 @@ export default function JournalEntryForm({
         customers: customerRows,
         suppliers: supplierRows,
         lineAccount: account,
+        selectedParty: {
+          partyId: line?.partyId,
+          partyCode: line?.partyCode,
+          partyKey: line?.partyKey,
+        },
       }),
     [contractRows, tenantRows, customerRows, supplierRows]
   );
@@ -588,6 +605,7 @@ export default function JournalEntryForm({
         <JournalEntryLinesGrid
           lines={form.lines || []}
           accountOptions={accountOptions}
+          getLinePartyOptions={getLinePartyOptions}
           getLineContractOptions={getLineContractOptions}
           getLineInvoiceOptions={getLineInvoiceOptions}
           errors={errors}

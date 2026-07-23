@@ -17,6 +17,7 @@ import {
 
 export const PURCHASES_MODULE_TABS = [
   { label: "Supplier", route: "/supplier" },
+  { label: "Purchase Invoice", route: "/purchases/purchase-invoice" },
   { label: "Purchase Returns", route: "/purchases/purchase-returns" },
 ];
 

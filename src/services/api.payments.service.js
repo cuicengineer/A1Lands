@@ -105,9 +105,15 @@ export function normalizePaymentRow(row) {
     receivedInCoaId: pickField(row, "receivedInCoaId", "ReceivedInCoaId"),
     receiptPartyType: normalizePaymentPartyType(payeeContactType),
     receivedFromAccountLabel:
+      pickField(row, "paidFromAccountDisplay", "PaidFromAccountDisplay") ||
+      pickField(row, "receivedFromAccountDisplay", "ReceivedFromAccountDisplay") ||
+      pickField(row, "paidFrom", "PaidFrom"),
+    paidFromAccountDisplay:
+      pickField(row, "paidFromAccountDisplay", "PaidFromAccountDisplay") ||
       pickField(row, "receivedFromAccountDisplay", "ReceivedFromAccountDisplay") ||
       pickField(row, "paidFrom", "PaidFrom"),
     paidFrom:
+      pickField(row, "paidFromAccountDisplay", "PaidFromAccountDisplay") ||
       pickField(row, "receivedFromAccountDisplay", "ReceivedFromAccountDisplay") ||
       pickField(row, "paidFrom", "PaidFrom"),
     payeeContactType,

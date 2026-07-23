@@ -3,7 +3,6 @@ import {
   formatTenantBusinessLabel,
   pickField,
 } from "layouts/income-agreements/collections/collectionsUtils";
-import { resolveBaseNameById } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 
 export const SHARE_DISTRIBUTION_HEADER_COLORS = {
@@ -156,19 +155,37 @@ export function isFinalizedContract(row) {
   return approval === true || approval === 1 || approval === "1";
 }
 
+export function resolveShareDistributionBaseCode(bases, baseId) {
+  const id = Number(baseId);
+  if (!Number.isFinite(id) || id === 0) return "";
+  const match = (bases || []).find((base) => Number(base?.id ?? base?.Id) === id);
+  if (!match) return "";
+  return String(match?.code ?? match?.Code ?? "").trim();
+}
+
 export function resolveShareDistributionBaseLabel(row, bases = []) {
   const baseId = pickField(row, "baseId", "BaseId", "BaseID", "baseID");
-  const fromCatalog = resolveBaseNameById(bases, baseId);
+  const fromCatalog = resolveShareDistributionBaseCode(bases, baseId);
   if (fromCatalog) return fromCatalog;
 
   const text = String(
-    pickField(row, "baseName", "BaseName", "BaseLabel", "baseLabel", "Base", "base") || ""
+    pickField(
+      row,
+      "baseCode",
+      "BaseCode",
+      "baseName",
+      "BaseName",
+      "BaseLabel",
+      "baseLabel",
+      "Base",
+      "base"
+    ) || ""
   ).trim();
   if (!text) return "";
 
   const asNum = Number(text);
   if (Number.isFinite(asNum) && String(asNum) === text) {
-    return resolveBaseNameById(bases, asNum) || text;
+    return resolveShareDistributionBaseCode(bases, asNum) || text;
   }
   return text;
 }

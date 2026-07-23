@@ -398,6 +398,7 @@ function ReceiptModeLineRow({
   const effectivePartyType = simplified ? linePartyType : receiptPartyType;
   const showInvoiceFields = simplified ? true : isReceiptInvoiceMode(mode);
   const partyColumnLabel = getReceiptPartyColumnLabel(effectivePartyType) || "Tenant";
+  const amountLockedByInvoice = Boolean(String(line.invoiceKey || "").trim());
   const lineTotal = effectiveMode
     ? computeReceiptLineTotal(line, effectiveMode)
     : computeLineTotal(line);
@@ -531,7 +532,7 @@ function ReceiptModeLineRow({
               placeholder="Amount"
               inputProps={{ inputMode: "decimal" }}
               error={Boolean(errors[`line-${index}-amount`])}
-              disabled={readOnly}
+              disabled={readOnly || amountLockedByInvoice}
               sx={receiptLineCenterInputSx}
             />
           </MDBox>
@@ -612,7 +613,7 @@ function ReceiptModeLineRow({
               placeholder="Amount"
               inputProps={{ inputMode: "decimal" }}
               error={Boolean(errors[`line-${index}-amount`])}
-              disabled={readOnly}
+              disabled={readOnly || amountLockedByInvoice}
               sx={receiptLineCenterInputSx}
             />
           </MDBox>
@@ -774,6 +775,7 @@ function LegacyReceiptLineRow({
   onDuplicateLine,
   onDeleteLine,
 }) {
+  const amountLockedByInvoice = Boolean(String(line.invoiceKey || "").trim());
   return (
     <MDBox
       sx={{
@@ -944,7 +946,7 @@ function LegacyReceiptLineRow({
           placeholder="Amount"
           inputProps={{ inputMode: "decimal" }}
           error={Boolean(errors[`line-${index}-amount`])}
-          disabled={readOnly}
+          disabled={readOnly || amountLockedByInvoice}
           sx={receiptLineInputSx}
         />
       </MDBox>

@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import Checkbox from "@mui/material/Checkbox";
 import Icon from "@mui/material/Icon";
 import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
+import Popover from "@mui/material/Popover";
 import Tooltip from "@mui/material/Tooltip";
 import MDBox from "components/MDBox";
 import MDInput from "components/MDInput";
@@ -120,6 +121,102 @@ ReadOnlyCell.propTypes = {
 ReadOnlyCell.defaultProps = {
   align: "left",
   showFull: false,
+};
+
+/** Remarks: show first 30 chars; clickable "…" opens full text (also on mouse over via tooltip). */
+function RemarksCell({ value, maxVisibleChars = 30 }) {
+  const [anchor, setAnchor] = useState(null);
+  const text = value != null && String(value).trim() !== "" ? String(value) : "";
+  const hasContent = Boolean(text);
+  const showMore = hasContent && text.length > maxVisibleChars;
+  const displayText = showMore ? text.slice(0, maxVisibleChars) : text;
+
+  return (
+    <MDBox display="flex" alignItems="center" gap={0.25} sx={{ maxWidth: "100%", minWidth: 0 }}>
+      <MDTypography
+        variant="caption"
+        component="span"
+        sx={{
+          ...readOnlySx,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "clip",
+          whiteSpace: "nowrap",
+          color: `${readOnlySx.color} !important`,
+        }}
+      >
+        {hasContent ? displayText : "—"}
+      </MDTypography>
+      {showMore ? (
+        <>
+          <Tooltip
+            title={
+              <MDTypography
+                variant="caption"
+                sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "inherit" }}
+              >
+                {text}
+              </MDTypography>
+            }
+            placement="top"
+            enterDelay={200}
+            componentsProps={{
+              tooltip: {
+                sx: { maxWidth: "min(92vw, 420px)", bgcolor: "rgba(33,33,33,0.95)" },
+              },
+            }}
+          >
+            <MDBox
+              component="button"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAnchor(e.currentTarget);
+              }}
+              sx={{
+                border: "none",
+                background: "none",
+                padding: "0 1px",
+                cursor: "pointer",
+                color: "info.main",
+                fontSize: "0.8rem",
+                lineHeight: 1.2,
+                flexShrink: 0,
+                textDecoration: "underline",
+              }}
+              aria-label="Show full remarks"
+            >
+              ...
+            </MDBox>
+          </Tooltip>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+            transformOrigin={{ vertical: "top", horizontal: "left" }}
+            PaperProps={{
+              sx: { maxWidth: "min(92vw, 420px)", p: 1.5, boxShadow: 3, bgcolor: "#ffffff" },
+            }}
+          >
+            <MDTypography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {text}
+            </MDTypography>
+          </Popover>
+        </>
+      ) : null}
+    </MDBox>
+  );
+}
+
+RemarksCell.propTypes = {
+  value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  maxVisibleChars: PropTypes.number,
+};
+
+RemarksCell.defaultProps = {
+  value: "",
+  maxVisibleChars: 30,
 };
 
 function GridCell({ align = "left", compact = false, bodyCellSx, sx, children }) {
@@ -428,7 +525,9 @@ function CollectionEntryGridRow({
     enriched.selectedContract,
     tenants
   );
-  const tenantDeepLink = collectionTenantNo ? buildTenantConfigDeepLink(collectionTenantNo) : "";
+  const tenantDeepLink = collectionTenantNo
+    ? buildTenantConfigDeepLink(collectionTenantNo, { readOnly: true })
+    : "";
   const invoiceDeepLink =
     invoiceContext.invoiceNo || invoiceContext.contractNo
       ? buildAgreementProvInvoiceDeepLink(invoiceContext.contractNo, invoiceContext.invoiceNo)
@@ -439,7 +538,11 @@ function CollectionEntryGridRow({
 
   const handleViewTenant = () => {
     if (!collectionTenantNo) return;
-    onViewTenant?.(row);
+    if (onViewTenant) {
+      onViewTenant(row);
+      return;
+    }
+    openAppRouteInNewTab(tenantDeepLink);
   };
 
   const handleViewInvoice = () => {
@@ -466,18 +569,23 @@ function CollectionEntryGridRow({
       patch({
         contractId: "",
         invoiceKey: "",
+        receivable: 0,
+        balance: computeCollectionRowBalance(0, enriched.amount),
       });
       return;
     }
+    // Always overwrite Account / Tenant from the newly selected agreement (no stale fallbacks).
     const tenantAccount = resolveCollectionTenantAccount(contract, tenants, coaOptions);
     patch({
       classId: contract?.classId ?? enriched.classId ?? "",
       contractId,
       invoiceKey: "",
-      tenantNo: tenantAccount.tenantNo,
-      tenantBusiness: tenantAccount.tenantBusiness,
-      coaId: tenantAccount.coaId || enriched.coaId,
-      accountLabel: tenantAccount.accountLabel || enriched.accountLabel,
+      receivable: 0,
+      balance: computeCollectionRowBalance(0, enriched.amount),
+      tenantNo: tenantAccount.tenantNo || "",
+      tenantBusiness: tenantAccount.tenantBusiness || "",
+      coaId: tenantAccount.coaId || "",
+      accountLabel: tenantAccount.accountLabel || "",
     });
   };
 
@@ -485,7 +593,6 @@ function CollectionEntryGridRow({
     const coa = findCoaById(coaOptions, coaId);
     const nextCoaId = coa?.id ?? coaId ?? "";
     const matchingTenants = getCollectionTenantOptionsForAccount(tenants, nextCoaId, {
-      includeTenantNo: enriched.tenantNo,
       customers,
       suppliers,
       coaOptions,
@@ -493,18 +600,38 @@ function CollectionEntryGridRow({
     const tenantStillValid = matchingTenants.some(
       (item) => String(item.tenantNo) === String(enriched.tenantNo)
     );
+
+    if (tenantStillValid) {
+      patch({
+        coaId: nextCoaId,
+        accountLabel: formatAccountLabel(coa),
+      });
+      return;
+    }
+
+    // If the account has exactly one linked party, auto-select it for save.
+    if (matchingTenants.length === 1) {
+      const account = resolveCollectionTenantSelection(matchingTenants[0], coaOptions);
+      patch({
+        coaId: nextCoaId,
+        accountLabel: formatAccountLabel(coa),
+        tenantNo: account.tenantNo,
+        tenantBusiness: account.tenantBusiness,
+        invoiceKey: "",
+        receivable: 0,
+        balance: computeCollectionRowBalance(0, enriched.amount),
+      });
+      return;
+    }
+
     patch({
       coaId: nextCoaId,
       accountLabel: formatAccountLabel(coa),
-      ...(tenantStillValid
-        ? {}
-        : {
-            tenantNo: "",
-            tenantBusiness: "",
-            invoiceKey: "",
-            receivable: 0,
-            balance: computeCollectionRowBalance(0, enriched.amount),
-          }),
+      tenantNo: "",
+      tenantBusiness: "",
+      invoiceKey: "",
+      receivable: 0,
+      balance: computeCollectionRowBalance(0, enriched.amount),
     });
   };
 
@@ -570,6 +697,39 @@ function CollectionEntryGridRow({
   const hasSaved = Boolean(enriched.hasAttachment || enriched.attachmentFileId);
   const isAgreementSelected =
     enriched.contractId != null && String(enriched.contractId).trim() !== "";
+
+  // When Account is chosen and exactly one Tenant/Business is linked, auto-select it.
+  useEffect(() => {
+    if (!isRowEditing || readOnly || isAgreementSelected) return;
+    if (!enriched.coaId) return;
+    if (String(enriched.tenantNo || "").trim()) return;
+
+    const matchingTenants = getCollectionTenantOptionsForAccount(tenants, enriched.coaId, {
+      customers,
+      suppliers,
+      coaOptions,
+    });
+    if (matchingTenants.length !== 1) return;
+
+    const account = resolveCollectionTenantSelection(matchingTenants[0], coaOptions);
+    if (!account.tenantNo) return;
+    onRowChange?.(rowKey, {
+      tenantNo: account.tenantNo,
+      tenantBusiness: account.tenantBusiness,
+    });
+  }, [
+    isRowEditing,
+    readOnly,
+    isAgreementSelected,
+    enriched.coaId,
+    enriched.tenantNo,
+    tenants,
+    customers,
+    suppliers,
+    coaOptions,
+    onRowChange,
+    rowKey,
+  ]);
 
   return (
     <MDBox sx={{ ...gridRowSx, "&:hover": { bgcolor: "rgba(0,0,0,0.02)" } }}>
@@ -804,7 +964,7 @@ function CollectionEntryGridRow({
             sx={inputSx}
           />
         ) : (
-          <ReadOnlyCell value={enriched.remarks} />
+          <RemarksCell value={enriched.remarks} />
         )}
       </Col>
 

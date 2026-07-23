@@ -5152,6 +5152,13 @@ async function persistFinalizedInvoiceScheduleWithTenantAccHead({
   }
 }
 
+function resolveClassLinkedItemWithCode(classes, classId) {
+  const id = Number(classId);
+  if (!Number.isFinite(id) || id <= 0) return "";
+  const row = (classes || []).find((item) => Number(item?.id ?? item?.Id) === id);
+  return String(row?.itemWithCode ?? row?.ItemWithCode ?? "").trim();
+}
+
 function AgreementProvFinalizeOptionsDialog({
   open,
   onClose,
@@ -5160,11 +5167,36 @@ function AgreementProvFinalizeOptionsDialog({
   accountOptions,
   productOptions,
   loadingOptions,
+  defaultItemWithCode,
 }) {
   const [itemWithCode, setItemWithCode] = useState("");
   const [accHead, setAccHead] = useState("");
   const [itemError, setItemError] = useState("");
   const [accountError, setAccountError] = useState("");
+
+  const applyItemWithCode = useCallback(
+    (nextItem) => {
+      const itemValue = String(nextItem || "").trim();
+      setItemWithCode(itemValue);
+      if (itemError) setItemError("");
+      if (!itemValue) {
+        setAccHead("");
+        if (accountError) setAccountError("");
+        return;
+      }
+      const matched =
+        (productOptions || []).find(
+          (option) =>
+            String(option?.value || "")
+              .trim()
+              .toUpperCase() === itemValue.toUpperCase()
+        ) || null;
+      const nextAccHead = resolveFinalizeItemWithCodeAccHead(matched, accountOptions);
+      setAccHead(nextAccHead);
+      if (nextAccHead && accountError) setAccountError("");
+    },
+    [accountError, accountOptions, itemError, productOptions]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -5174,26 +5206,20 @@ function AgreementProvFinalizeOptionsDialog({
     setAccountError("");
   }, [open]);
 
-  const applyItemWithCode = (nextItem) => {
-    const itemValue = String(nextItem || "").trim();
-    setItemWithCode(itemValue);
-    if (itemError) setItemError("");
-    if (!itemValue) {
-      setAccHead("");
-      if (accountError) setAccountError("");
-      return;
-    }
+  useEffect(() => {
+    if (!open || loadingOptions) return;
+    const preferred = String(defaultItemWithCode || "").trim();
+    if (!preferred) return;
     const matched =
       (productOptions || []).find(
         (option) =>
           String(option?.value || "")
             .trim()
-            .toUpperCase() === itemValue.toUpperCase()
+            .toUpperCase() === preferred.toUpperCase()
       ) || null;
-    const nextAccHead = resolveFinalizeItemWithCodeAccHead(matched, accountOptions);
-    setAccHead(nextAccHead);
-    if (nextAccHead && accountError) setAccountError("");
-  };
+    if (!matched) return;
+    applyItemWithCode(matched.value);
+  }, [open, loadingOptions, productOptions, defaultItemWithCode, applyItemWithCode]);
 
   const handleConfirm = () => {
     const nextItem = String(itemWithCode || "").trim();
@@ -5316,6 +5342,7 @@ AgreementProvFinalizeOptionsDialog.propTypes = {
   accountOptions: PropTypes.arrayOf(PropTypes.object),
   productOptions: PropTypes.arrayOf(PropTypes.object),
   loadingOptions: PropTypes.bool,
+  defaultItemWithCode: PropTypes.string,
 };
 
 AgreementProvFinalizeOptionsDialog.defaultProps = {
@@ -5323,6 +5350,7 @@ AgreementProvFinalizeOptionsDialog.defaultProps = {
   accountOptions: [],
   productOptions: [],
   loadingOptions: false,
+  defaultItemWithCode: "",
 };
 
 function formatSchGridNumber(value) {
@@ -7109,10 +7137,14 @@ export default function Contracts() {
     setFinalizeAccountOptions([]);
 
     try {
-      const [productOptions, coaResponse] = await Promise.all([
+      const [productOptions, coaResponse, classResponse] = await Promise.all([
         fetchAgreementProvFinalizeProductOptions(),
         chartOfAccountsApi.getAll().catch(() => null),
+        api.list("class").catch(() => null),
       ]);
+      if (classResponse != null) {
+        setClasses(normalizeCatalogList(classResponse));
+      }
       const coaOptions = chartOfAccountsApi.unwrapList(coaResponse);
       // Keep COA options available so Item Sale Account can resolve when display text is missing.
       const accountOptions = (coaOptions || [])
@@ -11715,6 +11747,10 @@ export default function Contracts() {
         accountOptions={finalizeAccountOptions}
         productOptions={finalizeProductOptions}
         loadingOptions={finalizeOptionsLoading}
+        defaultItemWithCode={resolveClassLinkedItemWithCode(
+          classes,
+          invoiceFinalizeContractRow?.ClassId ?? invoiceFinalizeContractRow?.classId
+        )}
       />
 
       <AgreementProvInvoiceEditDialog

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 // @mui material components
 import Icon from "@mui/material/Icon";
@@ -6,7 +6,6 @@ import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
 
 import MDBox from "components/MDBox";
-import MDTypography from "components/MDTypography";
 import MDButton from "components/MDButton";
 import MDBadge from "components/MDBadge";
 import MDInput from "components/MDInput";
@@ -23,16 +22,51 @@ import api, {
   canEditCurrentMenu,
 } from "../../../services/api.service";
 import { useMaterialUIController } from "context";
+import { fetchReceiptProductOptions } from "layouts/accounts/receipts/receiptUtils";
 
 const UOM_OPTIONS = ["Marla", "Sq Ft", "Acre"];
 
 const getRowUoM = (row) => row?.uoM ?? row?.UoM ?? row?.uom ?? "";
+
+const getRowItemWithCode = (row) => String(row?.itemWithCode ?? row?.ItemWithCode ?? "").trim();
+
+/** Same active Item with Code options as contract invoice finalize dialog. */
+async function fetchClassItemWithCodeOptions() {
+  const products = await fetchReceiptProductOptions();
+  return (products || [])
+    .map((row) => {
+      const label = String(row?.label || "").trim();
+      if (!label) return null;
+      const itemCode = label.includes(" - ") ? label.split(" - ")[0].trim() : label;
+      if (!itemCode) return null;
+      return {
+        value: itemCode,
+        label,
+      };
+    })
+    .filter(Boolean);
+}
+
+function resolveItemWithCodeLabel(options, value) {
+  const key = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!key) return "";
+  const match = (options || []).find(
+    (option) =>
+      String(option?.value || "")
+        .trim()
+        .toUpperCase() === key
+  );
+  return match?.label || String(value || "").trim();
+}
 
 function ClassConfig() {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
   const [tableRows, setTableRows] = useState([]);
   const [errors, setErrors] = useState({});
+  const [itemWithCodeOptions, setItemWithCodeOptions] = useState([]);
 
   const [editingRowId, setEditingRowId] = useState(null);
   const [newRowDraft, setNewRowDraft] = useState(null);
@@ -42,11 +76,7 @@ function ClassConfig() {
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
 
-  useEffect(() => {
-    fetchClasses();
-  }, []);
-
-  const fetchClasses = async () => {
+  const fetchClasses = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.list("Class");
@@ -57,7 +87,22 @@ function ClassConfig() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const loadItemWithCodeOptions = useCallback(async () => {
+    try {
+      const options = await fetchClassItemWithCodeOptions();
+      setItemWithCodeOptions(options);
+    } catch (e) {
+      console.error("Failed to load Item with Code options", e);
+      setItemWithCodeOptions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchClasses();
+    loadItemWithCodeOptions();
+  }, [fetchClasses, loadItemWithCodeOptions]);
 
   const handleAddClass = () => {
     if (!canCreate) return;
@@ -69,6 +114,7 @@ function ClassConfig() {
       name: "",
       description: "",
       uoM: "",
+      itemWithCode: "",
       status: 0,
     });
     setErrors({});
@@ -80,7 +126,11 @@ function ClassConfig() {
     const row = tableRows.find((r) => r.id === id);
     if (!row) return;
     setEditingRowId(id);
-    setEditDraft({ ...row, uoM: getRowUoM(row) });
+    setEditDraft({
+      ...row,
+      uoM: getRowUoM(row),
+      itemWithCode: getRowItemWithCode(row),
+    });
   };
 
   const handleChange = (field, value) => {
@@ -121,43 +171,32 @@ function ClassConfig() {
     return Object.keys(errs).length === 0;
   };
 
+  const buildPayload = (draft) => ({
+    id: draft.id,
+    code: String(draft.code || "")
+      .trim()
+      .toUpperCase(),
+    name: draft.name,
+    description: draft.description,
+    uoM: draft.uoM,
+    itemWithCode: String(draft.itemWithCode || "").trim() || null,
+    ItemWithCode: String(draft.itemWithCode || "").trim() || null,
+    status: typeof draft.status === "string" ? Number(draft.status) : draft.status,
+  });
+
   const handleSave = async () => {
     try {
       if (editingRowId === "__new__" && newRowDraft) {
         if (!canCreate) return;
         if (!validateDraft(newRowDraft)) return;
-        const payload = {
-          id: newRowDraft.id,
-          code: String(newRowDraft.code || "")
-            .trim()
-            .toUpperCase(),
-          name: newRowDraft.name,
-          description: newRowDraft.description,
-          uoM: newRowDraft.uoM,
-          status:
-            typeof newRowDraft.status === "string"
-              ? Number(newRowDraft.status)
-              : newRowDraft.status,
-        };
-        await api.create("Class", payload);
+        await api.create("Class", buildPayload(newRowDraft));
         await fetchClasses();
         setEditingRowId(null);
         setNewRowDraft(null);
       } else if (editingRowId && editDraft) {
         if (!canEdit) return;
         if (!validateDraft(editDraft)) return;
-        const payload = {
-          id: editDraft.id,
-          code: String(editDraft.code || "")
-            .trim()
-            .toUpperCase(),
-          name: editDraft.name,
-          description: editDraft.description,
-          uoM: editDraft.uoM,
-          status:
-            typeof editDraft.status === "string" ? Number(editDraft.status) : editDraft.status,
-        };
-        await api.update("Class", editDraft.id, payload);
+        await api.update("Class", editDraft.id, buildPayload(editDraft));
         await fetchClasses();
         setEditingRowId(null);
         setEditDraft(null);
@@ -192,12 +231,13 @@ function ClassConfig() {
 
   const columns = [
     { Header: "Actions", accessor: "actions", align: "center", width: "56px" },
-    { Header: "Id", accessor: "id", align: "left", width: "6%" },
-    { Header: "Code", accessor: "code", align: "left", width: "8%" },
-    { Header: "Class Name", accessor: "name", align: "left", width: "18%" },
-    { Header: "Description", accessor: "description", align: "left", width: "22%" },
-    { Header: "UoM", accessor: "uoM", align: "left", width: "10%" },
-    { Header: "Status", accessor: "status", align: "center", width: "10%" },
+    { Header: "Id", accessor: "id", align: "left", width: "5%" },
+    { Header: "Code", accessor: "code", align: "left", width: "7%" },
+    { Header: "Class Name", accessor: "name", align: "left", width: "14%" },
+    { Header: "Description", accessor: "description", align: "left", width: "16%" },
+    { Header: "UoM", accessor: "uoM", align: "left", width: "8%" },
+    { Header: "Item with Code", accessor: "itemWithCode", align: "left", width: "18%" },
+    { Header: "Status", accessor: "status", align: "center", width: "8%" },
   ];
 
   const renderStatusBadge = (status) => {
@@ -221,6 +261,26 @@ function ClassConfig() {
     );
   };
 
+  const darkInputSx = darkMode
+    ? {
+        "& .MuiInputBase-input": {
+          color: "#000000 !important",
+        },
+        "& .MuiInputLabel-root": {
+          color: "#000000 !important",
+        },
+        "& .MuiFormHelperText-root": {
+          color: "#000000 !important",
+        },
+        "& .MuiSelect-select": {
+          color: "#000000 !important",
+        },
+        "& .MuiSvgIcon-root": {
+          color: "#000000 !important",
+        },
+      }
+    : {};
+
   const renderInput = (field, value) => (
     <MDInput
       value={value}
@@ -233,21 +293,7 @@ function ClassConfig() {
       {...(field === "code" && {
         inputProps: { maxLength: 10, style: { textTransform: "uppercase" } },
       })}
-      sx={
-        darkMode
-          ? {
-              "& .MuiInputBase-input": {
-                color: "#000000 !important",
-              },
-              "& .MuiInputLabel-root": {
-                color: "#000000 !important",
-              },
-              "& .MuiFormHelperText-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}
-      }
+      sx={darkInputSx}
     />
   );
 
@@ -263,21 +309,7 @@ function ClassConfig() {
       helperText={errors?.[field]}
       displayEmpty
       SelectProps={{ displayEmpty: true }}
-      sx={
-        darkMode
-          ? {
-              "& .MuiSelect-select": {
-                color: "#000000 !important",
-              },
-              "& .MuiSvgIcon-root": {
-                color: "#000000 !important",
-              },
-              "& .MuiFormHelperText-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}
-      }
+      sx={darkInputSx}
     >
       <MenuItem value="">
         <em>Select UoM</em>
@@ -290,6 +322,40 @@ function ClassConfig() {
     </MDInput>
   );
 
+  const renderItemWithCodeSelect = (field, value) => {
+    const selected = String(value ?? "").trim();
+    const hasSelectedInOptions = itemWithCodeOptions.some(
+      (option) =>
+        String(option.value || "")
+          .trim()
+          .toUpperCase() === selected.toUpperCase()
+    );
+    return (
+      <MDInput
+        select
+        value={selected}
+        onChange={(e) => handleChange(field, e.target.value)}
+        size="small"
+        fullWidth
+        displayEmpty
+        SelectProps={{ displayEmpty: true }}
+        sx={darkInputSx}
+      >
+        <MenuItem value="">
+          <em>Select Item with Code</em>
+        </MenuItem>
+        {selected && !hasSelectedInOptions ? (
+          <MenuItem value={selected}>{selected}</MenuItem>
+        ) : null}
+        {itemWithCodeOptions.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.label}
+          </MenuItem>
+        ))}
+      </MDInput>
+    );
+  };
+
   const renderStatusSelect = (field, value) => (
     <MDInput
       select
@@ -297,18 +363,7 @@ function ClassConfig() {
       onChange={(e) => handleChange(field, e.target.value)}
       size="small"
       fullWidth
-      sx={
-        darkMode
-          ? {
-              "& .MuiSelect-select": {
-                color: "#000000 !important",
-              },
-              "& .MuiSvgIcon-root": {
-                color: "#000000 !important",
-              },
-            }
-          : {}
-      }
+      sx={darkInputSx}
     >
       <MenuItem value={1}>Active</MenuItem>
       <MenuItem value={0}>Inactive</MenuItem>
@@ -325,6 +380,7 @@ function ClassConfig() {
         name: renderInput("name", newRowDraft.name),
         description: renderInput("description", newRowDraft.description),
         uoM: renderUoMSelect("uoM", newRowDraft.uoM),
+        itemWithCode: renderItemWithCodeSelect("itemWithCode", newRowDraft.itemWithCode),
         status: renderStatusSelect("status", newRowDraft.status),
         actions: (
           <MDBox display="flex" gap={1}>
@@ -342,6 +398,7 @@ function ClassConfig() {
     tableRows.forEach((row) => {
       const isEditing = editingRowId === row.id;
       const currentRow = isEditing ? editDraft : row;
+      const itemWithCodeValue = getRowItemWithCode(currentRow);
 
       rows.push({
         id: currentRow.id,
@@ -389,6 +446,22 @@ function ClassConfig() {
         ) : (
           <MDBox component="span" sx={{ fontWeight: "medium" }}>
             {getRowUoM(row) || "—"}
+          </MDBox>
+        ),
+        itemWithCode: isEditing ? (
+          renderItemWithCodeSelect("itemWithCode", itemWithCodeValue)
+        ) : (
+          <MDBox
+            component="span"
+            sx={{
+              display: "block",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+            }}
+          >
+            {resolveItemWithCodeLabel(itemWithCodeOptions, itemWithCodeValue) || "—"}
           </MDBox>
         ),
         status: isEditing

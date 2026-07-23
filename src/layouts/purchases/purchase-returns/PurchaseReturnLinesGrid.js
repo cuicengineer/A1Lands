@@ -10,6 +10,8 @@ import SearchableSelect from "components/SearchableSelect";
 import MDInput from "components/MDInput";
 import {
   computePurchaseReturnLineAmount,
+  findPurchaseReturnAccountOption,
+  findPurchaseReturnCapitalOption,
   formatAmount,
   isPurchaseReturnLineComplete,
 } from "./purchaseReturnUtils";
@@ -30,6 +32,7 @@ const COLUMNS = [
   { label: "#", key: "sno", align: "right" },
   { label: "Item", key: "item", align: "left" },
   { label: "Account", key: "account", align: "left" },
+  { label: "Capital", key: "capital", align: "left" },
   { label: "Particulars", key: "particulars", align: "left" },
   { label: "Qty", key: "quantity", align: "right" },
   { label: "Unit Price", key: "unitPrice", align: "right" },
@@ -40,8 +43,9 @@ const COLUMNS = [
 const GRID_TEMPLATE = [
   "28px",
   "minmax(120px, 1fr)",
-  "minmax(112px, 0.95fr)",
-  "minmax(140px, 1.1fr)",
+  "minmax(130px, 1.05fr)",
+  "minmax(110px, 0.9fr)",
+  "minmax(130px, 1.05fr)",
   "minmax(52px, 0.45fr)",
   "minmax(72px, 0.55fr)",
   "minmax(48px, 0.42fr)",
@@ -55,6 +59,8 @@ function PurchaseReturnLineRow({
   line,
   index,
   productOptions,
+  accountOptions,
+  capitalOptions,
   readOnly,
   errors,
   onLineChange,
@@ -62,6 +68,10 @@ function PurchaseReturnLineRow({
   onDeleteLine,
 }) {
   const lineAmount = computePurchaseReturnLineAmount(line);
+  const selectedAccount = findPurchaseReturnAccountOption(accountOptions, line);
+  const selectedCapital = findPurchaseReturnCapitalOption(capitalOptions, line);
+  const accountSelectValue = selectedAccount?.value || line.accountKey || line.accountCoaId || "";
+  const capitalSelectValue = selectedCapital?.value || line.capitalKey || line.capital || "";
 
   return (
     <MDBox
@@ -103,9 +113,59 @@ function PurchaseReturnLineRow({
       </MDBox>
 
       <MDBox sx={{ ...bodyCellSx, textAlign: "left" }}>
-        <MDTypography variant="caption" sx={{ fontSize: "0.75rem" }}>
-          {line.account || "—"}
-        </MDTypography>
+        <FormControl fullWidth size="small" error={Boolean(errors[`line-${index}-account`])}>
+          <SearchableSelect
+            value={accountSelectValue}
+            onChange={(e) => onLineChange(line.id, "accountKey", e.target.value)}
+            fullWidth
+            size="small"
+            displayEmpty
+            disabled={readOnly}
+            renderValue={(selected) => {
+              if (!selected) return "";
+              const option = findPurchaseReturnAccountOption(accountOptions, selected);
+              return option?.label || line.account || selected;
+            }}
+            sx={lineInputSx}
+          >
+            <MenuItem value="">
+              <em>Select Account</em>
+            </MenuItem>
+            {(accountOptions || []).map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </SearchableSelect>
+        </FormControl>
+      </MDBox>
+
+      <MDBox sx={{ ...bodyCellSx, textAlign: "left" }}>
+        <FormControl fullWidth size="small" error={Boolean(errors[`line-${index}-capital`])}>
+          <SearchableSelect
+            value={capitalSelectValue}
+            onChange={(e) => onLineChange(line.id, "capitalKey", e.target.value)}
+            fullWidth
+            size="small"
+            displayEmpty
+            disabled={readOnly}
+            renderValue={(selected) => {
+              if (!selected) return "";
+              const option = findPurchaseReturnCapitalOption(capitalOptions, selected);
+              return option?.label || line.capital || selected;
+            }}
+            sx={lineInputSx}
+          >
+            <MenuItem value="">
+              <em>Select Capital</em>
+            </MenuItem>
+            {(capitalOptions || []).map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </SearchableSelect>
+        </FormControl>
       </MDBox>
 
       <MDBox sx={{ ...bodyCellSx, textAlign: "left" }}>
@@ -208,6 +268,8 @@ PurchaseReturnLineRow.propTypes = {
   line: PropTypes.object.isRequired,
   index: PropTypes.number.isRequired,
   productOptions: PropTypes.array,
+  accountOptions: PropTypes.array,
+  capitalOptions: PropTypes.array,
   readOnly: PropTypes.bool,
   errors: PropTypes.object,
   onLineChange: PropTypes.func.isRequired,
@@ -217,6 +279,8 @@ PurchaseReturnLineRow.propTypes = {
 
 PurchaseReturnLineRow.defaultProps = {
   productOptions: [],
+  accountOptions: [],
+  capitalOptions: [],
   readOnly: false,
   errors: {},
 };
@@ -224,6 +288,8 @@ PurchaseReturnLineRow.defaultProps = {
 export default function PurchaseReturnLinesGrid({
   lines,
   productOptions,
+  accountOptions,
+  capitalOptions,
   errors,
   saving,
   grandTotal,
@@ -348,6 +414,8 @@ export default function PurchaseReturnLinesGrid({
                   line={line}
                   index={index}
                   productOptions={productOptions}
+                  accountOptions={accountOptions}
+                  capitalOptions={capitalOptions}
                   readOnly={readOnly}
                   errors={errors}
                   onLineChange={onLineChange}
@@ -366,6 +434,8 @@ export default function PurchaseReturnLinesGrid({
 PurchaseReturnLinesGrid.propTypes = {
   lines: PropTypes.arrayOf(PropTypes.object).isRequired,
   productOptions: PropTypes.array,
+  accountOptions: PropTypes.array,
+  capitalOptions: PropTypes.array,
   errors: PropTypes.object,
   saving: PropTypes.bool,
   grandTotal: PropTypes.number,
@@ -378,6 +448,8 @@ PurchaseReturnLinesGrid.propTypes = {
 
 PurchaseReturnLinesGrid.defaultProps = {
   productOptions: [],
+  accountOptions: [],
+  capitalOptions: [],
   errors: {},
   saving: false,
   grandTotal: 0,

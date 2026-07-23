@@ -85,6 +85,7 @@ import ExchangeRate from "layouts/accounts/exchange-rate/exchange-rate";
 import Payments from "layouts/accounts/receipts/payments";
 import Receipts from "layouts/receipts/receipts";
 import Supplier from "layouts/supplier/supplier";
+import PurchaseInvoice from "layouts/purchases/purchase-invoice/purchase-invoice";
 import PurchaseReturns from "layouts/purchases/purchase-returns/purchase-returns";
 import Customer from "layouts/customer/customer";
 import CashAndBank from "layouts/cash-fund-flow/cash-and-bank/cash-and-bank";
@@ -305,6 +306,14 @@ const routes = [
         icon: <Icon fontSize="small">local_shipping</Icon>,
         route: "/supplier",
         component: <Supplier />,
+      },
+      {
+        type: "collapse",
+        name: "Purchase Invoice",
+        key: "purchases-purchase-invoice",
+        icon: <Icon fontSize="small">receipt_long</Icon>,
+        route: "/purchases/purchase-invoice",
+        component: <PurchaseInvoice />,
       },
       {
         type: "collapse",

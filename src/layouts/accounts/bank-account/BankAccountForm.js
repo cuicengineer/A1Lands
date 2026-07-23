@@ -26,6 +26,7 @@ import api, {
   canCreateCurrentMenu,
   canDeleteCurrentMenu,
   canEditCurrentMenu,
+  isSuperuserOrAhqSupervisorUser,
 } from "services/api.service";
 import uploadApi from "services/api.upload.service";
 import { fetchBankListsForDropdown, UPLOAD_TABLE_NAME } from "services/api.bankAccount.service";
@@ -322,8 +323,10 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   const [quickAddName, setQuickAddName] = useState("");
   const [quickAddError, setQuickAddError] = useState("");
   const [quickAddSubmitting, setQuickAddSubmitting] = useState(false);
-  const canQuickAddRacBase = canCreateCurrentMenu();
-  const canEditRacUnitDropdownLabels = canEditCurrentMenu();
+  // RAC/Unit quick-add and rename: superuser or AHQ level + Category Supervisor only.
+  const canManageRacUnitCatalog = isSuperuserOrAhqSupervisorUser();
+  const canQuickAddRacBase = canManageRacUnitCatalog;
+  const canEditRacUnitDropdownLabels = canManageRacUnitCatalog;
   const [racUnitNameEdit, setRacUnitNameEdit] = useState(null);
   const [racUnitNameEditDraft, setRacUnitNameEditDraft] = useState("");
   const [racUnitNameEditError, setRacUnitNameEditError] = useState("");
@@ -769,6 +772,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   ]);
 
   const handleQuickAddSubmit = useCallback(async () => {
+    if (!canQuickAddRacBase) return;
     const name = String(quickAddName ?? "").trim();
     if (!name) {
       setQuickAddError("Name is required");
@@ -815,7 +819,14 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     } finally {
       setQuickAddSubmitting(false);
     }
-  }, [quickAddName, quickAddType, form.racId, refreshRacOptions, closeQuickAdd]);
+  }, [
+    canQuickAddRacBase,
+    quickAddName,
+    quickAddType,
+    form.racId,
+    refreshRacOptions,
+    closeQuickAdd,
+  ]);
 
   const formatFileSize = (bytes) => {
     if (bytes === 0) return "0 Bytes";

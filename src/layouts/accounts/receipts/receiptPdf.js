@@ -11,6 +11,28 @@ import { getCashAndBankLedgerDropdownLabel } from "layouts/cash-fund-flow/cash-a
 import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { computeGrandTotal, computeLineTotal } from "./receiptUtils";
 
+export const RECEIPT_PDF_SELECTABLE_COLUMNS = [
+  { key: "particulars", label: "Particulars" },
+  { key: "tinFtn", label: "TIN-FTN" },
+];
+
+export const PAYMENT_PDF_SELECTABLE_COLUMNS = [
+  { key: "particulars", label: "Particulars" },
+  { key: "tinFtn", label: "TIN-TRN" },
+];
+
+export const RECEIPT_PDF_DEFAULT_COLUMN_KEYS = ["particulars", "tinFtn"];
+
+export function createDefaultReceiptPdfColumnKeys() {
+  return new Set(RECEIPT_PDF_DEFAULT_COLUMN_KEYS);
+}
+
+function resolveReceiptPdfColumnKeys(columnKeys) {
+  if (columnKeys instanceof Set) return columnKeys;
+  if (Array.isArray(columnKeys)) return new Set(columnKeys);
+  return createDefaultReceiptPdfColumnKeys();
+}
+
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
 const PDF_FONT_PARTICULARS_MIN = 5;
@@ -312,7 +334,11 @@ async function resolveReceiptModeLabel(receipt) {
   }
 
   const receivedFromLabel = String(
-    receipt?.receivedFromAccountLabel || receipt?.receivedFromAccountDisplay || ""
+    receipt?.paidFromAccountDisplay ||
+      receipt?.paidFromAccountLabel ||
+      receipt?.receivedFromAccountLabel ||
+      receipt?.receivedFromAccountDisplay ||
+      ""
   ).trim();
   if (receivedFromLabel) return stripLedgerCodePrefix(receivedFromLabel);
 
@@ -329,7 +355,12 @@ async function resolveReceiptModeLabel(receipt) {
 export async function generateReceiptPdf(
   receipt,
   marginsInParam = null,
-  { openNewTab = false, documentTitle = "Receipt Voucher", isPaymentVoucher = false } = {}
+  {
+    openNewTab = false,
+    documentTitle = "Receipt Voucher",
+    isPaymentVoucher = false,
+    columnKeys = null,
+  } = {}
 ) {
   if (!receipt) {
     throw new Error("No receipt data available for PDF.");
@@ -573,20 +604,33 @@ export async function generateReceiptPdf(
 
   yPos += lineHeight * 0.5;
 
+  const selectedColumns = resolveReceiptPdfColumnKeys(columnKeys);
+  const showParticulars = selectedColumns.has("particulars");
+  const showTinFtn = selectedColumns.has("tinFtn");
+  // Amount / Total always shown (same pattern as agreement-prov Total).
+  const showAmount = true;
+
   const colParticularsX = marginLeft;
   const colAmountRightX = contentRight;
-  const colAmountLeftX = colAmountRightX - contentWidth * 0.1;
-  const colTinFtnRightX = colAmountLeftX - contentWidth * 0.01;
-  const colTinFtnLeftX = colTinFtnRightX - contentWidth * 0.26;
-  const particularsMaxWidth = Math.max(
-    12,
-    colTinFtnLeftX - colParticularsX - PDF_PARTICULARS_COLUMN_GAP_MM
-  );
+  const amountShare = showAmount ? 0.1 : 0;
+  const tinFtnShare = showTinFtn ? 0.26 : 0;
+  const colAmountLeftX = colAmountRightX - contentWidth * amountShare;
+  const colTinFtnRightX = colAmountLeftX - (showTinFtn ? contentWidth * 0.01 : 0);
+  const colTinFtnLeftX = colTinFtnRightX - contentWidth * tinFtnShare;
+  const particularsRightEdge = showTinFtn
+    ? colTinFtnLeftX
+    : showAmount
+    ? colAmountLeftX
+    : contentRight;
+  const particularsMaxWidth = showParticulars
+    ? Math.max(12, particularsRightEdge - colParticularsX - PDF_PARTICULARS_COLUMN_GAP_MM)
+    : 0;
   const amountMaxWidth = Math.max(10, colAmountRightX - colAmountLeftX);
   const tinFtnMaxWidth = Math.max(10, colTinFtnRightX - colTinFtnLeftX);
   const tinFtnHeaderLabel = paymentVoucher ? "TIN-TRN" : "TIN-FTN";
 
   const drawAmountCell = (text, y, options = {}) => {
+    if (!showAmount) return;
     drawBodyText(text, colAmountRightX, y, {
       ...options,
       textOptions: {
@@ -598,6 +642,7 @@ export async function generateReceiptPdf(
   };
 
   const drawTinFtnCell = (text, y, options = {}) => {
+    if (!showTinFtn) return;
     drawBodyText(text, colTinFtnRightX, y, {
       ...options,
       textOptions: {
@@ -609,6 +654,7 @@ export async function generateReceiptPdf(
   };
 
   const drawParticularsText = (text, y) => {
+    if (!showParticulars) return 1;
     const value = String(text ?? "");
     const { fontSize, lines } = resolveParticularsPdfTextLayout(doc, value, particularsMaxWidth, {
       maxLines: PDF_PARTICULARS_MAX_LINES,
@@ -628,11 +674,15 @@ export async function generateReceiptPdf(
 
   const drawVoucherTableHeader = () => {
     const rowTop = yPos;
-    drawBodyText("Particulars", colParticularsX, rowTop, { bold: true });
-    drawBodyText(tinFtnHeaderLabel, colTinFtnRightX, rowTop, {
-      bold: true,
-      textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
-    });
+    if (showParticulars) {
+      drawBodyText("Particulars", colParticularsX, rowTop, { bold: true });
+    }
+    if (showTinFtn) {
+      drawBodyText(tinFtnHeaderLabel, colTinFtnRightX, rowTop, {
+        bold: true,
+        textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
+      });
+    }
     drawBodyText("Amount", colAmountRightX, rowTop, {
       bold: true,
       textOptions: { align: "right", maxWidth: sc(amountMaxWidth) },
@@ -640,7 +690,7 @@ export async function generateReceiptPdf(
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(sf(bodyFont));
-    const headerTextHeight = doc.getTextDimensions("Particulars").h;
+    const headerTextHeight = doc.getTextDimensions(showParticulars ? "Particulars" : "Amount").h;
     const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
     drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
     yPos = underlineY + lineHeight;

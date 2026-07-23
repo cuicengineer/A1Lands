@@ -55,7 +55,7 @@ export function getPaymentPartyTypeLabel(partyType) {
 
 export function getPaymentPartyColumnLabel(partyType) {
   const type = normalizePaymentPartyType(partyType);
-  if (type === "Tenant") return "Tenant";
+  if (type === "Tenant") return "Tenant/Supplier";
   if (type === "CustomerSupplier") return "Customer";
   return "Party";
 }
@@ -221,7 +221,7 @@ export function validatePaymentForm(
   }
   const receivedInSelection = form.cashAndBankAccountId || form.receivedInCoaId;
   if (receivedInSelection === "" || receivedInSelection == null) {
-    errors.receivedInCoaId = labels.receivedFromRequired || "Received In is required";
+    errors.receivedInCoaId = labels.receivedFromRequired || "Paid From is required";
   } else {
     const ledgerId = resolveCashAndBankAccountIdFromSelection(
       receivedInSelection,
@@ -255,7 +255,7 @@ export function validatePaymentForm(
     }
 
     if (mode && (isPaymentInvoiceMode(mode) || isReceiptInvoiceMode(mode))) {
-      if (!line.partyKey) errors[`line-${idx}-party`] = "Tenant is required";
+      if (!line.partyKey) errors[`line-${idx}-party`] = "Tenant/Supplier is required";
     }
 
     if (parseAmount(line.amount) <= 0) {
@@ -358,6 +358,15 @@ export function flattenPaymentForGrid(payment, index, { attachmentCount = 0 } = 
     vrNo: payment.vrNo || payment.reference || "-",
     paidTo: payment.payeeName || "-",
     receivedFrom:
+      payment.paidFromAccountDisplay ||
+      payment.paidFromAccountLabel ||
+      payment.receivedFromAccountLabel ||
+      payment.receivedFromAccountDisplay ||
+      payment.paidFrom ||
+      "-",
+    paidFrom:
+      payment.paidFromAccountDisplay ||
+      payment.paidFromAccountLabel ||
       payment.receivedFromAccountLabel ||
       payment.receivedFromAccountDisplay ||
       payment.paidFrom ||
@@ -386,6 +395,15 @@ export function mapPaymentForVoucherPdf(payment) {
     reference: vrNo,
     paidFrom: payment.payeeName || payment.paidTo || "",
     receivedFromAccountLabel:
+      payment.paidFromAccountDisplay ||
+      payment.paidFromAccountLabel ||
+      payment.receivedFromAccountLabel ||
+      payment.receivedFromAccountDisplay ||
+      payment.paidFrom ||
+      "",
+    paidFromAccountDisplay:
+      payment.paidFromAccountDisplay ||
+      payment.paidFromAccountLabel ||
       payment.receivedFromAccountLabel ||
       payment.receivedFromAccountDisplay ||
       payment.paidFrom ||

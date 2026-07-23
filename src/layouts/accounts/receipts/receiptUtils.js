@@ -7,6 +7,7 @@ import {
   buildCollectionEntryPayload,
   buildInvoiceKey,
   formatAgreementPeriodLabel,
+  formatCollectionInvoiceDropdownLabel,
   formatContractNoLabel,
   isFinalizedContract,
   normalizeCatalogRow,
@@ -86,13 +87,14 @@ export function formatLineAccountDropdownLabel(option) {
 }
 
 export function formatTenantPartyContractDropdownLabel(party, contract) {
-  const baseLabel = String(party?.label || "").trim();
+  const tenantNo = String(party?.code || "").trim();
+  const name = String(party?.name || "").trim();
   const contractNo = formatContractNoLabel(contract);
-  const period = formatAgreementPeriodLabel(
+  const duration = formatAgreementPeriodLabel(
     pickField(contract, "contractStartDate", "ContractStartDate"),
     pickField(contract, "contractEndDate", "ContractEndDate")
   );
-  return [baseLabel, contractNo, period].filter(Boolean).join(" - ");
+  return [tenantNo, name, contractNo, duration].filter(Boolean).join("| ");
 }
 
 export const partyDropdownOneLineSx = {
@@ -446,26 +448,59 @@ export function getCollectionEntryBalanceAmount(entry) {
   return { balance, amount };
 }
 
-export function formatReceiptCollectionInvoiceOptionLabel(
-  entry,
-  { duplicateInvoiceNo = false } = {}
-) {
-  const invoiceNo = String(pickField(entry, "invoiceNo", "InvoiceNo") || "").trim();
+export function formatReceiptCollectionInvoiceOptionLabel(entry, invoice = null) {
+  const invoiceNo = String(
+    pickField(entry, "invoiceNo", "InvoiceNo") || pickField(invoice, "invoiceNo", "InvoiceNo") || ""
+  ).trim();
   if (!invoiceNo) return "";
-  const { balance, amount } = getCollectionEntryBalanceAmount(entry);
-  if (!duplicateInvoiceNo && balance === 0 && amount === 0) return invoiceNo;
-  return `${invoiceNo} - Balance ${formatAmount(balance)} - Amount ${formatAmount(amount)}`;
+  // Same display as collections grid: invoice no| issue date| total Amount
+  return formatCollectionInvoiceDropdownLabel({
+    ...(invoice || {}),
+    invoiceNo,
+    InvoiceNo: invoiceNo,
+    invoiceDate:
+      pickField(invoice, "invoiceDate", "InvoiceDate", "Cod", "cod") ||
+      pickField(entry, "invoiceDate", "InvoiceDate", "Cod", "cod"),
+    amountReceivable:
+      invoice?.amountReceivable ??
+      invoice?.AmountReceivable ??
+      invoice?.totalRent ??
+      invoice?.TotalRent ??
+      entry?.receivableAmount ??
+      entry?.ReceivableAmount ??
+      entry?.amount ??
+      entry?.Amount,
+    totalRent:
+      invoice?.totalRent ??
+      invoice?.TotalRent ??
+      entry?.receivableAmount ??
+      entry?.ReceivableAmount ??
+      entry?.amount ??
+      entry?.Amount,
+  });
 }
 
-export function formatReceiptCollectionTenantBusinessOptionLabel(
-  entry,
-  { duplicateTenantBusiness = false } = {}
-) {
+export function formatReceiptCollectionTenantBusinessOptionLabel(entry, contract = null) {
+  const tenantNo = pickField(entry, "tenantNo", "TenantNo");
   const tenantBusiness = String(entry?.tenantBusiness || entry?.TenantBusiness || "").trim();
-  if (!tenantBusiness) return "";
-  const { balance, amount } = getCollectionEntryBalanceAmount(entry);
-  if (!duplicateTenantBusiness && balance === 0 && amount === 0) return tenantBusiness;
-  return `${tenantBusiness} - Balance ${formatAmount(balance)} - Amount ${formatAmount(amount)}`;
+  let name = tenantBusiness;
+  if (tenantNo && name.toLowerCase().startsWith(tenantNo.toLowerCase())) {
+    name = name
+      .slice(tenantNo.length)
+      .replace(/^[\s\-–—]+/, "")
+      .trim();
+  }
+  // Drop trailing nature-of-business "(...)" if present so Name stays clean.
+  name = name.replace(/\s*\([^)]*\)\s*$/, "").trim() || tenantBusiness;
+  const contractNo =
+    formatContractNoLabel(contract) || pickField(entry, "contractNo", "ContractNo");
+  const duration = contract
+    ? formatAgreementPeriodLabel(
+        pickField(contract, "contractStartDate", "ContractStartDate"),
+        pickField(contract, "contractEndDate", "ContractEndDate")
+      )
+    : "";
+  return [tenantNo, name, contractNo, duration].filter(Boolean).join("| ");
 }
 
 export function buildSyntheticPartyFromCollectionEntry(entry) {
@@ -482,25 +517,27 @@ export function buildSyntheticPartyFromCollectionEntry(entry) {
 export function buildReceiptLineCollectionTenantOptions(
   collectionRows,
   lineAccount,
-  { selectedCollectionEntryId = "", unavailableCollectionEntryIds = new Set() } = {}
+  { selectedCollectionEntryId = "", unavailableCollectionEntryIds = new Set(), contracts = [] } = {}
 ) {
   if (!lineAccount || !isCollectionAccountCoaOption(lineAccount)) return [];
 
   const selectedId = String(selectedCollectionEntryId || "").trim();
+  const contractsByNo = new Map();
+  (contracts || []).map(normalizeCatalogRow).forEach((contract) => {
+    const contractNo = formatContractNoLabel(contract);
+    if (!contractNo) return;
+    const key = contractNo.toLowerCase();
+    if (!contractsByNo.has(key)) contractsByNo.set(key, contract);
+  });
+
   const pendingEntries = (collectionRows || []).filter((entry) => {
     if (!isPendingReceiptCollectionEntry(entry, { selectedCollectionEntryId: selectedId })) {
       return false;
     }
     if (!entryMatchesReceiptLineAccount(entry, lineAccount)) return false;
-    return Boolean(String(entry?.tenantBusiness || entry?.TenantBusiness || "").trim());
-  });
-
-  const countByTenantBusiness = new Map();
-  pendingEntries.forEach((entry) => {
-    const name = String(entry?.tenantBusiness || entry?.TenantBusiness || "")
-      .trim()
-      .toLowerCase();
-    if (name) countByTenantBusiness.set(name, (countByTenantBusiness.get(name) || 0) + 1);
+    return Boolean(
+      String(pickField(entry, "tenantNo", "TenantNo") || entry?.tenantBusiness || "").trim()
+    );
   });
 
   return pendingEntries
@@ -513,13 +550,11 @@ export function buildReceiptLineCollectionTenantOptions(
     })
     .map((entry) => {
       const entryId = entry?.id ?? entry?.Id;
-      const tenantBusiness = String(entry?.tenantBusiness || entry?.TenantBusiness || "").trim();
-      const duplicate = (countByTenantBusiness.get(tenantBusiness.toLowerCase()) || 0) > 1;
+      const contractNo = pickField(entry, "contractNo", "ContractNo");
+      const contract = contractNo ? contractsByNo.get(contractNo.toLowerCase()) || null : null;
       return {
         value: buildReceiptCollectionEntryOptionValue(entryId),
-        label: formatReceiptCollectionTenantBusinessOptionLabel(entry, {
-          duplicateTenantBusiness: duplicate,
-        }),
+        label: formatReceiptCollectionTenantBusinessOptionLabel(entry, contract),
         collectionEntryId: String(entryId),
         entry,
         type: "Tenant",
@@ -528,11 +563,7 @@ export function buildReceiptLineCollectionTenantOptions(
     .filter((option) => option.label);
 }
 
-export function applyReceiptLinePartyFromCollectionEntry(
-  line,
-  entry,
-  { duplicateTenantBusiness = false } = {}
-) {
+export function applyReceiptLinePartyFromCollectionEntry(line, entry, { contract = null } = {}) {
   const entryId = String(entry?.id ?? entry?.Id ?? "").trim();
   const amount = parseAmount(entry?.amount ?? entry?.Amount);
   const entryTinTrn = normalizeTinTrn(entry?.tinTrn ?? entry?.TinTrn ?? "");
@@ -547,9 +578,7 @@ export function applyReceiptLinePartyFromCollectionEntry(
     partyId: entryId,
     partyCode: pickField(entry, "tenantNo", "TenantNo"),
     partyName: tenantBusiness,
-    partyLabel: formatReceiptCollectionTenantBusinessOptionLabel(entry, {
-      duplicateTenantBusiness,
-    }),
+    partyLabel: formatReceiptCollectionTenantBusinessOptionLabel(entry, contract),
     collectionEntryId: entryId,
     contractNo,
     invoiceNo,
@@ -588,7 +617,11 @@ export function getPendingCollectionEntriesForReceiptTenant(
 export function buildReceiptLineCollectionInvoiceOptions(
   collectionRows,
   party,
-  { selectedCollectionEntryId = "", unavailableCollectionEntryIds = new Set() } = {}
+  {
+    selectedCollectionEntryId = "",
+    unavailableCollectionEntryIds = new Set(),
+    invoiceRowsByKey = null,
+  } = {}
 ) {
   if (!party) return [];
 
@@ -612,14 +645,6 @@ export function buildReceiptLineCollectionInvoiceOptions(
     return partyMatchesReceiptCollectionEntry(party, entry);
   });
 
-  const countByInvoiceNo = new Map();
-  pendingEntries.forEach((entry) => {
-    const invoiceNo = String(pickField(entry, "invoiceNo", "InvoiceNo") || "")
-      .trim()
-      .toLowerCase();
-    if (invoiceNo) countByInvoiceNo.set(invoiceNo, (countByInvoiceNo.get(invoiceNo) || 0) + 1);
-  });
-
   return pendingEntries
     .filter((entry) => {
       const entryId = String(entry?.id ?? entry?.Id ?? "").trim();
@@ -631,10 +656,12 @@ export function buildReceiptLineCollectionInvoiceOptions(
     .map((entry) => {
       const entryId = entry?.id ?? entry?.Id;
       const invoiceNo = String(pickField(entry, "invoiceNo", "InvoiceNo") || "").trim();
-      const duplicate = (countByInvoiceNo.get(invoiceNo.toLowerCase()) || 0) > 1;
+      const invoiceKey = buildInvoiceKey(entry);
+      const invoice =
+        (invoiceRowsByKey && invoiceKey ? invoiceRowsByKey.get(invoiceKey) : null) || null;
       return {
         value: buildReceiptCollectionEntryOptionValue(entryId),
-        label: formatReceiptCollectionInvoiceOptionLabel(entry, { duplicateInvoiceNo: duplicate }),
+        label: formatReceiptCollectionInvoiceOptionLabel(entry, invoice),
         collectionEntryId: String(entryId),
         invoiceNo,
         entry,
@@ -686,6 +713,44 @@ export function buildReceiptCollectionEntryUpdatePayload(entry, { receiptId, ref
     status: "Received",
     receiptId,
   });
+}
+
+/** Clear receipt voucher fields on a collection entry after the linked receipt is deleted. */
+export function buildReceiptCollectionEntryClearPayload(entry) {
+  return buildCollectionEntryPayload({
+    ...entry,
+    vrNo: "",
+    vrDate: "",
+    status: "Pending",
+    receiptId: "",
+  });
+}
+
+export function collectionEntryMatchesDeletedReceipt(entry, receipt) {
+  if (!entry || !receipt) return false;
+  const receiptId = receipt?.id ?? receipt?.Id;
+  const entryReceiptId = entry?.receiptId ?? entry?.ReceiptId;
+  if (
+    receiptId != null &&
+    receiptId !== "" &&
+    entryReceiptId != null &&
+    entryReceiptId !== "" &&
+    Number(entryReceiptId) === Number(receiptId)
+  ) {
+    return true;
+  }
+  const entryVrNo = String(entry?.vrNo ?? entry?.VrNo ?? "")
+    .trim()
+    .toLowerCase();
+  if (!entryVrNo) return false;
+  const references = [receipt?.reference, receipt?.Reference, receipt?.vrNo, receipt?.VrNo]
+    .map((value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    )
+    .filter(Boolean);
+  return references.includes(entryVrNo);
 }
 
 export function getCollectionEntriesForInvoiceKey(collectionRows, invoiceKey) {

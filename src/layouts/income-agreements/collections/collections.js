@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import MDBox from "components/MDBox";
@@ -45,6 +45,7 @@ import {
 } from "./collectionReceiptUtils";
 import {
   buildCollectionEntryPayload,
+  buildTenantConfigDeepLink,
   createEmptyCollectionRow,
   enrichCollectionGridRow,
   findCollectionPartyOption,
@@ -55,8 +56,10 @@ import {
   formatTenantBusinessLabel,
   getActiveClassOptions,
   isCollectionRowLockedByVrDate,
+  isInvoiceScheduleHeaderRow,
   normalizeCatalogRow,
   normalizeCollectionEntryRow,
+  openAppRouteInNewTab,
   parseAmount,
   parseInvoiceKey,
   pickActiveLockDateYyyyMmDd,
@@ -108,7 +111,7 @@ export default function Collections() {
   const [gridPageSize] = useState(GRID_DISPLAY_DEFAULT_PAGE_SIZE);
   const [activeLockDate, setActiveLockDate] = useState("");
   const [invoiceViewRow, setInvoiceViewRow] = useState(null);
-  const [tenantViewData, setTenantViewData] = useState(null);
+  const catalogLoadTokenRef = useRef(0);
 
   const canEdit = canEditCurrentMenu();
   const canDelete = canDeleteCurrentMenu();
@@ -140,6 +143,8 @@ export default function Collections() {
   }, [search]);
 
   const loadCatalogs = useCallback(async ({ silent = false } = {}) => {
+    const loadToken = catalogLoadTokenRef.current + 1;
+    catalogLoadTokenRef.current = loadToken;
     if (!silent) setLoading(true);
     try {
       const [
@@ -157,7 +162,8 @@ export default function Collections() {
         api.list("class"),
         api.list("base"),
         contractApi.getAllRecords(),
-        contractApi.getAllInvoiceScheduleRecords(),
+        // Finalized headers only — avoids paging the full schedule (header + line items).
+        contractApi.getAgreementProvFinalizedInvoiceScheduleRecords(),
         api.list("tenant"),
         customerApi.listCustomers(),
         supplierApi.listSuppliers(),
@@ -166,10 +172,14 @@ export default function Collections() {
         receiptsApi.listReceipts(),
       ]);
 
+      if (catalogLoadTokenRef.current !== loadToken) return;
+
       const classRows = unwrapList(classRes).map(normalizeCatalogRow);
       const baseRows = unwrapList(baseRes).map(normalizeCatalogRow);
       const contractRows = unwrapList(contractRes?.data ?? contractRes).map(normalizeCatalogRow);
-      const invoiceRows = unwrapList(invoiceRes?.data ?? invoiceRes).map(normalizeCatalogRow);
+      const invoiceRows = unwrapList(invoiceRes?.data ?? invoiceRes)
+        .map(normalizeCatalogRow)
+        .filter(isInvoiceScheduleHeaderRow);
       const tenantRows = unwrapList(tenantRes).map(normalizeCatalogRow);
       const customerRows = unwrapList(customerRes).map(normalizeCatalogRow);
       const supplierRows = unwrapList(supplierRes).map(normalizeCatalogRow);
@@ -188,43 +198,49 @@ export default function Collections() {
         ),
       ];
 
-      for (const coaId of savedCoaIds) {
-        if (findCoaById(coaRows, coaId)) continue;
-        try {
-          const savedRow = await api.get("ChartOfAccounts", coaId);
-          const option = normalizePartyCoaOption(savedRow);
-          if (option.id != null) {
-            coaRows = mergePartyCoaOption(coaRows, option);
-          }
-        } catch (error) {
-          console.error("Error fetching saved collection account:", error);
-        }
-      }
-
-      const persistedRows = await Promise.all(
-        collectionList.map(normalizeCollectionEntryRow).map(async (row) => {
-          const party = findCollectionPartyOption(
-            { tenants: tenantRows, customers: customerRows, suppliers: supplierRows },
-            row.tenantNo,
-            row.coaId,
-            coaRows
-          );
-          const account = findCoaById(coaRows, row.coaId ?? party?.coaId);
-          const attachmentMeta = isPersistedCollectionLineId(row.id)
-            ? await loadCollectionLineAttachmentMeta(row.id)
-            : { hasAttachment: false, attachmentFileId: null, attachmentFileName: "" };
-          return {
-            ...row,
-            tenantBusiness:
-              row.tenantBusiness ||
-              formatCollectionPartyDropdownLabel(party) ||
-              formatTenantBusinessLabel(row, party),
-            accountLabel: formatAccountLabel(account),
-            ...attachmentMeta,
-            pendingAttachmentFile: null,
-          };
-        })
+      const missingCoaOptions = await Promise.all(
+        savedCoaIds
+          .filter((coaId) => !findCoaById(coaRows, coaId))
+          .map(async (coaId) => {
+            try {
+              const savedRow = await api.get("ChartOfAccounts", coaId);
+              return normalizePartyCoaOption(savedRow);
+            } catch (error) {
+              console.error("Error fetching saved collection account:", error);
+              return null;
+            }
+          })
       );
+      missingCoaOptions.forEach((option) => {
+        if (option?.id != null) {
+          coaRows = mergePartyCoaOption(coaRows, option);
+        }
+      });
+
+      if (catalogLoadTokenRef.current !== loadToken) return;
+
+      // Paint the grid immediately; attachment icons hydrate in the background.
+      const apiReturnedAttachmentFlags = collectionList.some(
+        (row) => row?.isAttachment !== undefined || row?.IsAttachment !== undefined
+      );
+      const persistedRows = collectionList.map(normalizeCollectionEntryRow).map((row) => {
+        const party = findCollectionPartyOption(
+          { tenants: tenantRows, customers: customerRows, suppliers: supplierRows },
+          row.tenantNo,
+          row.coaId,
+          coaRows
+        );
+        const account = findCoaById(coaRows, row.coaId ?? party?.coaId);
+        return {
+          ...row,
+          tenantBusiness:
+            row.tenantBusiness ||
+            formatCollectionPartyDropdownLabel(party) ||
+            formatTenantBusinessLabel(row, party),
+          accountLabel: formatAccountLabel(account),
+          pendingAttachmentFile: null,
+        };
+      });
 
       setClasses(classRows);
       setBases(baseRows);
@@ -237,7 +253,32 @@ export default function Collections() {
       setReceipts(receiptsApi.unwrapList(receiptRes));
       setEntries(persistedRows);
       setDraftRows([]);
+
+      // File id/name are only needed for download; fetch after paint.
+      // When API returns IsAttachment, only hydrate rows that have files.
+      const attachmentIds = persistedRows
+        .filter((row) => isPersistedCollectionLineId(row.id))
+        .filter((row) => (apiReturnedAttachmentFlags ? row.hasAttachment : true))
+        .map((row) => row.id);
+      if (attachmentIds.length > 0) {
+        void Promise.all(
+          attachmentIds.map(async (id) => {
+            const meta = await loadCollectionLineAttachmentMeta(id);
+            return [id, meta];
+          })
+        ).then((pairs) => {
+          if (catalogLoadTokenRef.current !== loadToken) return;
+          const metaById = new Map(pairs);
+          setEntries((prev) =>
+            prev.map((row) => {
+              const meta = metaById.get(row.id);
+              return meta ? { ...row, ...meta } : row;
+            })
+          );
+        });
+      }
     } catch (error) {
+      if (catalogLoadTokenRef.current !== loadToken) return;
       console.error("Failed to load collections catalogs", error);
       setClasses([]);
       setBases([]);
@@ -251,7 +292,7 @@ export default function Collections() {
       setEntries([]);
       setDraftRows([]);
     } finally {
-      if (!silent) setLoading(false);
+      if (catalogLoadTokenRef.current === loadToken && !silent) setLoading(false);
     }
   }, []);
 
@@ -797,16 +838,10 @@ export default function Collections() {
     (row) => {
       const enriched = buildCollectionViewContext(row);
       const tenantNo = resolveCollectionTenantNo(enriched, enriched.selectedContract, tenants);
-      const party = findCollectionPartyOption(
-        { tenants, customers, suppliers },
-        tenantNo,
-        enriched.coaId,
-        coaOptions
-      );
-      if (!party) return;
-      setTenantViewData(party);
+      if (!tenantNo) return;
+      openAppRouteInNewTab(buildTenantConfigDeepLink(tenantNo, { readOnly: true }));
     },
-    [buildCollectionViewContext, coaOptions, customers, suppliers, tenants]
+    [buildCollectionViewContext, tenants]
   );
 
   return (
@@ -924,8 +959,6 @@ export default function Collections() {
       <CollectionRecordViewDialogs
         invoiceRowData={invoiceViewRow}
         onCloseInvoice={() => setInvoiceViewRow(null)}
-        tenantData={tenantViewData}
-        onCloseTenant={() => setTenantViewData(null)}
       />
     </DashboardLayout>
   );

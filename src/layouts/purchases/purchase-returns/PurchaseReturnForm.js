@@ -28,12 +28,16 @@ import {
   uploadPurchaseReturnAttachments,
 } from "./purchaseReturnAttachmentUtils";
 import {
+  applyPurchaseReturnAccountSelection,
+  applyPurchaseReturnCapitalSelection,
   applyPurchaseReturnProductSelection,
   buildPurchaseReturnFormState,
   computeNextPurchaseReturnVrNo,
   computePurchaseReturnGrandTotal,
   createPurchaseReturnLineRow,
   fetchPurchaseReturnVrNos,
+  findPurchaseReturnAccountOption,
+  findPurchaseReturnCapitalOption,
   findPurchaseReturnSupplierOption,
   getPurchaseReturnYearFromDate,
   loadPurchaseReturnFormCatalogs,
@@ -149,6 +153,7 @@ export default function PurchaseReturnForm({
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
   const [accountOptions, setAccountOptions] = useState([]);
+  const [capitalOptions, setCapitalOptions] = useState([]);
   const [existingVrNos, setExistingVrNos] = useState([]);
   const [vrNosLoaded, setVrNosLoaded] = useState(false);
   const fileInputRef = useRef(null);
@@ -180,6 +185,7 @@ export default function PurchaseReturnForm({
           setSupplierOptions(catalogs.supplierOptions);
           setProductOptions(catalogs.productOptions);
           setAccountOptions(catalogs.accountOptions);
+          setCapitalOptions(catalogs.capitalOptions);
         }
       } catch (error) {
         console.error("Error loading purchase return catalogs:", error);
@@ -187,6 +193,7 @@ export default function PurchaseReturnForm({
           setSupplierOptions([]);
           setProductOptions([]);
           setAccountOptions([]);
+          setCapitalOptions([]);
         }
       }
     })();
@@ -261,6 +268,35 @@ export default function PurchaseReturnForm({
     });
   }, [open, isEditMode, vrNosLoaded, existingVrNos, form.date]);
 
+  const mergedAccountOptions = useMemo(() => {
+    const list = [...(accountOptions || [])];
+    (form.lines || []).forEach((line) => {
+      if (!String(line.account || "").trim()) return;
+      if (findPurchaseReturnAccountOption(list, line)) return;
+      list.push({
+        value: line.accountKey || line.accountCoaId || line.account,
+        label: line.account,
+        coaId: line.accountCoaId || "",
+      });
+    });
+    return list;
+  }, [accountOptions, form.lines]);
+
+  const mergedCapitalOptions = useMemo(() => {
+    const list = [...(capitalOptions || [])];
+    (form.lines || []).forEach((line) => {
+      const capital = String(line.capital || line.capitalKey || "").trim();
+      if (!capital) return;
+      if (findPurchaseReturnCapitalOption(list, line)) return;
+      list.push({
+        value: line.capitalKey || capital,
+        label: capital,
+        controlAccount: capital,
+      });
+    });
+    return list;
+  }, [capitalOptions, form.lines]);
+
   const updateHeader = (field, value) => {
     if (field === "vrNo") return;
     setForm((prev) => {
@@ -289,8 +325,12 @@ export default function PurchaseReturnForm({
             updated,
             value,
             productOptions,
-            accountOptions
+            mergedAccountOptions
           );
+        } else if (field === "accountKey") {
+          updated = applyPurchaseReturnAccountSelection(updated, value, mergedAccountOptions);
+        } else if (field === "capitalKey") {
+          updated = applyPurchaseReturnCapitalSelection(updated, value, mergedCapitalOptions);
         } else if (field === "quantity" || field === "unitPrice" || field === "discount") {
           updated = syncPurchaseReturnLineAmount(updated);
         }
@@ -547,6 +587,8 @@ export default function PurchaseReturnForm({
           <PurchaseReturnLinesGrid
             lines={form.lines}
             productOptions={productOptions}
+            accountOptions={mergedAccountOptions}
+            capitalOptions={mergedCapitalOptions}
             errors={errors}
             saving={saving}
             grandTotal={grandTotal}

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -23,6 +25,10 @@ import {
   saveAgreementProvPdfMargins,
 } from "utils/agreementProvPdfMargins";
 
+function createColumnKeySet(defaultColumnKeys = []) {
+  return new Set(Array.isArray(defaultColumnKeys) ? defaultColumnKeys : []);
+}
+
 function AgreementProvPdfPreviewDialog({
   open,
   onClose,
@@ -33,8 +39,17 @@ function AgreementProvPdfPreviewDialog({
   defaultMargins = AGREEMENT_PROV_PDF_DEFAULT_MARGINS,
   loadMargins = loadAgreementProvPdfMargins,
   saveMargins = saveAgreementProvPdfMargins,
+  selectableColumns = null,
+  defaultColumnKeys = null,
+  alwaysOnColumnLabels = ["Total (always shown)"],
 }) {
+  const hasColumnSelection = Array.isArray(selectableColumns) && selectableColumns.length > 0;
+  const resolvedDefaultColumnKeys = hasColumnSelection
+    ? defaultColumnKeys || selectableColumns.map((col) => col.key)
+    : [];
+
   const [marginsIn, setMarginsIn] = useState(() => loadMargins());
+  const [columnKeys, setColumnKeys] = useState(() => createColumnKeySet(resolvedDefaultColumnKeys));
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const previewUrlRef = useRef(null);
@@ -48,12 +63,14 @@ function AgreementProvPdfPreviewDialog({
   }, []);
 
   const regeneratePreview = useCallback(
-    async (rowData, margins) => {
+    async (rowData, margins, nextColumnKeys = columnKeys) => {
       if (!rowData || typeof generatePdfBlob !== "function") return;
       setLoading(true);
       try {
         saveMargins(margins);
-        const pdfBlob = await generatePdfBlob(rowData, margins);
+        const pdfBlob = await generatePdfBlob(rowData, margins, {
+          columnKeys: hasColumnSelection ? nextColumnKeys : undefined,
+        });
         revokePreviewObjectUrl();
         const nextUrl = URL.createObjectURL(pdfBlob);
         previewUrlRef.current = nextUrl;
@@ -65,16 +82,18 @@ function AgreementProvPdfPreviewDialog({
         setLoading(false);
       }
     },
-    [generatePdfBlob, revokePreviewObjectUrl, saveMargins]
+    [columnKeys, generatePdfBlob, hasColumnSelection, revokePreviewObjectUrl, saveMargins]
   );
 
   useEffect(() => {
     if (!open) return undefined;
     const margins = loadMargins();
+    const nextColumnKeys = createColumnKeySet(resolvedDefaultColumnKeys);
     setMarginsIn(margins);
-    regeneratePreview(data, margins);
+    setColumnKeys(nextColumnKeys);
+    regeneratePreview(data, margins, nextColumnKeys);
     return () => revokePreviewObjectUrl();
-  }, [open, data, regeneratePreview, revokePreviewObjectUrl, loadMargins]);
+  }, [open, data]);
 
   const handleClose = () => {
     revokePreviewObjectUrl();
@@ -83,7 +102,23 @@ function AgreementProvPdfPreviewDialog({
   };
 
   const handleApplyMargins = async () => {
-    await regeneratePreview(data, marginsIn);
+    await regeneratePreview(data, marginsIn, columnKeys);
+  };
+
+  const handleReset = () => {
+    setMarginsIn({ ...defaultMargins });
+    if (hasColumnSelection) {
+      setColumnKeys(createColumnKeySet(resolvedDefaultColumnKeys));
+    }
+  };
+
+  const toggleColumn = (key) => {
+    setColumnKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   const adjustContentScale = (delta) => {
@@ -221,12 +256,53 @@ function AgreementProvPdfPreviewDialog({
             A4 size is 100% scale.
           </MDTypography>
 
+          {hasColumnSelection ? (
+            <>
+              <MDTypography variant="h6" sx={{ mt: 2, mb: 1 }}>
+                PDF columns
+              </MDTypography>
+              <MDBox display="flex" flexDirection="column" gap={0.25}>
+                {selectableColumns.map((col) => (
+                  <FormControlLabel
+                    key={col.key}
+                    sx={{ m: 0, alignItems: "center" }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={columnKeys.has(col.key)}
+                        onChange={() => toggleColumn(col.key)}
+                        disabled={loading}
+                      />
+                    }
+                    label={
+                      <MDTypography variant="body2" sx={{ fontSize: "0.8125rem" }}>
+                        {col.label}
+                      </MDTypography>
+                    }
+                  />
+                ))}
+                {(alwaysOnColumnLabels || []).map((label) => (
+                  <FormControlLabel
+                    key={label}
+                    sx={{ m: 0, alignItems: "center" }}
+                    control={<Checkbox size="small" checked disabled />}
+                    label={
+                      <MDTypography variant="body2" sx={{ fontSize: "0.8125rem" }}>
+                        {label}
+                      </MDTypography>
+                    }
+                  />
+                ))}
+              </MDBox>
+            </>
+          ) : null}
+
           <MDBox mt={2} display="flex" gap={1} alignItems="center">
             <MDButton
               variant="outlined"
               color="dark"
               size="small"
-              onClick={() => setMarginsIn({ ...defaultMargins })}
+              onClick={handleReset}
               disabled={loading}
             >
               Reset
@@ -243,8 +319,9 @@ function AgreementProvPdfPreviewDialog({
           </MDBox>
 
           <MDTypography variant="caption" sx={{ mt: 1, color: "text.secondary", display: "block" }}>
-            Margins and content scale are applied when you click Update. Scale adjusts fonts,
-            spacing, and layout in the generated PDF (not just the preview display).
+            {hasColumnSelection
+              ? "Margins, content scale, and columns are applied when you click Update. Scale adjusts fonts, spacing, and layout in the generated PDF (not just the preview display)."
+              : "Margins and content scale are applied when you click Update. Scale adjusts fonts, spacing, and layout in the generated PDF (not just the preview display)."}
           </MDTypography>
         </MDBox>
 
@@ -310,6 +387,20 @@ AgreementProvPdfPreviewDialog.propTypes = {
   }),
   loadMargins: PropTypes.func,
   saveMargins: PropTypes.func,
+  selectableColumns: PropTypes.arrayOf(
+    PropTypes.shape({
+      key: PropTypes.string.isRequired,
+      label: PropTypes.string.isRequired,
+    })
+  ),
+  defaultColumnKeys: PropTypes.arrayOf(PropTypes.string),
+  alwaysOnColumnLabels: PropTypes.arrayOf(PropTypes.string),
+};
+
+AgreementProvPdfPreviewDialog.defaultProps = {
+  selectableColumns: null,
+  defaultColumnKeys: null,
+  alwaysOnColumnLabels: ["Total (always shown)"],
 };
 
 export default AgreementProvPdfPreviewDialog;

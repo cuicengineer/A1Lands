@@ -9,6 +9,30 @@ import {
 import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
 import { mapInterAccTransferForVoucherPdf } from "./interAccTransferUtils";
 
+export const INTER_ACC_TRANSFER_PDF_SELECTABLE_COLUMNS = [
+  { key: "accounts", label: "Accounts" },
+  { key: "tinFtn", label: "TIN-FTN" },
+  { key: "amountOutflow", label: "Amount Outflow" },
+  { key: "amountInflow", label: "Amount Inflow" },
+];
+
+export const INTER_ACC_TRANSFER_PDF_DEFAULT_COLUMN_KEYS = [
+  "accounts",
+  "tinFtn",
+  "amountOutflow",
+  "amountInflow",
+];
+
+export function createDefaultInterAccTransferPdfColumnKeys() {
+  return new Set(INTER_ACC_TRANSFER_PDF_DEFAULT_COLUMN_KEYS);
+}
+
+function resolveInterAccTransferPdfColumnKeys(columnKeys) {
+  if (columnKeys instanceof Set) return columnKeys;
+  if (Array.isArray(columnKeys)) return new Set(columnKeys);
+  return createDefaultInterAccTransferPdfColumnKeys();
+}
+
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
 const PDF_FONT_PARTICULARS_MIN = 5;
@@ -163,7 +187,7 @@ function pickTransferAmount(value) {
 export async function generateInterAccTransferPdf(
   transfer,
   marginsInParam = null,
-  { openNewTab = false } = {}
+  { openNewTab = false, columnKeys = null } = {}
 ) {
   const mapped = mapInterAccTransferForVoucherPdf(transfer);
   if (!mapped) {
@@ -378,20 +402,37 @@ export async function generateInterAccTransferPdf(
 
   yPos += lineHeight * 0.5;
 
+  const selectedColumns = resolveInterAccTransferPdfColumnKeys(columnKeys);
+  const showAccounts = selectedColumns.has("accounts");
+  const showTinFtn = selectedColumns.has("tinFtn");
+  const showOutflow = selectedColumns.has("amountOutflow");
+  const showInflow = selectedColumns.has("amountInflow");
+
   const colParticularsX = marginLeft;
   const colInflowRightX = contentRight;
-  // Wide enough for "Amount Outflow" / "Amount Inflow" on one line at body font.
-  const colInflowLeftX = colInflowRightX - contentWidth * 0.17;
-  const colOutflowRightX = colInflowLeftX - contentWidth * 0.01;
-  const colOutflowLeftX = colOutflowRightX - contentWidth * 0.17;
-  const colTinFtnRightX = colOutflowLeftX - contentWidth * 0.01;
-  const colTinFtnLeftX = colTinFtnRightX - contentWidth * 0.22;
-  const particularsMaxWidth = Math.max(12, colTinFtnLeftX - colParticularsX - 3);
+  const inflowShare = showInflow ? 0.17 : 0;
+  const outflowShare = showOutflow ? 0.17 : 0;
+  const tinFtnShare = showTinFtn ? 0.22 : 0;
+  const colInflowLeftX = colInflowRightX - contentWidth * inflowShare;
+  const colOutflowRightX = colInflowLeftX - (showOutflow && showInflow ? contentWidth * 0.01 : 0);
+  const colOutflowLeftX = colOutflowRightX - contentWidth * outflowShare;
+  const amountBlockLeft = showOutflow
+    ? colOutflowLeftX
+    : showInflow
+    ? colInflowLeftX
+    : contentRight;
+  const colTinFtnRightX = amountBlockLeft - (showTinFtn ? contentWidth * 0.01 : 0);
+  const colTinFtnLeftX = colTinFtnRightX - contentWidth * tinFtnShare;
+  const accountsRightEdge = showTinFtn ? colTinFtnLeftX : amountBlockLeft;
+  const particularsMaxWidth = showAccounts
+    ? Math.max(12, accountsRightEdge - colParticularsX - 3)
+    : 0;
   const outflowMaxWidth = Math.max(10, colOutflowRightX - colOutflowLeftX);
   const inflowMaxWidth = Math.max(10, colInflowRightX - colInflowLeftX);
   const tinFtnMaxWidth = Math.max(10, colTinFtnRightX - colTinFtnLeftX);
 
   const drawOutflowCell = (text, y, options = {}) => {
+    if (!showOutflow) return;
     drawBodyText(text, colOutflowRightX, y, {
       ...options,
       textOptions: {
@@ -403,6 +444,7 @@ export async function generateInterAccTransferPdf(
   };
 
   const drawInflowCell = (text, y, options = {}) => {
+    if (!showInflow) return;
     drawBodyText(text, colInflowRightX, y, {
       ...options,
       textOptions: {
@@ -414,6 +456,7 @@ export async function generateInterAccTransferPdf(
   };
 
   const drawTinFtnCell = (text, y, options = {}) => {
+    if (!showTinFtn) return;
     drawBodyText(text, colTinFtnRightX, y, {
       ...options,
       textOptions: {
@@ -425,8 +468,8 @@ export async function generateInterAccTransferPdf(
   };
 
   const drawAccountsText = (text, y) => {
+    if (!showAccounts) return 1;
     const value = String(text ?? "");
-    // Match Description body font size (PDF_FONT_BODY).
     const { fontSize, lines } = resolveWrappedPdfFontSize(
       doc,
       value,
@@ -447,7 +490,6 @@ export async function generateInterAccTransferPdf(
 
   const drawSingleLineAmountHeader = (text, x, y, maxWidth) => {
     const value = String(text ?? "");
-    // Keep one line; prefer same size as TIN-FTN (body bold), shrink only if needed.
     const fontSize = resolveSingleLinePdfFontSize(
       doc,
       value,
@@ -463,17 +505,32 @@ export async function generateInterAccTransferPdf(
 
   const drawVoucherTableHeader = () => {
     const rowTop = yPos;
-    drawBodyText("Accounts", colParticularsX, rowTop, { bold: true });
-    drawBodyText("TIN-FTN", colTinFtnRightX, rowTop, {
-      bold: true,
-      textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
-    });
-    drawSingleLineAmountHeader("Amount Outflow", colOutflowRightX, rowTop, outflowMaxWidth);
-    drawSingleLineAmountHeader("Amount Inflow", colInflowRightX, rowTop, inflowMaxWidth);
+    if (showAccounts) {
+      drawBodyText("Accounts", colParticularsX, rowTop, { bold: true });
+    }
+    if (showTinFtn) {
+      drawBodyText("TIN-FTN", colTinFtnRightX, rowTop, {
+        bold: true,
+        textOptions: { align: "right", maxWidth: sc(tinFtnMaxWidth) },
+      });
+    }
+    if (showOutflow) {
+      drawSingleLineAmountHeader("Amount Outflow", colOutflowRightX, rowTop, outflowMaxWidth);
+    }
+    if (showInflow) {
+      drawSingleLineAmountHeader("Amount Inflow", colInflowRightX, rowTop, inflowMaxWidth);
+    }
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(sf(bodyFont));
-    const headerTextHeight = doc.getTextDimensions("Accounts").h;
+    const headerSample = showAccounts
+      ? "Accounts"
+      : showTinFtn
+      ? "TIN-FTN"
+      : showOutflow
+      ? "Amount Outflow"
+      : "Amount Inflow";
+    const headerTextHeight = doc.getTextDimensions(headerSample).h;
     const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
     drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
     yPos = underlineY + lineHeight;
@@ -515,16 +572,33 @@ export async function generateInterAccTransferPdf(
   drawPdfLine(marginLeft, totalOverlineY, contentRight, totalOverlineY);
 
   const outflowAmountText = formatPdfCurrency(outflowTotal);
-  const outflowTextWidth = doc.getTextWidth(outflowAmountText);
+  const inflowAmountText = formatPdfCurrency(inflowTotal);
   const totalLabelGapMm = 4;
-  const totalLabelAnchorX = colOutflowRightX - outflowTextWidth - totalLabelGapMm;
 
-  drawBodyText("Total", totalLabelAnchorX, totalRowY, {
-    bold: true,
-    textOptions: { align: "right" },
-  });
-  drawOutflowCell(outflowAmountText, totalRowY, { bold: true });
-  drawInflowCell(formatPdfCurrency(inflowTotal), totalRowY, { bold: true });
+  if (showOutflow) {
+    const outflowTextWidth = doc.getTextWidth(outflowAmountText);
+    const totalLabelAnchorX = colOutflowRightX - outflowTextWidth - totalLabelGapMm;
+    drawBodyText("Total", totalLabelAnchorX, totalRowY, {
+      bold: true,
+      textOptions: { align: "right" },
+    });
+    drawOutflowCell(outflowAmountText, totalRowY, { bold: true });
+  } else if (showInflow) {
+    const inflowTextWidth = doc.getTextWidth(inflowAmountText);
+    const totalLabelAnchorX = colInflowRightX - inflowTextWidth - totalLabelGapMm;
+    drawBodyText("Total", totalLabelAnchorX, totalRowY, {
+      bold: true,
+      textOptions: { align: "right" },
+    });
+  } else {
+    drawBodyText("Total", contentRight, totalRowY, {
+      bold: true,
+      textOptions: { align: "right" },
+    });
+  }
+  if (showInflow) {
+    drawInflowCell(inflowAmountText, totalRowY, { bold: true });
+  }
 
   const totalUnderlineY = totalRowY + totalLabelHeight * 0.35 + sc(0.5);
   drawPdfLine(marginLeft, totalUnderlineY, contentRight, totalUnderlineY);

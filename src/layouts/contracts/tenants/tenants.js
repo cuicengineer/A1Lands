@@ -1379,14 +1379,22 @@ function readTenantsUrlParams() {
     const params = new URLSearchParams(
       typeof window !== "undefined" ? window.location?.search || "" : ""
     );
+    const readOnlyRaw = String(params.get("readOnly") || params.get("mode") || "")
+      .trim()
+      .toLowerCase();
     return {
       tenantNo: String(params.get("tenantNo") || "").trim(),
       view: String(params.get("view") || "")
         .trim()
         .toLowerCase(),
+      readOnly:
+        readOnlyRaw === "1" ||
+        readOnlyRaw === "true" ||
+        readOnlyRaw === "view" ||
+        readOnlyRaw === "readonly",
     };
   } catch {
-    return { tenantNo: "", view: "" };
+    return { tenantNo: "", view: "", readOnly: false };
   }
 }
 
@@ -1436,6 +1444,7 @@ export default function Tenants() {
   const canDelete = canDeleteCurrentMenu();
   const canEditTenantNo = isSuperuserUser();
   const [openForm, setOpenForm] = useState(false);
+  const [formReadOnly, setFormReadOnly] = useState(false);
   const [currentTenant, setCurrentTenant] = useState(null);
   const [rows, setRows] = useState([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1451,6 +1460,7 @@ export default function Tenants() {
   const [loading, setLoading] = useState(true);
   const [coaLabelById, setCoaLabelById] = useState({});
   const urlDeepLink = useMemo(() => readTenantsUrlParams(), []);
+  const deepLinkFormOpenedRef = useRef(false);
 
   const fetchCoaLabels = useCallback(async () => {
     try {
@@ -1555,10 +1565,14 @@ export default function Tenants() {
   const handleOpenForm = () => {
     if (!canCreate) return;
     setCurrentTenant(null);
+    setFormReadOnly(false);
     setOpenForm(true);
   };
 
-  const handleCloseForm = () => setOpenForm(false);
+  const handleCloseForm = () => {
+    setOpenForm(false);
+    setFormReadOnly(false);
+  };
 
   const handleEditTenant = (id) => {
     if (!canEdit) return;
@@ -1581,6 +1595,7 @@ export default function Tenants() {
       coaId: tenant.coaId ?? tenant.CoaId ?? "",
       coaId2: tenant.coaId2 ?? tenant.CoaId2 ?? "",
     });
+    setFormReadOnly(false);
     setOpenForm(true);
   };
 
@@ -1601,6 +1616,25 @@ export default function Tenants() {
     if (!urlDeepLink.tenantNo) return;
     setPageNumber(1);
   }, [urlDeepLink.tenantNo]);
+
+  useEffect(() => {
+    if (deepLinkFormOpenedRef.current) return;
+    if (!urlDeepLink.tenantNo || loading) return;
+    const target = String(urlDeepLink.tenantNo || "")
+      .trim()
+      .toLowerCase();
+    const tenant = rows.find(
+      (row) =>
+        String(row?.tenantNo ?? row?.TenantNo ?? "")
+          .trim()
+          .toLowerCase() === target
+    );
+    if (!tenant) return;
+    deepLinkFormOpenedRef.current = true;
+    setCurrentTenant(buildTenantFormState(tenant));
+    setFormReadOnly(Boolean(urlDeepLink.readOnly));
+    setOpenForm(true);
+  }, [loading, rows, urlDeepLink.readOnly, urlDeepLink.tenantNo]);
 
   const handleDeleteTenant = (id) => {
     if (!canDelete) return;
@@ -2040,6 +2074,7 @@ export default function Tenants() {
         initialData={currentTenant}
         existingTenantNos={rows.map((row) => String(row?.tenantNo ?? row?.TenantNo ?? "").trim())}
         canEditTenantNo={canEditTenantNo}
+        readOnly={formReadOnly}
       />
       <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <DialogTitle>Confirm Delete</DialogTitle>

@@ -4,37 +4,50 @@ import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 import {
   agreementProvPdfMarginsInchesToMm,
   createAgreementProvPdfScaleHelpers,
-  loadReceiptPdfMargins,
+  loadPurchaseInvoicePdfMargins,
 } from "utils/agreementProvPdfMargins";
 import { addContractPdfWatermarks } from "layouts/contracts/contracts/contractPdfWatermark";
-import { mapJournalEntryForVoucherPdf } from "./journalEntryUtils";
+import {
+  computePurchaseInvoiceGrandTotal,
+  getPurchaseInvoiceLineComputedTotal,
+  normalizePurchaseInvoiceLine,
+} from "./purchaseInvoiceUtils";
 
-export const JOURNAL_ENTRY_PDF_SELECTABLE_COLUMNS = [
-  { key: "particulars", label: "Particulars" },
-  { key: "debit", label: "Debit" },
-  { key: "credit", label: "Credit" },
+export const PURCHASE_INVOICE_PDF_SELECTABLE_COLUMNS = [
+  { key: "itemCode", label: "Item" },
+  { key: "particular", label: "Particular" },
+  { key: "accHead", label: "Acc Head" },
+  { key: "qty", label: "Qty" },
+  { key: "unitPrice", label: "Unit Price" },
+  { key: "disc", label: "Disc" },
 ];
 
-export const JOURNAL_ENTRY_PDF_DEFAULT_COLUMN_KEYS = ["particulars", "debit", "credit"];
+export const PURCHASE_INVOICE_PDF_DEFAULT_COLUMN_KEYS = [
+  "itemCode",
+  "particular",
+  "accHead",
+  "qty",
+  "unitPrice",
+  "disc",
+];
 
-export function createDefaultJournalEntryPdfColumnKeys() {
-  return new Set(JOURNAL_ENTRY_PDF_DEFAULT_COLUMN_KEYS);
+export function createDefaultPurchaseInvoicePdfColumnKeys() {
+  return new Set(PURCHASE_INVOICE_PDF_DEFAULT_COLUMN_KEYS);
 }
 
-function resolveJournalEntryPdfColumnKeys(columnKeys) {
+function resolvePurchaseInvoicePdfColumnKeys(columnKeys) {
   if (columnKeys instanceof Set) return columnKeys;
   if (Array.isArray(columnKeys)) return new Set(columnKeys);
-  return createDefaultJournalEntryPdfColumnKeys();
+  return createDefaultPurchaseInvoicePdfColumnKeys();
 }
 
 const PDF_FONT_TITLE = 18;
-const PDF_FONT_BODY = 10;
+const PDF_FONT_BODY = 9;
 const PDF_FONT_PARTICULARS_MIN = 5;
-const PDF_FONT_PARTICULARS_CONTENT_START = 8;
-const PDF_FONT_PARTICULARS_CONTENT_MIN = 5.5;
-const PDF_PARTICULARS_MAX_LINES = 2;
-const PDF_PARTICULARS_LINE_STEP_RATIO = 0.9;
-const PDF_PARTICULARS_DEBIT_GAP_MM = 3;
+const PDF_FONT_CELL_START = 8;
+const PDF_FONT_CELL_MIN = 5.5;
+const PDF_TEXT_MAX_LINES = 2;
+const PDF_TEXT_LINE_STEP_RATIO = 0.9;
 const PDF_LINE_HEIGHT_MM = 5;
 const PDF_VALUE_UNDERLINE_GAP_MM = 0.75;
 const VOUCHER_PDF_SIGNATURE_BLOCKS = [
@@ -50,28 +63,17 @@ function formatPdfDate(dateString) {
   return formatted || "—";
 }
 
-function formatPdfScaledUnit(value) {
-  const rounded = Math.round(value * 100) / 100;
-  return rounded.toLocaleString("en-US", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  });
+function formatPdfCurrency(value) {
+  if (value === null || value === undefined || value === "") return "0";
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString("en-US") : String(value);
 }
 
-/** Debit/Credit: suffix M or B only at million/billion; otherwise plain number. */
-function formatPdfDebitCreditAmount(value) {
-  if (value === null || value === undefined || value === "") return "";
+function formatPdfQty(value) {
+  if (value === null || value === undefined || value === "") return "—";
   const n = Number(value);
-  if (!Number.isFinite(n) || n === 0) return "";
-
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) {
-    return `${formatPdfScaledUnit(n / 1_000_000_000)}B`;
-  }
-  if (abs >= 1_000_000) {
-    return `${formatPdfScaledUnit(n / 1_000_000)}M`;
-  }
-  return n.toLocaleString("en-US");
+  if (!Number.isFinite(n)) return String(value);
+  return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 function getPdfRowCenteredBaselineY(rowTop, rowBandHeight, textHeight) {
@@ -172,7 +174,7 @@ function loadPafLogoIntoPdf(doc, x, y, widthMm = 18) {
         doc.addImage(imgData, "PNG", x, y, widthMm, logoHeight);
         resolve(logoHeight);
       } catch (error) {
-        console.error("Error adding logo to journal entry PDF:", error);
+        console.error("Error adding logo to purchase invoice PDF:", error);
         resolve(0);
       }
     };
@@ -186,23 +188,39 @@ function textValue(value) {
   return text || "—";
 }
 
+function mapPurchaseInvoiceForPdf(record) {
+  if (!record) return null;
+  const lines = (record.lines || []).map(normalizePurchaseInvoiceLine);
+  return {
+    id: record.id,
+    date: record.date,
+    piNo: String(record.piNo || "").trim(),
+    description: String(record.description || "").trim(),
+    grandTotal:
+      record.grandTotal != null && Number.isFinite(Number(record.grandTotal))
+        ? Number(record.grandTotal)
+        : computePurchaseInvoiceGrandTotal(lines),
+    lines,
+  };
+}
+
 /**
- * Generate a Journal Entry PDF using the same voucher layout as receipts.
+ * Generate a Purchase Invoice PDF using the same voucher layout as receipts / journal entries.
  */
-export async function generateJournalEntryPdf(
+export async function generatePurchaseInvoicePdf(
   record,
   marginsInParam = null,
   { openNewTab = false, columnKeys = null } = {}
 ) {
-  const mapped = mapJournalEntryForVoucherPdf(record);
+  const mapped = mapPurchaseInvoiceForPdf(record);
   if (!mapped) {
-    throw new Error("No journal entry data available for PDF.");
+    throw new Error("No purchase invoice data available for PDF.");
   }
 
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const marginsIn = marginsInParam ?? loadReceiptPdfMargins();
+  const marginsIn = marginsInParam ?? loadPurchaseInvoicePdfMargins();
   const { marginLeft, marginRight, marginTop, marginBottom } =
     agreementProvPdfMarginsInchesToMm(marginsIn);
   const { sx, sy, sf, sc, logicalPageBottomY, logicalPageBottomReserve } =
@@ -218,8 +236,8 @@ export async function generateJournalEntryPdf(
   const lineHeight = PDF_LINE_HEIGHT_MM;
   const bodyFont = PDF_FONT_BODY;
 
-  const vrNoDisplay = textValue(mapped.vrNo);
-  const vrDateDisplay = formatPdfDate(mapped.date);
+  const piNoDisplay = textValue(mapped.piNo);
+  const piDateDisplay = formatPdfDate(mapped.date);
   const descriptionText = String(mapped.description ?? "").trim();
 
   let particularName = "—";
@@ -242,7 +260,7 @@ export async function generateJournalEntryPdf(
       accountingTelNo = String(accountingConfig?.TelNo ?? accountingConfig?.telNo ?? "").trim();
     }
   } catch (error) {
-    console.error("Error fetching accounting system config for journal entry PDF:", error);
+    console.error("Error fetching accounting system config for purchase invoice PDF:", error);
   }
 
   const LOGO_WIDTH_MM = 18;
@@ -275,7 +293,7 @@ export async function generateJournalEntryPdf(
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(sf(PDF_FONT_TITLE));
-  doc.text("Journal Entry", sx(textStartX), sy(marginTop + 5));
+  doc.text("Purchase Invoice", sx(textStartX), sy(marginTop + 5));
 
   let headerY = marginTop + 11;
   const particularNameMaxWidth = Math.max(12, voucherBoxLeft - textStartX - 2);
@@ -328,12 +346,12 @@ export async function generateJournalEntryPdf(
     voucherMetaY += lineHeight;
   };
 
-  drawVoucherMetaRow("Vr No", vrNoDisplay);
-  drawVoucherMetaRow("Vr Date", vrDateDisplay);
+  drawVoucherMetaRow("PI No", piNoDisplay);
+  drawVoucherMetaRow("PI Date", piDateDisplay);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(sf(bodyFont));
-  const voucherMetaTextHeight = doc.getTextDimensions("Vr No").h;
+  const voucherMetaTextHeight = doc.getTextDimensions("PI No").h;
   const voucherLineTopY = voucherMetaStartY - voucherMetaTextHeight * 0.72;
   const voucherLineBottomY = voucherMetaY - lineHeight + voucherMetaTextHeight * 0.28;
   drawPdfLine(voucherBoxLeft, voucherLineTopY, voucherBoxLeft, voucherLineBottomY);
@@ -398,48 +416,78 @@ export async function generateJournalEntryPdf(
 
   yPos += lineHeight * 0.5;
 
-  const selectedColumns = resolveJournalEntryPdfColumnKeys(columnKeys);
-  const showParticulars = selectedColumns.has("particulars");
-  const showDebit = selectedColumns.has("debit");
-  const showCredit = selectedColumns.has("credit");
+  const selectedColumns = resolvePurchaseInvoicePdfColumnKeys(columnKeys);
+  const showItem = selectedColumns.has("itemCode");
+  const showParticular = selectedColumns.has("particular");
+  const showAccHead = selectedColumns.has("accHead");
+  const showQty = selectedColumns.has("qty");
+  const showUnitPrice = selectedColumns.has("unitPrice");
+  const showDisc = selectedColumns.has("disc");
 
-  const colParticularsX = marginLeft;
-  const colCreditRightX = contentRight;
-  const creditShare = showCredit ? 0.14 : 0;
-  const debitShare = showDebit ? 0.14 : 0;
-  const colCreditLeftX = colCreditRightX - contentWidth * creditShare;
-  const colDebitRightX = colCreditLeftX - (showDebit && showCredit ? contentWidth * 0.015 : 0);
-  const colDebitLeftX = colDebitRightX - contentWidth * debitShare;
-  const particularsRightEdge = showDebit
-    ? colDebitLeftX
-    : showCredit
-    ? colCreditLeftX
-    : contentRight;
-  const particularsMaxWidth = showParticulars
-    ? Math.max(24, particularsRightEdge - colParticularsX - PDF_PARTICULARS_DEBIT_GAP_MM)
-    : 0;
-  const debitMaxWidth = Math.max(10, colDebitRightX - colDebitLeftX);
-  const creditMaxWidth = Math.max(10, colCreditRightX - colCreditLeftX);
+  const colTotalRightX = contentRight;
+  const totalShare = 0.14;
+  const discShare = showDisc ? 0.07 : 0;
+  const unitPriceShare = showUnitPrice ? 0.12 : 0;
+  const qtyShare = showQty ? 0.07 : 0;
+  const gapShare = 0.008;
 
-  const drawParticularsCell = (text, y) => {
-    if (!showParticulars) return 1;
+  const colTotalLeftX = colTotalRightX - contentWidth * totalShare;
+  let cursorX = colTotalLeftX;
+
+  const colDiscRightX = showDisc ? cursorX - contentWidth * gapShare : cursorX;
+  const colDiscLeftX = showDisc ? colDiscRightX - contentWidth * discShare : cursorX;
+  cursorX = showDisc ? colDiscLeftX : cursorX;
+
+  const colUnitPriceRightX = showUnitPrice ? cursorX - contentWidth * gapShare : cursorX;
+  const colUnitPriceLeftX = showUnitPrice
+    ? colUnitPriceRightX - contentWidth * unitPriceShare
+    : cursorX;
+  cursorX = showUnitPrice ? colUnitPriceLeftX : cursorX;
+
+  const colQtyRightX = showQty ? cursorX - contentWidth * gapShare : cursorX;
+  const colQtyLeftX = showQty ? colQtyRightX - contentWidth * qtyShare : cursorX;
+  cursorX = showQty ? colQtyLeftX : cursorX;
+
+  const textBlockWidth = Math.max(24, cursorX - marginLeft - contentWidth * gapShare);
+  const textParts = [showItem, showParticular, showAccHead].filter(Boolean).length || 1;
+  const itemShare = showItem ? (showParticular || showAccHead ? 0.28 : 1) : 0;
+  const accHeadShare = showAccHead ? (showItem || showParticular ? 0.28 : 1) : 0;
+  const particularShare = showParticular ? Math.max(0.2, 1 - itemShare - accHeadShare) : 0;
+  const shareSum = itemShare + particularShare + accHeadShare || 1;
+
+  const colItemX = marginLeft;
+  const itemWidth = showItem ? (textBlockWidth * itemShare) / shareSum : 0;
+  const colParticularX = showItem ? colItemX + itemWidth + 1.5 : marginLeft;
+  const particularWidth = showParticular ? (textBlockWidth * particularShare) / shareSum : 0;
+  const colAccHeadX = showParticular
+    ? colParticularX + particularWidth + 1.5
+    : showItem
+    ? colItemX + itemWidth + 1.5
+    : marginLeft;
+  const accHeadWidth = showAccHead ? (textBlockWidth * accHeadShare) / shareSum : 0;
+
+  const totalMaxWidth = Math.max(10, colTotalRightX - colTotalLeftX);
+  const discMaxWidth = Math.max(8, colDiscRightX - colDiscLeftX);
+  const unitPriceMaxWidth = Math.max(10, colUnitPriceRightX - colUnitPriceLeftX);
+  const qtyMaxWidth = Math.max(8, colQtyRightX - colQtyLeftX);
+
+  const drawWrappedCell = (text, x, maxWidth, y) => {
+    if (maxWidth <= 0) return 1;
     const value = String(text ?? "");
     const { fontSize, lines } = resolveWrappedPdfFontSize(
       doc,
       value,
-      sc(particularsMaxWidth),
-      PDF_PARTICULARS_MAX_LINES,
-      sf(PDF_FONT_PARTICULARS_CONTENT_START),
-      sf(PDF_FONT_PARTICULARS_CONTENT_MIN),
+      sc(maxWidth),
+      PDF_TEXT_MAX_LINES,
+      sf(PDF_FONT_CELL_START),
+      sf(PDF_FONT_CELL_MIN),
       "normal"
     );
-    const lineStep = lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO;
+    const lineStep = lineHeight * PDF_TEXT_LINE_STEP_RATIO;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(fontSize);
     lines.forEach((line, index) => {
-      doc.text(line, sx(colParticularsX), sy(y + index * lineStep), {
-        maxWidth: sc(particularsMaxWidth),
-      });
+      doc.text(line, sx(x), sy(y + index * lineStep), { maxWidth: sc(maxWidth) });
     });
     return Math.max(1, lines.length);
   };
@@ -455,65 +503,93 @@ export async function generateJournalEntryPdf(
     });
   };
 
-  const drawJournalTableHeader = () => {
+  const drawSingleLineAmountHeader = (text, x, y, maxWidth) => {
+    const value = String(text ?? "");
+    const fontSize = resolveSingleLinePdfFontSize(
+      doc,
+      value,
+      sc(maxWidth),
+      sf(bodyFont),
+      sf(PDF_FONT_PARTICULARS_MIN),
+      "bold"
+    );
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fontSize);
+    doc.text(value, sx(x), sy(y), { align: "right" });
+  };
+
+  const drawTableHeader = () => {
     const rowTop = yPos;
-    if (showParticulars) {
-      drawBodyText("Particulars", colParticularsX, rowTop, { bold: true });
+    if (showItem) drawBodyText("Item", colItemX, rowTop, { bold: true });
+    if (showParticular) drawBodyText("Particular", colParticularX, rowTop, { bold: true });
+    if (showAccHead) drawBodyText("Acc Head", colAccHeadX, rowTop, { bold: true });
+    if (showQty) drawSingleLineAmountHeader("Qty", colQtyRightX, rowTop, qtyMaxWidth);
+    if (showUnitPrice) {
+      drawSingleLineAmountHeader("Unit Price", colUnitPriceRightX, rowTop, unitPriceMaxWidth);
     }
-    if (showDebit) {
-      drawBodyText("Debit", colDebitRightX, rowTop, {
-        bold: true,
-        textOptions: { align: "right", maxWidth: sc(debitMaxWidth) },
-      });
-    }
-    if (showCredit) {
-      drawBodyText("Credit", colCreditRightX, rowTop, {
-        bold: true,
-        textOptions: { align: "right", maxWidth: sc(creditMaxWidth) },
-      });
-    }
+    if (showDisc) drawSingleLineAmountHeader("Disc", colDiscRightX, rowTop, discMaxWidth);
+    drawSingleLineAmountHeader("Total", colTotalRightX, rowTop, totalMaxWidth);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(sf(bodyFont));
-    const headerSample = showParticulars ? "Particulars" : showDebit ? "Debit" : "Credit";
-    const headerTextHeight = doc.getTextDimensions(headerSample).h;
+    const headerTextHeight = doc.getTextDimensions("Total").h;
     const underlineY = rowTop + headerTextHeight * 0.28 + sc(0.4);
     drawPdfLine(marginLeft, underlineY, contentRight, underlineY);
     yPos = underlineY + lineHeight;
   };
 
-  const drawJournalTableRow = (line) => {
-    yPos = ensurePageSpace(
-      yPos,
-      lineHeight * PDF_PARTICULARS_MAX_LINES * PDF_PARTICULARS_LINE_STEP_RATIO + 2
-    );
+  const drawTableRow = (line) => {
+    yPos = ensurePageSpace(yPos, lineHeight * PDF_TEXT_MAX_LINES * PDF_TEXT_LINE_STEP_RATIO + 2);
     if (yPos === marginTop) {
-      drawJournalTableHeader();
+      drawTableHeader();
     }
 
     const rowTop = yPos;
-    const particularsLines = drawParticularsCell(line.particulars, rowTop);
-    const rowHeight = Math.max(
-      lineHeight,
-      particularsLines * lineHeight * PDF_PARTICULARS_LINE_STEP_RATIO
-    );
-
-    if (showDebit) {
-      drawAmountCell(formatPdfDebitCreditAmount(line.debit), colDebitRightX, rowTop, debitMaxWidth);
+    const lineHeights = [];
+    if (showItem) {
+      lineHeights.push(drawWrappedCell(textValue(line.itemCode), colItemX, itemWidth - 1, rowTop));
     }
-    if (showCredit) {
-      drawAmountCell(
-        formatPdfDebitCreditAmount(line.credit),
-        colCreditRightX,
-        rowTop,
-        creditMaxWidth
+    if (showParticular) {
+      lineHeights.push(
+        drawWrappedCell(textValue(line.desc), colParticularX, particularWidth - 1, rowTop)
       );
     }
+    if (showAccHead) {
+      lineHeights.push(
+        drawWrappedCell(textValue(line.accHead), colAccHeadX, accHeadWidth - 1, rowTop)
+      );
+    }
+
+    const rowHeight = Math.max(
+      lineHeight,
+      ...(lineHeights.length
+        ? lineHeights.map((n) => n * lineHeight * PDF_TEXT_LINE_STEP_RATIO)
+        : [lineHeight])
+    );
+
+    if (showQty) drawAmountCell(formatPdfQty(line.months), colQtyRightX, rowTop, qtyMaxWidth);
+    if (showUnitPrice) {
+      drawAmountCell(
+        formatPdfCurrency(line.calculatedRentPM),
+        colUnitPriceRightX,
+        rowTop,
+        unitPriceMaxWidth
+      );
+    }
+    if (showDisc) {
+      drawAmountCell(formatPdfQty(line.discountPercent), colDiscRightX, rowTop, discMaxWidth);
+    }
+    drawAmountCell(
+      formatPdfCurrency(getPurchaseInvoiceLineComputedTotal(line)),
+      colTotalRightX,
+      rowTop,
+      totalMaxWidth
+    );
     yPos += rowHeight;
   };
 
-  drawJournalTableHeader();
-  (mapped.lines || []).forEach((line) => drawJournalTableRow(line));
+  drawTableHeader();
+  (mapped.lines || []).forEach((line) => drawTableRow(line));
 
   yPos = ensurePageSpace(yPos + 4, lineHeight * 3);
   yPos += 4;
@@ -525,37 +601,15 @@ export async function generateJournalEntryPdf(
   const totalOverlineY = totalRowY - totalLabelHeight * 0.75 - sc(0.5);
   drawPdfLine(marginLeft, totalOverlineY, contentRight, totalOverlineY);
 
-  const debitTotalText = formatPdfDebitCreditAmount(mapped.totalDebit) || "0";
-  const creditTotalText = formatPdfDebitCreditAmount(mapped.totalCredit) || "0";
+  const grandTotalText = formatPdfCurrency(mapped.grandTotal);
   const totalLabelGapMm = 4;
-
-  if (showDebit) {
-    const debitTextWidth = doc.getTextWidth(debitTotalText);
-    const totalLabelAnchorX = colDebitRightX - debitTextWidth - totalLabelGapMm;
-    drawBodyText("Total", totalLabelAnchorX, totalRowY, {
-      bold: true,
-      textOptions: { align: "right" },
-    });
-    drawAmountCell(debitTotalText, colDebitRightX, totalRowY, debitMaxWidth, { bold: true });
-  } else if (showCredit) {
-    const creditTextWidth = doc.getTextWidth(creditTotalText);
-    const totalLabelAnchorX = colCreditRightX - creditTextWidth - totalLabelGapMm;
-    drawBodyText("Total", totalLabelAnchorX, totalRowY, {
-      bold: true,
-      textOptions: { align: "right" },
-    });
-  } else {
-    drawBodyText("Total", contentRight, totalRowY, {
-      bold: true,
-      textOptions: { align: "right" },
-    });
-  }
-
-  if (showCredit) {
-    drawAmountCell(creditTotalText, colCreditRightX, totalRowY, creditMaxWidth, {
-      bold: true,
-    });
-  }
+  const totalTextWidth = doc.getTextWidth(grandTotalText);
+  const totalLabelAnchorX = colTotalRightX - totalTextWidth - totalLabelGapMm;
+  drawBodyText("Total", totalLabelAnchorX, totalRowY, {
+    bold: true,
+    textOptions: { align: "right" },
+  });
+  drawAmountCell(grandTotalText, colTotalRightX, totalRowY, totalMaxWidth, { bold: true });
 
   const totalUnderlineY = totalRowY + totalLabelHeight * 0.35 + sc(0.5);
   drawPdfLine(marginLeft, totalUnderlineY, contentRight, totalUnderlineY);
@@ -579,7 +633,7 @@ export async function generateJournalEntryPdf(
       const blockRight = marginLeft + (index + 1) * blockWidth - 6;
       drawPdfLine(blockLeft, signatureLineY, blockRight, signatureLineY);
       drawBodyText(label, (blockLeft + blockRight) / 2, signatureLabelY, {
-        fontSize: PDF_FONT_BODY - 2,
+        fontSize: PDF_FONT_BODY - 1,
         textOptions: { align: "center" },
       });
     });

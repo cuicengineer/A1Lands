@@ -47,7 +47,11 @@ import {
   RECEIPT_PDF_DEFAULT_MARGINS,
   saveReceiptPdfMargins,
 } from "utils/agreementProvPdfMargins";
-import { generateJournalEntryPdf } from "./journalEntryPdf";
+import {
+  generateJournalEntryPdf,
+  JOURNAL_ENTRY_PDF_DEFAULT_COLUMN_KEYS,
+  JOURNAL_ENTRY_PDF_SELECTABLE_COLUMNS,
+} from "./journalEntryPdf";
 import {
   fetchJournalEntryAttachmentCount,
   fetchJournalEntryUploadedFiles,
@@ -270,7 +274,8 @@ export default function JournalEntryPage() {
   };
 
   const generateJournalEntryPdfBlob = useCallback(
-    (record, marginsIn) => generateJournalEntryPdf(record, marginsIn, { openNewTab: false }),
+    (record, marginsIn, { columnKeys } = {}) =>
+      generateJournalEntryPdf(record, marginsIn, { openNewTab: false, columnKeys }),
     []
   );
 
@@ -734,6 +739,9 @@ export default function JournalEntryPage() {
         defaultMargins={RECEIPT_PDF_DEFAULT_MARGINS}
         loadMargins={loadReceiptPdfMargins}
         saveMargins={saveReceiptPdfMargins}
+        selectableColumns={JOURNAL_ENTRY_PDF_SELECTABLE_COLUMNS}
+        defaultColumnKeys={JOURNAL_ENTRY_PDF_DEFAULT_COLUMN_KEYS}
+        alwaysOnColumnLabels={["Total (always shown)"]}
       />
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

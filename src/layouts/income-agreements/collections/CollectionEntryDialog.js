@@ -674,11 +674,12 @@ export default function CollectionEntryDialog({
             getCollectionAgreementsForClass(contracts, prev.classId).find(
               (option) => Number(option.id) === Number(value)
             ) || null;
+          // Always refresh linked Account / Tenant from the newly selected agreement.
           const tenantAccount = resolveCollectionTenantAccount(contract, tenants, coaOptions);
-          next.tenantNo = tenantAccount.tenantNo || prev.tenantNo;
-          next.tenantBusiness = tenantAccount.tenantBusiness || prev.tenantBusiness;
-          next.coaId = tenantAccount.coaId || prev.coaId;
-          next.accountLabel = tenantAccount.accountLabel || prev.accountLabel;
+          next.tenantNo = tenantAccount.tenantNo || "";
+          next.tenantBusiness = tenantAccount.tenantBusiness || "";
+          next.coaId = tenantAccount.coaId || "";
+          next.accountLabel = tenantAccount.accountLabel || "";
         }
       }
       if (field === "tenantNo") {

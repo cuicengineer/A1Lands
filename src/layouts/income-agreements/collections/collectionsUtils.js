@@ -248,12 +248,21 @@ export function formatInvoiceLabel(invoice) {
   return invoiceDate ? `${head}(${invoiceDate})` : head;
 }
 
-/** Collection entry invoice dropdown: invoice no and Due date (no Gen date). */
+/** Collection entry invoice dropdown: invoice no | issue date | total amount. */
 export function formatCollectionInvoiceDropdownLabel(invoice) {
   const invoiceNo = String(pickField(invoice, "invoiceNo", "InvoiceNo") || "").trim();
   if (!invoiceNo) return "";
-  const dueDate = formatDisplayDateLong(pickField(invoice, "dueDate", "DueDate"));
-  return dueDate ? `${invoiceNo} (Due: ${dueDate})` : invoiceNo;
+  const issueDate = formatDisplayDateLong(
+    pickField(invoice, "invoiceDate", "InvoiceDate", "Cod", "cod")
+  );
+  const totalAmount = formatAmount(
+    invoice?.amountReceivable ??
+      invoice?.AmountReceivable ??
+      invoice?.totalRent ??
+      invoice?.TotalRent
+  );
+  const amountPart = totalAmount && totalAmount !== "-" ? totalAmount : "";
+  return [invoiceNo, issueDate, amountPart].filter(Boolean).join("| ");
 }
 
 export function formatTenantBusinessLabel(contract, tenant) {
@@ -393,13 +402,7 @@ export function getCollectionInvoiceOptions(invoices, { includeInvoiceKey = "" }
 
   (invoices || [])
     .map(normalizeCatalogRow)
-    .filter((row) => isNotDeletedRecord(row))
-    .filter((row) => !pickInvoiceIsLocked(row))
-    .filter((row) => {
-      const invoiceKey = buildInvoiceKey(row);
-      if (includeKey && invoiceKey === includeKey) return true;
-      return pickInvoiceIsExplicitlyFinalized(row);
-    })
+    .filter(isCollectionDropdownInvoice)
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -634,6 +637,13 @@ export function pickInvoiceIsLocked(row) {
   return Number.isFinite(n) && n === 1;
 }
 
+/** Collections invoice dropdown: finalized and not locked only. */
+export function isCollectionDropdownInvoice(row) {
+  if (!row || !isNotDeletedRecord(row)) return false;
+  if (pickInvoiceIsLocked(row)) return false;
+  return pickInvoiceIsFinalized(row);
+}
+
 export function isInvoiceScheduleHeaderRow(row) {
   return !String(pickField(row, "subInvoiceNo", "SubInvoiceNo") || "").trim();
 }
@@ -713,14 +723,8 @@ export function getCollectionInvoicesForContract(
 
   (invoices || [])
     .map(normalizeCatalogRow)
-    .filter((row) => isNotDeletedRecord(row))
     .filter((row) => invoiceMatchesCollectionContract(row, contractMatch))
-    .filter((row) => !pickInvoiceIsLocked(row))
-    .filter((row) => {
-      const invoiceKey = buildInvoiceKey(row);
-      if (includeKey && invoiceKey === includeKey) return true;
-      return pickInvoiceIsExplicitlyFinalized(row);
-    })
+    .filter(isCollectionDropdownInvoice)
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -765,14 +769,8 @@ export function getCollectionInvoicesForTenant(
 
   (invoices || [])
     .map(normalizeCatalogRow)
-    .filter((row) => isNotDeletedRecord(row))
-    .filter((row) => !pickInvoiceIsLocked(row))
     .filter((row) => tenantContractNos.has(String(row.contractNo || "").trim()))
-    .filter((row) => {
-      const invoiceKey = buildInvoiceKey(row);
-      if (includeKey && invoiceKey === includeKey) return true;
-      return pickInvoiceIsExplicitlyFinalized(row);
-    })
+    .filter(isCollectionDropdownInvoice)
     .forEach((row) => {
       const invoiceKey = buildInvoiceKey(row);
       if (!invoiceKey) return;
@@ -1180,16 +1178,24 @@ export function enrichCollectionGridRow(
           .map(normalizeCatalogRow)
           .find((item) => Number(item.id) === Number(row.contractId))
       : null;
+  // When an agreement is selected, Tenant/Business is agreement-driven (read-only in the grid).
+  const contractTenantAccount = contract
+    ? resolveCollectionTenantAccount(contract, tenants, coaOptions)
+    : { tenantNo: "", tenantBusiness: "", coaId: "", accountLabel: "" };
+  const lookupTenantNo = contract ? contractTenantAccount.tenantNo || row.tenantNo : row.tenantNo;
+  const lookupCoaId = row.coaId || (contract ? contractTenantAccount.coaId : "");
   const tenantFromNo = findCollectionPartyOption(
     { tenants, customers, suppliers },
-    row.tenantNo,
-    row.coaId,
+    lookupTenantNo,
+    lookupCoaId,
     coaOptions
   );
   const tenant = tenantFromNo || findTenantByContract(tenants, contract);
-  const tenantAccount = row.tenantNo
+  const tenantAccount = contract
+    ? contractTenantAccount
+    : row.tenantNo
     ? resolveCollectionTenantSelection(tenant, coaOptions)
-    : resolveCollectionTenantAccount(contract, tenants, coaOptions);
+    : { tenantNo: "", tenantBusiness: "", coaId: "", accountLabel: "" };
   const coa = findCoaById(
     coaOptions,
     row.coaId || tenantAccount.coaId || tenant?.coaId || tenant?.CoaId
@@ -1209,11 +1215,18 @@ export function enrichCollectionGridRow(
   return {
     ...row,
     className,
-    tenantNo: row.tenantNo || tenantAccount.tenantNo || resolveContractTenantNo(contract),
+    // Agreement selected → always refresh tenant from the current contract.
+    tenantNo:
+      (contract ? tenantAccount.tenantNo : "") ||
+      row.tenantNo ||
+      tenantAccount.tenantNo ||
+      resolveContractTenantNo(contract),
     tenantBusiness:
+      (contract ? tenantAccount.tenantBusiness : "") ||
       row.tenantBusiness ||
       tenantAccount.tenantBusiness ||
       (contract ? formatTenantBusinessLabel(contract, tenant) : ""),
+    // Account prefers row (allows manual override); agreement change patches row via handler.
     accountLabel: row.accountLabel || tenantAccount.accountLabel || formatAccountLabel(coa),
     coaId: row.coaId || tenantAccount.coaId || coa?.id || "",
     receivable: invoiceReceivable,
@@ -1252,10 +1265,11 @@ export function buildAgreementProvInvoiceDeepLink(contractNo, invoiceNo) {
   return qs ? `/contracts/agreement-prov-invoice?${qs}` : "/contracts/agreement-prov-invoice";
 }
 
-export function buildTenantConfigDeepLink(tenantNo) {
+export function buildTenantConfigDeepLink(tenantNo, { readOnly = false } = {}) {
   const tn = String(tenantNo || "").trim();
-  if (!tn) return "/configuration/tenants?view=grid";
-  const params = new URLSearchParams({ view: "grid", tenantNo: tn });
+  const params = new URLSearchParams({ view: "grid" });
+  if (tn) params.set("tenantNo", tn);
+  if (readOnly) params.set("readOnly", "1");
   return `/configuration/tenants?${params.toString()}`;
 }
 
@@ -1319,6 +1333,14 @@ export function normalizeCollectionEntryRow(row) {
     .toLowerCase();
   const normalizedStatus =
     statusText === "received" ? "Received" : statusText === "pending" ? "Pending" : "";
+  const attachmentFlag = row?.isAttachment ?? row?.IsAttachment;
+  const hasAttachmentFlag =
+    attachmentFlag === true ||
+    attachmentFlag === 1 ||
+    attachmentFlag === "1" ||
+    String(attachmentFlag || "")
+      .trim()
+      .toLowerCase() === "true";
   return {
     ...normalized,
     id: row?.id ?? row?.Id ?? null,
@@ -1348,7 +1370,7 @@ export function normalizeCollectionEntryRow(row) {
     pendingAttachmentFile: null,
     attachmentFileName: "",
     attachmentFileId: null,
-    hasAttachment: false,
+    hasAttachment: hasAttachmentFlag,
   };
 }
 

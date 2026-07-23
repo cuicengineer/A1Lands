@@ -16,7 +16,8 @@ export const COLLECTIONS_COLUMNS = [
   { label: "Balance", key: "balance", align: "right", width: "minmax(132px, 1.05fr)" },
   { label: "Amount", key: "amount", align: "right", width: "minmax(132px, 1.05fr)" },
   { label: "TIN-TRN", key: "tinTrn", align: "left", width: "minmax(110px, 1fr)" },
-  { label: "Remarks", key: "remarks", align: "left", width: "minmax(140px, 1.2fr)" },
+  // Wide enough to show ~30 characters before truncating with an expandable "…".
+  { label: "Remarks", key: "remarks", align: "left", width: "minmax(30ch, 1.8fr)" },
   { label: "Attach", key: "attach", align: "center", width: "108px" },
   { label: "Status", key: "status", align: "left", width: "minmax(96px, 0.85fr)" },
   { label: "Vr No", key: "vrNo", align: "left", width: "minmax(180px, 1.5fr)" },

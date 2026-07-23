@@ -35,7 +35,11 @@ import {
   saveInterAccTransferPdfMargins,
 } from "utils/agreementProvPdfMargins";
 import InterAccTransferForm from "./InterAccTransferForm";
-import { generateInterAccTransferPdf } from "./interAccTransferPdf";
+import {
+  generateInterAccTransferPdf,
+  INTER_ACC_TRANSFER_PDF_DEFAULT_COLUMN_KEYS,
+  INTER_ACC_TRANSFER_PDF_SELECTABLE_COLUMNS,
+} from "./interAccTransferPdf";
 import {
   buildInterAccTransferPayload,
   flattenInterAccTransferForGrid,
@@ -318,7 +322,8 @@ export default function InterAccTransfer() {
   };
 
   const generateTransferPdfBlob = useCallback(
-    (record, marginsIn) => generateInterAccTransferPdf(record, marginsIn, { openNewTab: false }),
+    (record, marginsIn, { columnKeys } = {}) =>
+      generateInterAccTransferPdf(record, marginsIn, { openNewTab: false, columnKeys }),
     []
   );
 
@@ -603,6 +608,9 @@ export default function InterAccTransfer() {
         defaultMargins={INTER_ACC_TRANSFER_PDF_DEFAULT_MARGINS}
         loadMargins={loadInterAccTransferPdfMargins}
         saveMargins={saveInterAccTransferPdfMargins}
+        selectableColumns={INTER_ACC_TRANSFER_PDF_SELECTABLE_COLUMNS}
+        defaultColumnKeys={INTER_ACC_TRANSFER_PDF_DEFAULT_COLUMN_KEYS}
+        alwaysOnColumnLabels={["Total (always shown)"]}
       />
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

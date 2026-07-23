@@ -1,18 +1,22 @@
 import supplierApi from "services/api.supplier.service";
 import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
+import incomeStatementApi from "services/api.incomestatement.service";
 import {
   createLineRow,
-  fetchReceiptProductOptions,
   formatAmount,
   parseAmount,
-  resolveReceiptProductAccountOption,
-  buildLineAccountOptions,
+  formatLineAccountLabel,
+  normalizeLineAccountOption,
 } from "layouts/accounts/receipts/receiptUtils";
+import {
+  fetchPaymentProductOptions,
+  resolveProductAccountOption,
+} from "layouts/accounts/receipts/paymentUtils";
 
 export {
   formatAmount,
   parseAmount,
-  fetchReceiptProductOptions as fetchPurchaseReturnProductOptions,
+  fetchPaymentProductOptions as fetchPurchaseReturnProductOptions,
 };
 
 function pickField(row, ...keys) {
@@ -31,8 +35,179 @@ export function createPurchaseReturnLineRow(overrides = {}) {
     amount: "",
     discount: "0",
     total: 0,
+    capital: "",
+    capitalKey: "",
     ...overrides,
   });
+}
+
+function unwrapList(response) {
+  if (!response) return [];
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  return [];
+}
+
+function isExpensesGroup(row) {
+  return pickField(row, "groupName", "GroupName").toLowerCase() === "expenses";
+}
+
+function isCapitalGroup(row) {
+  const group = pickField(row, "groupName", "GroupName").toLowerCase();
+  return group === "capital" || group === "capitals";
+}
+
+/** Income Statement accounts with group Expenses (Account dropdown). */
+export function buildPurchaseReturnExpenseAccountOptions(incomeRows, savedAccounts = []) {
+  const byKey = new Map();
+  (incomeRows || []).forEach((row) => {
+    if (!isExpensesGroup(row)) return;
+    const id = row?.id ?? row?.Id;
+    const acctId = pickField(row, "acctId", "AcctId");
+    const acctName = pickField(row, "acctName", "AcctName");
+    const controlAccount = pickField(
+      row,
+      "subGroup",
+      "SubGroup",
+      "controlAccount",
+      "ControlAccount"
+    );
+    const label =
+      formatLineAccountLabel(acctId, acctName, controlAccount) ||
+      formatLineAccountLabel(acctId, acctName, "");
+    if (!label || id == null || id === "") return;
+    const value = `is:${id}`;
+    byKey.set(value, {
+      id,
+      coaId: String(id),
+      value,
+      label,
+      acctId,
+      acctName,
+      groupName: pickField(row, "groupName", "GroupName"),
+      accountSource: "is",
+    });
+  });
+
+  (savedAccounts || []).forEach((saved) => {
+    const trimmed = String(saved || "").trim();
+    if (!trimmed) return;
+    const existing = [...byKey.values()].find(
+      (option) => option.label === trimmed || option.value === trimmed
+    );
+    if (existing) return;
+    byKey.set(`legacy:${trimmed}`, {
+      value: trimmed,
+      label: trimmed,
+      coaId: "",
+      accountSource: "is",
+    });
+  });
+
+  return [...byKey.values()].sort((a, b) =>
+    String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" })
+  );
+}
+
+/**
+ * Control Account values from Balance Sheet COA where group is Capital / Capitals.
+ */
+export function buildPurchaseReturnCapitalOptions(coaRows, savedCapitals = []) {
+  const byKey = new Map();
+
+  (coaRows || []).forEach((row) => {
+    if (!isCapitalGroup(row)) return;
+    const controlAccount = pickField(row, "controlAccount", "ControlAccount");
+    if (controlAccount) {
+      const key = controlAccount.toUpperCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          value: controlAccount,
+          label: controlAccount,
+          controlAccount,
+          groupName: pickField(row, "groupName", "GroupName"),
+        });
+      }
+      return;
+    }
+    // Fallback when ControlAccount is blank: use the Capital-group account itself.
+    const option = normalizeLineAccountOption(row);
+    if (!option?.value) return;
+    const key = String(option.label || option.value)
+      .trim()
+      .toUpperCase();
+    if (!key || byKey.has(key)) return;
+    byKey.set(key, {
+      value: option.label || option.value,
+      label: option.label || option.value,
+      controlAccount: option.controlAccount || "",
+      coaId: option.coaId,
+      groupName: option.groupName,
+    });
+  });
+
+  (savedCapitals || []).forEach((saved) => {
+    const trimmed = String(saved || "").trim();
+    if (!trimmed) return;
+    const key = trimmed.toUpperCase();
+    if (byKey.has(key)) return;
+    byKey.set(key, { value: trimmed, label: trimmed });
+  });
+
+  return [...byKey.values()].sort((a, b) =>
+    String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" })
+  );
+}
+
+export function findPurchaseReturnAccountOption(options, lineOrValue) {
+  const raw =
+    typeof lineOrValue === "string" || typeof lineOrValue === "number"
+      ? String(lineOrValue || "").trim()
+      : String(
+          lineOrValue?.accountKey ||
+            lineOrValue?.accountCoaId ||
+            lineOrValue?.value ||
+            lineOrValue?.coaId ||
+            lineOrValue?.account ||
+            lineOrValue?.label ||
+            ""
+        ).trim();
+  if (!raw) return null;
+  const rawUpper = raw.toUpperCase();
+  return (
+    (options || []).find((option) => {
+      const candidates = [
+        option.value,
+        option.coaId,
+        option.label,
+        option.coaId ? `is:${option.coaId}` : "",
+      ]
+        .map((v) =>
+          String(v || "")
+            .trim()
+            .toUpperCase()
+        )
+        .filter(Boolean);
+      return candidates.includes(rawUpper);
+    }) || null
+  );
+}
+
+export function findPurchaseReturnCapitalOption(options, lineOrValue) {
+  const raw =
+    typeof lineOrValue === "string" || typeof lineOrValue === "number"
+      ? String(lineOrValue || "").trim()
+      : String(lineOrValue?.capitalKey || lineOrValue?.capital || "").trim();
+  if (!raw) return null;
+  return (
+    (options || []).find(
+      (option) =>
+        String(option.value) === raw ||
+        String(option.label) === raw ||
+        String(option.controlAccount || "") === raw
+    ) || null
+  );
 }
 
 export function computePurchaseReturnLineAmount(line) {
@@ -155,21 +330,58 @@ export function findPurchaseReturnSupplierOption(options, key) {
 }
 
 export async function loadPurchaseReturnFormCatalogs() {
-  const [supplierRes, coaRes, productRes] = await Promise.allSettled([
+  const [supplierRes, incomeRes, coaRes, productRes] = await Promise.allSettled([
     supplierApi.listSuppliers(),
+    incomeStatementApi.getAll(),
     chartOfAccountsApi.getAll(COA_SECTION_TYPE),
-    fetchReceiptProductOptions(),
+    fetchPaymentProductOptions(),
   ]);
 
   const suppliers =
     supplierRes.status === "fulfilled" ? supplierApi.unwrapList(supplierRes.value) : [];
+  const incomeRows = incomeRes.status === "fulfilled" ? unwrapList(incomeRes.value) : [];
   const coaRows = coaRes.status === "fulfilled" ? chartOfAccountsApi.unwrapList(coaRes.value) : [];
   const products = productRes.status === "fulfilled" ? productRes.value : [];
 
   return {
     supplierOptions: buildPurchaseReturnSupplierOptions(suppliers),
-    accountOptions: buildLineAccountOptions(coaRows),
+    accountOptions: buildPurchaseReturnExpenseAccountOptions(incomeRows),
+    capitalOptions: buildPurchaseReturnCapitalOptions(coaRows),
     productOptions: products,
+  };
+}
+
+export function applyPurchaseReturnAccountSelection(line, accountValue, accountOptions) {
+  const option = findPurchaseReturnAccountOption(accountOptions, accountValue);
+  if (!option) {
+    return {
+      ...line,
+      account: "",
+      accountCoaId: "",
+      accountKey: "",
+    };
+  }
+  return {
+    ...line,
+    account: option.label || "",
+    accountCoaId: option.coaId || option.value || "",
+    accountKey: option.value || "",
+  };
+}
+
+export function applyPurchaseReturnCapitalSelection(line, capitalValue, capitalOptions) {
+  const option = findPurchaseReturnCapitalOption(capitalOptions, capitalValue);
+  if (!option) {
+    return {
+      ...line,
+      capital: "",
+      capitalKey: "",
+    };
+  }
+  return {
+    ...line,
+    capital: option.label || option.value || "",
+    capitalKey: option.value || "",
   };
 }
 
@@ -189,17 +401,24 @@ export function applyPurchaseReturnProductSelection(
       item: "",
       account: "",
       accountCoaId: "",
+      accountKey: "",
     });
   }
-  const accountOption = resolveReceiptProductAccountOption(product, accountOptions);
+  const accountOption = resolveProductAccountOption(product, accountOptions);
+  const matchedAccount = accountOption
+    ? findPurchaseReturnAccountOption(accountOptions, accountOption.value) ||
+      findPurchaseReturnAccountOption(accountOptions, accountOption.coaId) ||
+      findPurchaseReturnAccountOption(accountOptions, accountOption.label)
+    : null;
   return syncPurchaseReturnLineAmount({
     ...line,
     productKey: product.value,
     productType: product.productType || "",
     productId: product.productId || "",
     item: product.label || "",
-    account: accountOption?.label || product.saleAccountDisplay || "",
-    accountCoaId: accountOption?.coaId || accountOption?.value || "",
+    account: matchedAccount?.label || "",
+    accountCoaId: matchedAccount?.coaId || matchedAccount?.value || "",
+    accountKey: matchedAccount?.value || "",
     unitPrice:
       line.unitPrice !== "" && line.unitPrice != null
         ? line.unitPrice
@@ -214,6 +433,7 @@ export function isPurchaseReturnLineComplete(line) {
   return (
     Boolean(String(line.item || "").trim()) &&
     Boolean(String(line.account || "").trim()) &&
+    Boolean(String(line.capital || line.capitalKey || "").trim()) &&
     parseAmount(line.quantity) > 0 &&
     parseAmount(line.unitPrice) > 0
   );
@@ -236,6 +456,9 @@ export function validatePurchaseReturnForm(form) {
   lines.forEach((line, idx) => {
     if (!line.item) errors[`line-${idx}-item`] = "Item is required";
     if (!line.account) errors[`line-${idx}-account`] = "Account is required";
+    if (!String(line.capital || line.capitalKey || "").trim()) {
+      errors[`line-${idx}-capital`] = "Capital is required";
+    }
     if (parseAmount(line.quantity) <= 0) errors[`line-${idx}-quantity`] = "Qty is required";
     if (parseAmount(line.unitPrice) <= 0) {
       errors[`line-${idx}-unitPrice`] = "Unit Price is required";

@@ -224,6 +224,14 @@ function listReceipts() {
   return api.request("GET", "/api/Receipts");
 }
 
+function listReceiptTinLinesByInvoice(invoiceNo, contractNo = "") {
+  const params = new URLSearchParams();
+  params.set("invoiceNo", String(invoiceNo || "").trim());
+  const cn = String(contractNo || "").trim();
+  if (cn) params.set("contractNo", cn);
+  return api.request("GET", `/api/Receipts/lines-by-invoice?${params.toString()}`);
+}
+
 function getReceiptById(id) {
   return api.request("GET", `/api/Receipts/${id}`);
 }
@@ -267,6 +275,7 @@ const receiptsApi = {
   buildReceiptApiPayload,
   buildReceiptFinalizePayload,
   listReceipts,
+  listReceiptTinLinesByInvoice,
   getReceiptById,
   createReceipt,
   updateReceipt,
