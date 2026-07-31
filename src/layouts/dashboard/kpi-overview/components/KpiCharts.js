@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, Doughnut } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -29,8 +29,6 @@ import { useMaterialUIController } from "context";
 
 import {
   applyTenureToAssetCards,
-  applyTenureToFinancialShares,
-  buildFinancialShares,
   buildKpiBaseCategoryGovtPafCells,
   buildKpiBaseGovtPafCells,
   buildKpiCategoryRacMilMatrix,
@@ -60,7 +58,7 @@ import {
   exportDonutChartDataToExcel,
   exportGroupedBarChartDataToExcel,
 } from "utils/kpiChartExcelExport";
-import { KPI_BAR_CHART_SERIES_COLORS, KPI_AHQ_RAC_BASE_CHART_COLORS } from "../kpiBarChartColors";
+import useDashboardChartColors from "hooks/useDashboardChartColors";
 
 function applyKpiCrosshairBarChartEnhancements(baseOptions, options = {}) {
   return applyKpiZoomBarChartEnhancements(baseOptions, {
@@ -522,23 +520,21 @@ const AHQ_RAC_BASE_SERIES = CATEGORY_SERIES.filter(
   (s) => s.milKey === "ahq" || s.milKey === "rac" || s.milKey === "base"
 );
 
-const SHARE_COLORS = ["#025B64", "#00D47E", "#F5A524", "#3B82F6", "#6B7280"];
+function buildKpiChartColorMaps(chartColors) {
+  const series = chartColors.series;
+  const categoryBarColorByIndex = (_, idx) => series[idx % series.length];
+  const seriesColorByMilKey = Object.fromEntries(
+    CATEGORY_SERIES.map((s, i) => [s.milKey, series[i % series.length]])
+  );
 
-const CATEGORY_BAR_COLORS = KPI_BAR_CHART_SERIES_COLORS;
-
-const categoryBarColorByIndex = (_, idx) => CATEGORY_BAR_COLORS[idx % CATEGORY_BAR_COLORS.length];
-
-const SERIES_COLOR_BY_MIL_KEY = Object.fromEntries(
-  CATEGORY_SERIES.map((s, i) => [s.milKey, CATEGORY_BAR_COLORS[i % CATEGORY_BAR_COLORS.length]])
-);
-
-const DONUT_COLOR_BY_SHARE_ID = {
-  govt: SHARE_COLORS[0],
-  paf: SHARE_COLORS[1],
-  ahq: SHARE_COLORS[2],
-  rac: SHARE_COLORS[3],
-  base: SHARE_COLORS[4],
-};
+  return {
+    seriesColorByMilKey,
+    categoryBarColorByIndex,
+    donutColorByShareId: chartColors.shareById,
+    shareFallbackColor: chartColors.share[0],
+    ahqRacBase: chartColors.ahqRacBase,
+  };
+}
 
 const DONUT_TOOLTIP_INTERACTION = {
   mode: "nearest",
@@ -686,14 +682,14 @@ function cellFinancialCategoryTotal(mil) {
   return kpiNumeric(mil.ahq) + kpiNumeric(mil.rac) + kpiNumeric(mil.base);
 }
 
-function buildCategoryRacBarDataFromMatrix(cells, series) {
+function buildCategoryRacBarDataFromMatrix(cells, series, colorByMilKey) {
   return {
     labels: cells.map((c) => c.chartLabel),
     datasets: withKpiOverviewWideBarDatasets(
       series.map((s) => ({
         label: s.label,
         data: cells.map((c) => nullIfZeroChartBarValue(c.mil?.[s.milKey])),
-        backgroundColor: SERIES_COLOR_BY_MIL_KEY[s.milKey],
+        backgroundColor: colorByMilKey[s.milKey],
         borderRadius: 6,
       }))
     ),
@@ -724,7 +720,7 @@ function groupDonutCellsByRac(cells) {
 }
 
 /** RAC on x-axis; one bar per RAC (no class breakdown). */
-function buildRacOnlyFinancialBarData(cells) {
+function buildRacOnlyFinancialBarData(cells, categoryBarColorByIndex) {
   const grouped = groupDonutCellsByRac(cells);
 
   return {
@@ -740,7 +736,7 @@ function buildRacOnlyFinancialBarData(cells) {
   };
 }
 
-function buildCategoryRacFinancialDonutChart(cells, darkMode) {
+function buildCategoryRacFinancialDonutChart(cells, darkMode, categoryBarColorByIndex) {
   const groupedCells = groupDonutCellsByRac(cells);
   const labels = groupedCells.map((c) => c.racLabel);
   const racLabels = groupedCells.map((c) => c.racLabel);
@@ -778,12 +774,56 @@ function buildGovtPafOuterRingDonutChart({ labels, values, colors, darkMode }) {
       donutSliceTotal: sumTotal,
       datasets: buildKpiDualRingDatasets(values, colors, darkMode),
     },
-    options: buildKpiStandardDualRingDonutChartOptions(sumTotal, darkMode),
+    options: {
+      ...buildKpiStandardDualRingDonutChartOptions(sumTotal, darkMode),
+      animation: { duration: 0 },
+    },
   };
 }
 
-function buildRacGovtPafStackedBarData(cells) {
-  const base = buildCategoryRacBarDataFromMatrix(cells, GOVT_PAF_SERIES);
+/** Sum Govt / PAF (Mil) from RAC-level Govt & PAF bar cells — keeps donut aligned with the bar chart. */
+function sumGovtPafMilFromKpiCells(cells) {
+  let govt = 0;
+  let paf = 0;
+  for (const cell of cells || []) {
+    govt += kpiNumeric(cell?.mil?.govt);
+    paf += kpiNumeric(cell?.mil?.paf);
+  }
+  return { govt, paf };
+}
+
+function buildGovtPafSharesFromRacBarCells(cells) {
+  const { govt, paf } = sumGovtPafMilFromKpiCells(cells);
+  return [
+    { id: "govt", label: "Govt Share", value: govt },
+    { id: "paf", label: "PAF Share", value: paf },
+  ];
+}
+
+/** Sum AHQ / RAC / Base (Mil) across category asset cards — aligns donut with the category bar chart. */
+function sumAhqRacBaseMilFromCategoryCards(cards) {
+  let ahq = 0;
+  let rac = 0;
+  let base = 0;
+  for (const card of cards || []) {
+    ahq += kpiNumeric(card?.mil?.ahq);
+    rac += kpiNumeric(card?.mil?.rac);
+    base += kpiNumeric(card?.mil?.base);
+  }
+  return { ahq, rac, base };
+}
+
+function buildAhqRacBaseSharesFromCategoryBarCards(cards) {
+  const { ahq, rac, base } = sumAhqRacBaseMilFromCategoryCards(cards);
+  return [
+    { id: "ahq", label: "AHQ Share", value: ahq },
+    { id: "rac", label: "RAC Share", value: rac },
+    { id: "base", label: "Base Share", value: base },
+  ];
+}
+
+function buildRacGovtPafStackedBarData(cells, colorByMilKey) {
+  const base = buildCategoryRacBarDataFromMatrix(cells, GOVT_PAF_SERIES, colorByMilKey);
   const lastIdx = base.datasets.length - 1;
   return {
     labels: base.labels,
@@ -798,7 +838,7 @@ function buildRacGovtPafStackedBarData(cells) {
   };
 }
 
-function buildGroupedBarData(cards, series, { colorByMilKey = SERIES_COLOR_BY_MIL_KEY } = {}) {
+function buildGroupedBarData(cards, series, { colorByMilKey } = {}) {
   return {
     labels: cards.map((a) => a.label),
     datasets: withKpiOverviewWideBarDatasets(
@@ -816,16 +856,12 @@ function buildShareDonutChart(
   shareItems,
   shareIds,
   darkMode,
-  {
-    outerLegendRing = false,
-    labelPluginOverrides = {},
-    colorByShareId = DONUT_COLOR_BY_SHARE_ID,
-  } = {}
+  { outerLegendRing = false, labelPluginOverrides = {}, colorByShareId, shareFallbackColor } = {}
 ) {
   const filtered = (shareItems || []).filter((s) => shareIds.includes(s.id));
   const donutLabels = filtered.map((s) => s.label);
   const donutValues = filtered.map((s) => s.value);
-  const donutColors = shareIds.map((id) => colorByShareId[id] || SHARE_COLORS[0]);
+  const donutColors = shareIds.map((id) => colorByShareId[id] || shareFallbackColor);
 
   if (
     outerLegendRing &&
@@ -975,10 +1011,86 @@ const GOVT_PAF_DRILL_CATEGORY = "category";
 
 const GOVT_PAF_DRILL_INITIAL = { level: GOVT_PAF_DRILL_RAC };
 
+function govtPafDonutSliceValuesEqual(prevDonut, nextDonut) {
+  const prevValues = prevDonut?.data?.datasets?.[0]?.data || [];
+  const nextValues = nextDonut?.data?.datasets?.[0]?.data || [];
+  if (prevValues.length !== nextValues.length) return false;
+  for (let i = 0; i < prevValues.length; i += 1) {
+    if (kpiNumeric(prevValues[i]) !== kpiNumeric(nextValues[i])) return false;
+  }
+  return (
+    kpiNumeric(prevDonut?.data?.donutSliceTotal) === kpiNumeric(nextDonut?.data?.donutSliceTotal)
+  );
+}
+
+/** Govt & PAF pie — frozen at RAC-level totals; must not re-render on bar-chart drill-down. */
+const GovtPafRacLevelDonutCard = memo(
+  function GovtPafRacLevelDonutCard({
+    donutChart,
+    loading,
+    cardSx,
+    darkMode,
+    zoomEnabled,
+    onZoom,
+    zoomKey,
+  }) {
+    const title = "Govt & PAF share distribution";
+
+    return (
+      <Card sx={{ ...cardSx, p: 2, minHeight: 280 }}>
+        <MDBox
+          display="flex"
+          alignItems="center"
+          justifyContent="space-between"
+          gap={1}
+          flexWrap="wrap"
+          mb={1}
+        >
+          <MDTypography variant="h6" fontWeight="bold" color={darkMode ? "white" : "dark"}>
+            {title}
+          </MDTypography>
+          <ChartExportButton
+            disabled={loading}
+            ariaLabel={`Export ${title} to Excel`}
+            onExport={() => exportDonutChartDataToExcel(title, donutChart.data)}
+          />
+        </MDBox>
+        <MDBox height={220} opacity={loading ? 0.4 : 1}>
+          <ChartZoomSurface enabled={zoomEnabled} darkMode={darkMode} onZoom={onZoom}>
+            <Doughnut data={donutChart.data} options={donutChart.options} redraw={false} />
+          </ChartZoomSurface>
+        </MDBox>
+      </Card>
+    );
+  },
+  (prev, next) =>
+    prev.loading === next.loading &&
+    prev.darkMode === next.darkMode &&
+    prev.zoomEnabled === next.zoomEnabled &&
+    prev.zoomKey === next.zoomKey &&
+    govtPafDonutSliceValuesEqual(prev.donutChart, next.donutChart)
+);
+
+GovtPafRacLevelDonutCard.propTypes = {
+  donutChart: PropTypes.shape({
+    data: PropTypes.object.isRequired,
+    options: PropTypes.object.isRequired,
+  }).isRequired,
+  loading: PropTypes.bool,
+  cardSx: PropTypes.object,
+  darkMode: PropTypes.bool.isRequired,
+  zoomEnabled: PropTypes.bool.isRequired,
+  onZoom: PropTypes.func.isRequired,
+  zoomKey: PropTypes.string.isRequired,
+};
+
 function KpiCharts({
   shareRows,
   contractRows,
   propertyRows,
+  agreementContractRows,
+  useAsOfContracts = false,
+  contractMetaById,
   racOptions,
   racIds,
   baseOptions,
@@ -987,10 +1099,15 @@ function KpiCharts({
   loading,
   chartZoomOnClick,
   chartLayout,
+  showShareDistributionCharts = true,
+  showGovtPafCharts = true,
   tenure = "Annual",
+  preferSpGovtPafShare = false,
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const chartColors = useDashboardChartColors();
+  const colorMaps = useMemo(() => buildKpiChartColorMaps(chartColors), [chartColors]);
   const [donutRacFilter, setDonutRacFilter] = useState("all");
   const [zoomChart, setZoomChart] = useState(null);
   const [govtPafDrill, setGovtPafDrill] = useState(GOVT_PAF_DRILL_INITIAL);
@@ -999,7 +1116,15 @@ function KpiCharts({
 
   useEffect(() => {
     setGovtPafDrill(GOVT_PAF_DRILL_INITIAL);
-  }, [shareRows, contractRows, propertyRows, racIds, tenure]);
+  }, [shareRows, contractRows, propertyRows, agreementContractRows, racIds, tenure]);
+
+  const agreementOptions = useMemo(
+    () => ({
+      useAsOf: useAsOfContracts,
+      contractMetaById: contractMetaById || new Map(),
+    }),
+    [useAsOfContracts, contractMetaById]
+  );
 
   const donutRacSelectOptions = useMemo(() => {
     const list = racOptions || [];
@@ -1014,20 +1139,6 @@ function KpiCharts({
     }
     return racIds || [];
   }, [donutRacFilter, racIds]);
-
-  const ahqDonutShareRows = useMemo(() => {
-    if (!donutRacFilter || donutRacFilter === "all") {
-      return shareRows || [];
-    }
-    return filterKpiRowsByRacBase(shareRows || [], [String(donutRacFilter)], []);
-  }, [shareRows, donutRacFilter]);
-
-  const ahqDonutContractRows = useMemo(() => {
-    if (!donutRacFilter || donutRacFilter === "all") {
-      return contractRows || [];
-    }
-    return filterKpiRowsByRacBase(contractRows || [], [String(donutRacFilter)], []);
-  }, [contractRows, donutRacFilter]);
 
   const categoryRacBarCells = useMemo(
     () =>
@@ -1060,13 +1171,28 @@ function KpiCharts({
   );
 
   const categoryRacBarData = useMemo(
-    () => buildRacOnlyFinancialBarData(categoryRacBarCells),
-    [categoryRacBarCells]
+    () => buildRacOnlyFinancialBarData(categoryRacBarCells, colorMaps.categoryBarColorByIndex),
+    [categoryRacBarCells, colorMaps]
   );
 
   const categoryRacDonutChart = useMemo(
-    () => buildCategoryRacFinancialDonutChart(categoryRacDonutCells, darkMode),
-    [categoryRacDonutCells, darkMode]
+    () =>
+      buildCategoryRacFinancialDonutChart(
+        categoryRacDonutCells,
+        darkMode,
+        colorMaps.categoryBarColorByIndex
+      ),
+    [categoryRacDonutCells, darkMode, colorMaps]
+  );
+
+  const racFilteredAgreementRows = useMemo(
+    () => filterKpiRowsByRacBase(agreementContractRows || [], racIds || [], []),
+    [agreementContractRows, racIds]
+  );
+
+  const donutFilteredAgreementRows = useMemo(
+    () => filterKpiRowsByRacBase(agreementContractRows || [], effectiveDonutRacIds, []),
+    [agreementContractRows, effectiveDonutRacIds]
   );
 
   const racGovtPafCells = useMemo(
@@ -1075,17 +1201,31 @@ function KpiCharts({
         buildKpiRacGovtPafCells({
           shareRows: shareRows || [],
           contractRows: contractRows || [],
+          agreementContractRows: racFilteredAgreementRows,
+          useAsOfContracts,
+          contractMetaById: agreementOptions.contractMetaById,
           racOptions: racOptions || [],
           racIds: racIds || [],
+          preferSpGovtPafShare,
         }),
         tenure
       ),
-    [shareRows, contractRows, racOptions, racIds, tenure]
+    [
+      shareRows,
+      contractRows,
+      racFilteredAgreementRows,
+      useAsOfContracts,
+      agreementOptions.contractMetaById,
+      racOptions,
+      racIds,
+      tenure,
+      preferSpGovtPafShare,
+    ]
   );
 
   const categoryRacGovtPafBarData = useMemo(
-    () => buildRacGovtPafStackedBarData(racGovtPafCells),
-    [racGovtPafCells]
+    () => buildRacGovtPafStackedBarData(racGovtPafCells, colorMaps.seriesColorByMilKey),
+    [racGovtPafCells, colorMaps]
   );
 
   const baseGovtPafCells = useMemo(() => {
@@ -1094,9 +1234,13 @@ function KpiCharts({
       buildKpiBaseGovtPafCells({
         shareRows: shareRows || [],
         contractRows: contractRows || [],
+        agreementContractRows: racFilteredAgreementRows,
+        useAsOfContracts,
+        contractMetaById: agreementOptions.contractMetaById,
         baseOptions: baseOptions || [],
         allBases: allBases || [],
         racCmdId: govtPafDrill.racId,
+        preferSpGovtPafShare,
       }),
       tenure
     );
@@ -1105,6 +1249,9 @@ function KpiCharts({
     govtPafDrill.racId,
     shareRows,
     contractRows,
+    racFilteredAgreementRows,
+    useAsOfContracts,
+    agreementOptions.contractMetaById,
     baseOptions,
     allBases,
     tenure,
@@ -1117,8 +1264,12 @@ function KpiCharts({
         shareRows: shareRows || [],
         propertyRows: propertyRows || [],
         contractRows: contractRows || [],
+        agreementContractRows: racFilteredAgreementRows,
+        useAsOfContracts,
+        contractMetaById: agreementOptions.contractMetaById,
         racCmdId: govtPafDrill.racId,
         baseId: govtPafDrill.baseId,
+        preferSpGovtPafShare,
       }),
       tenure
     );
@@ -1129,18 +1280,27 @@ function KpiCharts({
     shareRows,
     propertyRows,
     contractRows,
+    racFilteredAgreementRows,
+    useAsOfContracts,
+    agreementOptions.contractMetaById,
     tenure,
   ]);
 
   const activeGovtPafBarData = useMemo(() => {
     if (govtPafDrill.level === GOVT_PAF_DRILL_BASE) {
-      return buildRacGovtPafStackedBarData(baseGovtPafCells);
+      return buildRacGovtPafStackedBarData(baseGovtPafCells, colorMaps.seriesColorByMilKey);
     }
     if (govtPafDrill.level === GOVT_PAF_DRILL_CATEGORY) {
-      return buildRacGovtPafStackedBarData(categoryGovtPafCells);
+      return buildRacGovtPafStackedBarData(categoryGovtPafCells, colorMaps.seriesColorByMilKey);
     }
     return categoryRacGovtPafBarData;
-  }, [govtPafDrill.level, categoryRacGovtPafBarData, baseGovtPafCells, categoryGovtPafCells]);
+  }, [
+    govtPafDrill.level,
+    categoryRacGovtPafBarData,
+    baseGovtPafCells,
+    categoryGovtPafCells,
+    colorMaps,
+  ]);
 
   const govtPafBarTitle = useMemo(() => {
     const baseTitle = "Govt & PAF share";
@@ -1153,19 +1313,26 @@ function KpiCharts({
     return `${baseTitle} by RAC`;
   }, [govtPafDrill]);
 
-  const govtPafDonutChart = useMemo(
-    () =>
-      buildShareDonutChart(
-        applyTenureToFinancialShares(
-          buildFinancialShares(shareRows || [], "all", contractRows || []),
-          tenure
-        ),
-        ["govt", "paf"],
-        darkMode,
-        { outerLegendRing: true }
-      ),
-    [shareRows, contractRows, darkMode, tenure]
-  );
+  // RAC-level totals only — never scoped to base/category bar drill-down.
+  const govtPafDonutChartRef = useRef(null);
+  const govtPafDonutChart = useMemo(() => {
+    const shares = buildGovtPafSharesFromRacBarCells(racGovtPafCells);
+    const govt = kpiNumeric(shares.find((share) => share.id === "govt")?.value);
+    const paf = kpiNumeric(shares.find((share) => share.id === "paf")?.value);
+    const fingerprint = `${govt}|${paf}|${darkMode}|${colorMaps.donutColorByShareId?.govt}|${colorMaps.donutColorByShareId?.paf}`;
+
+    if (govtPafDonutChartRef.current?.fingerprint === fingerprint) {
+      return govtPafDonutChartRef.current.chart;
+    }
+
+    const chart = buildShareDonutChart(shares, ["govt", "paf"], darkMode, {
+      outerLegendRing: true,
+      colorByShareId: colorMaps.donutColorByShareId,
+      shareFallbackColor: colorMaps.shareFallbackColor,
+    });
+    govtPafDonutChartRef.current = { fingerprint, chart };
+    return chart;
+  }, [racGovtPafCells, darkMode, colorMaps]);
 
   const tenureScaledAssetCards = useMemo(
     () => applyTenureToAssetCards(assetCards, tenure),
@@ -1176,13 +1343,17 @@ function KpiCharts({
     (c) => c.chartInclude !== false && c.key !== "total"
   );
 
-  const groupedBarData = useMemo(() => buildGroupedBarData(cards, CATEGORY_SERIES), [cards]);
+  const groupedBarData = useMemo(
+    () =>
+      buildGroupedBarData(cards, CATEGORY_SERIES, { colorByMilKey: colorMaps.seriesColorByMilKey }),
+    [cards, colorMaps]
+  );
   const ahqRacBaseBarData = useMemo(
     () =>
       buildGroupedBarData(cards, AHQ_RAC_BASE_SERIES, {
-        colorByMilKey: KPI_AHQ_RAC_BASE_CHART_COLORS,
+        colorByMilKey: colorMaps.ahqRacBase,
       }),
-    [cards]
+    [cards, colorMaps]
   );
 
   const textColor = darkMode ? "#e8e8e8" : "#344767";
@@ -1191,22 +1362,20 @@ function KpiCharts({
   const ahqRacBaseDonutChart = useMemo(
     () =>
       buildShareDonutChart(
-        applyTenureToFinancialShares(
-          buildFinancialShares(ahqDonutShareRows, "all", ahqDonutContractRows),
-          tenure
-        ),
+        buildAhqRacBaseSharesFromCategoryBarCards(cards),
         ["ahq", "rac", "base"],
         darkMode,
         {
           outerLegendRing: true,
-          colorByShareId: KPI_AHQ_RAC_BASE_CHART_COLORS,
+          colorByShareId: colorMaps.ahqRacBase,
+          shareFallbackColor: colorMaps.shareFallbackColor,
           labelPluginOverrides: {
             fontSize: KPI_AHQ_RAC_BASE_DONUT_LABEL_FONT_SIZE,
             minFontSize: KPI_AHQ_RAC_BASE_DONUT_LABEL_MIN_FONT_SIZE,
           },
         }
       ),
-    [ahqDonutShareRows, ahqDonutContractRows, darkMode, tenure]
+    [cards, darkMode, colorMaps]
   );
 
   const isFinancialsLayout = chartLayout === "financials";
@@ -1295,7 +1464,7 @@ function KpiCharts({
           darkMode,
           formatValue: formatKpiCrosshairBarValueLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 9,
+          fontSize: 12,
           labelPlacement: "inside",
         }
       ),
@@ -1322,7 +1491,7 @@ function KpiCharts({
           darkMode,
           formatValue: formatKpiCrosshairBarValueLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 11,
+          fontSize: 14,
           labelPlacement: "inside",
         }
       ),
@@ -1349,7 +1518,7 @@ function KpiCharts({
           darkMode,
           formatValue: formatKpiCrosshairBarValueLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 10,
+          fontSize: 13,
           labelPlacement: "inside",
         }
       ),
@@ -1376,7 +1545,7 @@ function KpiCharts({
           darkMode,
           formatValue: formatKpiCrosshairBarValueLabel,
           tooltipCallbacks: groupedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 12,
+          fontSize: 15,
           labelPlacement: "inside",
         }
       ),
@@ -1403,7 +1572,7 @@ function KpiCharts({
           darkMode,
           formatValue: formatKpiCrosshairBarValueLabel,
           tooltipCallbacks: stackedBarOptions.plugins.tooltip.callbacks,
-          fontSize: 10,
+          fontSize: 13,
           labelPlacement: "inside",
         }
       ),
@@ -1796,10 +1965,15 @@ function KpiCharts({
               {renderGovtPafDrillBarCard(ZOOM_CHART.govtPafBar)}
             </Grid>
             <Grid item xs={12} md={6}>
-              {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
-                zoomKey: ZOOM_CHART.govtPafDonut,
-                showRacFilter: false,
-              })}
+              <GovtPafRacLevelDonutCard
+                donutChart={govtPafDonutChart}
+                loading={loading}
+                cardSx={cardSx}
+                darkMode={darkMode}
+                zoomEnabled={zoomEnabled}
+                zoomKey={ZOOM_CHART.govtPafDonut}
+                onZoom={() => setZoomChart(ZOOM_CHART.govtPafDonut)}
+              />
             </Grid>
           </Grid>
           <Grid container spacing={2} sx={{ mt: 0 }}>
@@ -1822,34 +1996,43 @@ function KpiCharts({
         </>
       ) : (
         <>
-          <Grid container spacing={2}>
-            <Grid item xs={12} lg={7}>
-              {renderBarCard(
-                "Share Distribution (M)",
-                categoryRacBarData,
-                ZOOM_CHART.assetsBar,
-                financialShareBarOptions,
-                { showZoomHint: false }
-              )}
+          {showShareDistributionCharts ? (
+            <Grid container spacing={2}>
+              <Grid item xs={12} lg={7}>
+                {renderBarCard(
+                  "Share Distribution (M)",
+                  categoryRacBarData,
+                  ZOOM_CHART.assetsBar,
+                  financialShareBarOptions,
+                  { showZoomHint: false }
+                )}
+              </Grid>
+              <Grid item xs={12} lg={5}>
+                {renderDonutCard("Share Distribution", categoryRacDonutChart, {
+                  filterIdSuffix: "assets",
+                  zoomKey: ZOOM_CHART.assetsDonut,
+                })}
+              </Grid>
             </Grid>
-            <Grid item xs={12} lg={5}>
-              {renderDonutCard("Share Distribution", categoryRacDonutChart, {
-                filterIdSuffix: "assets",
-                zoomKey: ZOOM_CHART.assetsDonut,
-              })}
+          ) : null}
+          {showGovtPafCharts ? (
+            <Grid container spacing={2} sx={{ mt: showShareDistributionCharts ? 0 : undefined }}>
+              <Grid item xs={12} lg={7}>
+                {renderGovtPafDrillBarCard(ZOOM_CHART.assetsGovtPafBar)}
+              </Grid>
+              <Grid item xs={12} lg={5}>
+                <GovtPafRacLevelDonutCard
+                  donutChart={govtPafDonutChart}
+                  loading={loading}
+                  cardSx={cardSx}
+                  darkMode={darkMode}
+                  zoomEnabled={zoomEnabled}
+                  zoomKey={ZOOM_CHART.assetsGovtPafDonut}
+                  onZoom={() => setZoomChart(ZOOM_CHART.assetsGovtPafDonut)}
+                />
+              </Grid>
             </Grid>
-          </Grid>
-          <Grid container spacing={2} sx={{ mt: 0 }}>
-            <Grid item xs={12} lg={7}>
-              {renderGovtPafDrillBarCard(ZOOM_CHART.assetsGovtPafBar)}
-            </Grid>
-            <Grid item xs={12} lg={5}>
-              {renderDonutCard("Govt & PAF share distribution", govtPafDonutChart, {
-                zoomKey: ZOOM_CHART.assetsGovtPafDonut,
-                showRacFilter: false,
-              })}
-            </Grid>
-          </Grid>
+          ) : null}
         </>
       )}
 
@@ -1940,6 +2123,9 @@ KpiCharts.propTypes = {
   shareRows: PropTypes.arrayOf(PropTypes.object),
   contractRows: PropTypes.arrayOf(PropTypes.object),
   propertyRows: PropTypes.arrayOf(PropTypes.object),
+  agreementContractRows: PropTypes.arrayOf(PropTypes.object),
+  useAsOfContracts: PropTypes.bool,
+  contractMetaById: PropTypes.instanceOf(Map),
   racOptions: PropTypes.arrayOf(PropTypes.object),
   racIds: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
   baseOptions: PropTypes.arrayOf(PropTypes.object),
@@ -1960,13 +2146,19 @@ KpiCharts.propTypes = {
   loading: PropTypes.bool,
   chartZoomOnClick: PropTypes.bool,
   chartLayout: PropTypes.oneOf(["default", "financials"]),
+  showShareDistributionCharts: PropTypes.bool,
+  showGovtPafCharts: PropTypes.bool,
   tenure: PropTypes.oneOf(["Annual", "Biannual", "Quarterly", "Monthly"]),
+  preferSpGovtPafShare: PropTypes.bool,
 };
 
 KpiCharts.defaultProps = {
   shareRows: [],
   contractRows: [],
   propertyRows: [],
+  agreementContractRows: [],
+  useAsOfContracts: false,
+  contractMetaById: undefined,
   racOptions: [],
   racIds: [],
   baseOptions: [],
@@ -1975,7 +2167,10 @@ KpiCharts.defaultProps = {
   loading: false,
   chartZoomOnClick: false,
   chartLayout: "default",
+  showShareDistributionCharts: true,
+  showGovtPafCharts: true,
   tenure: "Annual",
+  preferSpGovtPafShare: false,
 };
 
 export default KpiCharts;

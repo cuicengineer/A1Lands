@@ -45,12 +45,8 @@ import {
   formatKpiMoneyLabel,
   formatKpiCrosshairBarValue,
 } from "../kpiDataUtils";
-import {
-  KPI_FISCAL_BAR_CHART_COLORS,
-  KPI_AHQ_RAC_BASE_CHART_COLORS,
-  KPI_BAR_INSIDE_LABEL_COLOR,
-  KPI_BAR_INSIDE_LABEL_SHADOW,
-} from "../kpiBarChartColors";
+import useDashboardChartColors from "hooks/useDashboardChartColors";
+import { KPI_BAR_INSIDE_LABEL_COLOR, KPI_BAR_INSIDE_LABEL_SHADOW } from "../kpiBarChartColors";
 
 /** Ensures null/zero grouped bars never reserve width (legend-uncheck style layout). */
 const fiscalGroupedBarCompactPlugin = {
@@ -265,15 +261,8 @@ const FISCAL_DETAIL_LABELS = {
   "fiscal-rac": "RAC Share",
   "fiscal-base": "Base Share",
 };
-const FISCAL_DETAIL_COLORS = {
-  "fiscal-ahq": KPI_AHQ_RAC_BASE_CHART_COLORS.ahq,
-  "fiscal-rac": KPI_AHQ_RAC_BASE_CHART_COLORS.rac,
-  "fiscal-base": KPI_AHQ_RAC_BASE_CHART_COLORS.base,
-};
 
 /** Nested horizontal bar: thick background (Govt) + thin foreground (PAF). */
-const FISCAL_NESTED_GOVT_COLOR = "#CBD5E1";
-const FISCAL_NESTED_PAF_COLOR = "#3B82F6";
 const FISCAL_NESTED_GOVT_BAR_THICKNESS = 28;
 const FISCAL_NESTED_PAF_BAR_THICKNESS = 14;
 
@@ -317,6 +306,7 @@ function FiscalKpiGrid({
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const chartColors = useDashboardChartColors();
   const cardRef = useRef(null);
   const [chartZoomOpen, setChartZoomOpen] = useState(false);
   const [selectedFiscalPeriodKey, setSelectedFiscalPeriodKey] = useState(null);
@@ -463,11 +453,11 @@ function FiscalKpiGrid({
                   fiscalRowId: period.fieldKey,
                   data: detailDataset,
                   backgroundColor: detailRows.map(
-                    (row, idx) => FISCAL_DETAIL_COLORS[row.id] || KPI_FISCAL_BAR_CHART_COLORS[idx]
+                    (row, idx) => chartColors.fiscalDetail[row.id] || chartColors.fiscal[idx]
                   ),
                   borderRadius: 6,
                   categoryPercentage: 0.66,
-                  barPercentage: 0.25,
+                  barPercentage: 0.5,
                   barThickness: "flex",
                   maxBarThickness: 1000,
                   yAxisID: "y",
@@ -491,7 +481,7 @@ function FiscalKpiGrid({
             data: chartPeriods.map((period) =>
               nullIfZeroChartBarValue(fiscalRowMil(govtRow, period.fieldKey))
             ),
-            backgroundColor: FISCAL_NESTED_GOVT_COLOR,
+            backgroundColor: chartColors.nestedGovt,
             borderSkipped: false,
             borderRadius: 4,
             barThickness: FISCAL_NESTED_GOVT_BAR_THICKNESS,
@@ -508,7 +498,7 @@ function FiscalKpiGrid({
             data: chartPeriods.map((period) =>
               nullIfZeroChartBarValue(fiscalRowMil(pafRow, period.fieldKey))
             ),
-            backgroundColor: FISCAL_NESTED_PAF_COLOR,
+            backgroundColor: chartColors.nestedPaf,
             borderSkipped: false,
             borderRadius: 4,
             barThickness: FISCAL_NESTED_PAF_BAR_THICKNESS,
@@ -522,7 +512,7 @@ function FiscalKpiGrid({
         ],
       },
     };
-  }, [rows, periods, selectedFiscalPeriodKey]);
+  }, [rows, periods, selectedFiscalPeriodKey, chartColors]);
 
   const fiscalTableChartData = fiscalChartContext.data;
   const chartZoomEnabled =
@@ -592,7 +582,7 @@ function FiscalKpiGrid({
             enabled: true,
             darkMode,
             color: textColor,
-            fontSize: 11,
+            fontSize: 14,
             fontWeight: 700,
             gap: 6,
           },
@@ -660,7 +650,7 @@ function FiscalKpiGrid({
         bar: {
           ...COMPACT_GROUPED_BAR_OPTIONS.datasets.bar,
           categoryPercentage: 0.66,
-          barPercentage: 0.25,
+          barPercentage: 0.5,
           maxBarThickness: 1000,
         },
       },
@@ -677,11 +667,11 @@ function FiscalKpiGrid({
         fiscalBarVerticalSeriesLabel: {
           enabled: true,
           minBarHeight: 34,
-          fontSize: 9,
+          fontSize: 12,
           fontWeight: 700,
           color: KPI_BAR_INSIDE_LABEL_COLOR,
           showValue: true,
-          valueFontSize: 8,
+          valueFontSize: 11,
           valueMinBarHeight: 38,
           valueTopInset: 4,
           valueColor: KPI_BAR_INSIDE_LABEL_COLOR,
@@ -752,7 +742,7 @@ function FiscalKpiGrid({
       darkMode,
       formatValue: fiscalCrosshairFormatValue,
       tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
-      fontSize: isOverview ? 10 : 10,
+      fontSize: isOverview ? 13 : 13,
       labelPlacement: isOverview ? "end" : "inside",
     });
 
@@ -792,7 +782,7 @@ function FiscalKpiGrid({
             },
           },
           fiscalNestedBarEndLabel: nestedLabelOpts
-            ? { ...nestedLabelOpts, fontSize: 13 }
+            ? { ...nestedLabelOpts, fontSize: 16 }
             : { enabled: false },
         },
       },
@@ -800,7 +790,7 @@ function FiscalKpiGrid({
         darkMode,
         formatValue: fiscalCrosshairFormatValue,
         tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
-        fontSize: 12,
+        fontSize: 15,
         labelPlacement: isOverview ? "end" : "inside",
       }
     );
@@ -816,13 +806,13 @@ function FiscalKpiGrid({
         kpiZoomPermanentLabels: { enabled: false },
         fiscalBarVerticalSeriesLabel: {
           ...fiscalTableChartOptions.plugins.fiscalBarVerticalSeriesLabel,
-          valueFontSize: 10,
+          valueFontSize: 13,
         },
         fiscalGroupedBarCompact: fiscalTableChartOptions.plugins.fiscalGroupedBarCompact || {
           enabled: true,
         },
         fiscalNestedBarEndLabel: nestedLabelOpts
-          ? { ...nestedLabelOpts, fontSize: 13 }
+          ? { ...nestedLabelOpts, fontSize: 16 }
           : { enabled: false },
       },
     };

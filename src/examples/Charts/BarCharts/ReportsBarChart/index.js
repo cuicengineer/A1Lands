@@ -100,7 +100,7 @@ function ReportsBarChart({
       return applyKpiCrosshairBarChartEnhancements(baseOptions, {
         darkMode,
         formatValue: formatKpiCrosshairBarValue,
-        fontSize: zoomEnhanced ? 12 : 10,
+        fontSize: zoomEnhanced ? 15 : 13,
         labelPlacement: "inside",
       });
     }

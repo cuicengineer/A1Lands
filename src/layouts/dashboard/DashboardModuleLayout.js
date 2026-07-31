@@ -47,6 +47,7 @@ function DashboardModuleLayout() {
       title={shellProps.title}
       subtitle={shellProps.subtitle}
       actions={shellProps.actions}
+      moduleBodyClassName={isKpiOverview ? "erp-kpi-overview-module-body" : undefined}
     >
       {isKpiOverview ? (
         <KpiOverview embedded onShellProps={handleKpiShellProps} />

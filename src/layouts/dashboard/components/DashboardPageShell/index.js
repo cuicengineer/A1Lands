@@ -22,6 +22,7 @@ function DashboardPageShell({
   metadata,
   bodySx,
   pageClassName,
+  moduleBodyClassName,
 }) {
   const { pathname } = useLocation();
   const bodyRef = useRef(null);
@@ -56,7 +57,10 @@ function DashboardPageShell({
           ...bodySx,
         }}
       >
-        <MDBox ref={bodyRef} className="dashboard-module-body">
+        <MDBox
+          ref={bodyRef}
+          className={["dashboard-module-body", moduleBodyClassName].filter(Boolean).join(" ")}
+        >
           {children}
         </MDBox>
       </EnterpriseWorkspace>
@@ -80,6 +84,7 @@ DashboardPageShell.propTypes = {
   ),
   bodySx: PropTypes.object,
   pageClassName: PropTypes.string,
+  moduleBodyClassName: PropTypes.string,
 };
 
 DashboardPageShell.defaultProps = {
@@ -89,6 +94,7 @@ DashboardPageShell.defaultProps = {
   metadata: null,
   bodySx: {},
   pageClassName: null,
+  moduleBodyClassName: null,
 };
 
 export default DashboardPageShell;

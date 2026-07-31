@@ -22,9 +22,9 @@ export const KPI_FISCAL_BAR_CHART_COLORS = [
 export const KPI_BAR_INSIDE_LABEL_COLOR = "#1f2937";
 export const KPI_BAR_INSIDE_LABEL_SHADOW = "rgba(255, 255, 255, 0.9)";
 
-/** AHQ / RAC / Base charts — same tone as PAF Annual Rent & Govt Share. */
+/** AHQ / RAC / Base charts — brand teal (#025B64) family. */
 export const KPI_AHQ_RAC_BASE_CHART_COLORS = {
-  ahq: KPI_BAR_CHART_PRIMARY,
-  rac: KPI_BAR_CHART_SECONDARY,
-  base: KPI_BAR_CHART_SERIES_COLORS[2],
+  ahq: "#025B64",
+  rac: "#037078",
+  base: "#048890",
 };

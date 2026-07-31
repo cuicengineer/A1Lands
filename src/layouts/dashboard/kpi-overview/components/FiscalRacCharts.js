@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import PropTypes from "prop-types";
-import { Chart } from "react-chartjs-2";
+import { Bar, Chart } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -26,7 +26,10 @@ import MDTypography from "components/MDTypography";
 import { useMaterialUIController } from "context";
 import { ChartZoomSurface, getEnterpriseCardSx } from "./KpiCharts";
 import ChartExportButton from "./ChartExportButton";
-import { applyKpiCrosshairBarChartEnhancements } from "./kpiZoomChartEnhancements";
+import {
+  applyKpiCrosshairBarChartEnhancements,
+  applyKpiZoomBarChartEnhancements,
+} from "./kpiZoomChartEnhancements";
 import { exportGroupedBarChartDataToExcel } from "utils/kpiChartExcelExport";
 import {
   coerceChartDataValue,
@@ -39,22 +42,18 @@ import {
   buildKpiRacIncomeDueCollectionsCells,
   buildKpiRacOutstandingIncomeCells,
   buildKpiNatureOfBusinessIncomeCells,
+  formatNatureActivityChartLabel,
   asOfAmountToMillions,
   PROPERTY_CLASS_STICKERS,
   formatKpiBarAxisTick,
   formatKpiBarAxisTickRounded,
+  formatKpiBarMoneyLabel,
   formatKpiCrosshairBarValue,
   formatKpiMoneyLabel,
   scaleKpiAmountByTenure,
 } from "../kpiDataUtils";
-import {
-  KPI_BAR_CHART_PRIMARY,
-  KPI_BAR_CHART_SECONDARY,
-  KPI_BAR_CHART_SERIES_COLORS,
-  KPI_FISCAL_BAR_CHART_COLORS,
-  KPI_BAR_INSIDE_LABEL_COLOR,
-  KPI_BAR_INSIDE_LABEL_SHADOW,
-} from "../kpiBarChartColors";
+import useDashboardChartColors from "hooks/useDashboardChartColors";
+import { KPI_BAR_INSIDE_LABEL_COLOR, KPI_BAR_INSIDE_LABEL_SHADOW } from "../kpiBarChartColors";
 
 const natureOfBusinessBarLabelPlugin = {
   id: "natureOfBusinessBarLabel",
@@ -360,6 +359,82 @@ const natureOfActivityXAxisLabelPlugin = {
   },
 };
 
+/** Value label at the end of each horizontal nature-of-activity bar (outside when space allows). */
+const natureActivityBarEndLabelPlugin = {
+  id: "natureActivityBarEndLabel",
+  afterDatasetsDraw(chart) {
+    const opts = chart.options?.plugins?.natureActivityBarEndLabel;
+    if (!opts?.enabled) return;
+    if (chart.options?.indexAxis !== "y") return;
+
+    const { ctx, chartArea } = chart;
+    if (!ctx || !chartArea) return;
+
+    const fontSize = Number(opts.fontSize ?? 12);
+    const fontWeight = opts.fontWeight ?? 700;
+    const textColor = opts.color || (opts.darkMode ? "#e8e8e8" : "#344767");
+    const gap = Number(opts.gap ?? 6);
+    const fontFamily = "Inter, Roboto, Helvetica, Arial, sans-serif";
+    const formatValue =
+      typeof opts.formatValue === "function"
+        ? opts.formatValue
+        : (value) => formatKpiBarMoneyLabel(value);
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((bar, dataIndex) => {
+        const raw = dataset?.data?.[dataIndex];
+        const n = coerceChartDataValue(raw);
+        if (n == null || n === 0) return;
+
+        const valueText = String(formatValue(n) ?? "").trim();
+        if (!valueText || valueText === "—") return;
+
+        const { x, y, base, height } = bar.getProps(["x", "y", "base", "height"], true);
+        const endX = Math.max(x, base);
+        const startX = Math.min(x, base);
+        const barWidth = Math.abs(endX - startX);
+
+        ctx.save();
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        const textWidth = ctx.measureText(valueText).width;
+        const outsideX = endX + gap;
+        const fitsOutside = outsideX + textWidth <= chartArea.right - 2;
+        const fitsInside = barWidth >= textWidth + gap * 2;
+
+        let drawX;
+        let align;
+        if (fitsOutside) {
+          drawX = outsideX;
+          align = "left";
+        } else if (fitsInside) {
+          drawX = endX - gap;
+          align = "right";
+          ctx.fillStyle = KPI_BAR_INSIDE_LABEL_COLOR;
+          ctx.shadowColor = KPI_BAR_INSIDE_LABEL_SHADOW;
+          ctx.shadowBlur = 2;
+        } else {
+          ctx.restore();
+          return;
+        }
+
+        if (fitsOutside) {
+          ctx.fillStyle = textColor;
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.textAlign = align;
+        ctx.textBaseline = "middle";
+        ctx.fillText(valueText, drawX, y);
+        ctx.restore();
+      });
+    });
+  },
+};
+
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -371,47 +446,49 @@ ChartJS.register(
   BarController,
   LineController,
   natureOfBusinessBarLabelPlugin,
-  natureOfActivityXAxisLabelPlugin
+  natureOfActivityXAxisLabelPlugin,
+  natureActivityBarEndLabelPlugin
 );
+
+function formatNatureActivityAxisTick(value, index, ticks) {
+  const n = coerceChartDataValue(value);
+  if (n == null || n === 0) return "";
+  const formatted = formatKpiBarAxisTickRounded(n);
+  if (!formatted) return "";
+  if (index > 0) {
+    const prev = coerceChartDataValue(ticks[index - 1]?.value);
+    if (prev != null && formatKpiBarAxisTickRounded(prev) === formatted) {
+      return "";
+    }
+  }
+  return formatted;
+}
 
 const INCOME_TURNOVER_TITLE = "Income Turnover RAC Wise";
 const INCOME_DUE_COLLECTIONS_TITLE = "Income Due vs Collections RAC Wise";
 const OUTSTANDING_INCOME_TITLE = "Outstanding Income Formation Wise";
 const NATURE_ACTIVITY_INCOME_TITLE = "Nature of Activity Wise Income";
 
-const INCOME_TURNOVER_COLORS = {
-  income: KPI_BAR_CHART_SERIES_COLORS[3],
-  govt: KPI_BAR_CHART_PRIMARY,
-  paf: KPI_BAR_CHART_SECONDARY,
-};
-
-const INCOME_DUE_BAR_COLOR = KPI_BAR_CHART_SERIES_COLORS[2];
-
 const OUTSTANDING_INCOME_CLASS_KEYS = ["categoryA", "categoryB", "categoryC", "bts", "hb"];
 
-const OUTSTANDING_INCOME_CLASS_COLORS = {
-  total: KPI_BAR_CHART_SERIES_COLORS[4],
-  categoryA: KPI_FISCAL_BAR_CHART_COLORS[0],
-  categoryB: KPI_FISCAL_BAR_CHART_COLORS[1],
-  categoryC: KPI_FISCAL_BAR_CHART_COLORS[2],
-  bts: KPI_FISCAL_BAR_CHART_COLORS[3],
-  hb: KPI_FISCAL_BAR_CHART_COLORS[6],
-};
+function buildOutstandingIncomeClassColors(chartColors) {
+  const fiscal = chartColors.fiscal;
+  return {
+    total: chartColors.outstandingTotal,
+    categoryA: fiscal[0],
+    categoryB: fiscal[1],
+    categoryC: fiscal[2],
+    bts: fiscal[3],
+    hb: fiscal[6],
+  };
+}
 
-/** Matches KPI Analytics by fiscal year chart bar proportions (25% of prior full width). */
+/** Matches KPI Analytics by fiscal year chart bar proportions (2× prior 0.25 bar width). */
 const FISCAL_SHARE_BAR_OPTIONS = {
   categoryPercentage: 0.66,
-  barPercentage: 0.25,
+  barPercentage: 0.5,
   barThickness: "flex",
   maxBarThickness: 1000,
-};
-
-/** Nature of Activity chart — 2× prior nature bar width (half category slot, full fiscal bar %). */
-const NATURE_ACTIVITY_BAR_OPTIONS = {
-  categoryPercentage: FISCAL_SHARE_BAR_OPTIONS.categoryPercentage * 0.5,
-  barPercentage: FISCAL_SHARE_BAR_OPTIONS.barPercentage,
-  barThickness: "flex",
-  maxBarThickness: FISCAL_SHARE_BAR_OPTIONS.maxBarThickness,
 };
 
 const TENURE_LABELS = {
@@ -429,7 +506,6 @@ function scaleTurnoverCellsByTenure(cells, tenure) {
   return (cells || []).map((cell) => ({
     ...cell,
     mil: {
-      income: scaleKpiAmountByTenure(cell.mil?.income, tenure),
       govt: scaleKpiAmountByTenure(cell.mil?.govt, tenure),
       paf: scaleKpiAmountByTenure(cell.mil?.paf, tenure),
     },
@@ -456,33 +532,25 @@ function scaleOutstandingIncomeCellsByTenure(cells, tenure) {
   });
 }
 
-function buildIncomeTurnoverChartData(cells) {
+function buildIncomeTurnoverChartData(cells, chartColors) {
+  const colors = chartColors.incomeTurnover;
   const labels = cells.map((cell) => cell.chartLabel);
   return {
     labels,
     datasets: withCompactGroupedBarDatasets([
       {
-        label: "Income",
-        data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.income)),
-        backgroundColor: INCOME_TURNOVER_COLORS.income,
-        stack: "income",
-        borderSkipped: false,
-        borderRadius: 6,
-        ...FISCAL_SHARE_BAR_OPTIONS,
-      },
-      {
         label: "Govt Share",
         data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.govt)),
-        backgroundColor: INCOME_TURNOVER_COLORS.govt,
+        backgroundColor: colors.govt,
         stack: "shares",
         borderSkipped: false,
-        borderRadius: { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 },
+        borderRadius: { topLeft: 0, topRight: 0, bottomLeft: 6, bottomRight: 6 },
         ...FISCAL_SHARE_BAR_OPTIONS,
       },
       {
         label: "PAF Share",
         data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.paf)),
-        backgroundColor: INCOME_TURNOVER_COLORS.paf,
+        backgroundColor: colors.paf,
         stack: "shares",
         borderSkipped: false,
         borderRadius: { topLeft: 6, topRight: 6, bottomLeft: 0, bottomRight: 0 },
@@ -492,7 +560,7 @@ function buildIncomeTurnoverChartData(cells) {
   };
 }
 
-function buildIncomeDueCollectionsChartData(cells) {
+function buildIncomeDueCollectionsChartData(cells, chartColors) {
   const labels = cells.map((cell) => cell.chartLabel);
   return {
     labels,
@@ -501,7 +569,7 @@ function buildIncomeDueCollectionsChartData(cells) {
         type: "bar",
         label: "Income Due",
         data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.incomeDue)),
-        backgroundColor: INCOME_DUE_BAR_COLOR,
+        backgroundColor: chartColors.incomeDue,
         borderSkipped: false,
         borderRadius: 6,
         order: 2,
@@ -512,10 +580,10 @@ function buildIncomeDueCollectionsChartData(cells) {
         type: "line",
         label: "Collections",
         data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.collections)),
-        borderColor: "#38BDF8",
-        backgroundColor: "#38BDF8",
-        pointBackgroundColor: "#F5A524",
-        pointBorderColor: "#F5A524",
+        borderColor: chartColors.lineCollection,
+        backgroundColor: chartColors.lineCollection,
+        pointBackgroundColor: chartColors.lineCollectionPoint,
+        pointBorderColor: chartColors.lineCollectionPoint,
         pointRadius: 5,
         pointHoverRadius: 6,
         borderWidth: 3,
@@ -528,41 +596,34 @@ function buildIncomeDueCollectionsChartData(cells) {
   };
 }
 
-function buildOutstandingIncomeChartData(cells) {
+function buildOutstandingIncomeChartData(cells, chartColors) {
+  const classColors = buildOutstandingIncomeClassColors(chartColors);
   const labels = cells.map((cell) => cell.chartLabel);
   const classDatasets = OUTSTANDING_INCOME_CLASS_KEYS.map((key, idx, arr) => ({
     label: PROPERTY_CLASS_STICKERS[key]?.label || key,
     data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.[key])),
-    backgroundColor: OUTSTANDING_INCOME_CLASS_COLORS[key],
-    stack: "classes",
+    backgroundColor: classColors[key],
+    stack: "formation",
     borderSkipped: false,
     ...FISCAL_SHARE_BAR_OPTIONS,
     borderRadius:
-      idx === arr.length - 1
+      idx === 0
+        ? { topLeft: 0, topRight: 0, bottomLeft: 6, bottomRight: 6 }
+        : idx === arr.length - 1
         ? { topLeft: 6, topRight: 6, bottomLeft: 0, bottomRight: 0 }
         : { topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 },
   }));
 
   return {
     labels,
-    datasets: withCompactGroupedBarDatasets([
-      {
-        label: "Total",
-        data: cells.map((cell) => nullIfZeroChartBarValue(cell.mil?.total)),
-        backgroundColor: OUTSTANDING_INCOME_CLASS_COLORS.total,
-        stack: "total",
-        borderSkipped: false,
-        borderRadius: 6,
-        ...FISCAL_SHARE_BAR_OPTIONS,
-      },
-      ...classDatasets,
-    ]),
+    datasets: withCompactGroupedBarDatasets(classDatasets),
   };
 }
 
-function buildNatureActivityIncomeChartData(cells) {
+function buildNatureActivityIncomeChartData(cells, chartColors) {
+  const fiscal = chartColors.fiscal;
   return {
-    labels: cells.map((cell) => cell.chartLabel),
+    labels: cells.map((cell) => formatNatureActivityChartLabel(cell)),
     datasets: [
       {
         label: "Income",
@@ -570,12 +631,10 @@ function buildNatureActivityIncomeChartData(cells) {
           const mil = asOfAmountToMillions(cell.mil?.income);
           return nullIfZeroChartBarValue(mil);
         }),
-        backgroundColor: cells.map(
-          (_, idx) => KPI_FISCAL_BAR_CHART_COLORS[idx % KPI_FISCAL_BAR_CHART_COLORS.length]
-        ),
+        backgroundColor: cells.map((_, idx) => fiscal[idx % fiscal.length]),
         borderSkipped: false,
-        borderRadius: 6,
-        ...NATURE_ACTIVITY_BAR_OPTIONS,
+        borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 6, bottomRight: 6 },
+        ...FISCAL_SHARE_BAR_OPTIONS,
       },
     ],
   };
@@ -597,6 +656,7 @@ function FiscalRacCharts({
   asOfContractRows = [],
   contractCatalogRows = [],
   contractMetaById,
+  propertyGroups = [],
   racOptions,
   racIds,
   tenure = "Annual",
@@ -605,6 +665,7 @@ function FiscalRacCharts({
 }) {
   const [controller] = useMaterialUIController();
   const { darkMode } = controller;
+  const chartColors = useDashboardChartColors();
   const [zoomChartKey, setZoomChartKey] = useState(null);
 
   const tenureLabel = getTenureLabel(tenure);
@@ -616,13 +677,12 @@ function FiscalRacCharts({
   const turnoverCells = useMemo(() => {
     const cells = buildKpiRacIncomeTurnoverCells({
       shareRows,
-      propertyRows,
       contractRows,
       racOptions,
       racIds,
     });
     return scaleTurnoverCellsByTenure(cells, tenure);
-  }, [shareRows, propertyRows, contractRows, racOptions, racIds, tenure]);
+  }, [shareRows, contractRows, racOptions, racIds, tenure]);
 
   const dueCollectionsCells = useMemo(() => {
     const cells = buildKpiRacIncomeDueCollectionsCells({
@@ -648,33 +708,30 @@ function FiscalRacCharts({
       asOfContractRows,
       contractCatalogRows,
       contractMetaById,
+      propertyGroups,
+      racIds,
     });
     return scaleNatureActivityCellsByTenure(cells, tenure);
-  }, [asOfContractRows, contractCatalogRows, contractMetaById, tenure]);
+  }, [asOfContractRows, contractCatalogRows, contractMetaById, propertyGroups, racIds, tenure]);
 
   const turnoverChartData = useMemo(
-    () => buildIncomeTurnoverChartData(turnoverCells),
-    [turnoverCells]
+    () => buildIncomeTurnoverChartData(turnoverCells, chartColors),
+    [turnoverCells, chartColors]
   );
 
   const dueCollectionsChartData = useMemo(
-    () => buildIncomeDueCollectionsChartData(dueCollectionsCells),
-    [dueCollectionsCells]
+    () => buildIncomeDueCollectionsChartData(dueCollectionsCells, chartColors),
+    [dueCollectionsCells, chartColors]
   );
 
   const outstandingIncomeChartData = useMemo(
-    () => buildOutstandingIncomeChartData(outstandingIncomeCells),
-    [outstandingIncomeCells]
+    () => buildOutstandingIncomeChartData(outstandingIncomeCells, chartColors),
+    [outstandingIncomeCells, chartColors]
   );
 
   const natureActivityChartData = useMemo(
-    () => buildNatureActivityIncomeChartData(natureActivityCells),
-    [natureActivityCells]
-  );
-
-  const natureActivityCategoryLabels = useMemo(
-    () => natureActivityCells.map((cell) => cell.chartLabel),
-    [natureActivityCells]
+    () => buildNatureActivityIncomeChartData(natureActivityCells, chartColors),
+    [natureActivityCells, chartColors]
   );
 
   const formatCrosshairValue = useCallback((value) => formatKpiCrosshairBarValue(value), []);
@@ -717,11 +774,21 @@ function FiscalRacCharts({
       label: (ctx) => {
         const n = coerceChartDataValue(ctx.raw);
         if (n == null || n === 0) return null;
-        const nature = natureActivityCategoryLabels[ctx.dataIndex] || ctx.label || "Income";
-        return `${nature}: ${formatKpiMoneyLabel(n)}`;
+        const cell = natureActivityCells[ctx.dataIndex];
+        const nature = cell?.chartLabel || ctx.label || "Income";
+        const propertyCount = Number(cell?.propertyCount) || 0;
+        const lines = [`${nature}: ${formatKpiMoneyLabel(n)}`];
+        if (propertyCount > 0) {
+          lines.push(
+            propertyCount === 1
+              ? "1 active property"
+              : `${propertyCount.toLocaleString()} active properties`
+          );
+        }
+        return lines;
       },
     }),
-    [natureActivityCategoryLabels]
+    [natureActivityCells]
   );
 
   const baseChartOptions = useMemo(
@@ -781,21 +848,41 @@ function FiscalRacCharts({
     [baseChartOptions.scales.y]
   );
 
-  const natureActivityYAxisScale = useMemo(
+  const natureActivityAmountScale = useMemo(
     () => ({
-      ...roundedYAxisScale,
+      beginAtZero: true,
+      grid: { color: gridColor },
       ticks: {
-        ...roundedYAxisScale.ticks,
+        color: textColor,
         font: { size: 12, weight: "600" },
-        callback: (value) => formatKpiBarAxisTickRounded(value),
+        callback: formatNatureActivityAxisTick,
       },
       title: {
-        ...roundedYAxisScale.title,
+        display: true,
         text: "Amount (M)",
+        color: textColor,
         font: { size: 13, weight: "600" },
       },
     }),
-    [roundedYAxisScale]
+    [gridColor, textColor]
+  );
+
+  const natureActivityCategoryScale = useMemo(
+    () => ({
+      grid: { display: false },
+      ticks: {
+        color: textColor,
+        font: { size: 11, weight: "600" },
+        autoSkip: false,
+      },
+      title: {
+        display: true,
+        text: "Nature of Business",
+        color: textColor,
+        font: { size: 13, weight: "600" },
+      },
+    }),
+    [textColor]
   );
 
   const turnoverChartOptions = useMemo(() => {
@@ -827,7 +914,7 @@ function FiscalRacCharts({
       darkMode,
       formatValue: formatCrosshairValue,
       tooltipCallbacks: turnoverTooltipCallbacks,
-      fontSize: 9,
+      fontSize: 12,
       labelPlacement: "inside",
     });
   }, [baseChartOptions, darkMode, formatCrosshairValue, turnoverTooltipCallbacks]);
@@ -860,7 +947,7 @@ function FiscalRacCharts({
       darkMode,
       formatValue: formatCrosshairValue,
       tooltipCallbacks: dueCollectionsTooltipCallbacks,
-      fontSize: 9,
+      fontSize: 12,
       labelPlacement: "inside",
     });
   }, [
@@ -907,7 +994,7 @@ function FiscalRacCharts({
       darkMode,
       formatValue: formatCrosshairValue,
       tooltipCallbacks: outstandingIncomeTooltipCallbacks,
-      fontSize: 9,
+      fontSize: 12,
       labelPlacement: "inside",
     });
   }, [
@@ -919,52 +1006,29 @@ function FiscalRacCharts({
   ]);
 
   const natureActivityChartOptions = useMemo(() => {
-    const xAxisReservedHeight = NATURE_X_AXIS_MAX_LINES * NATURE_X_AXIS_LINE_HEIGHT + 20;
     const options = {
-      ...baseChartOptions,
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: "y",
+      interaction: { mode: "index", intersect: false },
+      ...COMPACT_GROUPED_BAR_OPTIONS,
       layout: {
-        padding: {
-          top: 4,
-          right: 8,
-          bottom: 4,
-          left: 0,
-        },
+        padding: { right: 48 },
       },
       datasets: {
         bar: {
-          skipNull: true,
-          grouped: true,
-          ...NATURE_ACTIVITY_BAR_OPTIONS,
+          ...COMPACT_GROUPED_BAR_OPTIONS.datasets.bar,
+          ...FISCAL_SHARE_BAR_OPTIONS,
         },
       },
       scales: {
-        ...baseChartOptions.scales,
-        x: {
-          ...baseChartOptions.scales.x,
-          grid: { display: false },
-          title: {
-            ...baseChartOptions.scales.x.title,
-            text: "Nature of Business",
-            font: { size: 13, weight: "600" },
-            padding: { top: 8, bottom: 0 },
-          },
-          ticks: {
-            ...baseChartOptions.scales.x.ticks,
-            display: false,
-            autoSkip: false,
-            maxRotation: 0,
-            minRotation: 0,
-          },
-          afterFit(scale) {
-            scale.height = Math.max(scale.height || 0, xAxisReservedHeight);
-          },
-        },
-        y: natureActivityYAxisScale,
+        x: natureActivityAmountScale,
+        y: natureActivityCategoryScale,
       },
       plugins: {
-        ...baseChartOptions.plugins,
         legend: {
-          ...baseChartOptions.plugins.legend,
+          position: "bottom",
+          labels: { color: textColor, boxWidth: 12, padding: 12, font: { size: 11 } },
           display: false,
         },
         tooltip: {
@@ -973,53 +1037,46 @@ function FiscalRacCharts({
           callbacks: natureActivityTooltipCallbacks,
         },
         natureOfBusinessBarLabel: {
-          enabled: true,
-          categoryLabels: natureActivityCategoryLabels,
-          darkMode,
-          fontSize: 12,
+          enabled: false,
         },
         natureOfActivityXAxisLabel: {
-          enabled: true,
-          categoryLabels: natureActivityCategoryLabels,
-          color: textColor,
-          darkMode,
-          maxLines: NATURE_X_AXIS_MAX_LINES,
-          lineHeight: NATURE_X_AXIS_LINE_HEIGHT,
-          font: NATURE_X_AXIS_FONT,
-          paddingTop: 8,
+          enabled: false,
         },
       },
     };
 
-    const enhanced = applyKpiCrosshairBarChartEnhancements(options, {
+    const enhanced = applyKpiZoomBarChartEnhancements(options, {
       darkMode,
       formatValue: formatCrosshairValue,
       tooltipCallbacks: natureActivityTooltipCallbacks,
-      fontSize: 12,
-      labelPlacement: "inside",
+      fontSize: 15,
+      labelPlacement: "above",
     });
 
     return {
       ...enhanced,
-      scales: {
-        ...enhanced.scales,
-        x: options.scales.x,
-        y: options.scales.y,
-      },
       plugins: {
         ...enhanced.plugins,
         kpiZoomPermanentLabels: { enabled: false },
-        natureOfBusinessBarLabel: options.plugins.natureOfBusinessBarLabel,
-        natureOfActivityXAxisLabel: options.plugins.natureOfActivityXAxisLabel,
+        natureOfBusinessBarLabel: { enabled: false },
+        natureOfActivityXAxisLabel: { enabled: false },
+        natureActivityBarEndLabel: {
+          enabled: true,
+          darkMode,
+          color: textColor,
+          fontSize: 12,
+          fontWeight: 700,
+          gap: 6,
+          formatValue: (value) => formatKpiBarMoneyLabel(value),
+        },
       },
     };
   }, [
-    baseChartOptions,
     darkMode,
     formatCrosshairValue,
-    natureActivityCategoryLabels,
+    natureActivityAmountScale,
+    natureActivityCategoryScale,
     natureActivityTooltipCallbacks,
-    natureActivityYAxisScale,
     textColor,
   ]);
 
@@ -1037,7 +1094,7 @@ function FiscalRacCharts({
             ...turnoverChartOptions.plugins,
             kpiZoomPermanentLabels: {
               ...turnoverChartOptions.plugins?.kpiZoomPermanentLabels,
-              fontSize: 12,
+              fontSize: 15,
             },
           },
         },
@@ -1053,7 +1110,7 @@ function FiscalRacCharts({
             ...dueCollectionsChartOptions.plugins,
             kpiZoomPermanentLabels: {
               ...dueCollectionsChartOptions.plugins?.kpiZoomPermanentLabels,
-              fontSize: 12,
+              fontSize: 15,
             },
           },
         },
@@ -1069,7 +1126,7 @@ function FiscalRacCharts({
             ...outstandingIncomeChartOptions.plugins,
             kpiZoomPermanentLabels: {
               ...outstandingIncomeChartOptions.plugins?.kpiZoomPermanentLabels,
-              fontSize: 12,
+              fontSize: 15,
             },
           },
         },
@@ -1081,10 +1138,14 @@ function FiscalRacCharts({
         data: natureActivityChartData,
         options: {
           ...natureActivityChartOptions,
+          layout: {
+            ...(natureActivityChartOptions.layout || {}),
+            padding: { right: 72 },
+          },
           plugins: {
             ...natureActivityChartOptions.plugins,
-            natureOfBusinessBarLabel: {
-              ...natureActivityChartOptions.plugins?.natureOfBusinessBarLabel,
+            natureActivityBarEndLabel: {
+              ...natureActivityChartOptions.plugins?.natureActivityBarEndLabel,
               fontSize: 14,
             },
           },
@@ -1115,6 +1176,7 @@ function FiscalRacCharts({
     onExport,
     emptyMessage = "No RAC data for the selected filters.",
     chartHeight = 280,
+    useBarComponent = false,
   }) => (
     <Card sx={{ ...cardSx, overflow: "hidden", height: "100%" }}>
       <MDBox px={2} py={1.5}>
@@ -1145,7 +1207,11 @@ function FiscalRacCharts({
               showZoomHint={false}
               onZoom={() => setZoomChartKey(chartKey)}
             >
-              <Chart type="bar" data={chartData} options={chartOptions} />
+              {useBarComponent ? (
+                <Bar data={chartData} options={chartOptions} />
+              ) : (
+                <Chart type="bar" data={chartData} options={chartOptions} />
+              )}
             </ChartZoomSurface>
           ) : (
             <MDBox
@@ -1172,7 +1238,7 @@ function FiscalRacCharts({
           {renderChartCard({
             chartKey: "turnover",
             title: INCOME_TURNOVER_TITLE,
-            subtitle: `Income with Govt & PAF share by RAC (${tenureLabel})`,
+            subtitle: `Govt & PAF share stacked by RAC (${tenureLabel})`,
             chartData: turnoverChartData,
             chartOptions: turnoverChartOptions,
             hasData: turnoverCells.length > 0,
@@ -1202,7 +1268,7 @@ function FiscalRacCharts({
           {renderChartCard({
             chartKey: "outstandingIncome",
             title: OUTSTANDING_INCOME_TITLE,
-            subtitle: `Class-wise outstanding income by formation (${tenureLabel})`,
+            subtitle: `Stacked class-wise outstanding income by formation (${tenureLabel})`,
             chartData: outstandingIncomeChartData,
             chartOptions: outstandingIncomeChartOptions,
             hasData: outstandingIncomeCells.length > 0,
@@ -1217,11 +1283,12 @@ function FiscalRacCharts({
           {renderChartCard({
             chartKey: "natureActivity",
             title: NATURE_ACTIVITY_INCOME_TITLE,
-            subtitle: `Income grouped by nature of business from contracts (${tenureLabel})`,
+            subtitle: `Income and active property count by nature of business (${tenureLabel})`,
             chartData: natureActivityChartData,
             chartOptions: natureActivityChartOptions,
             hasData: natureActivityCells.length > 0,
             chartHeight: 400,
+            useBarComponent: true,
             emptyMessage: "No contract income data for the selected filters.",
             onExport: () =>
               exportGroupedBarChartDataToExcel(
@@ -1286,7 +1353,11 @@ function FiscalRacCharts({
         >
           {zoomConfig ? (
             <MDBox sx={{ flex: 1, minHeight: 0, width: "100%", position: "relative" }}>
-              <Chart type="bar" data={zoomConfig.data} options={zoomConfig.options} />
+              {zoomChartKey === "natureActivity" ? (
+                <Bar data={zoomConfig.data} options={zoomConfig.options} />
+              ) : (
+                <Chart type="bar" data={zoomConfig.data} options={zoomConfig.options} />
+              )}
             </MDBox>
           ) : null}
         </DialogContent>
@@ -1302,6 +1373,7 @@ FiscalRacCharts.propTypes = {
   asOfContractRows: PropTypes.arrayOf(PropTypes.object),
   contractCatalogRows: PropTypes.arrayOf(PropTypes.object),
   contractMetaById: PropTypes.instanceOf(Map),
+  propertyGroups: PropTypes.arrayOf(PropTypes.object),
   racOptions: PropTypes.arrayOf(PropTypes.object).isRequired,
   racIds: PropTypes.arrayOf(PropTypes.string),
   tenure: PropTypes.oneOf(["Annual", "Biannual", "Quarterly", "Monthly"]),
@@ -1313,6 +1385,7 @@ FiscalRacCharts.defaultProps = {
   asOfContractRows: [],
   contractCatalogRows: [],
   contractMetaById: new Map(),
+  propertyGroups: [],
   racIds: [],
   tenure: "Annual",
   loading: false,

@@ -30,14 +30,20 @@ import ConfiguratorRoot from "examples/Configurator/ConfiguratorRoot";
 import ChangePasswordDialog from "examples/Configurator/ChangePasswordDialog";
 
 // Material Dashboard 2 React context
-import { useMaterialUIController, setOpenConfigurator, setSidenavColor } from "context";
+import {
+  useMaterialUIController,
+  setOpenConfigurator,
+  setSidenavColor,
+  setDashboardColorCombination,
+} from "context";
 import { SIDENAV_COLOR_OPTIONS } from "utils/sidenavColorTheme";
+import { DASHBOARD_COLOR_COMBINATION_OPTIONS } from "utils/dashboardChartColorThemes";
 
 const SIDENAV_COLORS_PER_ROW = 7;
 
 function Configurator() {
   const [controller, dispatch] = useMaterialUIController();
-  const { openConfigurator, sidenavColor, darkMode } = controller;
+  const { openConfigurator, sidenavColor, dashboardColorCombination, darkMode } = controller;
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const handleCloseConfigurator = () => setOpenConfigurator(dispatch, false);
@@ -124,6 +130,91 @@ function Configurator() {
               {secondRowColors.map(renderColorSwatch)}
             </MDBox>
           ) : null}
+        </MDBox>
+
+        <Divider sx={{ my: 2 }} />
+
+        <MDBox>
+          <MDTypography variant="h6">Dashboard Chart Colors</MDTypography>
+          <MDTypography variant="caption" color="text" display="block" mb={1}>
+            KPI overview charts, bars, and graphs
+          </MDTypography>
+
+          {DASHBOARD_COLOR_COMBINATION_OPTIONS.map((option) => {
+            const selected = dashboardColorCombination === option.value;
+
+            return (
+              <MDBox
+                key={option.value}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selected}
+                onClick={() => setDashboardColorCombination(dispatch, option.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setDashboardColorCombination(dispatch, option.value);
+                  }
+                }}
+                sx={({
+                  borders: { borderWidth },
+                  palette: { white, dark, background },
+                  transitions,
+                }) => ({
+                  mb: 1,
+                  p: 1.25,
+                  borderRadius: 1,
+                  cursor: "pointer",
+                  border: `${borderWidth[1]} solid ${
+                    selected
+                      ? darkMode
+                        ? white.main
+                        : dark.main
+                      : darkMode
+                      ? "rgba(255,255,255,0.12)"
+                      : "rgba(15,23,42,0.08)"
+                  }`,
+                  backgroundColor: selected
+                    ? darkMode
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(15,23,42,0.03)"
+                    : "transparent",
+                  transition: transitions.create(["border-color", "background-color"], {
+                    easing: transitions.easing.sharp,
+                    duration: transitions.duration.shorter,
+                  }),
+                  "&:hover, &:focus-visible": {
+                    borderColor: darkMode ? white.main : dark.main,
+                    outline: "none",
+                  },
+                })}
+              >
+                <MDTypography variant="button" fontWeight={selected ? 700 : 500}>
+                  {option.label}
+                </MDTypography>
+                <MDTypography variant="caption" color="text" display="block">
+                  {option.description}
+                </MDTypography>
+                <MDBox display="flex" flexWrap="nowrap" mt={0.75}>
+                  {option.preview.map((color) => (
+                    <MDBox
+                      key={color}
+                      sx={{
+                        width: 28,
+                        height: 14,
+                        mr: 0.5,
+                        borderRadius: 0.5,
+                        backgroundColor: color,
+                        border: darkMode
+                          ? "1px solid rgba(255,255,255,0.12)"
+                          : "1px solid rgba(15,23,42,0.08)",
+                      }}
+                    />
+                  ))}
+                </MDBox>
+              </MDBox>
+            );
+          })}
         </MDBox>
 
         <Divider sx={{ my: 2 }} />

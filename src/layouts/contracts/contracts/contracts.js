@@ -78,11 +78,15 @@ import jsPDF from "jspdf";
 import { addMonths, addDays, format, parseISO, isValid } from "date-fns";
 import {
   getBaseDropdownLabel,
+  getKpiContractRowStateNormalized,
   hasContractsKpiGridFilters,
   readContractsUrlKpiFilters,
   resolveBaseNameById,
   resolveClassNameById,
   resolveCommandNameById,
+  rowIsInKpiAsOfActiveScope,
+  rowMatchesKpiContractHealthFilter,
+  rowMatchesKpiContractStatusFilter,
 } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import {
   AgreementProvContractBasicInfoStrip,
@@ -5546,51 +5550,6 @@ function readContractsUrlContractNo() {
   return readContractsUrlKpiFilters().contractNo;
 }
 
-function rowMatchesKpiContractHealthFilter(row, filterKey, getRowContractStateNormalized) {
-  if (!filterKey) return true;
-  const st = getRowContractStateNormalized(row);
-  const payload = String(
-    row.ContractState ?? row.contractState ?? row.ContractStatus ?? row.contractStatus ?? ""
-  )
-    .trim()
-    .toLowerCase();
-  switch (filterKey) {
-    case "active":
-      return (
-        st === "active" || st === "valid" || payload.includes("active") || payload.includes("valid")
-      );
-    case "expiring":
-      return st === "expiring" || payload.includes("expir") || payload.includes("border");
-    case "terminated":
-      return st === "terminated" || payload.includes("terminat") || payload.includes("closed");
-    case "vacant":
-      return st === "vacant" || payload.includes("vacant");
-    default:
-      return true;
-  }
-}
-
-function rowMatchesKpiContractStatusFilter(row, filterKey) {
-  if (!filterKey) return true;
-  if (filterKey === "viable" || filterKey === "unviable") {
-    const v = String(
-      row.feasible ?? row.Viability ?? row.viability ?? row.Feasible ?? row.feasible ?? ""
-    )
-      .trim()
-      .toLowerCase();
-    if (filterKey === "viable") return v === "viable";
-    return v === "unviable";
-  }
-  const isActive =
-    row.Status === true ||
-    row.Status === 1 ||
-    row.Status === "1" ||
-    (typeof row.Status === "string" && String(row.Status).toLowerCase() === "active");
-  if (filterKey === "active") return isActive;
-  if (filterKey === "inactive") return !isActive;
-  return true;
-}
-
 function ContractInvoiceFinalizeGrid({
   rows,
   selectedKeys,
@@ -6359,6 +6318,16 @@ export default function Contracts() {
     : {};
   const ALL_FILTER_VALUE = "__ALL__";
 
+  /** As-of SP can return 0 when rate lookups fail; keep stored contract shares in that case. */
+  const shouldApplyAsOfShareValue = (asOfValue, baseValue) => {
+    if (asOfValue === undefined) return false;
+    const asOfNum = Number(asOfValue);
+    if (!Number.isFinite(asOfNum)) return asOfValue !== null && asOfValue !== "";
+    if (asOfNum !== 0) return true;
+    const baseNum = Number(baseValue);
+    return !(Number.isFinite(baseNum) && baseNum !== 0);
+  };
+
   const mergeAsOfOverrides = (baseRows, overrideState) => {
     const rowsArr = Array.isArray(baseRows) ? baseRows : [];
     if (!overrideState?.asOfDate) return rowsArr;
@@ -6424,26 +6393,32 @@ export default function Contracts() {
         next.RentalValue = rentalValue;
         next.rentalValue = rentalValue;
       }
-      if (govtShare !== undefined) {
+      if (
+        govtShare !== undefined &&
+        shouldApplyAsOfShareValue(govtShare, r.GovtShare ?? r.govtShare)
+      ) {
         next.GovtShare = govtShare;
         next.govtShare = govtShare;
       }
-      if (pafShare !== undefined) {
+      if (pafShare !== undefined && shouldApplyAsOfShareValue(pafShare, r.PAFShare ?? r.pafShare)) {
         next.PAFShare = pafShare;
         next.pafShare = pafShare;
       }
       const ahqShare = readFirstOwn(o, ["AHQShare", "ahqShare"]);
       const racShare = readFirstOwn(o, ["RACShare", "racShare"]);
       const baseShare = readFirstOwn(o, ["BaseShare", "baseShare"]);
-      if (ahqShare !== undefined) {
+      if (ahqShare !== undefined && shouldApplyAsOfShareValue(ahqShare, r.AHQShare ?? r.ahqShare)) {
         next.AHQShare = ahqShare;
         next.ahqShare = ahqShare;
       }
-      if (racShare !== undefined) {
+      if (racShare !== undefined && shouldApplyAsOfShareValue(racShare, r.RACShare ?? r.racShare)) {
         next.RACShare = racShare;
         next.racShare = racShare;
       }
-      if (baseShare !== undefined) {
+      if (
+        baseShare !== undefined &&
+        shouldApplyAsOfShareValue(baseShare, r.BaseShare ?? r.baseShare)
+      ) {
         next.BaseShare = baseShare;
         next.baseShare = baseShare;
       }
@@ -6701,12 +6676,25 @@ export default function Contracts() {
     if (className) setClassFilterIds([className]);
     if (urlKpiFilters.kpiContractHealth) {
       setKpiContractHealthFilter(urlKpiFilters.kpiContractHealth);
+      if (urlKpiFilters.kpiContractHealth !== "active") {
+        setContractsArchiveFilter("all");
+      }
     }
     if (urlKpiFilters.kpiContractStatus) {
       setKpiContractStatusFilter(urlKpiFilters.kpiContractStatus);
+      if (
+        urlKpiFilters.kpiContractStatus === "inactive" ||
+        urlKpiFilters.kpiContractStatus === "unviable"
+      ) {
+        setContractsArchiveFilter("all");
+      }
     }
     if (urlKpiFilters.kpiApproval === "approved" || urlKpiFilters.kpiApproval === "pending") {
       setContractsApprovalFilter(urlKpiFilters.kpiApproval);
+    }
+    if (urlKpiFilters.asOfDate) {
+      setAsOfDate(urlKpiFilters.asOfDate);
+      setAsOfRefreshToken((token) => token + 1);
     }
 
     urlKpiGridFiltersAppliedRef.current = true;
@@ -10131,30 +10119,7 @@ export default function Contracts() {
         .filter(Boolean)
     );
 
-    const getRowContractStateNormalized = (r) => {
-      const fromPayload =
-        r.ContractState ?? r.contractState ?? r.ContractStatus ?? r.contractStatus ?? "";
-      const n = String(fromPayload || "")
-        .trim()
-        .toLowerCase();
-      if (n) {
-        if (n === "upcoming" || n === "not started") return "upcoming";
-        return n;
-      }
-      const startRaw = r.contractStartDate ?? r.ContractStartDate ?? "";
-      const endRaw = r.contractEndDate ?? r.ContractEndDate ?? "";
-      const start = String(startRaw || "")
-        .split("T")[0]
-        .slice(0, 10);
-      const end = String(endRaw || "")
-        .split("T")[0]
-        .slice(0, 10);
-      const today = new Date().toISOString().split("T")[0];
-      if (start && today < start) return "upcoming";
-      if (end && today > end) return "terminated";
-      if (start && end && today >= start && today <= end) return "active";
-      return "";
-    };
+    const getRowContractStateNormalized = getKpiContractRowStateNormalized;
 
     const filteredRows = normalizedRows.filter((row) => {
       const isArchived = (v) =>
@@ -10207,12 +10172,17 @@ export default function Contracts() {
           break;
       }
 
-      const matchesKpiHealth = rowMatchesKpiContractHealthFilter(
-        row,
-        kpiContractHealthFilter,
-        getRowContractStateNormalized
-      );
+      const matchesKpiHealth = rowMatchesKpiContractHealthFilter(row, kpiContractHealthFilter);
       const matchesKpiStatus = rowMatchesKpiContractStatusFilter(row, kpiContractStatusFilter);
+      const hasKpiStickerFilter =
+        Boolean(kpiContractHealthFilter) ||
+        Boolean(kpiContractStatusFilter) ||
+        contractsApprovalFilter === "approved" ||
+        contractsApprovalFilter === "pending";
+      const matchesKpiAsOfScope =
+        !urlKpiFilters.asOfDate ||
+        !hasKpiStickerFilter ||
+        rowIsInKpiAsOfActiveScope(row, asOfOverrideMap);
 
       return (
         matchesCommand &&
@@ -10222,7 +10192,8 @@ export default function Contracts() {
         matchesArchiveComposite &&
         matchesApprovalDimension &&
         matchesKpiHealth &&
-        matchesKpiStatus
+        matchesKpiStatus &&
+        matchesKpiAsOfScope
       );
     });
 
@@ -10360,6 +10331,9 @@ export default function Contracts() {
     contractsApprovalFilter,
     kpiContractHealthFilter,
     kpiContractStatusFilter,
+    asOfOverrideMap,
+    urlKpiFilters.asOfDate,
+    contractsApprovalFilter,
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,

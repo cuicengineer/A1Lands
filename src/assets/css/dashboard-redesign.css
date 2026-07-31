@@ -596,12 +596,47 @@
   border: 1px solid #dce6e7 !important;
 }
 
-/* KPI Overview — tab panels must not stretch inside the workspace flex host */
-.dashboard-redesign-page .saas-workspace-grid-host > .erp-kpi-tab-panel {
-  flex: 0 0 auto !important;
+/* KPI Overview — module body sizes to tab content (no flex dead band) */
+body.enterprise-ui
+  .dashboard-redesign-page
+  .saas-workspace-grid-host
+  > .dashboard-module-body.erp-kpi-overview-module-body {
+  display: block !important;
+  flex: none !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
   min-height: 0 !important;
-  align-self: flex-start !important;
+  height: auto !important;
   width: 100% !important;
+}
+
+.dashboard-redesign-page .erp-kpi-overview-root {
+  display: block;
+  width: 100%;
+}
+
+.dashboard-redesign-page .erp-kpi-overview-root .erp-kpi-tab-panel,
+.dashboard-redesign-page .erp-kpi-overview-root .erp-kpi-tab-panel--dense {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+.dashboard-redesign-page .erp-kpi-tab-panel--contracts {
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.dashboard-redesign-page .erp-kpi-assets-only-overview {
+  flex: 0 0 auto !important;
+  width: 100%;
+}
+
+.dashboard-redesign-page .erp-kpi-assets-only-overview .erp-asset-cards-scroller {
+  flex: 0 0 auto !important;
+}
+
+.dashboard-redesign-page .erp-kpi-assets-only-overview .erp-asset-cards-stack {
+  gap: 12px;
 }
 
 /* Fiscal analytics card must size to content when collapsed */

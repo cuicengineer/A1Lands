@@ -23,6 +23,7 @@ import { createContext, useContext, useReducer, useMemo, useEffect } from "react
 // prop-types is a library for typechecking of props
 import PropTypes from "prop-types";
 import { normalizeSidenavColor } from "utils/sidenavColorTheme";
+import { normalizeDashboardColorCombination } from "utils/dashboardChartColorThemes";
 
 // Material Dashboard 2 React main context
 const MaterialUI = createContext();
@@ -59,6 +60,11 @@ const loadPreferencesFromStorage = (defaultState) => {
       const parsed = JSON.parse(saved);
       if (parsed.sidenavColor) {
         parsed.sidenavColor = normalizeSidenavColor(parsed.sidenavColor);
+      }
+      if (parsed.dashboardColorCombination != null) {
+        parsed.dashboardColorCombination = normalizeDashboardColorCombination(
+          parsed.dashboardColorCombination
+        );
       }
       // Merge saved preferences with defaults (saved takes precedence)
       return { ...defaultState, ...parsed };
@@ -119,6 +125,13 @@ function reducer(state, action) {
       newState = { ...state, layout: action.value };
       break;
     }
+    case "DASHBOARD_COLOR_COMBINATION": {
+      newState = {
+        ...state,
+        dashboardColorCombination: normalizeDashboardColorCombination(action.value),
+      };
+      break;
+    }
     case "DARKMODE": {
       newState = { ...state, darkMode: action.value };
       break;
@@ -152,6 +165,7 @@ function MaterialUIControllerProvider({ children }) {
     transparentSidenav: false,
     whiteSidenav: false,
     sidenavColor: "default",
+    dashboardColorCombination: 1,
     transparentNavbar: true,
     fixedNavbar: true,
     openConfigurator: false,
@@ -222,6 +236,8 @@ const setMiniSidenav = (dispatch, value) => dispatch({ type: "MINI_SIDENAV", val
 const setTransparentSidenav = (dispatch, value) => dispatch({ type: "TRANSPARENT_SIDENAV", value });
 const setWhiteSidenav = (dispatch, value) => dispatch({ type: "WHITE_SIDENAV", value });
 const setSidenavColor = (dispatch, value) => dispatch({ type: "SIDENAV_COLOR", value });
+const setDashboardColorCombination = (dispatch, value) =>
+  dispatch({ type: "DASHBOARD_COLOR_COMBINATION", value });
 const setTransparentNavbar = (dispatch, value) => dispatch({ type: "TRANSPARENT_NAVBAR", value });
 const setFixedNavbar = (dispatch, value) => dispatch({ type: "FIXED_NAVBAR", value });
 const setOpenConfigurator = (dispatch, value) => dispatch({ type: "OPEN_CONFIGURATOR", value });
@@ -238,6 +254,7 @@ export {
   setTransparentSidenav,
   setWhiteSidenav,
   setSidenavColor,
+  setDashboardColorCombination,
   setTransparentNavbar,
   setFixedNavbar,
   setOpenConfigurator,

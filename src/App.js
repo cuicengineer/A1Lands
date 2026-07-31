@@ -41,6 +41,7 @@ import themeDarkBase from "assets/theme-dark";
 import themeDarkRTLBase from "assets/theme-dark/theme-rtl";
 
 import { applySidenavColorTheme, getSidenavMuiThemeOverrides } from "utils/sidenavColorTheme";
+import { applyDashboardChartColorTheme } from "utils/dashboardChartColorThemes";
 
 // RTL plugins
 import rtlPlugin from "stylis-plugin-rtl";
@@ -146,6 +147,7 @@ export default function App() {
     layout,
     openConfigurator,
     sidenavColor,
+    dashboardColorCombination,
     transparentSidenav,
     whiteSidenav,
     darkMode,
@@ -183,6 +185,10 @@ export default function App() {
   useLayoutEffect(() => {
     applySidenavColorTheme(sidenavColor);
   }, [sidenavColor]);
+
+  useLayoutEffect(() => {
+    applyDashboardChartColorTheme(dashboardColorCombination ?? 1);
+  }, [dashboardColorCombination]);
 
   const theme = useMemo(
     () => createTheme(themeBase, getSidenavMuiThemeOverrides(sidenavColor)),
