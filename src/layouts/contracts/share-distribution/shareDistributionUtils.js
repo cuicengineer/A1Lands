@@ -209,6 +209,13 @@ export function getShareDistributionContractId(row = {}) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+export function getShareDistributionCollectionEntryId(row = {}) {
+  const entryId = pickField(row, "collectionEntryId", "CollectionEntryId");
+  if (entryId == null || entryId === "") return null;
+  const parsed = Number(entryId);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function getShareDistributionRowKey(row = {}) {
   if (row?.__isTotalRow) {
     return String(row.id || "__share-dist-grid-total__");
@@ -218,6 +225,10 @@ export function getShareDistributionRowKey(row = {}) {
   }
   if (row?.selectionKey != null && row.selectionKey !== "") {
     return String(row.selectionKey);
+  }
+  const collectionEntryId = getShareDistributionCollectionEntryId(row);
+  if (collectionEntryId != null) {
+    return `entry-${collectionEntryId}`;
   }
   const contractId = getShareDistributionContractId(row);
   if (contractId != null) {
@@ -526,9 +537,18 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       const row = mergeContractRow(raw, catalog);
       const tenant = findTenant(tenants, row);
       const sn = pickField(raw, "sn", "SN") || index + 1;
-      // Stable unique key per contract so checkbox selection matches workbook assignment grain.
+      const collectionEntryId = (() => {
+        const parsed = Number(pickField(raw, "collectionEntryId", "CollectionEntryId"));
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      })();
+      const invoiceNo = String(pickField(raw, "invoiceNo", "InvoiceNo") || "").trim();
+      // Stable unique key per collection entry so workbook assignment matches checkbox selection.
       const selectionKey =
-        contractId != null ? `contract-${contractId}` : `${contractNo || "row"}-${index}`;
+        collectionEntryId != null
+          ? `entry-${collectionEntryId}`
+          : contractId != null
+          ? `contract-${contractId}`
+          : `${contractNo || invoiceNo || "row"}-${index}`;
 
       const caArea1 = pickField(row, "vaArea", "VaArea", "groupArea", "GroupArea");
       const caArea2 = pickField(
@@ -544,6 +564,8 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       return {
         id: selectionKey,
         contractId,
+        collectionEntryId,
+        invoiceNo,
         selectionKey,
         sn,
         racName: String(
@@ -661,18 +683,5 @@ export function buildShareDistributionRows({ asOfRows, contractRows, tenants, ba
       __sortReceiptDate,
     }));
 
-  // One grid row per contract — prevents Create Workbook from appearing to bind
-  // unselected sibling rows that shared the same ContractId.
-  const uniqueByContract = [];
-  const seenContractIds = new Set();
-  preparedRows.forEach((row) => {
-    const contractId = getShareDistributionContractId(row);
-    if (contractId != null) {
-      if (seenContractIds.has(contractId)) return;
-      seenContractIds.add(contractId);
-    }
-    uniqueByContract.push(row);
-  });
-
-  return finalizeShareDistributionRows(uniqueByContract);
+  return finalizeShareDistributionRows(preparedRows);
 }

@@ -1,5 +1,6 @@
 /**
- * Bank account RAC / Unit dropdown helpers — options come from AccRacBase only.
+ * Bank account RAC / Unit dropdown helpers.
+ * RAC options → AccRac; Unit options → AccRacBase where ParentId = AccRac.Id.
  */
 
 import {
@@ -9,11 +10,16 @@ import {
   getLoggedInUserLevelId,
 } from "services/api.service";
 
-export function mapAccRacBaseToRacOption(row, fallbackId = "") {
+export function mapAccRacToRacOption(row, fallbackId = "") {
   const id = String(row?.id ?? row?.Id ?? fallbackId ?? "").trim();
   const name = String(row?.name ?? row?.Name ?? "").trim();
   if (!id || !name) return null;
   return { id, name, source: "custom" };
+}
+
+/** @deprecated use mapAccRacToRacOption — kept for saved-row fallback shapes */
+export function mapAccRacBaseToRacOption(row, fallbackId = "") {
+  return mapAccRacToRacOption(row, fallbackId);
 }
 
 export function mapAccRacBaseToUnitOption(row, fallbackId = "") {
@@ -50,9 +56,7 @@ function mergeOptionsById(options) {
 }
 
 export function mergeRacDropdownOptions({ customRacRows = [], savedOption = null } = {}) {
-  const mapped = [
-    ...(customRacRows || []).map((row) => mapAccRacBaseToRacOption(row)).filter(Boolean),
-  ];
+  const mapped = [...(customRacRows || []).map((row) => mapAccRacToRacOption(row)).filter(Boolean)];
   if (savedOption?.id && savedOption?.name) {
     mapped.push({
       id: String(savedOption.id),
@@ -139,7 +143,49 @@ export function buildScopedBaseDropdownOptions(params) {
   return filterBaseOptionsForUserScope(merged, params?.selectedRacId);
 }
 
-/** AccRacBase rows may be renamed from the form. */
+export function isBankAccountRacFilterLocked(scope = getBankAccountRacBaseUserScope()) {
+  return Boolean(!scope?.canSeeAll && scope?.userCmdId != null);
+}
+
+export function isBankAccountBaseFilterLocked(scope = getBankAccountRacBaseUserScope()) {
+  return Boolean(
+    !scope?.canSeeAll && Number(scope?.userLevelId) === 3 && scope?.userBaseId != null
+  );
+}
+
+function readBankAccountRowCmdId(row) {
+  return String(row?.cmdId ?? row?.CmdId ?? row?.racId ?? row?.RacId ?? "");
+}
+
+function readBankAccountRowBaseId(row) {
+  return String(row?.baseId ?? row?.BaseId ?? row?.unitId ?? row?.UnitId ?? "");
+}
+
+/** Client-side grid filter (defense-in-depth; API also scopes by RAC/Base). */
+export function filterBankAccountRowsForUserScope(rows, scope = getBankAccountRacBaseUserScope()) {
+  if (scope?.canSeeAll) return rows || [];
+  const cmdKey = scope?.userCmdId != null && scope.userCmdId !== "" ? String(scope.userCmdId) : "";
+  if (!cmdKey) return [];
+  let filtered = (rows || []).filter((row) => readBankAccountRowCmdId(row) === cmdKey);
+  if (Number(scope?.userLevelId) === 3 && scope?.userBaseId != null) {
+    const baseKey = String(scope.userBaseId);
+    filtered = filtered.filter((row) => readBankAccountRowBaseId(row) === baseKey);
+  }
+  return filtered;
+}
+
+/** Default RAC/Base for new bank account forms when user is scoped. */
+export function resolveBankAccountDefaultRacBase(scope = getBankAccountRacBaseUserScope()) {
+  if (scope?.canSeeAll) {
+    return { racId: "", baseId: "" };
+  }
+  const racId = scope?.userCmdId != null && scope.userCmdId !== "" ? String(scope.userCmdId) : "";
+  const baseId =
+    Number(scope?.userLevelId) === 3 && scope?.userBaseId != null ? String(scope.userBaseId) : "";
+  return { racId, baseId };
+}
+
+/** AccRac / AccRacBase rows may be renamed from the form. */
 export function isCustomAccRacBaseDropdownOption(option) {
   return option?.source === "custom";
 }

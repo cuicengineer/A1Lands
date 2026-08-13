@@ -44,6 +44,12 @@ import {
   matchesCollectionStatusFilter,
 } from "./collectionReceiptUtils";
 import {
+  filterBasesForUserScope,
+  filterCollectionEntriesForUserScope,
+  filterContractsForUserScope,
+  filterInvoicesForUserScope,
+} from "./collectionsAccess";
+import {
   buildCollectionEntryPayload,
   buildTenantConfigDeepLink,
   createEmptyCollectionRow,
@@ -147,11 +153,20 @@ export default function Collections() {
     catalogLoadTokenRef.current = loadToken;
     if (!silent) setLoading(true);
     try {
+      // Started with the rest but deliberately not awaited below: the invoice catalog only
+      // feeds the entry dialog and the Excel export, and it is the slowest of these calls,
+      // so waiting on it just delays the grid.
+      const invoicePromise = contractApi
+        .getAgreementProvFinalizedInvoiceScheduleRecords()
+        .catch((error) => {
+          console.error("Error loading finalized invoice schedule:", error);
+          return null;
+        });
+
       const [
         classRes,
         baseRes,
         contractRes,
-        invoiceRes,
         tenantRes,
         customerRes,
         supplierRes,
@@ -162,8 +177,6 @@ export default function Collections() {
         api.list("class"),
         api.list("base"),
         contractApi.getAllRecords(),
-        // Finalized headers only — avoids paging the full schedule (header + line items).
-        contractApi.getAgreementProvFinalizedInvoiceScheduleRecords(),
         api.list("tenant"),
         customerApi.listCustomers(),
         supplierApi.listSuppliers(),
@@ -175,15 +188,17 @@ export default function Collections() {
       if (catalogLoadTokenRef.current !== loadToken) return;
 
       const classRows = unwrapList(classRes).map(normalizeCatalogRow);
-      const baseRows = unwrapList(baseRes).map(normalizeCatalogRow);
-      const contractRows = unwrapList(contractRes?.data ?? contractRes).map(normalizeCatalogRow);
-      const invoiceRows = unwrapList(invoiceRes?.data ?? invoiceRes)
-        .map(normalizeCatalogRow)
-        .filter(isInvoiceScheduleHeaderRow);
+      const baseRows = filterBasesForUserScope(unwrapList(baseRes).map(normalizeCatalogRow));
+      const contractRows = filterContractsForUserScope(
+        unwrapList(contractRes?.data ?? contractRes).map(normalizeCatalogRow)
+      );
       const tenantRows = unwrapList(tenantRes).map(normalizeCatalogRow);
       const customerRows = unwrapList(customerRes).map(normalizeCatalogRow);
       const supplierRows = unwrapList(supplierRes).map(normalizeCatalogRow);
-      const collectionList = collectionsApi.unwrapList(collectionRes);
+      const collectionList = filterCollectionEntriesForUserScope(
+        collectionsApi.unwrapList(collectionRes),
+        contractRows
+      );
       let coaRows = unwrapList(coaRes)
         .map(normalizePartyCoaOption)
         .filter((row) => row.id != null && isCollectionAccountCoaOption(row));
@@ -245,7 +260,6 @@ export default function Collections() {
       setClasses(classRows);
       setBases(baseRows);
       setContracts(contractRows);
-      setInvoices(invoiceRows);
       setTenants(tenantRows);
       setCustomers(customerRows);
       setSuppliers(supplierRows);
@@ -253,6 +267,20 @@ export default function Collections() {
       setReceipts(receiptsApi.unwrapList(receiptRes));
       setEntries(persistedRows);
       setDraftRows([]);
+
+      // Invoice options land after the grid is on screen. The dropdown they feed is only
+      // reachable after opening the entry dialog and picking an agreement.
+      void invoicePromise.then((invoiceRes) => {
+        if (catalogLoadTokenRef.current !== loadToken || invoiceRes == null) return;
+        setInvoices(
+          filterInvoicesForUserScope(
+            unwrapList(invoiceRes?.data ?? invoiceRes)
+              .map(normalizeCatalogRow)
+              .filter(isInvoiceScheduleHeaderRow),
+            contractRows
+          )
+        );
+      });
 
       // File id/name are only needed for download; fetch after paint.
       // When API returns IsAttachment, only hydrate rows that have files.
@@ -894,51 +922,59 @@ export default function Collections() {
         <MDBox
           px={3}
           pb={3}
-          sx={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}
+          sx={{
+            flex: "1 1 0",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+          }}
         >
-          <WorkspaceLoadingOverlay open={loading} />
-          <CollectionsGrid
-            rows={paginatedRows}
-            totalRowCount={filteredRows.length}
-            rowIndexOffset={(gridPageNumber - 1) * gridPageSize}
-            gridTemplate={gridTemplate}
-            hiddenColumnKeys={hiddenColumnKeys}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            classOptions={classOptions}
-            contracts={contracts}
-            invoices={invoices}
-            tenants={tenants}
-            customers={customers}
-            suppliers={suppliers}
-            coaOptions={coaOptions}
-            receipts={receipts}
-            canCreate={canAddRow}
-            canEditRow={canEditRow}
-            canDeleteRow={canDeleteRow}
-            canEditStatus={canEditStatus}
-            activeLockDate={activeLockDate}
-            saving={saving}
-            onRowChange={updateRowState}
-            onSaveRow={handleSaveRow}
-            onEditRow={handleEditRow}
-            onCancelEditRow={handleCancelEditRow}
-            onDeleteRow={handleDeleteRow}
-            onDuplicateRow={handleDuplicateRow}
-            onAddRow={handleAddRow}
-            onAttachmentSelect={handleAttachmentSelect}
-            onClearPendingAttachment={handleClearPendingAttachment}
-            onDownloadAttachment={handleDownloadAttachment}
-            onViewTenant={handleViewTenantFromGrid}
-            onViewInvoice={handleViewInvoiceFromGrid}
-            selectedRowIds={selectedRowIds}
-            allRowsSelected={allFilteredRowsSelected}
-            someRowsSelected={someFilteredRowsSelected}
-            onToggleRowSelection={toggleRowSelection}
-            onToggleAllRowSelection={toggleAllRowSelection}
-            getRowKey={getRowKey}
-          />
-          {paginationHost && totalPages > 1
+          <WorkspaceLoadingOverlay active={loading} />
+          {!loading ? (
+            <CollectionsGrid
+              rows={paginatedRows}
+              totalRowCount={filteredRows.length}
+              rowIndexOffset={(gridPageNumber - 1) * gridPageSize}
+              gridTemplate={gridTemplate}
+              hiddenColumnKeys={hiddenColumnKeys}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              classOptions={classOptions}
+              contracts={contracts}
+              invoices={invoices}
+              tenants={tenants}
+              customers={customers}
+              suppliers={suppliers}
+              coaOptions={coaOptions}
+              receipts={receipts}
+              canCreate={canAddRow}
+              canEditRow={canEditRow}
+              canDeleteRow={canDeleteRow}
+              canEditStatus={canEditStatus}
+              activeLockDate={activeLockDate}
+              saving={saving}
+              onRowChange={updateRowState}
+              onSaveRow={handleSaveRow}
+              onEditRow={handleEditRow}
+              onCancelEditRow={handleCancelEditRow}
+              onDeleteRow={handleDeleteRow}
+              onDuplicateRow={handleDuplicateRow}
+              onAddRow={handleAddRow}
+              onAttachmentSelect={handleAttachmentSelect}
+              onClearPendingAttachment={handleClearPendingAttachment}
+              onDownloadAttachment={handleDownloadAttachment}
+              onViewTenant={handleViewTenantFromGrid}
+              onViewInvoice={handleViewInvoiceFromGrid}
+              selectedRowIds={selectedRowIds}
+              allRowsSelected={allFilteredRowsSelected}
+              someRowsSelected={someFilteredRowsSelected}
+              onToggleRowSelection={toggleRowSelection}
+              onToggleAllRowSelection={toggleAllRowSelection}
+              getRowKey={getRowKey}
+            />
+          ) : null}
+          {!loading && paginationHost && totalPages > 1
             ? createPortal(serverPaginationNode, paginationHost)
             : null}
           <CollectionGridColumnsMenu

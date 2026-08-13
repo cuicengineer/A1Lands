@@ -32,8 +32,14 @@ import DataTable from "examples/Tables/DataTable";
 import CompactGroupBySelect from "components/CompactGroupBySelect";
 import { withGridValueChip } from "utils/gridValueChipCell";
 import PropTypes from "prop-types";
-import api, { isSuperuserOrAhqSupervisorUser } from "services/api.service";
+import api, {
+  canCreateCurrentMenu,
+  canEditCurrentMenu,
+  isSuperuserOrAhqSupervisorUser,
+} from "services/api.service";
 import contractApi from "services/api.contract.service";
+import { ContractInvoicesDialog } from "layouts/contracts/contracts/contracts";
+import { getKpiContractRowStateNormalized } from "layouts/dashboard/kpi-overview/kpiOverviewNavigation";
 import accountingSysApi from "services/api.accountingsys.service";
 import salesReturnsApi from "services/api.salesReturns.service";
 import { productServiceApi } from "services/api.product.service";
@@ -5094,6 +5100,71 @@ function normalizeAgreementProvInvoiceRow(row) {
   };
 }
 
+/** Active contracts only, labelled for the Add New Invoice picker. */
+function normalizeContractPickerTenantNoKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^T\s*-?\s*\d+/i);
+  const token = match ? match[0] : raw.split(/\s+/)[0];
+  return token.replace(/[\s-]/g, "").toUpperCase();
+}
+
+function resolveContractPickerTenantNo(row) {
+  const raw = String(row?.TenantNo ?? row?.tenantNo ?? "").trim();
+  const key = normalizeContractPickerTenantNoKey(raw);
+  if (key) return key;
+  return raw.split(/\s+/)[0] || raw;
+}
+
+function findContractPickerTenant(row, tenants = []) {
+  const key = normalizeContractPickerTenantNoKey(row?.TenantNo ?? row?.tenantNo);
+  if (!key) return null;
+  return (
+    (tenants || []).find(
+      (tenant) => normalizeContractPickerTenantNoKey(tenant?.tenantNo ?? tenant?.TenantNo) === key
+    ) || null
+  );
+}
+
+function buildActiveContractPickerOptions(contractRows, tenants = []) {
+  const formatPickerDate = (raw) => {
+    const text = formatDateDDMMMYYYY(raw);
+    return text === "—" ? "" : text;
+  };
+
+  return (Array.isArray(contractRows) ? contractRows : [])
+    .filter((row) => getKpiContractRowStateNormalized(row) === "active")
+    .map((row) => {
+      const contractNo = String(row?.ContractNo ?? row?.contractNo ?? "").trim();
+      const start = formatPickerDate(row?.ContractStartDate ?? row?.contractStartDate ?? "");
+      const end = formatPickerDate(row?.ContractEndDate ?? row?.contractEndDate ?? "");
+      const duration = start && end ? `${start} To ${end}` : start || end || "";
+      const tenant = findContractPickerTenant(row, tenants);
+      const tenantNo = resolveContractPickerTenantNo(row);
+      const businessName = String(
+        tenant?.businessName ?? tenant?.BusinessName ?? row?.BusinessName ?? row?.businessName ?? ""
+      ).trim();
+      const natureOfBusiness = String(row?.NatureOfBusiness ?? row?.natureOfBusiness ?? "").trim();
+      const contractLabel = duration ? `${contractNo} (${duration})` : contractNo;
+      const searchLabel = [contractLabel, tenantNo, businessName, natureOfBusiness]
+        .filter(Boolean)
+        .join(" ");
+
+      return {
+        contractNo,
+        duration,
+        tenantNo,
+        businessName,
+        natureOfBusiness,
+        label: contractLabel,
+        searchLabel,
+        row,
+      };
+    })
+    .filter((option) => option.contractNo)
+    .sort((a, b) => a.contractNo.localeCompare(b.contractNo, undefined, { numeric: true }));
+}
+
 export default function AgreementProvInvoice() {
   const navigate = useNavigate();
   const [controller] = useMaterialUIController();
@@ -5145,6 +5216,56 @@ export default function AgreementProvInvoice() {
   }, []);
   const canUnlockInvoiceFromGrid = isSuperuserOrAhqSupervisorUser();
   const canDeleteInvoiceFromGrid = canUnlockInvoiceFromGrid;
+  // Creating and finalizing invoices needs create/edit rights on this menu; everyone else views only.
+  const canManageProvInvoices = canCreateCurrentMenu() || canEditCurrentMenu();
+  const [contractPickerOpen, setContractPickerOpen] = useState(false);
+  const [activeContractOptions, setActiveContractOptions] = useState([]);
+  const activeContractRowsRef = useRef([]);
+  const [activeContractsLoading, setActiveContractsLoading] = useState(false);
+  const [contractInvoicesOpen, setContractInvoicesOpen] = useState(false);
+  const [contractInvoicesRow, setContractInvoicesRow] = useState(null);
+
+  const handleOpenContractPicker = useCallback(async () => {
+    setContractPickerOpen(true);
+    setActiveContractsLoading(true);
+    try {
+      if (activeContractRowsRef.current.length === 0) {
+        const response = await contractApi.getAllRecords();
+        const base = response?.data ?? (Array.isArray(response) ? response : []);
+        activeContractRowsRef.current = base;
+      }
+      setActiveContractOptions(
+        buildActiveContractPickerOptions(activeContractRowsRef.current, tenants)
+      );
+    } catch (error) {
+      console.error("Error loading active contracts:", error);
+      activeContractRowsRef.current = [];
+      setActiveContractOptions([]);
+      alert("Failed to load active contracts. Please try again.");
+    } finally {
+      setActiveContractsLoading(false);
+    }
+  }, [tenants]);
+
+  const handleCloseContractPicker = useCallback(() => {
+    setContractPickerOpen(false);
+  }, []);
+
+  const handleSelectContractForInvoices = useCallback((option) => {
+    if (!option?.row) return;
+    setContractInvoicesRow(option.row);
+    setContractInvoicesOpen(true);
+    setContractPickerOpen(false);
+  }, []);
+
+  // Assigned below once refreshScheduleGrid exists, so closing the invoices popup can reload the grid.
+  const refreshScheduleGridRef = useRef(null);
+
+  const handleCloseContractInvoices = useCallback(() => {
+    setContractInvoicesOpen(false);
+    setContractInvoicesRow(null);
+    void refreshScheduleGridRef.current?.();
+  }, []);
   const AGREEMENT_PROV_GROUP_BY_CACHE_KEY = "agreementProvInvoice_groupByColumns";
   const [groupByColumns, setGroupByColumns] = useState(() => {
     try {
@@ -5401,6 +5522,8 @@ export default function AgreementProvInvoice() {
       setLoading(false);
     }
   };
+
+  refreshScheduleGridRef.current = refreshScheduleGrid;
 
   const handleInvoiceLockChange = async (rowData, nextLocked) => {
     if (!nextLocked && !canUnlockInvoiceFromGrid) return;
@@ -7143,6 +7266,12 @@ export default function AgreementProvInvoice() {
         title="Agreement Invoice"
         subtitle="Manage agreement provisional invoice records"
         tabs={<IncomeAgreementsModuleTabs />}
+        actions={
+          <MDButton variant="gradient" color="info" onClick={handleOpenContractPicker}>
+            <Icon sx={{ mr: 0.5 }}>add</Icon>
+            Add New Invoice
+          </MDButton>
+        }
         filters={
           <MDBox px={3} sx={{ flexShrink: 0 }}>
             {/* Filters — single compact row before Search */}
@@ -7552,6 +7681,98 @@ export default function AgreementProvInvoice() {
           </MDBox>
         </MDBox>
       </EnterpriseWorkspace>
+
+      <Dialog
+        open={contractPickerOpen}
+        onClose={handleCloseContractPicker}
+        maxWidth={false}
+        PaperProps={{
+          sx: {
+            width: "min(1200px, 95vw)",
+            maxWidth: "min(1200px, 95vw)",
+          },
+        }}
+      >
+        <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700, pb: 1 }}>
+          Select Contract
+        </DialogTitle>
+        <DialogContent dividers>
+          <Autocomplete
+            options={activeContractOptions}
+            loading={activeContractsLoading}
+            getOptionLabel={(option) => option?.searchLabel || option?.label || ""}
+            isOptionEqualToValue={(option, value) => option?.contractNo === value?.contractNo}
+            onChange={(_, option) => handleSelectContractForInvoices(option)}
+            renderOption={(props, option) => (
+              <li {...props} key={option.contractNo}>
+                <MDBox sx={{ py: 0.5, minWidth: 0, width: "100%" }}>
+                  <MDTypography
+                    component="span"
+                    variant="button"
+                    fontWeight="medium"
+                    sx={{ display: "block", lineHeight: 1.35 }}
+                  >
+                    {option.label}
+                  </MDTypography>
+                  <MDTypography
+                    component="span"
+                    variant="caption"
+                    color="text"
+                    sx={{ display: "block", lineHeight: 1.35, mt: 0.25 }}
+                  >
+                    {[
+                      option.tenantNo ? `Tenant No: ${option.tenantNo}` : "",
+                      option.businessName ? `Business: ${option.businessName}` : "",
+                      option.natureOfBusiness ? `Nature: ${option.natureOfBusiness}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join("   ·   ")}
+                  </MDTypography>
+                </MDBox>
+              </li>
+            )}
+            renderInput={(params) => (
+              <MDInput
+                {...params}
+                label="Contract No / Duration / Tenant / Business / Nature"
+                fullWidth
+                size="small"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {activeContractsLoading ? <CurrencyLoading size={20} /> : null}
+                      {params.InputProps?.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            noOptionsText={activeContractsLoading ? "Loading..." : "No active contracts found"}
+            slotProps={{
+              paper: {
+                sx: { maxWidth: "none" },
+              },
+            }}
+            sx={{ width: "100%" }}
+          />
+          <MDTypography variant="caption" color="text" sx={{ display: "block", mt: 1 }}>
+            Select an active contract to open its provisional invoices.
+          </MDTypography>
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseContractPicker}>
+            Close
+          </MDButton>
+        </DialogActions>
+      </Dialog>
+
+      <ContractInvoicesDialog
+        open={contractInvoicesOpen}
+        contractRow={contractInvoicesRow}
+        onClose={handleCloseContractInvoices}
+        canManage={canManageProvInvoices}
+      />
 
       <Dialog open={pdfPreviewOpen} onClose={handleClosePdfPreview} maxWidth={false} fullWidth>
         <DialogTitle sx={{ fontSize: "1.25rem", fontWeight: 700, pb: 1 }}>PDF Preview</DialogTitle>

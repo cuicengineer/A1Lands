@@ -20,6 +20,7 @@ import WorkspaceLoadingOverlay from "components/WorkspaceLoadingOverlay";
 import { ServerGridPagination } from "components/CompactGridPagination";
 import AccountsModuleTabs from "layouts/accounts/components/AccountsModuleTabs";
 import BankAccountForm from "layouts/accounts/bank-account/BankAccountForm";
+import { filterBankAccountRowsForUserScope } from "layouts/accounts/bank-account/bankAccountRacBaseUtils";
 import bankAccountApi, {
   UPLOAD_TABLE_NAME,
   fetchBankListsForDropdown,
@@ -879,13 +880,16 @@ export default function BankAccounts() {
     try {
       const response = await bankAccountApi.getAllUnpaged();
       if (Array.isArray(response)) {
-        setTableRows(response);
-        setTotalCount(response.length);
+        const scopedRows = filterBankAccountRowsForUserScope(response);
+        setTableRows(scopedRows);
+        setTotalCount(scopedRows.length);
         return;
       }
       const data = response?.data ?? [];
-      setTableRows(Array.isArray(data) ? data : []);
-      setTotalCount(Array.isArray(data) ? data.length : 0);
+      const rows = Array.isArray(data) ? data : [];
+      const scopedRows = filterBankAccountRowsForUserScope(rows);
+      setTableRows(scopedRows);
+      setTotalCount(scopedRows.length);
     } catch (error) {
       console.error("Error fetching bank accounts:", error);
       setTableRows([]);

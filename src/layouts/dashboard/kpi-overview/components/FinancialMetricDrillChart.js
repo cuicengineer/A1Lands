@@ -38,6 +38,7 @@ import {
 } from "../kpiDataUtils";
 import { applyKpiCrosshairBarChartEnhancements } from "./kpiZoomChartEnhancements";
 import ChartExportButton from "./ChartExportButton";
+import useDashboardChartColors from "hooks/useDashboardChartColors";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -67,6 +68,7 @@ function FinancialMetricDrillChart({
   isZoomed = false,
   preferSpGovtPafShare = false,
 }) {
+  const chartColors = useDashboardChartColors();
   const textColor = darkMode ? "#e8e8e8" : "#344767";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
 
@@ -223,14 +225,22 @@ function FinancialMetricDrillChart({
           },
         },
       },
+      ...(isZoomed
+        ? {
+            layout: {
+              padding: { bottom: 4, left: 4, right: 4 },
+            },
+          }
+        : {}),
       scales: {
         x: {
           grid: { display: false },
           ticks: {
             color: textColor,
+            autoSkip: isZoomed ? false : true,
             maxRotation: 45,
             minRotation: 0,
-            font: { size: 11, weight: "bold" },
+            font: { size: isZoomed ? 12 : 11, weight: "bold" },
           },
         },
         y: {
@@ -255,8 +265,10 @@ function FinancialMetricDrillChart({
       formatValue: formatKpiCrosshairBarValue,
       fontSize: isZoomed ? 15 : 13,
       labelPlacement: "inside",
+      insideLabelColor: chartColors.insideLabelColor,
+      insideTextShadowColor: chartColors.insideLabelShadow,
     });
-  }, [darkMode, textColor, gridColor, isZoomed]);
+  }, [darkMode, textColor, gridColor, isZoomed, chartColors]);
 
   const handleBarClick = useCallback(
     (_event, elements) => {
@@ -388,11 +400,22 @@ function FinancialMetricDrillChart({
     </MDBox>
   );
 
-  const chartHeight = isZoomed ? "calc(100dvh - 120px)" : "220px";
+  const chartHeight = isZoomed ? "100%" : "220px";
 
   const chartBody = (
-    <MDBox sx={{ height: chartHeight, width: "100%", minHeight: isZoomed ? 320 : 200 }}>
-      <Bar data={barChartData} options={barOptionsWithDrill} />
+    <MDBox
+      sx={{
+        height: chartHeight,
+        width: "100%",
+        minHeight: isZoomed ? 0 : 200,
+        flex: isZoomed ? "1 1 auto" : undefined,
+      }}
+    >
+      <Bar
+        key={`${drill.level}-${drill.racId ?? ""}-${drill.baseId ?? ""}`}
+        data={barChartData}
+        options={barOptionsWithDrill}
+      />
     </MDBox>
   );
 
@@ -416,7 +439,7 @@ function FinancialMetricDrillChart({
             onExport={() => exportSingleSeriesBarChartToExcel(chartTitle, exportChart)}
           />
         </MDBox>
-        <MDBox flex={1} minHeight={0}>
+        <MDBox flex={1} minHeight={0} display="flex" flexDirection="column">
           {chartBody}
         </MDBox>
       </MDBox>

@@ -324,6 +324,8 @@ export function buildKpiZoomPermanentLabelOptions({
   formatValue,
   fontSize = 13,
   labelPlacement = "above",
+  insideLabelColor = KPI_BAR_INSIDE_LABEL_COLOR,
+  insideTextShadowColor = KPI_BAR_INSIDE_LABEL_SHADOW,
 }) {
   return {
     enabled: true,
@@ -333,8 +335,8 @@ export function buildKpiZoomPermanentLabelOptions({
     fontSize,
     fontWeight: 700,
     labelPlacement,
-    insideLabelColor: KPI_BAR_INSIDE_LABEL_COLOR,
-    insideTextShadowColor: KPI_BAR_INSIDE_LABEL_SHADOW,
+    insideLabelColor,
+    insideTextShadowColor,
   };
 }
 
@@ -414,6 +416,8 @@ export function applyKpiZoomBarChartEnhancements(
     fontSize = 13,
     labelPlacement = "above",
     crosshair = false,
+    insideLabelColor,
+    insideTextShadowColor,
   } = {}
 ) {
   ensureKpiZoomChartPluginsRegistered();
@@ -438,6 +442,8 @@ export function applyKpiZoomBarChartEnhancements(
         formatValue,
         fontSize,
         labelPlacement,
+        insideLabelColor,
+        insideTextShadowColor,
       }),
       ...(crosshair
         ? {
@@ -454,7 +460,15 @@ export function applyKpiZoomBarChartEnhancements(
 
 export function applyKpiCrosshairBarChartEnhancements(
   baseOptions,
-  { darkMode, formatValue, tooltipCallbacks, fontSize = 10, labelPlacement = "inside" } = {}
+  {
+    darkMode,
+    formatValue,
+    tooltipCallbacks,
+    fontSize = 10,
+    labelPlacement = "inside",
+    insideLabelColor,
+    insideTextShadowColor,
+  } = {}
 ) {
   const formatBarValue = formatValue || formatKpiCrosshairBarValue;
 
@@ -465,6 +479,8 @@ export function applyKpiCrosshairBarChartEnhancements(
     fontSize,
     labelPlacement,
     crosshair: true,
+    insideLabelColor,
+    insideTextShadowColor,
   });
 }
 

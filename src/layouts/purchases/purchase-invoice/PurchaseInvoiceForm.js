@@ -6,9 +6,13 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import MDBox from "components/MDBox";
 import MDButton from "components/MDButton";
+import SearchableSelect from "components/SearchableSelect";
 import CurrencyLoading from "components/CurrencyLoading";
 import PurchaseInvoiceLinesGrid from "./PurchaseInvoiceLinesGrid";
 import {
@@ -40,10 +44,43 @@ const textFieldSx = {
   "& .MuiInputBase-root": { minHeight: 40 },
 };
 
-const readOnlyPiNoFieldSx = {
+const purchaseInvoiceHeaderFieldSx = {
   ...textFieldSx,
+  overflow: "visible",
+  "& .MuiInputLabel-root": {
+    top: 0,
+    whiteSpace: "nowrap",
+    overflow: "visible",
+    textOverflow: "clip",
+    maxWidth: "none",
+    lineHeight: 1.5,
+  },
+  "& .MuiInputLabel-shrink": {
+    maxWidth: "none",
+    lineHeight: 1.5,
+    transform: "translate(14px, -7px) scale(0.75)",
+  },
+};
+
+const purchaseInvoiceSupplierMenuProps = {
+  PaperProps: {
+    sx: {
+      maxWidth: "min(960px, 95vw)",
+      width: "max-content",
+      minWidth: "100%",
+    },
+  },
+  MenuListProps: {
+    sx: {
+      maxHeight: 360,
+    },
+  },
+};
+
+const readOnlyPiNoFieldSx = {
+  ...purchaseInvoiceHeaderFieldSx,
   "& .MuiInputBase-root": {
-    ...textFieldSx["& .MuiInputBase-root"],
+    ...purchaseInvoiceHeaderFieldSx["& .MuiInputBase-root"],
     bgcolor: "rgba(0,0,0,0.04)",
   },
 };
@@ -63,6 +100,7 @@ export default function PurchaseInvoiceForm({
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
   const [productOptions, setProductOptions] = useState([]);
   const [accHeadOptions, setAccHeadOptions] = useState([]);
+  const [controlAccountOptions, setControlAccountOptions] = useState([]);
   const [existingPiNos, setExistingPiNos] = useState([]);
   const [piNosLoaded, setPiNosLoaded] = useState(false);
 
@@ -82,8 +120,10 @@ export default function PurchaseInvoiceForm({
       setLoadingCatalogs(true);
       setErrors({});
       try {
+        const savedControlAccountCoaId =
+          initialData?.controlAccountCoaId ?? initialData?.ControlAccountCoaId ?? null;
         const [catalogs, piNos] = await Promise.all([
-          loadPurchaseInvoiceFormCatalogs(),
+          loadPurchaseInvoiceFormCatalogs(savedControlAccountCoaId),
           isEditMode || readOnly
             ? Promise.resolve([])
             : fetchPurchaseInvoicePiNos(purchaseInvoicesApi).catch(() => []),
@@ -91,6 +131,7 @@ export default function PurchaseInvoiceForm({
         if (cancelled) return;
         setProductOptions(catalogs.productOptions || []);
         setAccHeadOptions(catalogs.accHeadOptions || []);
+        setControlAccountOptions(catalogs.controlAccountOptions || []);
         setExistingPiNos(piNos);
         setPiNosLoaded(true);
 
@@ -117,6 +158,7 @@ export default function PurchaseInvoiceForm({
         if (!cancelled) {
           setProductOptions([]);
           setAccHeadOptions([]);
+          setControlAccountOptions([]);
         }
       } finally {
         if (!cancelled) setLoadingCatalogs(false);
@@ -349,16 +391,40 @@ export default function PurchaseInvoiceForm({
   const formTitle = initialData?.id ? labels.editFormTitle : labels.addFormTitle;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth={false}
+      scroll="paper"
+      PaperProps={{
+        sx: {
+          width: "92vw",
+          maxWidth: 1600,
+          height: "88vh",
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+        },
+      }}
+    >
       <DialogTitle>{formTitle}</DialogTitle>
-      <DialogContent dividers>
+      <DialogContent
+        dividers
+        sx={{
+          flex: 1,
+          overflowX: "hidden",
+          overflowY: "auto",
+          minHeight: 0,
+        }}
+      >
         {loadingCatalogs ? (
           <MDBox display="flex" justifyContent="center" py={4}>
             <CurrencyLoading size={36} />
           </MDBox>
         ) : (
-          <>
-            <Grid container spacing={2} sx={{ mb: 2 }}>
+          <MDBox sx={{ width: "100%", minWidth: 0, overflowX: "hidden" }}>
+            <Grid container spacing={2} sx={{ mb: 2, pt: 1, overflow: "visible" }}>
               <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   fullWidth
@@ -371,7 +437,7 @@ export default function PurchaseInvoiceForm({
                   InputLabelProps={{ shrink: true }}
                   error={Boolean(errors.date)}
                   helperText={errors.date}
-                  sx={textFieldSx}
+                  sx={purchaseInvoiceHeaderFieldSx}
                 />
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
@@ -388,10 +454,65 @@ export default function PurchaseInvoiceForm({
                   )}`}
                   error={Boolean(errors.piNo)}
                   helperText={errors.piNo}
-                  sx={isEditMode || readOnly ? textFieldSx : readOnlyPiNoFieldSx}
+                  sx={isEditMode || readOnly ? purchaseInvoiceHeaderFieldSx : readOnlyPiNoFieldSx}
                 />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} sm={6} md={6}>
+                <FormControl
+                  fullWidth
+                  size="small"
+                  error={Boolean(errors.controlAccountCoaId)}
+                  sx={purchaseInvoiceHeaderFieldSx}
+                >
+                  <InputLabel id="purchase-invoice-supplier-label" shrink>
+                    Supplier
+                  </InputLabel>
+                  <SearchableSelect
+                    labelId="purchase-invoice-supplier-label"
+                    label="Supplier"
+                    value={
+                      form.controlAccountCoaId === "" || form.controlAccountCoaId == null
+                        ? ""
+                        : Number(form.controlAccountCoaId)
+                    }
+                    displayEmpty
+                    onChange={(e) => updateHeader("controlAccountCoaId", e.target.value)}
+                    disabled={readOnly || saving || loadingCatalogs}
+                    MenuProps={purchaseInvoiceSupplierMenuProps}
+                    renderValue={(selected) => {
+                      if (selected === "" || selected == null) return "";
+                      const option = controlAccountOptions.find(
+                        (row) => Number(row.id) === Number(selected)
+                      );
+                      return option?.displayValue || option?.label || "";
+                    }}
+                  >
+                    <MenuItem value="">
+                      <em>Select supplier</em>
+                    </MenuItem>
+                    {controlAccountOptions.map((option) => (
+                      <MenuItem
+                        key={option.id}
+                        value={option.id}
+                        sx={{ whiteSpace: "normal", alignItems: "flex-start", py: 1 }}
+                      >
+                        <Typography
+                          variant="body2"
+                          sx={{ whiteSpace: "normal", lineHeight: 1.4, wordBreak: "break-word" }}
+                        >
+                          {option.label}
+                        </Typography>
+                      </MenuItem>
+                    ))}
+                  </SearchableSelect>
+                  {errors.controlAccountCoaId ? (
+                    <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+                      {errors.controlAccountCoaId}
+                    </Typography>
+                  ) : null}
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
                 <TextField
                   fullWidth
                   label="Description"
@@ -430,7 +551,7 @@ export default function PurchaseInvoiceForm({
                 </Typography>
               ) : null}
             </MDBox>
-          </>
+          </MDBox>
         )}
       </DialogContent>
       <DialogActions>

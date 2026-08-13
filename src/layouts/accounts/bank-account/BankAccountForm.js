@@ -33,9 +33,14 @@ import { fetchBankListsForDropdown, UPLOAD_TABLE_NAME } from "services/api.bankA
 import {
   buildScopedBaseDropdownOptions,
   buildScopedRacDropdownOptions,
+  getBankAccountRacBaseUserScope,
+  isBankAccountBaseFilterLocked,
+  isBankAccountRacFilterLocked,
   isCustomAccRacBaseDropdownOption,
+  mapAccRacToRacOption,
   mapAccRacBaseToRacOption,
   mapAccRacBaseToUnitOption,
+  resolveBankAccountDefaultRacBase,
 } from "layouts/accounts/bank-account/bankAccountRacBaseUtils";
 
 const FUNDING_SOURCES = ["Public Fund", "Non-Public Fund"];
@@ -48,8 +53,27 @@ const MAX_ATTACHMENT_FILES = 5;
 const MAX_REMARKS_CHARS = 500;
 const MAX_REFERENCE_WORDS = 130;
 
-/** Bank account form: RAC / Base lists and quick-add (POST) use this controller. */
+/** Bank account form: RAC → AccRac; Unit → AccRacBase (ParentId = AccRac.Id). */
+const ACC_RAC_ENTITY = "AccRac";
 const ACC_RAC_BASES_ENTITY = "AccRacBase";
+
+function unwrapAccRacList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.Items)) return res.Items;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.Data)) return res.Data;
+  return [];
+}
+
+function unwrapAccRacRow(res) {
+  if (Array.isArray(res)) return res[0] || null;
+  if (Array.isArray(res?.data)) return res.data[0] || null;
+  if (Array.isArray(res?.Data)) return res.Data[0] || null;
+  if (res?.data && typeof res.data === "object") return res.data;
+  if (res?.Data && typeof res.Data === "object") return res.Data;
+  return res && typeof res === "object" ? res : null;
+}
 
 function unwrapAccRacBasesList(res) {
   if (Array.isArray(res)) return res;
@@ -257,7 +281,7 @@ function initialDataToFormOverrides(data) {
   }
   return {
     openingDate: data.openingDate ?? data.OpeningDate ?? "",
-    racId: data.racId ?? data.RacId ?? "",
+    racId: data.racId ?? data.RacId ?? data.cmdId ?? data.CmdId ?? "",
     baseId:
       data.baseId ??
       data.BaseId ??
@@ -413,6 +437,10 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   };
 
   const mergedInitialKey = useMemo(() => JSON.stringify(initialData || {}), [initialData]);
+  const racBaseUserScope = useMemo(() => getBankAccountRacBaseUserScope(), []);
+  const racFilterLocked = isBankAccountRacFilterLocked(racBaseUserScope);
+  const baseFilterLocked = isBankAccountBaseFilterLocked(racBaseUserScope);
+  const isNewRecord = !initialData?.id && !initialData?.Id;
 
   const fetchExistingFiles = useCallback(async (id) => {
     if (id == null) return;
@@ -451,10 +479,16 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
 
   useEffect(() => {
     if (open) {
-      setForm(buildFormState(initialDataToFormOverrides(initialData)));
+      const baseForm = buildFormState(initialDataToFormOverrides(initialData));
+      if (isNewRecord) {
+        const defaults = resolveBankAccountDefaultRacBase(racBaseUserScope);
+        if (defaults.racId) baseForm.racId = defaults.racId;
+        if (defaults.baseId) baseForm.baseId = defaults.baseId;
+      }
+      setForm(baseForm);
       setErrors({});
     }
-  }, [open, mergedInitialKey]);
+  }, [open, mergedInitialKey, isNewRecord, racBaseUserScope]);
 
   useEffect(() => {
     if (open && isEditMode && recordId) {
@@ -474,15 +508,15 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
       try {
         const savedRacId = toAccRacBaseId(initialDataToFormOverrides(initialData).racId);
         const [racRes, banks, savedRacRes] = await Promise.all([
-          api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" }).catch(() => []),
+          api.list(ACC_RAC_ENTITY).catch(() => []),
           fetchBankListsForDropdown().catch(() => []),
-          savedRacId ? api.get(ACC_RAC_BASES_ENTITY, savedRacId).catch(() => null) : null,
+          savedRacId ? api.get(ACC_RAC_ENTITY, savedRacId).catch(() => null) : null,
         ]);
         if (!alive) return;
-        const customRacRows = unwrapAccRacBasesList(racRes);
-        const savedRacRow = unwrapAccRacBaseRow(savedRacRes);
+        const customRacRows = unwrapAccRacList(racRes);
+        const savedRacRow = unwrapAccRacRow(savedRacRes);
         const savedRacOption =
-          mapAccRacBaseToRacOption(savedRacRow, savedRacId) ||
+          mapAccRacToRacOption(savedRacRow, savedRacId) ||
           mapAccRacBasesRow(savedRacRow, savedRacId);
         setRacOptions(
           buildScopedRacDropdownOptions({
@@ -681,8 +715,8 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
   }, [open, closeQuickAdd]);
 
   const refreshRacOptions = useCallback(async () => {
-    const racRes = await api.list(ACC_RAC_BASES_ENTITY, { type: "RAC" });
-    const customRacRows = unwrapAccRacBasesList(racRes);
+    const racRes = await api.list(ACC_RAC_ENTITY);
+    const customRacRows = unwrapAccRacList(racRes);
     const racArr = buildScopedRacDropdownOptions({
       customRacRows,
     });
@@ -734,25 +768,30 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     setRacUnitNameEditSaving(true);
     setRacUnitNameEditError("");
     try {
-      const existingRes = await api.get(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id);
-      const existing = unwrapAccRacBaseRow(existingRes);
-      if (!existing || !(existing.id ?? existing.Id)) {
-        throw new Error("Could not load record to update");
-      }
-      const type =
-        existing.Type ?? existing.type ?? (racUnitNameEdit.list === "rac" ? "RAC" : "Base");
-      const parentRaw = existing.ParentId ?? existing.parentId;
-      const existingTerm = String(existing.Term ?? existing.term ?? "").trim();
-      const term = existingTerm || name;
-      const payload = { Name: name, Term: term, Type: type };
-      if (String(type).toLowerCase() === "base" && parentRaw != null && parentRaw !== "") {
-        const pid = Number(parentRaw);
-        payload.ParentId = Number.isFinite(pid) ? pid : parentRaw;
-      }
-      await api.update(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id, payload);
       if (racUnitNameEdit.list === "rac") {
+        const existingRes = await api.get(ACC_RAC_ENTITY, racUnitNameEdit.id);
+        const existing = unwrapAccRacRow(existingRes);
+        if (!existing || !(existing.id ?? existing.Id)) {
+          throw new Error("Could not load record to update");
+        }
+        await api.update(ACC_RAC_ENTITY, racUnitNameEdit.id, { Name: name });
         await refreshRacOptions();
       } else {
+        const existingRes = await api.get(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id);
+        const existing = unwrapAccRacBaseRow(existingRes);
+        if (!existing || !(existing.id ?? existing.Id)) {
+          throw new Error("Could not load record to update");
+        }
+        const type = existing.Type ?? existing.type ?? "Base";
+        const parentRaw = existing.ParentId ?? existing.parentId;
+        const existingTerm = String(existing.Term ?? existing.term ?? "").trim();
+        const term = existingTerm || name;
+        const payload = { Name: name, Term: term, Type: type };
+        if (parentRaw != null && parentRaw !== "") {
+          const pid = Number(parentRaw);
+          payload.ParentId = Number.isFinite(pid) ? pid : parentRaw;
+        }
+        await api.update(ACC_RAC_BASES_ENTITY, racUnitNameEdit.id, payload);
         await refreshBaseOptionsAfterRacUnitRename();
       }
       setRacUnitNameEdit(null);
@@ -782,7 +821,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
     setQuickAddError("");
     try {
       if (quickAddType === "rac") {
-        const created = await api.create(ACC_RAC_BASES_ENTITY, { Type: "RAC", Name: name });
+        const created = await api.create(ACC_RAC_ENTITY, { Name: name });
         await refreshRacOptions();
         const newId = created?.id ?? created?.Id;
         if (newId != null && newId !== "") {
@@ -1003,7 +1042,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                       form.racId === null || form.racId === undefined ? "" : String(form.racId)
                     }
                     onChange={onRacChange}
-                    disabled={loadingLists}
+                    disabled={loadingLists || racFilterLocked}
                   >
                     <MenuItem value="">
                       <em>None</em>
@@ -1081,6 +1120,7 @@ export default function BankAccountForm({ open, onClose, onSubmit, initialData, 
                   disabled={
                     loadingLists ||
                     loadingBases ||
+                    baseFilterLocked ||
                     form.racId === "" ||
                     form.racId == null ||
                     form.racId === 0 ||

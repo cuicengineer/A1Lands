@@ -1,25 +1,24 @@
-
 const slides = [
   {
     img: "assets/img/one.jpg",
     title: "One Platform for <br>Dte of CNPF",
-    text: "Secure control of land assets, tenants, finances, and revenue collection"
+    text: "Secure control of land assets, tenants, finances, and revenue collection",
   },
   {
     img: "assets/img/two.jpg",
     title: "Digital Control<br> of Land Assets",
-    text: "Structured management of contracts, tenants, rentals, and government share"
+    text: "Structured management of contracts, tenants, rentals, and government share",
   },
   {
     img: "assets/img/three.jpg",
     title: "Sustainable<br>Land Planning",
-    text: "Support growth while protecting natural resources"
-  }
+    text: "Support growth while protecting natural resources",
+  },
 ];
 
 let index = 0;
-const topBg = document.querySelector('.bg.top');
-const bottomBg = document.querySelector('.bg.bottom');
+const topBg = document.querySelector(".bg.top");
+const bottomBg = document.querySelector(".bg.bottom");
 
 bottomBg.style.backgroundImage = `url(${slides[0].img})`;
 

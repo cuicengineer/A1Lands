@@ -43,6 +43,7 @@ import api, {
   canCreateCurrentMenu,
   canEditCurrentMenu,
   canDeleteCurrentMenu,
+  canViewCurrentMenu,
   canAddContractAnnotations,
   getActionBy,
   getLoggedInUsername,
@@ -117,6 +118,7 @@ import {
 } from "./contractNoId";
 import {
   fetchContractAnnotationsForPdf,
+  fetchTenantForContractPdf,
   renderContractAgreementPdfFirstPage,
 } from "./contractAgreementPdf";
 import { addContractPdfWatermarks } from "./contractPdfWatermark";
@@ -4300,6 +4302,49 @@ ContractsDateColumnFilter.propTypes = {
   column: PropTypes.object.isRequired,
 };
 
+/** Sentinel from fn_BasicContractInfo when property group has no configured revenue rate. */
+const MISSING_CONTRACT_GROUP_RATE = -99;
+
+function normalizeContractClassKey(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+/** BTS / HB only — other classes keep existing revenue-rate resolution. */
+function isBtsOrHbContractClass(className, classId) {
+  const key = normalizeContractClassKey(className);
+  if (key === "BTS" || key === "HB") return true;
+  const id = Number(classId);
+  if (!Number.isFinite(id)) return false;
+  return id === 6 || id === 5 || id === 9;
+}
+
+function resolveBtsHbContractGroupRate(row, propertyGrouping, hasAsOfOverrides) {
+  const fromRow = Number(row?.GroupRate ?? row?.groupRate);
+  if (Number.isFinite(fromRow) && fromRow === MISSING_CONTRACT_GROUP_RATE) {
+    return MISSING_CONTRACT_GROUP_RATE;
+  }
+
+  const pgRate = Number(propertyGrouping?.Rate ?? propertyGrouping?.rate);
+  if (Number.isFinite(pgRate) && pgRate > 0) return pgRate;
+
+  if (hasAsOfOverrides && Number.isFinite(fromRow) && fromRow > 0) return fromRow;
+
+  return MISSING_CONTRACT_GROUP_RATE;
+}
+
+function resolveContractGridGroupRate(row, propertyGrouping, className, classId, hasAsOfOverrides) {
+  if (isBtsOrHbContractClass(className, classId)) {
+    return resolveBtsHbContractGroupRate(row, propertyGrouping, hasAsOfOverrides);
+  }
+  if (row?.GroupRate !== undefined || row?.groupRate !== undefined) {
+    return row.GroupRate ?? row.groupRate;
+  }
+  return propertyGrouping?.Rate ?? row?.TotalRate ?? row?.Rate ?? 0;
+}
+
 const CONTRACTS_GRID_MONEY_COMPARE_FALLBACK_KEYS = {
   initialRentPM: ["initialRentPM", "InitialRentPM"],
   initialRentPA: ["initialRentPA", "InitialRentPA"],
@@ -6105,6 +6150,770 @@ ContractInvoiceFinalizeGrid.defaultProps = {
   onInvoiceNoClick: undefined,
 };
 
+function unwrapContractCatalogList(response) {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.items)) return response.items;
+  return [];
+}
+
+/**
+ * Agreement provisional invoices popup for a single contract.
+ * `canManage` gates every mutating control (add / finalize / undo / duplicate);
+ * without it the popup is a read-only view of the pending and finalized schedules.
+ */
+export function ContractInvoicesDialog({ open, contractRow, onClose, canManage }) {
+  const [invoiceScheduleRows, setInvoiceScheduleRows] = useState([]);
+  const [invoiceScheduleLoading, setInvoiceScheduleLoading] = useState(false);
+  const [invoiceFinalizeSelectedKeys, setInvoiceFinalizeSelectedKeys] = useState(() => new Set());
+  const [invoiceFinalizeTab, setInvoiceFinalizeTab] = useState("pending");
+  const [invoiceFinalizeBusy, setInvoiceFinalizeBusy] = useState(false);
+  const [agreementProvCreateDialogOpen, setAgreementProvCreateDialogOpen] = useState(false);
+  const [agreementProvCreateRowData, setAgreementProvCreateRowData] = useState(null);
+  const [agreementProvEditDialogOpen, setAgreementProvEditDialogOpen] = useState(false);
+  const [agreementProvEditRowData, setAgreementProvEditRowData] = useState(null);
+  const [agreementProvEditSaving, setAgreementProvEditSaving] = useState(false);
+  const [invoiceFinalizeSearch, setInvoiceFinalizeSearch] = useState("");
+  const [invoiceFinalizeLockDate, setInvoiceFinalizeLockDate] = useState("");
+  const [finalizeOptionsOpen, setFinalizeOptionsOpen] = useState(false);
+  const [finalizeOptionsLoading, setFinalizeOptionsLoading] = useState(false);
+  const [finalizeProductOptions, setFinalizeProductOptions] = useState([]);
+  const [finalizeAccountOptions, setFinalizeAccountOptions] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [classes, setClasses] = useState([]);
+
+  const contractNo = String(contractRow?.ContractNo ?? contractRow?.contractNo ?? "").trim();
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const resetInvoiceFinalizeWorkState = useCallback(() => {
+    setInvoiceFinalizeSelectedKeys(new Set());
+    setInvoiceFinalizeTab("pending");
+    setAgreementProvCreateDialogOpen(false);
+    setAgreementProvCreateRowData(null);
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
+    setInvoiceFinalizeSearch("");
+    setFinalizeOptionsOpen(false);
+    setFinalizeProductOptions([]);
+    setFinalizeAccountOptions([]);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !contractNo) return undefined;
+    let cancelled = false;
+    setInvoiceScheduleLoading(true);
+    setInvoiceScheduleRows([]);
+    resetInvoiceFinalizeWorkState();
+
+    const loadInvoiceSchedule = async () => {
+      try {
+        const [scheduleRes, lockDateRes, tenantRes] = await Promise.all([
+          contractApi.getInvoiceSchedule({ contractNo }),
+          lockDateApi.getAll().catch(() => null),
+          api.list("tenant"),
+        ]);
+        if (cancelled) return;
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(scheduleRes))
+        );
+        setInvoiceFinalizeLockDate(
+          pickActiveLockDateYyyyMmDd(unwrapLockDateConfigList(lockDateRes))
+        );
+        setTenants(unwrapTenantList(tenantRes));
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Error loading invoice schedule:", error);
+        alert("Failed to load invoice schedule for this contract.");
+        onCloseRef.current?.();
+      } finally {
+        if (!cancelled) setInvoiceScheduleLoading(false);
+      }
+    };
+
+    void loadInvoiceSchedule();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, contractNo, resetInvoiceFinalizeWorkState]);
+
+  const handleCloseInvoiceFinalizeDialog = useCallback(() => {
+    if (invoiceFinalizeBusy || agreementProvEditSaving) return;
+    setInvoiceScheduleRows([]);
+    resetInvoiceFinalizeWorkState();
+    onClose?.();
+  }, [invoiceFinalizeBusy, agreementProvEditSaving, onClose, resetInvoiceFinalizeWorkState]);
+
+  const invoiceFinalizePendingRows = useMemo(
+    () =>
+      invoiceScheduleRows
+        .filter((r) => !pickScheduleRowIsFinalize(r))
+        .sort((a, b) =>
+          getContractInvoiceFinalizeInvoiceNo(a).localeCompare(
+            getContractInvoiceFinalizeInvoiceNo(b),
+            undefined,
+            { numeric: true }
+          )
+        ),
+    [invoiceScheduleRows]
+  );
+
+  const invoiceFinalizeFinalizedRows = useMemo(
+    () => invoiceScheduleRows.filter((r) => pickScheduleRowIsFinalize(r)),
+    [invoiceScheduleRows]
+  );
+
+  const invoiceFinalizeAllowedPendingKeys = useMemo(
+    () => getAllowedPendingFinalizeKeySet(invoiceScheduleRows),
+    [invoiceScheduleRows]
+  );
+
+  const executeFinalizeSelectedInvoices = useCallback(
+    async ({ itemWithCode = "", accHead = "" } = {}) => {
+      if (!contractRow) return;
+      const selected = invoiceScheduleRows.filter(
+        (r) =>
+          invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
+          !pickScheduleRowIsFinalize(r) &&
+          (invoiceFinalizeAllowedPendingKeys.size === 0 ||
+            invoiceFinalizeAllowedPendingKeys.has(getContractInvoiceFinalizeRowKey(r)))
+      );
+      if (selected.length === 0) {
+        alert("Selected rows are already finalized, invalid, or out of sequence.");
+        return;
+      }
+      setInvoiceFinalizeBusy(true);
+      try {
+        let coaOptions = [];
+        try {
+          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
+        } catch (coaError) {
+          console.error("Error loading chart of accounts for Acc Head:", coaError);
+        }
+
+        const finalizedInvoiceNos = new Set();
+        for (let i = 0; i < selected.length; i += 1) {
+          const schRow = selected[i];
+          const rowContractNo = String(
+            schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
+          ).trim();
+          const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
+          if (!rowContractNo || !invoiceNo || finalizedInvoiceNos.has(invoiceNo)) continue;
+          finalizedInvoiceNos.add(invoiceNo);
+          await persistFinalizedInvoiceScheduleWithTenantAccHead({
+            contractRow,
+            contractNo: rowContractNo,
+            invoiceNo,
+            schRow,
+            scheduleRows: invoiceScheduleRows,
+            tenants,
+            coaOptions,
+            itemWithCode,
+            accHead,
+          });
+        }
+        if (contractNo) {
+          const res = await contractApi.getInvoiceSchedule({ contractNo });
+          setInvoiceScheduleRows(
+            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+          );
+        }
+        setInvoiceFinalizeSelectedKeys(new Set());
+        setInvoiceFinalizeTab("finalized");
+        setFinalizeOptionsOpen(false);
+      } catch (error) {
+        console.error("Error finalizing invoice rows:", error);
+        alert(String(error?.message || "Finalize failed. Please try again."));
+      } finally {
+        setInvoiceFinalizeBusy(false);
+      }
+    },
+    [
+      contractRow,
+      contractNo,
+      invoiceFinalizeSelectedKeys,
+      invoiceScheduleRows,
+      invoiceFinalizeAllowedPendingKeys,
+      tenants,
+    ]
+  );
+
+  const handleFinalizeSelectedInvoices = useCallback(async () => {
+    if (!contractRow) return;
+    if (invoiceFinalizeSelectedKeys.size === 0) {
+      alert("Select at least one invoice row.");
+      return;
+    }
+    if (invoiceFinalizeAllowedPendingKeys.size > 0) {
+      const hasOutOfSequenceSelection = Array.from(invoiceFinalizeSelectedKeys).some(
+        (k) => !invoiceFinalizeAllowedPendingKeys.has(k)
+      );
+      if (hasOutOfSequenceSelection) {
+        alert("Only the next immediate pending invoice can be finalized.");
+        return;
+      }
+    }
+
+    setFinalizeOptionsOpen(true);
+    setFinalizeOptionsLoading(true);
+    setFinalizeProductOptions([]);
+    setFinalizeAccountOptions([]);
+
+    try {
+      const [productOptions, coaResponse, classResponse] = await Promise.all([
+        fetchAgreementProvFinalizeProductOptions(),
+        chartOfAccountsApi.getAll().catch(() => null),
+        api.list("class").catch(() => null),
+      ]);
+      if (classResponse != null) {
+        setClasses(unwrapContractCatalogList(classResponse));
+      }
+      const coaOptions = chartOfAccountsApi.unwrapList(coaResponse);
+      // Keep COA options available so Item Sale Account can resolve when display text is missing.
+      const accountOptions = (coaOptions || [])
+        .map(normalizePartyCoaOption)
+        .filter((option) => option?.id != null)
+        .map((option) => ({
+          value: formatAccountLabel(option),
+          label: getPartyCoaDropdownLabel(option) || formatAccountLabel(option),
+          id: option.id,
+          coaId: option.id,
+        }))
+        .filter((option) => option.value);
+      setFinalizeProductOptions(productOptions);
+      setFinalizeAccountOptions(accountOptions);
+      if (productOptions.length === 0) {
+        alert("No active services or goods found. Add products before finalizing.");
+      }
+    } catch (error) {
+      console.error("Error loading finalize options:", error);
+      alert("Failed to load Item with Code and Account options. Please try again.");
+      setFinalizeOptionsOpen(false);
+    } finally {
+      setFinalizeOptionsLoading(false);
+    }
+  }, [contractRow, invoiceFinalizeSelectedKeys, invoiceFinalizeAllowedPendingKeys]);
+
+  const handleConfirmFinalizeOptions = useCallback(
+    async (selection) => {
+      await executeFinalizeSelectedInvoices(selection);
+    },
+    [executeFinalizeSelectedInvoices]
+  );
+
+  const handleCloseFinalizeOptionsDialog = useCallback(() => {
+    if (invoiceFinalizeBusy) return;
+    setFinalizeOptionsOpen(false);
+  }, [invoiceFinalizeBusy]);
+
+  const handleCloseAgreementProvCreateDialog = useCallback(() => {
+    if (invoiceFinalizeBusy) return;
+    setAgreementProvCreateDialogOpen(false);
+    setAgreementProvCreateRowData(null);
+  }, [invoiceFinalizeBusy]);
+
+  const handleCloseAgreementProvEditDialog = useCallback(() => {
+    if (agreementProvEditSaving) return;
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
+  }, [agreementProvEditSaving]);
+
+  const handleOpenAgreementProvEditFromFinalizeRow = useCallback(
+    (scheduleRow) => {
+      if (!contractRow || !scheduleRow) return;
+      const invoiceNo = getContractInvoiceFinalizeInvoiceNo(scheduleRow);
+      if (!invoiceNo || invoiceNo === "—") return;
+      if (!pickScheduleRowIsFinalize(scheduleRow)) return;
+      setAgreementProvEditRowData(
+        buildAgreementProvEditRowFromContractAndSchedule(contractRow, scheduleRow)
+      );
+      setAgreementProvEditDialogOpen(true);
+      setAgreementProvCreateDialogOpen(false);
+      setAgreementProvCreateRowData(null);
+      setInvoiceFinalizeSelectedKeys(new Set());
+    },
+    [contractRow]
+  );
+
+  const handleSaveAgreementProvEditInvoice = useCallback(
+    async (form, rowData, lineSaveContext = {}) => {
+      if (!rowData) return;
+      setAgreementProvEditSaving(true);
+      try {
+        await persistAllInvoiceScheduleLines({
+          rowData,
+          form,
+          invoiceLines: lineSaveContext.invoiceLines ?? [],
+          pendingDeleteSubs: lineSaveContext.pendingDeleteSubs ?? [],
+          newLineDrafts: lineSaveContext.newLineDrafts ?? [],
+          editingLineDraft: lineSaveContext.editingLineDraft ?? null,
+          originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
+          originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
+        });
+        const saveContractNo = String(
+          contractNo || form?.contractNo || rowData?.ContractNo || rowData?.contractNo || ""
+        ).trim();
+        if (saveContractNo) {
+          const res = await contractApi.getInvoiceSchedule({ contractNo: saveContractNo });
+          setInvoiceScheduleRows(
+            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+          );
+        }
+        setAgreementProvEditDialogOpen(false);
+        setAgreementProvEditRowData(null);
+      } catch (error) {
+        console.error("Error saving agreement prov invoice:", error);
+        alert(getAgreementProvSaveErrorMessage(error));
+      } finally {
+        setAgreementProvEditSaving(false);
+      }
+    },
+    [contractNo]
+  );
+
+  const handleAddNewInvoiceDraft = useCallback(() => {
+    if (!contractRow) return;
+    if (!(invoiceScheduleRows || []).some((r) => pickScheduleRowIsFinalize(r))) {
+      alert("Please finalize at least 1 invoice before adding a new invoice.");
+      return;
+    }
+    const template = pickContractInvoiceTemplateRow(invoiceScheduleRows);
+    const draft = buildContractInvoiceDraftRow(template, contractRow, invoiceScheduleRows);
+    const nextInvoiceNo = generateNextFinalizedContractInvoiceNo(invoiceScheduleRows);
+    setAgreementProvCreateRowData({
+      ...draft,
+      InvoiceNo: nextInvoiceNo,
+      invoiceNo: nextInvoiceNo,
+    });
+    setAgreementProvCreateDialogOpen(true);
+    setAgreementProvEditDialogOpen(false);
+    setAgreementProvEditRowData(null);
+    setInvoiceFinalizeSelectedKeys(new Set());
+  }, [contractRow, invoiceScheduleRows]);
+
+  const handleDuplicateFinalizedInvoice = useCallback(
+    (parentRow) => {
+      if (!contractRow || !parentRow || agreementProvCreateDialogOpen) return;
+      const draft = buildContractInvoiceDraftRow(parentRow, contractRow, invoiceScheduleRows);
+      const periodDescription = pickContractSchPeriodDescription(parentRow);
+      const invoiceDateRaw =
+        pickScheduleInvoiceDateSch(parentRow) ||
+        pickSchField(parentRow, "PeriodStart", "periodStart");
+      const dueDateRaw = pickSchField(parentRow, "DueDate", "dueDate");
+      setAgreementProvCreateRowData({
+        ...draft,
+        Description: periodDescription,
+        description: periodDescription,
+        Desc: periodDescription,
+        __draftInvoiceDate: toContractInvoiceDateInputValue(invoiceDateRaw),
+        __draftDueDate: toContractInvoiceDateInputValue(dueDateRaw),
+      });
+      setAgreementProvCreateDialogOpen(true);
+      setInvoiceFinalizeSelectedKeys(new Set());
+    },
+    [contractRow, invoiceScheduleRows, agreementProvCreateDialogOpen]
+  );
+
+  const handleSaveAgreementProvCreateInvoice = useCallback(
+    async (form, rowData) => {
+      if (!contractRow || !rowData) return;
+      const draftInvoiceDate = String(form?.invoiceDate || "").trim();
+      const draftDueDate = String(form?.dueDate || "").trim();
+      if (!draftInvoiceDate || !draftDueDate) {
+        alert("Invoice Date and Due Date are required.");
+        return;
+      }
+      const invoiceNo = String(
+        form?.invoiceNo ?? rowData?.InvoiceNo ?? rowData?.invoiceNo ?? ""
+      ).trim();
+      if (!contractNo || !invoiceNo) {
+        alert("Contract No and Invoice No are required.");
+        return;
+      }
+      const subRaw = rowData?.SubInvoiceNo ?? rowData?.subInvoiceNo;
+      const subInvoiceNo = subRaw === null || subRaw === undefined ? "" : String(subRaw).trim();
+      const paymentTermMonths = contractRow?.PaymentTermMonths ?? contractRow?.paymentTermMonths;
+      const periodEndDate = computeAgreementInvoicePeriodEnd(draftInvoiceDate, paymentTermMonths);
+      if (!periodEndDate) {
+        alert("Unable to derive Period End from Period Start and Payment Term.");
+        return;
+      }
+      if (
+        hasDuplicateInvoicePeriod(invoiceScheduleRows, draftInvoiceDate, periodEndDate, invoiceNo)
+      ) {
+        alert("An invoice for the same period already exists.");
+        return;
+      }
+      const periodDescription = String(form?.description ?? "").trim();
+      const schRow = {
+        ...rowData,
+        InvoiceNo: invoiceNo,
+        invoiceNo,
+        PeriodStart: draftInvoiceDate,
+        periodStart: draftInvoiceDate,
+        PeriodEnd: periodEndDate || null,
+        periodEnd: periodEndDate || null,
+        DueDate: draftDueDate,
+        dueDate: draftDueDate,
+        Description: periodDescription,
+        description: periodDescription,
+        Desc: periodDescription,
+      };
+      setInvoiceFinalizeBusy(true);
+      try {
+        let coaOptions = [];
+        try {
+          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
+        } catch (coaError) {
+          console.error("Error loading chart of accounts for Acc Head:", coaError);
+        }
+        const accHead = resolveAgreementProvTenantAccHead(contractRow, tenants, coaOptions);
+        const payload = withInvoiceScheduleAccHead(
+          {
+            ...buildFinalizeInvoiceSchedulePayload(contractRow, schRow),
+            Description: periodDescription,
+            IsFinalized: true,
+            isFinalized: true,
+            IsFinalize: true,
+            isFinalize: true,
+          },
+          accHead
+        );
+        await contractApi.createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, payload);
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+        );
+        setAgreementProvCreateDialogOpen(false);
+        setAgreementProvCreateRowData(null);
+        setInvoiceFinalizeSelectedKeys(new Set());
+        setInvoiceFinalizeTab("finalized");
+      } catch (error) {
+        console.error("Error saving new invoice:", error);
+        alert(String(error?.message || "Failed to save invoice. Please try again."));
+      } finally {
+        setInvoiceFinalizeBusy(false);
+      }
+    },
+    [contractRow, contractNo, invoiceScheduleRows, tenants]
+  );
+
+  const handleUndoFinalizedInvoices = useCallback(async () => {
+    if (!contractRow) return;
+    if (invoiceFinalizeSelectedKeys.size === 0) {
+      alert("Select at least one finalized invoice to undo.");
+      return;
+    }
+    const selected = invoiceScheduleRows.filter(
+      (r) =>
+        invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
+        pickScheduleRowIsFinalize(r)
+    );
+    if (selected.length === 0) {
+      alert("Selected rows are not finalized or invalid.");
+      return;
+    }
+    const amountReceivedBlocked = selected.filter(isInvoiceRowBlockedFromUndoByAmountReceived);
+    if (amountReceivedBlocked.length > 0) {
+      const invoiceLabels = amountReceivedBlocked
+        .map((r) => getContractInvoiceFinalizeInvoiceNo(r) || "—")
+        .filter(Boolean)
+        .join(", ");
+      alert(
+        `Cannot undo finalize while Amount Received is greater than 0. Set Amount Received to 0 first${
+          invoiceLabels ? ` (Invoice: ${invoiceLabels})` : ""
+        }.`
+      );
+      return;
+    }
+    const blocked = selected.filter(
+      (r) => !isInvoiceRowAllowedByLockDateConstraint(r, invoiceFinalizeLockDate)
+    );
+    if (blocked.length > 0) {
+      const lockLabel = invoiceFinalizeLockDate
+        ? formatContractSchDateDisplay(invoiceFinalizeLockDate)
+        : "lock date";
+      alert(
+        `Cannot undo finalize: invoice date must be after the lock date (${lockLabel}) for all selected rows.`
+      );
+      return;
+    }
+    setInvoiceFinalizeBusy(true);
+    try {
+      for (let i = 0; i < selected.length; i += 1) {
+        const schRow = selected[i];
+        const rowContractNo = String(
+          schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
+        ).trim();
+        const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
+        if (!rowContractNo || !invoiceNo) continue;
+        const payload = {
+          ...buildFinalizeInvoiceSchedulePayload(contractRow, schRow),
+          IsFinalized: false,
+          isFinalized: false,
+        };
+        await contractApi.updateInvoiceSchedule(rowContractNo, invoiceNo, payload);
+      }
+      if (contractNo) {
+        const res = await contractApi.getInvoiceSchedule({ contractNo });
+        setInvoiceScheduleRows(
+          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
+        );
+      }
+      setInvoiceFinalizeSelectedKeys(new Set());
+      setInvoiceFinalizeTab("pending");
+    } catch (error) {
+      console.error("Error undoing finalized invoices:", error);
+      alert(String(error?.message || "Undo failed. Please try again."));
+    } finally {
+      setInvoiceFinalizeBusy(false);
+    }
+  }, [
+    contractRow,
+    contractNo,
+    invoiceFinalizeSelectedKeys,
+    invoiceScheduleRows,
+    invoiceFinalizeLockDate,
+  ]);
+
+  return (
+    <>
+      <Dialog open={open} onClose={handleCloseInvoiceFinalizeDialog} maxWidth="lg" fullWidth>
+        <DialogTitle>
+          <MDTypography variant="h5" fontWeight="bold">
+            Agreement provisional invoices
+          </MDTypography>
+        </DialogTitle>
+        <DialogContent dividers sx={{ position: "relative", minHeight: 280 }}>
+          {contractRow && (
+            <MDBox mb={1.5}>
+              <AgreementProvContractBasicInfoStrip
+                form={buildAgreementProvContractBasicInfoForm(contractRow)}
+              />
+            </MDBox>
+          )}
+          {invoiceFinalizeBusy && (
+            <MDBox
+              sx={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: "rgba(255,255,255,0.75)",
+              }}
+            >
+              <CurrencyLoading size={56} />
+            </MDBox>
+          )}
+          {invoiceScheduleLoading ? (
+            <MDBox display="flex" justifyContent="center" py={6}>
+              <CurrencyLoading size={48} />
+            </MDBox>
+          ) : (
+            <MDBox>
+              <MDBox
+                mb={1.5}
+                display="flex"
+                alignItems="center"
+                flexWrap="wrap"
+                gap={1}
+                sx={{ width: "100%" }}
+              >
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={invoiceFinalizeTab}
+                  onChange={(_, value) => {
+                    if (value) {
+                      setInvoiceFinalizeTab(value);
+                      setInvoiceFinalizeSelectedKeys(new Set());
+                      setAgreementProvCreateDialogOpen(false);
+                      setAgreementProvCreateRowData(null);
+                      setAgreementProvEditDialogOpen(false);
+                      setAgreementProvEditRowData(null);
+                    }
+                  }}
+                  disabled={invoiceFinalizeBusy}
+                >
+                  <ToggleButton value="pending">
+                    Pending ({invoiceFinalizePendingRows.length})
+                  </ToggleButton>
+                  <ToggleButton value="finalized">
+                    Finalized ({invoiceFinalizeFinalizedRows.length})
+                  </ToggleButton>
+                </ToggleButtonGroup>
+                {canManage && invoiceFinalizeTab === "pending" && (
+                  <MDButton
+                    variant="outlined"
+                    color="info"
+                    size="small"
+                    onClick={handleAddNewInvoiceDraft}
+                    disabled={
+                      invoiceFinalizeBusy || invoiceScheduleLoading || agreementProvCreateDialogOpen
+                    }
+                    sx={{ flexShrink: 0 }}
+                  >
+                    <Icon sx={{ mr: 0.5 }}>add</Icon>
+                    Add new invoice
+                  </MDButton>
+                )}
+                <MDBox sx={{ flex: "1 1 200px", minWidth: 180 }}>
+                  <MDInput
+                    placeholder="Search invoices..."
+                    value={invoiceFinalizeSearch}
+                    onChange={(e) => setInvoiceFinalizeSearch(e.target.value)}
+                    fullWidth
+                    size="small"
+                    disabled={invoiceFinalizeBusy}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Icon sx={{ fontSize: "1.1rem", opacity: 0.6 }}>search</Icon>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </MDBox>
+              </MDBox>
+              {invoiceFinalizeTab === "pending" ? (
+                <>
+                  {invoiceFinalizePendingRows.length === 0 ? (
+                    <MDTypography variant="body2" color="text">
+                      {canManage
+                        ? "No pending invoice rows. Add a new invoice or view the Finalized tab."
+                        : "No pending invoice rows."}
+                    </MDTypography>
+                  ) : (
+                    <ContractInvoiceFinalizeGrid
+                      rows={invoiceFinalizePendingRows}
+                      selectedKeys={invoiceFinalizeSelectedKeys}
+                      onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
+                      busy={invoiceFinalizeBusy}
+                      formatDate={formatContractSchDateDisplay}
+                      readOnly={!canManage}
+                      allowedSelectionKeys={invoiceFinalizeAllowedPendingKeys}
+                      blurNonSelectableRows={canManage}
+                      hideSearchInput
+                      searchValue={invoiceFinalizeSearch}
+                      onSearchChange={setInvoiceFinalizeSearch}
+                    />
+                  )}
+                </>
+              ) : invoiceFinalizeFinalizedRows.length === 0 ? (
+                <MDTypography variant="body2" color="text">
+                  No finalized invoice rows yet.
+                </MDTypography>
+              ) : (
+                <ContractInvoiceFinalizeGrid
+                  rows={invoiceFinalizeFinalizedRows}
+                  selectedKeys={invoiceFinalizeSelectedKeys}
+                  onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
+                  busy={
+                    invoiceFinalizeBusy ||
+                    agreementProvCreateDialogOpen ||
+                    agreementProvEditDialogOpen
+                  }
+                  formatDate={formatContractSchDateDisplay}
+                  readOnly={!canManage}
+                  undoSelectable={canManage}
+                  showDuplicateAction={canManage}
+                  onDuplicateRow={handleDuplicateFinalizedInvoice}
+                  clickableInvoiceNo
+                  onInvoiceNoClick={handleOpenAgreementProvEditFromFinalizeRow}
+                  hideSearchInput
+                  searchValue={invoiceFinalizeSearch}
+                  onSearchChange={setInvoiceFinalizeSearch}
+                />
+              )}
+            </MDBox>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <MDButton variant="outlined" color="secondary" onClick={handleCloseInvoiceFinalizeDialog}>
+            Close
+          </MDButton>
+          {canManage && invoiceFinalizeTab === "pending" && (
+            <MDButton
+              variant="gradient"
+              color="info"
+              onClick={handleFinalizeSelectedInvoices}
+              disabled={
+                invoiceFinalizeBusy ||
+                invoiceScheduleLoading ||
+                invoiceFinalizeSelectedKeys.size === 0
+              }
+            >
+              Finalize
+            </MDButton>
+          )}
+          {canManage && invoiceFinalizeTab === "finalized" && (
+            <MDButton
+              variant="gradient"
+              color="warning"
+              onClick={handleUndoFinalizedInvoices}
+              disabled={
+                invoiceFinalizeBusy ||
+                invoiceScheduleLoading ||
+                invoiceFinalizeSelectedKeys.size === 0
+              }
+            >
+              Undo
+            </MDButton>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      <AgreementProvFinalizeOptionsDialog
+        open={finalizeOptionsOpen}
+        onClose={handleCloseFinalizeOptionsDialog}
+        onConfirm={handleConfirmFinalizeOptions}
+        busy={invoiceFinalizeBusy}
+        accountOptions={finalizeAccountOptions}
+        productOptions={finalizeProductOptions}
+        loadingOptions={finalizeOptionsLoading}
+        defaultItemWithCode={resolveClassLinkedItemWithCode(
+          classes,
+          contractRow?.ClassId ?? contractRow?.classId
+        )}
+      />
+
+      <AgreementProvInvoiceEditDialog
+        open={agreementProvCreateDialogOpen}
+        onClose={handleCloseAgreementProvCreateDialog}
+        rowData={agreementProvCreateRowData}
+        onSave={handleSaveAgreementProvCreateInvoice}
+        saving={invoiceFinalizeBusy}
+        createMode
+      />
+
+      <AgreementProvInvoiceEditDialog
+        open={agreementProvEditDialogOpen}
+        onClose={handleCloseAgreementProvEditDialog}
+        rowData={agreementProvEditRowData}
+        onSave={handleSaveAgreementProvEditInvoice}
+        saving={agreementProvEditSaving}
+        viewMode={!canManage}
+      />
+    </>
+  );
+}
+
+ContractInvoicesDialog.propTypes = {
+  open: PropTypes.bool.isRequired,
+  contractRow: PropTypes.object,
+  onClose: PropTypes.func.isRequired,
+  canManage: PropTypes.bool,
+};
+
+ContractInvoicesDialog.defaultProps = {
+  contractRow: null,
+  canManage: false,
+};
+
 const ANNOTATION_REMARKS_MAX = 500;
 const ANNOTATION_UPLOAD_FORM_NAME = "ContractAnnotations";
 const ANNOTATION_ATTACH_MAX_BYTES = 10 * 1024 * 1024;
@@ -6163,6 +6972,12 @@ export default function Contracts() {
   const [annotationUploadingId, setAnnotationUploadingId] = useState(null);
   const canAddAnnotations = canAddContractAnnotations();
   const canDeleteAnnotations = isSuperuserUser();
+  const canViewAgreements = canViewCurrentMenu();
+  const canCreateAgreements = canCreateCurrentMenu();
+  const canEditAgreements = canEditCurrentMenu();
+  const canDeleteAgreements = canDeleteCurrentMenu();
+  const isAgreementsReadOnlyUser =
+    canViewAgreements && !canCreateAgreements && !canEditAgreements && !canDeleteAgreements;
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const CONTRACTS_GROUP_BY_CACHE_KEY = "contracts_groupByColumns";
   const [groupByColumns, setGroupByColumns] = useState(() => {
@@ -6212,26 +7027,8 @@ export default function Contracts() {
   const [selectedContractDetails, setSelectedContractDetails] = useState(null);
   const [contractDetailsRiseTerms, setContractDetailsRiseTerms] = useState([]);
   const [loadingContractDetailsRiseTerms, setLoadingContractDetailsRiseTerms] = useState(false);
-  const [invoiceFinalizeOpen, setInvoiceFinalizeOpen] = useState(false);
-  const [invoiceFinalizeContractRow, setInvoiceFinalizeContractRow] = useState(null);
-  const [invoiceScheduleRows, setInvoiceScheduleRows] = useState([]);
-  const [invoiceScheduleLoading, setInvoiceScheduleLoading] = useState(false);
-  const [invoiceFinalizeSelectedKeys, setInvoiceFinalizeSelectedKeys] = useState(() => new Set());
-  const [invoiceFinalizeTab, setInvoiceFinalizeTab] = useState("pending");
-  const [invoiceFinalizeBusy, setInvoiceFinalizeBusy] = useState(false);
   const [ahqApprovalSelectedIds, setAhqApprovalSelectedIds] = useState(() => new Set());
   const [ahqApprovalSubmitting, setAhqApprovalSubmitting] = useState(false);
-  const [agreementProvCreateDialogOpen, setAgreementProvCreateDialogOpen] = useState(false);
-  const [agreementProvCreateRowData, setAgreementProvCreateRowData] = useState(null);
-  const [agreementProvEditDialogOpen, setAgreementProvEditDialogOpen] = useState(false);
-  const [agreementProvEditRowData, setAgreementProvEditRowData] = useState(null);
-  const [agreementProvEditSaving, setAgreementProvEditSaving] = useState(false);
-  const [invoiceFinalizeSearch, setInvoiceFinalizeSearch] = useState("");
-  const [invoiceFinalizeLockDate, setInvoiceFinalizeLockDate] = useState("");
-  const [finalizeOptionsOpen, setFinalizeOptionsOpen] = useState(false);
-  const [finalizeOptionsLoading, setFinalizeOptionsLoading] = useState(false);
-  const [finalizeProductOptions, setFinalizeProductOptions] = useState([]);
-  const [finalizeAccountOptions, setFinalizeAccountOptions] = useState([]);
   const asOfDateInputRef = useRef(null);
 
   const openDatePicker = (ref) => {
@@ -6951,519 +7748,6 @@ export default function Contracts() {
 
     void openContractFromUrl();
   }, [urlContractNo]);
-
-  const handleOpenContractInvoices = useCallback(async (row) => {
-    const contractNo = String(row?.ContractNo ?? row?.contractNo ?? "").trim();
-    if (!contractNo) {
-      alert("Contract number is missing.");
-      return;
-    }
-    setInvoiceFinalizeContractRow(row);
-    setInvoiceFinalizeOpen(true);
-    setInvoiceScheduleLoading(true);
-    setInvoiceScheduleRows([]);
-    setInvoiceFinalizeSelectedKeys(new Set());
-    setInvoiceFinalizeTab("pending");
-    setAgreementProvCreateDialogOpen(false);
-    setAgreementProvCreateRowData(null);
-    setAgreementProvEditDialogOpen(false);
-    setAgreementProvEditRowData(null);
-    setInvoiceFinalizeSearch("");
-    try {
-      const [scheduleRes, lockDateRes, tenantRes] = await Promise.all([
-        contractApi.getInvoiceSchedule({ contractNo }),
-        lockDateApi.getAll().catch(() => null),
-        api.list("tenant"),
-      ]);
-      setInvoiceScheduleRows(
-        assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(scheduleRes))
-      );
-      setInvoiceFinalizeLockDate(pickActiveLockDateYyyyMmDd(unwrapLockDateConfigList(lockDateRes)));
-      setTenants(unwrapTenantList(tenantRes));
-    } catch (error) {
-      console.error("Error loading invoice schedule:", error);
-      alert("Failed to load invoice schedule for this contract.");
-      setInvoiceFinalizeOpen(false);
-      setInvoiceFinalizeContractRow(null);
-    } finally {
-      setInvoiceScheduleLoading(false);
-    }
-  }, []);
-
-  const handleCloseInvoiceFinalizeDialog = useCallback(() => {
-    if (invoiceFinalizeBusy || agreementProvEditSaving) return;
-    setInvoiceFinalizeOpen(false);
-    setInvoiceFinalizeContractRow(null);
-    setInvoiceScheduleRows([]);
-    setInvoiceFinalizeSelectedKeys(new Set());
-    setInvoiceFinalizeTab("pending");
-    setAgreementProvCreateDialogOpen(false);
-    setAgreementProvCreateRowData(null);
-    setAgreementProvEditDialogOpen(false);
-    setAgreementProvEditRowData(null);
-    setInvoiceFinalizeSearch("");
-    setFinalizeOptionsOpen(false);
-    setFinalizeProductOptions([]);
-    setFinalizeAccountOptions([]);
-  }, [invoiceFinalizeBusy, agreementProvEditSaving]);
-
-  const invoiceFinalizePendingRows = useMemo(
-    () =>
-      invoiceScheduleRows
-        .filter((r) => !pickScheduleRowIsFinalize(r))
-        .sort((a, b) =>
-          getContractInvoiceFinalizeInvoiceNo(a).localeCompare(
-            getContractInvoiceFinalizeInvoiceNo(b),
-            undefined,
-            { numeric: true }
-          )
-        ),
-    [invoiceScheduleRows]
-  );
-
-  const invoiceFinalizeFinalizedRows = useMemo(
-    () => invoiceScheduleRows.filter((r) => pickScheduleRowIsFinalize(r)),
-    [invoiceScheduleRows]
-  );
-
-  const invoiceFinalizeAllowedPendingKeys = useMemo(
-    () => getAllowedPendingFinalizeKeySet(invoiceScheduleRows),
-    [invoiceScheduleRows]
-  );
-
-  const executeFinalizeSelectedInvoices = useCallback(
-    async ({ itemWithCode = "", accHead = "" } = {}) => {
-      if (!invoiceFinalizeContractRow) return;
-      const selected = invoiceScheduleRows.filter(
-        (r) =>
-          invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
-          !pickScheduleRowIsFinalize(r) &&
-          (invoiceFinalizeAllowedPendingKeys.size === 0 ||
-            invoiceFinalizeAllowedPendingKeys.has(getContractInvoiceFinalizeRowKey(r)))
-      );
-      if (selected.length === 0) {
-        alert("Selected rows are already finalized, invalid, or out of sequence.");
-        return;
-      }
-      const contractNo = String(
-        invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
-      ).trim();
-      setInvoiceFinalizeBusy(true);
-      try {
-        let coaOptions = [];
-        try {
-          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
-        } catch (coaError) {
-          console.error("Error loading chart of accounts for Acc Head:", coaError);
-        }
-
-        const finalizedInvoiceNos = new Set();
-        for (let i = 0; i < selected.length; i += 1) {
-          const schRow = selected[i];
-          const rowContractNo = String(
-            schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
-          ).trim();
-          const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
-          if (!rowContractNo || !invoiceNo || finalizedInvoiceNos.has(invoiceNo)) continue;
-          finalizedInvoiceNos.add(invoiceNo);
-          await persistFinalizedInvoiceScheduleWithTenantAccHead({
-            contractRow: invoiceFinalizeContractRow,
-            contractNo: rowContractNo,
-            invoiceNo,
-            schRow,
-            scheduleRows: invoiceScheduleRows,
-            tenants,
-            coaOptions,
-            itemWithCode,
-            accHead,
-          });
-        }
-        if (contractNo) {
-          const res = await contractApi.getInvoiceSchedule({ contractNo });
-          setInvoiceScheduleRows(
-            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
-          );
-        }
-        setInvoiceFinalizeSelectedKeys(new Set());
-        setInvoiceFinalizeTab("finalized");
-        setFinalizeOptionsOpen(false);
-      } catch (error) {
-        console.error("Error finalizing invoice rows:", error);
-        alert(String(error?.message || "Finalize failed. Please try again."));
-      } finally {
-        setInvoiceFinalizeBusy(false);
-      }
-    },
-    [
-      invoiceFinalizeContractRow,
-      invoiceFinalizeSelectedKeys,
-      invoiceScheduleRows,
-      invoiceFinalizeAllowedPendingKeys,
-      tenants,
-    ]
-  );
-
-  const handleFinalizeSelectedInvoices = useCallback(async () => {
-    if (!invoiceFinalizeContractRow) return;
-    if (invoiceFinalizeSelectedKeys.size === 0) {
-      alert("Select at least one invoice row.");
-      return;
-    }
-    if (invoiceFinalizeAllowedPendingKeys.size > 0) {
-      const hasOutOfSequenceSelection = Array.from(invoiceFinalizeSelectedKeys).some(
-        (k) => !invoiceFinalizeAllowedPendingKeys.has(k)
-      );
-      if (hasOutOfSequenceSelection) {
-        alert("Only the next immediate pending invoice can be finalized.");
-        return;
-      }
-    }
-
-    setFinalizeOptionsOpen(true);
-    setFinalizeOptionsLoading(true);
-    setFinalizeProductOptions([]);
-    setFinalizeAccountOptions([]);
-
-    try {
-      const [productOptions, coaResponse, classResponse] = await Promise.all([
-        fetchAgreementProvFinalizeProductOptions(),
-        chartOfAccountsApi.getAll().catch(() => null),
-        api.list("class").catch(() => null),
-      ]);
-      if (classResponse != null) {
-        setClasses(normalizeCatalogList(classResponse));
-      }
-      const coaOptions = chartOfAccountsApi.unwrapList(coaResponse);
-      // Keep COA options available so Item Sale Account can resolve when display text is missing.
-      const accountOptions = (coaOptions || [])
-        .map(normalizePartyCoaOption)
-        .filter((option) => option?.id != null)
-        .map((option) => ({
-          value: formatAccountLabel(option),
-          label: getPartyCoaDropdownLabel(option) || formatAccountLabel(option),
-          id: option.id,
-          coaId: option.id,
-        }))
-        .filter((option) => option.value);
-      setFinalizeProductOptions(productOptions);
-      setFinalizeAccountOptions(accountOptions);
-      if (productOptions.length === 0) {
-        alert("No active services or goods found. Add products before finalizing.");
-      }
-    } catch (error) {
-      console.error("Error loading finalize options:", error);
-      alert("Failed to load Item with Code and Account options. Please try again.");
-      setFinalizeOptionsOpen(false);
-    } finally {
-      setFinalizeOptionsLoading(false);
-    }
-  }, [invoiceFinalizeContractRow, invoiceFinalizeSelectedKeys, invoiceFinalizeAllowedPendingKeys]);
-
-  const handleConfirmFinalizeOptions = useCallback(
-    async (selection) => {
-      await executeFinalizeSelectedInvoices(selection);
-    },
-    [executeFinalizeSelectedInvoices]
-  );
-
-  const handleCloseFinalizeOptionsDialog = useCallback(() => {
-    if (invoiceFinalizeBusy) return;
-    setFinalizeOptionsOpen(false);
-  }, [invoiceFinalizeBusy]);
-
-  const handleCloseAgreementProvCreateDialog = useCallback(() => {
-    if (invoiceFinalizeBusy) return;
-    setAgreementProvCreateDialogOpen(false);
-    setAgreementProvCreateRowData(null);
-  }, [invoiceFinalizeBusy]);
-
-  const handleCloseAgreementProvEditDialog = useCallback(() => {
-    if (agreementProvEditSaving) return;
-    setAgreementProvEditDialogOpen(false);
-    setAgreementProvEditRowData(null);
-  }, [agreementProvEditSaving]);
-
-  const handleOpenAgreementProvEditFromFinalizeRow = useCallback(
-    (scheduleRow) => {
-      if (!invoiceFinalizeContractRow || !scheduleRow) return;
-      const invoiceNo = getContractInvoiceFinalizeInvoiceNo(scheduleRow);
-      if (!invoiceNo || invoiceNo === "—") return;
-      if (!pickScheduleRowIsFinalize(scheduleRow)) return;
-      setAgreementProvEditRowData(
-        buildAgreementProvEditRowFromContractAndSchedule(invoiceFinalizeContractRow, scheduleRow)
-      );
-      setAgreementProvEditDialogOpen(true);
-      setAgreementProvCreateDialogOpen(false);
-      setAgreementProvCreateRowData(null);
-      setInvoiceFinalizeSelectedKeys(new Set());
-    },
-    [invoiceFinalizeContractRow]
-  );
-
-  const handleSaveAgreementProvEditInvoice = useCallback(
-    async (form, rowData, lineSaveContext = {}) => {
-      if (!rowData) return;
-      setAgreementProvEditSaving(true);
-      try {
-        await persistAllInvoiceScheduleLines({
-          rowData,
-          form,
-          invoiceLines: lineSaveContext.invoiceLines ?? [],
-          pendingDeleteSubs: lineSaveContext.pendingDeleteSubs ?? [],
-          newLineDrafts: lineSaveContext.newLineDrafts ?? [],
-          editingLineDraft: lineSaveContext.editingLineDraft ?? null,
-          originalServerSubs: lineSaveContext.originalServerSubs ?? new Set(),
-          originalLinePayloadSnapshots: lineSaveContext.originalLinePayloadSnapshots ?? new Map(),
-        });
-        const contractNo = String(
-          invoiceFinalizeContractRow?.ContractNo ??
-            invoiceFinalizeContractRow?.contractNo ??
-            form?.contractNo ??
-            rowData?.ContractNo ??
-            rowData?.contractNo ??
-            ""
-        ).trim();
-        if (contractNo) {
-          const res = await contractApi.getInvoiceSchedule({ contractNo });
-          setInvoiceScheduleRows(
-            assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
-          );
-        }
-        setAgreementProvEditDialogOpen(false);
-        setAgreementProvEditRowData(null);
-      } catch (error) {
-        console.error("Error saving agreement prov invoice:", error);
-        alert(getAgreementProvSaveErrorMessage(error));
-      } finally {
-        setAgreementProvEditSaving(false);
-      }
-    },
-    [invoiceFinalizeContractRow]
-  );
-
-  const handleAddNewInvoiceDraft = useCallback(() => {
-    if (!invoiceFinalizeContractRow) return;
-    if (!(invoiceScheduleRows || []).some((r) => pickScheduleRowIsFinalize(r))) {
-      alert("Please finalize at least 1 invoice before adding a new invoice.");
-      return;
-    }
-    const template = pickContractInvoiceTemplateRow(invoiceScheduleRows);
-    const draft = buildContractInvoiceDraftRow(
-      template,
-      invoiceFinalizeContractRow,
-      invoiceScheduleRows
-    );
-    const nextInvoiceNo = generateNextFinalizedContractInvoiceNo(invoiceScheduleRows);
-    setAgreementProvCreateRowData({
-      ...draft,
-      InvoiceNo: nextInvoiceNo,
-      invoiceNo: nextInvoiceNo,
-    });
-    setAgreementProvCreateDialogOpen(true);
-    setAgreementProvEditDialogOpen(false);
-    setAgreementProvEditRowData(null);
-    setInvoiceFinalizeSelectedKeys(new Set());
-  }, [invoiceFinalizeContractRow, invoiceScheduleRows]);
-
-  const handleDuplicateFinalizedInvoice = useCallback(
-    (parentRow) => {
-      if (!invoiceFinalizeContractRow || !parentRow || agreementProvCreateDialogOpen) return;
-      const draft = buildContractInvoiceDraftRow(
-        parentRow,
-        invoiceFinalizeContractRow,
-        invoiceScheduleRows
-      );
-      const periodDescription = pickContractSchPeriodDescription(parentRow);
-      const invoiceDateRaw =
-        pickScheduleInvoiceDateSch(parentRow) ||
-        pickSchField(parentRow, "PeriodStart", "periodStart");
-      const dueDateRaw = pickSchField(parentRow, "DueDate", "dueDate");
-      setAgreementProvCreateRowData({
-        ...draft,
-        Description: periodDescription,
-        description: periodDescription,
-        Desc: periodDescription,
-        __draftInvoiceDate: toContractInvoiceDateInputValue(invoiceDateRaw),
-        __draftDueDate: toContractInvoiceDateInputValue(dueDateRaw),
-      });
-      setAgreementProvCreateDialogOpen(true);
-      setInvoiceFinalizeSelectedKeys(new Set());
-    },
-    [invoiceFinalizeContractRow, invoiceScheduleRows, agreementProvCreateDialogOpen]
-  );
-
-  const handleSaveAgreementProvCreateInvoice = useCallback(
-    async (form, rowData) => {
-      if (!invoiceFinalizeContractRow || !rowData) return;
-      const draftInvoiceDate = String(form?.invoiceDate || "").trim();
-      const draftDueDate = String(form?.dueDate || "").trim();
-      if (!draftInvoiceDate || !draftDueDate) {
-        alert("Invoice Date and Due Date are required.");
-        return;
-      }
-      const contractNo = String(
-        invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
-      ).trim();
-      const invoiceNo = String(
-        form?.invoiceNo ?? rowData?.InvoiceNo ?? rowData?.invoiceNo ?? ""
-      ).trim();
-      if (!contractNo || !invoiceNo) {
-        alert("Contract No and Invoice No are required.");
-        return;
-      }
-      const subRaw = rowData?.SubInvoiceNo ?? rowData?.subInvoiceNo;
-      const subInvoiceNo = subRaw === null || subRaw === undefined ? "" : String(subRaw).trim();
-      const paymentTermMonths =
-        invoiceFinalizeContractRow?.PaymentTermMonths ??
-        invoiceFinalizeContractRow?.paymentTermMonths;
-      const periodEndDate = computeAgreementInvoicePeriodEnd(draftInvoiceDate, paymentTermMonths);
-      if (!periodEndDate) {
-        alert("Unable to derive Period End from Period Start and Payment Term.");
-        return;
-      }
-      if (
-        hasDuplicateInvoicePeriod(invoiceScheduleRows, draftInvoiceDate, periodEndDate, invoiceNo)
-      ) {
-        alert("An invoice for the same period already exists.");
-        return;
-      }
-      const periodDescription = String(form?.description ?? "").trim();
-      const schRow = {
-        ...rowData,
-        InvoiceNo: invoiceNo,
-        invoiceNo,
-        PeriodStart: draftInvoiceDate,
-        periodStart: draftInvoiceDate,
-        PeriodEnd: periodEndDate || null,
-        periodEnd: periodEndDate || null,
-        DueDate: draftDueDate,
-        dueDate: draftDueDate,
-        Description: periodDescription,
-        description: periodDescription,
-        Desc: periodDescription,
-      };
-      setInvoiceFinalizeBusy(true);
-      try {
-        let coaOptions = [];
-        try {
-          coaOptions = chartOfAccountsApi.unwrapList(await chartOfAccountsApi.getAll());
-        } catch (coaError) {
-          console.error("Error loading chart of accounts for Acc Head:", coaError);
-        }
-        const accHead = resolveAgreementProvTenantAccHead(
-          invoiceFinalizeContractRow,
-          tenants,
-          coaOptions
-        );
-        const payload = withInvoiceScheduleAccHead(
-          {
-            ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
-            Description: periodDescription,
-            IsFinalized: true,
-            isFinalized: true,
-            IsFinalize: true,
-            isFinalize: true,
-          },
-          accHead
-        );
-        await contractApi.createInvoiceSchedule(contractNo, invoiceNo, subInvoiceNo, payload);
-        const res = await contractApi.getInvoiceSchedule({ contractNo });
-        setInvoiceScheduleRows(
-          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
-        );
-        setAgreementProvCreateDialogOpen(false);
-        setAgreementProvCreateRowData(null);
-        setInvoiceFinalizeSelectedKeys(new Set());
-        setInvoiceFinalizeTab("finalized");
-      } catch (error) {
-        console.error("Error saving new invoice:", error);
-        alert(String(error?.message || "Failed to save invoice. Please try again."));
-      } finally {
-        setInvoiceFinalizeBusy(false);
-      }
-    },
-    [invoiceFinalizeContractRow, invoiceScheduleRows, tenants]
-  );
-
-  const handleUndoFinalizedInvoices = useCallback(async () => {
-    if (!invoiceFinalizeContractRow) return;
-    if (invoiceFinalizeSelectedKeys.size === 0) {
-      alert("Select at least one finalized invoice to undo.");
-      return;
-    }
-    const selected = invoiceScheduleRows.filter(
-      (r) =>
-        invoiceFinalizeSelectedKeys.has(getContractInvoiceFinalizeRowKey(r)) &&
-        pickScheduleRowIsFinalize(r)
-    );
-    if (selected.length === 0) {
-      alert("Selected rows are not finalized or invalid.");
-      return;
-    }
-    const amountReceivedBlocked = selected.filter(isInvoiceRowBlockedFromUndoByAmountReceived);
-    if (amountReceivedBlocked.length > 0) {
-      const invoiceLabels = amountReceivedBlocked
-        .map((r) => getContractInvoiceFinalizeInvoiceNo(r) || "—")
-        .filter(Boolean)
-        .join(", ");
-      alert(
-        `Cannot undo finalize while Amount Received is greater than 0. Set Amount Received to 0 first${
-          invoiceLabels ? ` (Invoice: ${invoiceLabels})` : ""
-        }.`
-      );
-      return;
-    }
-    const blocked = selected.filter(
-      (r) => !isInvoiceRowAllowedByLockDateConstraint(r, invoiceFinalizeLockDate)
-    );
-    if (blocked.length > 0) {
-      const lockLabel = invoiceFinalizeLockDate
-        ? formatDateDDMMMYYYY(invoiceFinalizeLockDate)
-        : "lock date";
-      alert(
-        `Cannot undo finalize: invoice date must be after the lock date (${lockLabel}) for all selected rows.`
-      );
-      return;
-    }
-    const contractNo = String(
-      invoiceFinalizeContractRow?.ContractNo ?? invoiceFinalizeContractRow?.contractNo ?? ""
-    ).trim();
-    setInvoiceFinalizeBusy(true);
-    try {
-      for (let i = 0; i < selected.length; i += 1) {
-        const schRow = selected[i];
-        const rowContractNo = String(
-          schRow?.ContractNo ?? schRow?.contractNo ?? contractNo ?? ""
-        ).trim();
-        const invoiceNo = getContractInvoiceFinalizeInvoiceNo(schRow);
-        if (!rowContractNo || !invoiceNo) continue;
-        const payload = {
-          ...buildFinalizeInvoiceSchedulePayload(invoiceFinalizeContractRow, schRow),
-          IsFinalized: false,
-          isFinalized: false,
-        };
-        await contractApi.updateInvoiceSchedule(rowContractNo, invoiceNo, payload);
-      }
-      if (contractNo) {
-        const res = await contractApi.getInvoiceSchedule({ contractNo });
-        setInvoiceScheduleRows(
-          assignContractInvoiceFinalizeKeys(unwrapContractInvoiceScheduleList(res))
-        );
-      }
-      setInvoiceFinalizeSelectedKeys(new Set());
-      setInvoiceFinalizeTab("pending");
-    } catch (error) {
-      console.error("Error undoing finalized invoices:", error);
-      alert(String(error?.message || "Undo failed. Please try again."));
-    } finally {
-      setInvoiceFinalizeBusy(false);
-    }
-  }, [
-    invoiceFinalizeContractRow,
-    invoiceFinalizeSelectedKeys,
-    invoiceScheduleRows,
-    invoiceFinalizeLockDate,
-  ]);
 
   const handleConfirmDelete = async () => {
     if (!canDeleteCurrentMenu()) return;
@@ -8633,6 +8917,24 @@ export default function Contracts() {
       // eslint-disable-next-line react/prop-types
       Cell: ({ value, row }) => {
         /* eslint-disable react/prop-types */
+        if (isContractGridGroupRow(row)) return "";
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue) && numericValue === MISSING_CONTRACT_GROUP_RATE) {
+          const grpId = getContractGridValue(row?.original || row, ["grpId", "GId", "GrpId"]);
+          return (
+            <MDBox display="flex" justifyContent="center" width="100%">
+              <IconButton
+                size="small"
+                color="error"
+                title="Add Rate to Property Grouping for this FY"
+                onClick={() => openPropertyGroupingPopupByGrpId(grpId)}
+                sx={{ p: "2px", color: "#dc2626 !important", opacity: "1 !important" }}
+              >
+                <Icon sx={{ color: "#dc2626" }}>warning</Icon>
+              </IconButton>
+            </MDBox>
+          );
+        }
         if (
           value === null ||
           row?.original?.GroupRate === null ||
@@ -9115,7 +9417,16 @@ export default function Contracts() {
   };
 
   const contractGridColumns = [
-    { ...findContractColumn("actions"), Header: "Action" },
+    {
+      id: "actions",
+      Header: "Action",
+      accessor: "actions",
+      align: "center",
+      width: "72px",
+      disableSortBy: true,
+      // eslint-disable-next-line react/prop-types
+      Cell: ({ value }) => value ?? null,
+    },
     makeContractGridColumn({
       id: "contractNo",
       Header: "CA No",
@@ -9344,7 +9655,7 @@ export default function Contracts() {
       Cell: ({ value, row }) => {
         if (isContractGridGroupRow(row)) return formatContractGridNumber(value);
         const numericValue = Number(value);
-        if (Number.isFinite(numericValue) && numericValue === -99) {
+        if (Number.isFinite(numericValue) && numericValue === MISSING_CONTRACT_GROUP_RATE) {
           const grpId = getContractGridValue(row, ["grpId", "GId", "GrpId"]);
           return (
             <MDBox display="flex" justifyContent="center" width="100%">
@@ -9873,7 +10184,7 @@ export default function Contracts() {
           borderRadius: "2px",
         }}
       >
-        {canEditCurrentMenu() && showEditDeleteActions && (
+        {canEditAgreements && showEditDeleteActions && (
           <IconButton
             size="small"
             color="info"
@@ -9884,7 +10195,7 @@ export default function Contracts() {
             <Icon>edit</Icon>
           </IconButton>
         )}
-        {canDeleteCurrentMenu() && showEditDeleteActions && (
+        {canDeleteAgreements && showEditDeleteActions && (
           <IconButton
             size="small"
             color="error"
@@ -9895,27 +10206,28 @@ export default function Contracts() {
             <Icon>delete</Icon>
           </IconButton>
         )}
-        <IconButton
-          size="small"
-          color="success"
-          onClick={() => handleViewDetails(row)}
-          title="View Details"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>visibility</Icon>
-        </IconButton>
-        <IconButton
-          size="small"
-          color="warning"
-          onClick={() => handleOpenContractInvoices(row)}
-          title="Invoices"
-          sx={{ padding: "1px" }}
-        >
-          <Icon>receipt_long</Icon>
-        </IconButton>
+        {canViewAgreements && (
+          <IconButton
+            size="small"
+            color="success"
+            onClick={() => handleViewDetails(row)}
+            title="View Details"
+            sx={{ padding: "1px" }}
+          >
+            <Icon>visibility</Icon>
+          </IconButton>
+        )}
       </MDBox>
     ),
-    [handleEditContract, handleDeleteContract, handleViewDetails, handleOpenContractInvoices]
+    [
+      canViewAgreements,
+      isAgreementsReadOnlyUser,
+      canEditAgreements,
+      canDeleteAgreements,
+      handleEditContract,
+      handleDeleteContract,
+      handleViewDetails,
+    ]
   );
 
   // Group contracts by selected grouping columns.
@@ -9955,6 +10267,17 @@ export default function Contracts() {
         ? "Viable"
         : "Unviable";
 
+      const classLabel = resolveContractClassLabel(row, classes);
+      const classId = pickContractRowVal(row, "ClassId", "classId");
+      const hasAsOfOverrides = Boolean(asOfOverrideMap?.asOfDate);
+      const resolvedGroupRate = resolveContractGridGroupRate(
+        row,
+        propertyGrouping,
+        classLabel,
+        classId,
+        hasAsOfOverrides
+      );
+
       return {
         ...row,
         id: pickContractRowVal(row, "Id", "id"),
@@ -9963,10 +10286,10 @@ export default function Contracts() {
         asOfToday: "Active", // Text value for Excel export
         cmdName: resolveContractCmdLabel(row, commands),
         baseName: resolveContractBaseLabel(row, bases),
-        className: resolveContractClassLabel(row, classes),
+        className: classLabel,
         CmdName: resolveContractCmdLabel(row, commands),
         BaseName: resolveContractBaseLabel(row, bases),
-        ClassName: resolveContractClassLabel(row, classes),
+        ClassName: classLabel,
         grpName:
           pickContractRowVal(row, "GrpName", "grpName", "GId", "gId") ??
           propertyGrouping?.GId ??
@@ -10046,10 +10369,7 @@ export default function Contracts() {
         ),
         remarks: pickContractRowVal(row, "Remarks", "remarks") ?? "",
         vaArea: pickContractRowVal(row, "VaArea", "vaArea") ?? 0,
-        groupRate:
-          row.GroupRate !== undefined || row.groupRate !== undefined
-            ? row.GroupRate ?? row.groupRate
-            : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        groupRate: resolvedGroupRate,
         // Also set PascalCase versions for direct access
         CurrentRentPA:
           pickContractRowVal(row, "CurrRentPA", "currRentPA", "CurrentRentPA", "currentRentPA") ??
@@ -10067,10 +10387,7 @@ export default function Contracts() {
           propertyGrouping?.rate ??
           pickContractRowVal(row, "TotalRate", "totalRate", "Rate", "rate") ??
           0,
-        GroupRate:
-          row.GroupRate !== undefined || row.groupRate !== undefined
-            ? row.GroupRate ?? row.groupRate
-            : propertyGrouping?.Rate ?? row.TotalRate ?? row.Rate ?? 0,
+        GroupRate: resolvedGroupRate,
         Location:
           propertyGrouping?.Location ??
           propertyGrouping?.location ??
@@ -10337,7 +10654,6 @@ export default function Contracts() {
     allPropertyGroupings,
     expandedGroups,
     groupByColumns,
-    handleOpenContractInvoices,
     buildContractGridActionsCell,
   ]);
 
@@ -10588,12 +10904,19 @@ export default function Contracts() {
     const contractNo =
       selectedContractDetails.ContractNo || selectedContractDetails.contractNo || "-";
 
+    let latestTenantForPdf = null;
+
     if (viewOnly) {
-      const annotations = await fetchContractAnnotationsForPdf(selectedContractDetails);
+      const [annotations, latestTenant] = await Promise.all([
+        fetchContractAnnotationsForPdf(selectedContractDetails),
+        fetchTenantForContractPdf(selectedContractDetails, tenants),
+      ]);
+      latestTenantForPdf = latestTenant;
       renderContractAgreementPdfFirstPage(doc, selectedContractDetails, {
         riseTerms: contractDetailsRiseTerms,
         tenants,
         annotations,
+        tenant: latestTenant,
       });
     } else {
       // Formatted layout with boxes and grid (for download)
@@ -10745,7 +11068,7 @@ export default function Contracts() {
         doc,
         selectedContractDetails,
         finalizedScheduleRows,
-        { tenants }
+        { tenants, tenant: latestTenantForPdf }
       );
     } catch (error) {
       console.error("Error adding provisional account statement PDF page:", error);
@@ -11525,225 +11848,6 @@ export default function Contracts() {
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={invoiceFinalizeOpen}
-        onClose={handleCloseInvoiceFinalizeDialog}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>
-          <MDTypography variant="h5" fontWeight="bold">
-            Agreement provisional invoices
-          </MDTypography>
-        </DialogTitle>
-        <DialogContent dividers sx={{ position: "relative", minHeight: 280 }}>
-          {invoiceFinalizeContractRow && (
-            <MDBox mb={1.5}>
-              <AgreementProvContractBasicInfoStrip
-                form={buildAgreementProvContractBasicInfoForm(invoiceFinalizeContractRow)}
-              />
-            </MDBox>
-          )}
-          {invoiceFinalizeBusy && (
-            <MDBox
-              sx={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 2,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                bgcolor: "rgba(255,255,255,0.75)",
-              }}
-            >
-              <CurrencyLoading size={56} />
-            </MDBox>
-          )}
-          {invoiceScheduleLoading ? (
-            <MDBox display="flex" justifyContent="center" py={6}>
-              <CurrencyLoading size={48} />
-            </MDBox>
-          ) : (
-            <MDBox>
-              <MDBox
-                mb={1.5}
-                display="flex"
-                alignItems="center"
-                flexWrap="wrap"
-                gap={1}
-                sx={{ width: "100%" }}
-              >
-                <ToggleButtonGroup
-                  exclusive
-                  size="small"
-                  value={invoiceFinalizeTab}
-                  onChange={(_, value) => {
-                    if (value) {
-                      setInvoiceFinalizeTab(value);
-                      setInvoiceFinalizeSelectedKeys(new Set());
-                      setAgreementProvCreateDialogOpen(false);
-                      setAgreementProvCreateRowData(null);
-                      setAgreementProvEditDialogOpen(false);
-                      setAgreementProvEditRowData(null);
-                    }
-                  }}
-                  disabled={invoiceFinalizeBusy}
-                >
-                  <ToggleButton value="pending">
-                    Pending ({invoiceFinalizePendingRows.length})
-                  </ToggleButton>
-                  <ToggleButton value="finalized">
-                    Finalized ({invoiceFinalizeFinalizedRows.length})
-                  </ToggleButton>
-                </ToggleButtonGroup>
-                {invoiceFinalizeTab === "pending" && (
-                  <MDButton
-                    variant="outlined"
-                    color="info"
-                    size="small"
-                    onClick={handleAddNewInvoiceDraft}
-                    disabled={
-                      invoiceFinalizeBusy || invoiceScheduleLoading || agreementProvCreateDialogOpen
-                    }
-                    sx={{ flexShrink: 0 }}
-                  >
-                    <Icon sx={{ mr: 0.5 }}>add</Icon>
-                    Add new invoice
-                  </MDButton>
-                )}
-                <MDBox sx={{ flex: "1 1 200px", minWidth: 180 }}>
-                  <MDInput
-                    placeholder="Search invoices..."
-                    value={invoiceFinalizeSearch}
-                    onChange={(e) => setInvoiceFinalizeSearch(e.target.value)}
-                    fullWidth
-                    size="small"
-                    disabled={invoiceFinalizeBusy}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <Icon sx={{ fontSize: "1.1rem", opacity: 0.6 }}>search</Icon>
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </MDBox>
-              </MDBox>
-              {invoiceFinalizeTab === "pending" ? (
-                <>
-                  {invoiceFinalizePendingRows.length === 0 ? (
-                    <MDTypography variant="body2" color="text">
-                      No pending invoice rows. Add a new invoice or view the Finalized tab.
-                    </MDTypography>
-                  ) : (
-                    <ContractInvoiceFinalizeGrid
-                      rows={invoiceFinalizePendingRows}
-                      selectedKeys={invoiceFinalizeSelectedKeys}
-                      onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
-                      busy={invoiceFinalizeBusy}
-                      formatDate={formatDateDDMMMYYYY}
-                      allowedSelectionKeys={invoiceFinalizeAllowedPendingKeys}
-                      blurNonSelectableRows
-                      hideSearchInput
-                      searchValue={invoiceFinalizeSearch}
-                      onSearchChange={setInvoiceFinalizeSearch}
-                    />
-                  )}
-                </>
-              ) : invoiceFinalizeFinalizedRows.length === 0 ? (
-                <MDTypography variant="body2" color="text">
-                  No finalized invoice rows yet.
-                </MDTypography>
-              ) : (
-                <ContractInvoiceFinalizeGrid
-                  rows={invoiceFinalizeFinalizedRows}
-                  selectedKeys={invoiceFinalizeSelectedKeys}
-                  onSelectedKeysChange={setInvoiceFinalizeSelectedKeys}
-                  busy={
-                    invoiceFinalizeBusy ||
-                    agreementProvCreateDialogOpen ||
-                    agreementProvEditDialogOpen
-                  }
-                  formatDate={formatDateDDMMMYYYY}
-                  undoSelectable
-                  showDuplicateAction
-                  onDuplicateRow={handleDuplicateFinalizedInvoice}
-                  clickableInvoiceNo
-                  onInvoiceNoClick={handleOpenAgreementProvEditFromFinalizeRow}
-                  hideSearchInput
-                  searchValue={invoiceFinalizeSearch}
-                  onSearchChange={setInvoiceFinalizeSearch}
-                />
-              )}
-            </MDBox>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <MDButton variant="outlined" color="secondary" onClick={handleCloseInvoiceFinalizeDialog}>
-            Close
-          </MDButton>
-          {invoiceFinalizeTab === "pending" && (
-            <MDButton
-              variant="gradient"
-              color="info"
-              onClick={handleFinalizeSelectedInvoices}
-              disabled={
-                invoiceFinalizeBusy ||
-                invoiceScheduleLoading ||
-                invoiceFinalizeSelectedKeys.size === 0
-              }
-            >
-              Finalize
-            </MDButton>
-          )}
-          {invoiceFinalizeTab === "finalized" && (
-            <MDButton
-              variant="gradient"
-              color="warning"
-              onClick={handleUndoFinalizedInvoices}
-              disabled={
-                invoiceFinalizeBusy ||
-                invoiceScheduleLoading ||
-                invoiceFinalizeSelectedKeys.size === 0
-              }
-            >
-              Undo
-            </MDButton>
-          )}
-        </DialogActions>
-      </Dialog>
-
-      <AgreementProvFinalizeOptionsDialog
-        open={finalizeOptionsOpen}
-        onClose={handleCloseFinalizeOptionsDialog}
-        onConfirm={handleConfirmFinalizeOptions}
-        busy={invoiceFinalizeBusy}
-        accountOptions={finalizeAccountOptions}
-        productOptions={finalizeProductOptions}
-        loadingOptions={finalizeOptionsLoading}
-        defaultItemWithCode={resolveClassLinkedItemWithCode(
-          classes,
-          invoiceFinalizeContractRow?.ClassId ?? invoiceFinalizeContractRow?.classId
-        )}
-      />
-
-      <AgreementProvInvoiceEditDialog
-        open={agreementProvCreateDialogOpen}
-        onClose={handleCloseAgreementProvCreateDialog}
-        rowData={agreementProvCreateRowData}
-        onSave={handleSaveAgreementProvCreateInvoice}
-        saving={invoiceFinalizeBusy}
-        createMode
-      />
-
-      <AgreementProvInvoiceEditDialog
-        open={agreementProvEditDialogOpen}
-        onClose={handleCloseAgreementProvEditDialog}
-        rowData={agreementProvEditRowData}
-        onSave={handleSaveAgreementProvEditInvoice}
-        saving={agreementProvEditSaving}
-      />
-
       <AgreementDetailsDialog
         open={detailsDialogOpen}
         onClose={() => setDetailsDialogOpen(false)}
@@ -11762,14 +11866,16 @@ export default function Contracts() {
             >
               <Icon>picture_as_pdf</Icon>&nbsp;View as PDF
             </MDButton>
-            <MDButton
-              onClick={handleCloneContractFromDetails}
-              color="success"
-              variant="gradient"
-              disabled={!selectedContractDetails || !canCreateCurrentMenu()}
-            >
-              <Icon>content_copy</Icon>&nbsp;Clone Contract
-            </MDButton>
+            {canCreateAgreements && !isAgreementsReadOnlyUser ? (
+              <MDButton
+                onClick={handleCloneContractFromDetails}
+                color="success"
+                variant="gradient"
+                disabled={!selectedContractDetails}
+              >
+                <Icon>content_copy</Icon>&nbsp;Clone Contract
+              </MDButton>
+            ) : null}
             <MDButton onClick={() => setDetailsDialogOpen(false)} color="secondary">
               Close
             </MDButton>

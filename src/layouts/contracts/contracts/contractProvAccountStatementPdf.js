@@ -5,6 +5,7 @@ import {
   createAgreementProvPdfScaleHelpers,
   loadAgreementProvPdfMargins,
 } from "utils/agreementProvPdfMargins";
+import { fetchTenantForContractPdf, formatTenantDisplayName } from "./contractAgreementPdf";
 
 const PDF_FONT_TITLE = 18;
 const PDF_FONT_BODY = 10;
@@ -137,22 +138,6 @@ function resolveSingleLinePdfFontSize(
   return minSize;
 }
 
-function formatCustomerDisplay(contractRow, tenants = []) {
-  const tenantNo = String(
-    pickRowField(contractRow, "TenantNo", "tenantNo") ||
-      pickRowField(contractRow, "PrefixNo", "prefixNo") ||
-      ""
-  ).trim();
-  let ownerName = String(pickRowField(contractRow, "OwnerName", "ownerName") || "").trim();
-  if (!ownerName && tenantNo) {
-    const tenant = (tenants || []).find(
-      (t) => String(t.tenantNo || t.TenantNo || "").trim() === tenantNo
-    );
-    ownerName = String(tenant?.ownerName || tenant?.OwnerName || "").trim();
-  }
-  return [tenantNo, ownerName].filter(Boolean).join(" ").trim() || "—";
-}
-
 function formatContractDisplay(contractRow) {
   const contractNo = String(pickRowField(contractRow, "ContractNo", "contractNo") || "").trim();
   const contractStartDate = pickRowField(contractRow, "ContractStartDate", "contractStartDate");
@@ -240,11 +225,14 @@ export async function appendProvisionalAccountStatementPdfPage(
   doc,
   contractRow,
   scheduleRows,
-  { marginsInParam = null, tenants = [] } = {}
+  { marginsInParam = null, tenants = [], tenant = null } = {}
 ) {
   if (!doc || !contractRow) return;
 
   doc.addPage();
+
+  const latestTenant = tenant ?? (await fetchTenantForContractPdf(contractRow, tenants));
+  const tenantDisplay = formatTenantDisplayName(contractRow, latestTenant);
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -264,7 +252,6 @@ export async function appendProvisionalAccountStatementPdfPage(
   const contentWidth = contentRight - marginLeft;
   const lineHeight = PDF_LINE_HEIGHT_MM;
   const bodyFont = PDF_FONT_BODY;
-  const customerDisplay = formatCustomerDisplay(contractRow, tenants);
   const contractDisplay = formatContractDisplay(contractRow);
   const tableRows = buildStatementTableRows(scheduleRows);
   const columns = resolveStatementTableColumns(contentWidth, marginLeft);
@@ -315,7 +302,7 @@ export async function appendProvisionalAccountStatementPdfPage(
   const LOGO_WIDTH_MM = 18;
   const LOGO_GAP_MM = 3;
   const textStartX = marginLeft + LOGO_WIDTH_MM + LOGO_GAP_MM;
-  const customerValueX = textStartX;
+  const tenantValueX = textStartX;
 
   await loadPafLogoIntoPdf(doc, sx(marginLeft), sy(marginTop), sc(LOGO_WIDTH_MM));
 
@@ -334,11 +321,11 @@ export async function appendProvisionalAccountStatementPdfPage(
 
   let yPos = headerY + lineHeight + 3;
 
-  const drawUnderlinedCustomerRow = (label, value, options = {}) => {
+  const drawUnderlinedTenantRow = (label, value, options = {}) => {
     const { singleLine = false, shrinkFont = false, minFontSize = 6 } = options;
     const rowTop = yPos;
     const labelText = `${label} :`;
-    const maxValueWidth = contentRight - customerValueX - 1;
+    const maxValueWidth = contentRight - tenantValueX - 1;
     const valueText = String(value || "—");
     const rowBandHeight = lineHeight;
 
@@ -366,9 +353,9 @@ export async function appendProvisionalAccountStatementPdfPage(
     if (singleLine) {
       const valueHeight = doc.getTextDimensions(valueText).h;
       const valueBaselineY = getPdfRowCenteredBaselineY(rowTop, rowBandHeight, valueHeight);
-      doc.text(valueText, sx(customerValueX), sy(valueBaselineY));
+      doc.text(valueText, sx(tenantValueX), sy(valueBaselineY));
       const underlineY = getPdfValueUnderlineY(valueBaselineY, valueHeight, sc);
-      drawPdfLine(customerValueX, underlineY, contentRight, underlineY);
+      drawPdfLine(tenantValueX, underlineY, contentRight, underlineY);
       yPos = underlineY + 1.75;
       return;
     }
@@ -383,17 +370,17 @@ export async function appendProvisionalAccountStatementPdfPage(
         lineHeight,
         lineHeightDim
       );
-      doc.text(line, sx(customerValueX), sy(lineBaselineY));
+      doc.text(line, sx(tenantValueX), sy(lineBaselineY));
       lastLineBaselineY = lineBaselineY;
       lastLineHeight = lineHeightDim;
     });
     const underlineY = getPdfValueUnderlineY(lastLineBaselineY, lastLineHeight, sc);
-    drawPdfLine(customerValueX, underlineY, contentRight, underlineY);
+    drawPdfLine(tenantValueX, underlineY, contentRight, underlineY);
     yPos = underlineY + 1.75;
   };
 
-  drawUnderlinedCustomerRow("Customer", customerDisplay, { singleLine: true });
-  drawUnderlinedCustomerRow("Contract", contractDisplay, { singleLine: true, shrinkFont: true });
+  drawUnderlinedTenantRow("Tenant", tenantDisplay, { singleLine: true });
+  drawUnderlinedTenantRow("Contract", contractDisplay, { singleLine: true, shrinkFont: true });
 
   yPos += lineHeight;
 

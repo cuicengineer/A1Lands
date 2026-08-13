@@ -867,8 +867,8 @@ function getLoggedInUserLevelId() {
 /** Superuser, AHQ level, or row/category supervisor may pick any RAC / Base on bank accounts. */
 function canSeeAllBankAccountRacBaseOptions() {
   if (isSuperuserUser()) return true;
-  if (Number(getLoggedInUserLevelId()) === 1) return true;
-  return loggedInUserHasSupervisorCategory();
+  if (Number(getLoggedInUserLevelId()) === 1 && loggedInUserHasSupervisorCategory()) return true;
+  return false;
 }
 
 /** KPI Overview: superuser, or AHQ level with supervisor category, sees all RAC / Base data. */

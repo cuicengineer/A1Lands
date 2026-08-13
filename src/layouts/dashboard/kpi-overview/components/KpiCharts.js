@@ -543,8 +543,6 @@ const DONUT_TOOLTIP_INTERACTION = {
 
 const KPI_DUAL_RING_CUTOUT = "46%";
 const KPI_DUAL_RING_DATASET_WEIGHTS = { inner: 2.2, outer: 0.85 };
-const KPI_AHQ_RAC_BASE_DONUT_LABEL_FONT_SIZE = 29;
-const KPI_AHQ_RAC_BASE_DONUT_LABEL_MIN_FONT_SIZE = 12;
 
 function buildKpiDualRingDatasets(values, colors, darkMode) {
   const outerRingColors = colors.map((hex) => `${hex}80`);
@@ -1369,10 +1367,6 @@ function KpiCharts({
           outerLegendRing: true,
           colorByShareId: colorMaps.ahqRacBase,
           shareFallbackColor: colorMaps.shareFallbackColor,
-          labelPluginOverrides: {
-            fontSize: KPI_AHQ_RAC_BASE_DONUT_LABEL_FONT_SIZE,
-            minFontSize: KPI_AHQ_RAC_BASE_DONUT_LABEL_MIN_FONT_SIZE,
-          },
         }
       ),
     [cards, darkMode, colorMaps]

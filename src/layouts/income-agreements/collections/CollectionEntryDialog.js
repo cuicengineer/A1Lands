@@ -616,13 +616,7 @@ export default function CollectionEntryDialog({
         </MenuItem>
       );
     });
-  }, [
-    isCreateMode,
-    invoices,
-    selectedAgreement,
-    draftParent.invoiceKey,
-    collectedInvoiceKeys,
-  ]);
+  }, [isCreateMode, invoices, selectedAgreement, draftParent.invoiceKey, collectedInvoiceKeys]);
 
   const tenantOptions = useMemo(() => {
     if (!isCreateMode) return [];

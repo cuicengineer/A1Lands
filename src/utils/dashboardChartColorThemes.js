@@ -1,6 +1,6 @@
 /** Dashboard KPI chart color combinations (soft tones, readable bar labels). */
 
-export const DASHBOARD_COLOR_COMBINATION_IDS = [1, 2, 3, 4];
+export const DASHBOARD_COLOR_COMBINATION_IDS = [1, 2, 3, 4, 5];
 
 export function normalizeDashboardColorCombination(value) {
   const n = Number(value);
@@ -104,11 +104,37 @@ const COMBINATION_4 = {
   insideLabelShadow: "rgba(255, 255, 255, 0.9)",
 };
 
+/** Color Scheme - Graphs.xlsx palette (muted slate, sage, blue, gold, peach, lavender, teal, rose). */
+const COMBINATION_5 = {
+  id: 5,
+  label: "Combination 5",
+  description: "Graph palette",
+  preview: ["#647887", "#8FAF8A", "#7DA0C4", "#D4BC72"],
+  series: ["#647887", "#8FAF8A", "#7DA0C4", "#D4BC72", "#D4A078", "#A894C4"],
+  fiscalExtra: ["#6BB0B0", "#C87E74"],
+  ahqRacBase: { ahq: "#4A6670", rac: "#5A8888", base: "#6BB0B0" },
+  share: ["#647887", "#8FAF8A", "#4A6670", "#7DA0C4", "#6BB0B0"],
+  barPrimary: "#647887",
+  barSecondary: "#8FAF8A",
+  executivePrimary: "#4A6670",
+  executiveSecondary: "#6BB0B0",
+  incomeDue: "#D4BC72",
+  incomeTurnoverIncome: "#7DA0C4",
+  outstandingTotal: "#9AAAB8",
+  lineCollection: "#6BB0B0",
+  lineCollectionPoint: "#D4A078",
+  nestedGovt: "#C8D2DC",
+  nestedPaf: "#7DA0C4",
+  insideLabelColor: "#1f2937",
+  insideLabelShadow: "rgba(255, 255, 255, 0.9)",
+};
+
 export const DASHBOARD_COLOR_COMBINATIONS = {
   1: COMBINATION_1,
   2: COMBINATION_2,
   3: COMBINATION_3,
   4: COMBINATION_4,
+  5: COMBINATION_5,
 };
 
 export function getDashboardChartColorCombinationMeta(combination) {

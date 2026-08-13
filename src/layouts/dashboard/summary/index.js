@@ -620,7 +620,9 @@ function SummaryOfA1Activities() {
                       label={item.label}
                       value={valueNode}
                       trend={`Worth: ${Number(item.data?.amount || 0).toFixed(2)} Mil`}
-                      variant={itemIndex === 0 || item.variant === "primary" ? "primary" : "default"}
+                      variant={
+                        itemIndex === 0 || item.variant === "primary" ? "primary" : "default"
+                      }
                       icon={item.icon}
                     />
                   </Grid>

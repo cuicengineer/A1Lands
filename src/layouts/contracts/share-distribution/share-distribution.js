@@ -37,6 +37,7 @@ import {
   buildShareDistributionGridTotalRow,
   filterShareDistributionRowsByWorkbook,
   getShareDistributionContractId,
+  getShareDistributionCollectionEntryId,
   getShareDistributionRowKey,
   isShareDistributionWorkbookAssigned,
   SHARE_DIST_DEFAULT_GROUP_BY_COLUMNS,
@@ -433,36 +434,38 @@ export default function ShareDistribution() {
       return;
     }
 
-    // Preserve selection order; one workbook assignment per selected contract only.
-    const contractIds = [];
-    const seenContractIds = new Set();
+    // Preserve selection order; one workbook assignment per selected collection entry only.
+    const collectionEntryIds = [];
+    const seenEntryIds = new Set();
     eligibleRows.forEach((row) => {
-      const contractId = getShareDistributionContractId(row);
-      if (contractId == null || seenContractIds.has(contractId)) return;
-      seenContractIds.add(contractId);
-      contractIds.push(contractId);
+      const entryId = getShareDistributionCollectionEntryId(row);
+      if (entryId == null || seenEntryIds.has(entryId)) return;
+      seenEntryIds.add(entryId);
+      collectionEntryIds.push(entryId);
     });
 
-    if (contractIds.length === 0) {
-      setWorkbookError("Selected rows do not have valid contract IDs.");
+    if (collectionEntryIds.length === 0) {
+      setWorkbookError("Selected rows do not have valid collection entry IDs.");
       return;
     }
 
     setWorkbookError("");
     setCreatingWorkbook(true);
     try {
-      const response = await contractApi.createShareDistributionWorkbook(contractIds);
+      const response = await contractApi.createShareDistributionWorkbook({ collectionEntryIds });
       const result = response?.data && !response?.workbookNo ? response.data : response;
       const workbookNumber = result?.workbookNo || result?.WorkbookNo || "";
-      const assignedContractIds = new Set(
-        (result?.contractIds || result?.ContractIds || contractIds).map((id) => Number(id))
+      const assignedEntryIds = new Set(
+        (result?.collectionEntryIds || result?.CollectionEntryIds || collectionEntryIds).map((id) =>
+          Number(id)
+        )
       );
 
       setLastCreatedWorkbook({
         number: workbookNumber,
-        rowCount: assignedContractIds.size || contractIds.length,
+        rowCount: assignedEntryIds.size || collectionEntryIds.length,
         caIds: eligibleRows
-          .filter((row) => assignedContractIds.has(getShareDistributionContractId(row)))
+          .filter((row) => assignedEntryIds.has(getShareDistributionCollectionEntryId(row)))
           .map((row) => row.caId)
           .filter(Boolean),
       });

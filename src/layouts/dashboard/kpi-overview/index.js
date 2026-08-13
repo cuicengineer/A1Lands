@@ -1287,10 +1287,7 @@ function KpiOverview({ embedded = false, onShellProps }) {
         groupedAssetCards,
         agreementContractRowsForCharts,
         contractMetaById,
-        {
-          activeOnly: !useAgreementAsOfForCharts,
-          ahqApprovedOnly: true,
-        }
+        { activeOnly: !useAgreementAsOfForCharts }
       ),
     [groupedAssetCards, agreementContractRowsForCharts, contractMetaById, useAgreementAsOfForCharts]
   );
@@ -1298,7 +1295,6 @@ function KpiOverview({ embedded = false, onShellProps }) {
     () =>
       applyContractMilToAssetCards(assetCards, agreementContractRowsForCharts, contractMetaById, {
         activeOnly: !useAgreementAsOfForCharts,
-        ahqApprovedOnly: true,
       }),
     [assetCards, agreementContractRowsForCharts, contractMetaById, useAgreementAsOfForCharts]
   );

@@ -1,3 +1,4 @@
+import api from "services/api.service";
 import contractApi from "services/api.contract.service";
 import { formatDateDDMMMYYYY } from "utils/dateFormatter";
 
@@ -66,39 +67,106 @@ function formatRiseIntervalLabel(months) {
   return String(months);
 }
 
+function unwrapTenantRows(response) {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.Data)) return response.Data;
+  if (Array.isArray(response?.items)) return response.items;
+  if (Array.isArray(response?.Items)) return response.Items;
+  return [];
+}
+
+/**
+ * The contracts list decorates TenantNo with the tenant prefix and owner name
+ * ("T0001 Mr John Doe"), so only the leading tenant number can be matched against
+ * the tenant master.
+ */
+function normalizeTenantNoKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^T\s*-?\s*\d+/i);
+  const token = match ? match[0] : raw.split(/\s+/)[0];
+  return token.replace(/[\s-]/g, "").toUpperCase();
+}
+
+function getContractTenantNoKey(contractRow) {
+  return normalizeTenantNoKey(pickField(contractRow, "tenantNo", "TenantNo"));
+}
+
 function findTenant(contractRow, tenants = []) {
-  const tenantNo = String(pickField(contractRow, "tenantNo", "TenantNo") || "").trim();
-  if (!tenantNo) return null;
-  return (tenants || []).find(
-    (tenant) => String(tenant?.tenantNo || tenant?.TenantNo || "").trim() === tenantNo
+  const tenantNoKey = getContractTenantNoKey(contractRow);
+  if (!tenantNoKey) return null;
+  return (
+    (tenants || []).find(
+      (tenant) => normalizeTenantNoKey(tenant?.tenantNo || tenant?.TenantNo) === tenantNoKey
+    ) || null
   );
 }
 
-function formatTenantDisplayName(contractRow, tenant) {
-  const tenantNo = String(pickField(contractRow, "tenantNo", "TenantNo") || "").trim();
+/**
+ * Tenant Particulars must show the tenant master as it stands at print time, so the
+ * record is re-fetched instead of relying on whatever list the page happened to cache.
+ */
+export async function fetchTenantForContractPdf(contractRow, fallbackTenants = []) {
+  if (!getContractTenantNoKey(contractRow)) return null;
+  try {
+    const latest = findTenant(contractRow, unwrapTenantRows(await api.list("tenant")));
+    if (latest) return latest;
+  } catch (error) {
+    console.error("Error fetching latest tenant for contract PDF:", error);
+  }
+  return findTenant(contractRow, fallbackTenants);
+}
+
+export function formatTenantDisplayName(contractRow, tenant) {
+  const rawTenantNo = String(pickField(contractRow, "tenantNo", "TenantNo") || "").trim();
+  const tenantNo = normalizeTenantNoKey(rawTenantNo) || rawTenantNo;
   const prefix = String(tenant?.prefix || tenant?.Prefix || "").trim();
   const ownerName = String(
     tenant?.ownerName || tenant?.OwnerName || pickField(contractRow, "ownerName", "OwnerName") || ""
   ).trim();
   const displayName = [prefix, ownerName].filter(Boolean).join(" ").trim() || ownerName;
   if (tenantNo && displayName) return `${tenantNo}- ${displayName}`;
-  return tenantNo || displayName || "—";
+  // Without a tenant record the decorated TenantNo is the only name we have.
+  return rawTenantNo || displayName || "—";
 }
 
 function formatTenantAddress(contractRow, tenant) {
-  return (
-    String(
-      tenant?.address || tenant?.Address || pickField(contractRow, "address", "Address") || ""
-    ).trim() || "—"
-  );
+  const cityAndProvince = [tenant?.city || tenant?.City, tenant?.province || tenant?.Province]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  const address = String(
+    tenant?.address || tenant?.Address || pickField(contractRow, "address", "Address") || ""
+  ).trim();
+  return [address, cityAndProvince].filter(Boolean).join(", ") || "—";
 }
 
-function formatTenantContact(tenant) {
-  const parts = [tenant?.telephoneNo, tenant?.TelephoneNo, tenant?.cellNo, tenant?.CellNo]
+function formatTenantContact(contractRow, tenant) {
+  const parts = [
+    tenant?.telephoneNo,
+    tenant?.TelephoneNo,
+    tenant?.cellNo,
+    tenant?.CellNo,
+    pickField(contractRow, "telephoneNo", "TelephoneNo"),
+    pickField(contractRow, "cellNo", "CellNo"),
+  ]
     .map((value) => String(value ?? "").trim())
     .filter(Boolean);
   const unique = [...new Set(parts)];
   return unique.length > 0 ? unique.join(", ") : "—";
+}
+
+function formatTenantBusiness(contractRow, tenant) {
+  return (
+    String(
+      pickField(contractRow, "natureOfBusiness", "NatureOfBusiness") ||
+        pickField(contractRow, "businessName", "BusinessName") ||
+        tenant?.businessName ||
+        tenant?.BusinessName ||
+        ""
+    ).trim() || "—"
+  );
 }
 
 function resolveUnitName(contractRow) {
@@ -284,14 +352,14 @@ function createPdfDrawer(doc, pageWidth, margin) {
 export function renderContractAgreementPdfFirstPage(
   doc,
   contractRow,
-  { riseTerms = [], tenants = [], annotations = [] } = {}
+  { riseTerms = [], tenants = [], annotations = [], tenant: latestTenant = null } = {}
 ) {
   if (!doc || !contractRow) return;
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
   const contentWidth = pageWidth - 2 * margin;
-  const tenant = findTenant(contractRow, tenants);
+  const tenant = latestTenant || findTenant(contractRow, tenants);
   const unitName = resolveUnitName(contractRow);
   const riseTermType = String(pickField(contractRow, "riseTermType", "RiseTermType") || "").trim();
   const variableCells = buildVariableIntervalCells(riseTerms);
@@ -362,11 +430,11 @@ export function renderContractAgreementPdfFirstPage(
   yPos = drawer.drawTwoColumnLabelValue(
     {
       label: "Contact No",
-      value: formatTenantContact(tenant),
+      value: formatTenantContact(contractRow, tenant),
     },
     {
       label: "Business",
-      value: pickField(contractRow, "natureOfBusiness", "NatureOfBusiness") || "—",
+      value: formatTenantBusiness(contractRow, tenant),
     },
     yPos,
     layout

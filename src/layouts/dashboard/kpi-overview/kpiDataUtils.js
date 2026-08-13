@@ -643,6 +643,31 @@ function readShareMilFromRow(row, shareKey) {
   return readNumber(row, MIL_FIELDS[shareKey]) || 0;
 }
 
+/** Canonical accumulator key → API field name understood by MIL_FIELDS / readShareMilFromRow. */
+const CANONICAL_MIL_KEY_TO_SHARE_FIELD = {
+  incomePA: "IncomePA",
+  govt: "GovtShare",
+  paf: "PAFShare",
+  ahq: "AHQShare",
+  rac: "RACShare",
+  base: "BaseShare",
+};
+
+/**
+ * Callers pass either API rows (GovtShare, PAFShare, …) or aggregation accumulators keyed by
+ * canonical names (govt, paf, …). Expose both shapes so share reads never silently resolve to 0.
+ */
+function withShareFieldAliases(mil) {
+  const row = { ...mil };
+  for (const [canonicalKey, fieldName] of Object.entries(CANONICAL_MIL_KEY_TO_SHARE_FIELD)) {
+    const existing = row[fieldName];
+    if (existing !== undefined && existing !== null && existing !== "") continue;
+    const value = coerceChartDataValue(mil[canonicalKey]);
+    if (value != null) row[fieldName] = value;
+  }
+  return row;
+}
+
 /**
  * Enforce dashboard share hierarchy on card/chart totals:
  *   Income (Total) = Govt + PAF
@@ -653,15 +678,17 @@ export function normalizeBalancedShareMil(mil) {
     return { incomePA: 0, govt: 0, paf: 0, ahq: 0, rac: 0, base: 0 };
   }
 
-  let govt = readNumber(mil, MIL_FIELDS.govt) || 0;
-  let paf = readNumber(mil, MIL_FIELDS.paf) || 0;
-  let ahq = readShareMilFromRow(mil, "ahq");
-  let rac = readShareMilFromRow(mil, "rac");
-  let base = readShareMilFromRow(mil, "base");
+  const row = withShareFieldAliases(mil);
+
+  let govt = readNumber(row, MIL_FIELDS.govt) || 0;
+  let paf = readNumber(row, MIL_FIELDS.paf) || 0;
+  let ahq = readShareMilFromRow(row, "ahq");
+  let rac = readShareMilFromRow(row, "rac");
+  let base = readShareMilFromRow(row, "base");
   let incomePA =
-    readNumber(mil, MIL_FIELDS.incomePAShare) ||
-    readNumber(mil, MIL_FIELDS.incomePAProperty) ||
-    readNumber(mil, ["incomePA"]) ||
+    readNumber(row, MIL_FIELDS.incomePAShare) ||
+    readNumber(row, MIL_FIELDS.incomePAProperty) ||
+    readNumber(row, ["incomePA"]) ||
     0;
 
   if (govt + paf > 0) {
@@ -2256,6 +2283,16 @@ function readFirstDefinedOwn(obj, keys) {
   return undefined;
 }
 
+/** Share columns sp_GetActiveContractsAsOfDate already expresses in millions. */
+const AS_OF_MILLION_SHARE_FIELDS = [
+  ["IncomePA_Million", "incomePA_Million"],
+  ["GovtShare_Million", "govtShare_Million"],
+  ["PAFShare_Million", "pafShare_Million"],
+  ["AHQShare_Million", "ahqShare_Million"],
+  ["RACShare_Million", "racShare_Million"],
+  ["BaseShare_Million", "baseShare_Million"],
+];
+
 function assignShareField(next, asOfRow, baseRow, fieldKeys, ...propNames) {
   const asOfValue = readFirstDefinedOwn(asOfRow, fieldKeys);
   if (asOfValue === undefined) return;
@@ -2306,6 +2343,29 @@ export function mergeAgreementCatalogWithAsOfOverrides(catalogRows, asOfRows) {
     assignShareField(next, asOfRow, row, MIL_FIELDS.ahq, "AHQShare", "ahqShare");
     assignShareField(next, asOfRow, row, MIL_FIELDS.rac, "RACShare", "racShare");
     assignShareField(next, asOfRow, row, MIL_FIELDS.base, "BaseShare", "baseShare");
+
+    // The as-of SP converts every share to millions itself; the catalog has no such
+    // columns, so carry them across rather than re-deriving them from the raw amounts.
+    for (const [pascal, camel] of AS_OF_MILLION_SHARE_FIELDS) {
+      const converted = readNumber(asOfRow, [pascal, camel]);
+      if (converted != null) {
+        next[pascal] = converted;
+        next[camel] = converted;
+      }
+    }
+
+    // Contract state / viability are computed by the as-of SP only; the catalog has no such
+    // columns, so downstream active-as-of checks need them carried across.
+    const contractState = readString(asOfRow, ["ContractState", "contractState"]);
+    if (contractState) {
+      next.ContractState = contractState;
+      next.contractState = contractState;
+    }
+    const viability = readString(asOfRow, ["Viability", "viability"]);
+    if (viability) {
+      next.Viability = viability;
+      next.viability = viability;
+    }
 
     return next;
   });
@@ -3304,29 +3364,75 @@ function readContractShareMil(row, fieldKeys) {
   return asOfAmountToMillions(readNumber(row, fieldKeys));
 }
 
+/**
+ * Share amount in millions, preferring the `*_Million` column that
+ * sp_GetActiveContractsAsOfDate already converted. Only rows from an older backend fall
+ * back to asOfAmountToMillions, whose per-value magnitude test can pick different units
+ * for the Govt/PAF/AHQ/RAC/Base columns of one contract and unbalance the split.
+ */
+function readAgreementShareMil(row, millionKeys, rawKeys) {
+  const converted = readNumber(row, millionKeys);
+  if (converted != null) return coerceChartDataValue(converted) ?? 0;
+  return asOfAmountToMillions(readNumber(row, rawKeys));
+}
+
 /** Govt Share (Mil) — matches /contracts grid GovtShare column. */
 function readAgreementGovtShareMil(row) {
-  return asOfAmountToMillions(readNumber(row, ["GovtShare", "govtShare"]));
+  return readAgreementShareMil(
+    row,
+    ["GovtShare_Million", "govtShare_Million"],
+    ["GovtShare", "govtShare"]
+  );
 }
 
 /** PAF Share (Mil) — matches /contracts grid PAFShare column. */
 function readAgreementPafShareMil(row) {
-  return asOfAmountToMillions(readNumber(row, ["PAFShare", "pafShare"]));
+  return readAgreementShareMil(
+    row,
+    ["PAFShare_Million", "pafShare_Million"],
+    ["PAFShare", "pafShare"]
+  );
 }
 
 /** AHQ Share (Mil) — matches /contracts grid AHQShare column (as-of calculated). */
 function readAgreementAhqShareMil(row) {
-  return asOfAmountToMillions(readNumber(row, ["AHQShare", "ahqShare"]));
+  return readAgreementShareMil(
+    row,
+    ["AHQShare_Million", "ahqShare_Million"],
+    ["AHQShare", "ahqShare"]
+  );
 }
 
 /** RAC Share (Mil) — matches /contracts grid RACShare column (as-of calculated). */
 function readAgreementRacShareMil(row) {
-  return asOfAmountToMillions(readNumber(row, ["RACShare", "racShare"]));
+  return readAgreementShareMil(
+    row,
+    ["RACShare_Million", "racShare_Million"],
+    ["RACShare", "racShare"]
+  );
 }
 
 /** Base Share (Mil) — matches /contracts grid BaseShare column (as-of calculated). */
 function readAgreementBaseShareMil(row) {
-  return asOfAmountToMillions(readNumber(row, ["BaseShare", "baseShare"]));
+  return readAgreementShareMil(
+    row,
+    ["BaseShare_Million", "baseShare_Million"],
+    ["BaseShare", "baseShare"]
+  );
+}
+
+/**
+ * Matches /contracts grid VALID toggle: ContractState Valid/Active as of the applied date.
+ * Rows without a state (catalog rows when no as-of payload merged) are kept.
+ */
+function isValidStateAgreementRow(row) {
+  const st = String(
+    row?.ContractState ?? row?.contractState ?? row?.ContractStatus ?? row?.contractStatus ?? ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!st) return true;
+  return st === "valid" || st === "active";
 }
 
 /** Matches /contracts grid AHQ approval filter (APPROVED toggle). */
@@ -3369,7 +3475,7 @@ export function buildMilFromContractRows(
   contractRows,
   classIds,
   contractMetaById = new Map(),
-  { activeOnly = true, ahqApprovedOnly = false } = {}
+  { activeOnly = true, ahqApprovedOnly = false, validStateOnly = false } = {}
 ) {
   const out = {
     incomePA: 0,
@@ -3384,6 +3490,7 @@ export function buildMilFromContractRows(
 
   for (const row of contractRows || []) {
     if (activeOnly && !isActiveCatalogContractRow(row)) continue;
+    if (validStateOnly && !isValidStateAgreementRow(row)) continue;
     if (ahqApprovedOnly && !isAhqApprovedAgreementRow(row)) continue;
 
     const classId = resolveAsOfContractClassId(row, contractMetaById);
@@ -3456,7 +3563,7 @@ export function applyContractMilToAssetCards(
   cards,
   contractRows,
   contractMetaById = new Map(),
-  { activeOnly = true, ahqApprovedOnly = false } = {}
+  { activeOnly = true, ahqApprovedOnly = false, validStateOnly = false } = {}
 ) {
   return (cards || []).map((card) => {
     if (!card || Number(card.count) <= 0) return card;
@@ -3471,15 +3578,12 @@ export function applyContractMilToAssetCards(
       }
     }
 
-    const mil = buildMilFromContractRows(contractRows, classIds, contractMetaById, {
-      activeOnly,
-      ahqApprovedOnly,
-    });
     return {
       ...card,
-      mil: normalizeBalancedShareMil({
-        ...mil,
-        incomePA: (mil.govt || 0) + (mil.paf || 0),
+      mil: buildMilFromContractRows(contractRows, classIds, contractMetaById, {
+        activeOnly,
+        ahqApprovedOnly,
+        validStateOnly,
       }),
     };
   });

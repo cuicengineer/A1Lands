@@ -55,6 +55,7 @@ export function normalizePurchaseInvoiceRow(row) {
     id: row?.id ?? row?.Id,
     date: toDateInputValue(pickField(row, "date", "Date")),
     piNo: pickField(row, "piNo", "PiNo"),
+    controlAccountCoaId: row?.controlAccountCoaId ?? row?.ControlAccountCoaId ?? "",
     description: pickField(row, "description", "Description"),
     grandTotal:
       Number(pickField(row, "grandTotal", "GrandTotal")) || computePurchaseInvoiceGrandTotal(lines),
@@ -67,6 +68,10 @@ export function buildPurchaseInvoiceApiPayload(form, grandTotal) {
     Date: form.date || null,
     PiNo: String(form.piNo || "").trim() || null,
     Description: form.description || null,
+    ControlAccountCoaId:
+      form.controlAccountCoaId === "" || form.controlAccountCoaId == null
+        ? null
+        : Number(form.controlAccountCoaId),
     GrandTotal: grandTotal,
     LinesJson: JSON.stringify(form.lines || []),
   };

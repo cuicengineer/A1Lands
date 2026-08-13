@@ -858,6 +858,33 @@ RevenueRatesAreaCell.propTypes = {
   row: PropTypes.shape({ original: PropTypes.object }),
 };
 
+const RevenueRatesPropertyAddressCell = React.memo(function RevenueRatesPropertyAddressCell({
+  row,
+}) {
+  const propId = row?.original?.propertyId ?? row?.original?.PropertyId ?? null;
+  const isPropertyDash = propId === 0 || propId === null || propId === undefined || propId === "";
+  if (isPropertyDash) return "-";
+
+  const fromRow = String(row?.original?.propertyAddressFull ?? "").trim();
+  const property = revenueRatesGridDataRef.current.rentalPropertyById.get(Number(propId));
+  const fullAddress = fromRow || getPropertyAddressFull(property);
+  if (!fullAddress) return "-";
+
+  const { display, truncated } = truncatePropertyAddress(fullAddress);
+  if (truncated) {
+    return (
+      <span title={fullAddress} style={{ cursor: "help" }}>
+        {display}
+      </span>
+    );
+  }
+  return display;
+});
+
+RevenueRatesPropertyAddressCell.propTypes = {
+  row: PropTypes.shape({ original: PropTypes.object }),
+};
+
 const RevenueRatesApplicableDateCell = React.memo(function RevenueRatesApplicableDateCell({
   value,
   row,
@@ -2591,6 +2618,17 @@ export default function RevenueRates() {
       const rowData = row || {};
       return rowData.propertyName || value || "";
     }
+    if (colId === "propertyaddress" || accessor === "propertyaddress") {
+      const rowData = row || {};
+      return (
+        rowData.propertyAddressFull ||
+        rowData.propertyAddress ||
+        rowData.location ||
+        rowData.Location ||
+        value ||
+        ""
+      );
+    }
     return value;
   }, []);
 
@@ -2701,6 +2739,14 @@ export default function RevenueRates() {
         accessor: "deactiveDateDisplay",
         align: "left",
       },
+      {
+        id: "propertyAddress",
+        Header: "Property Address",
+        accessor: "propertyAddress",
+        align: "left",
+        disableSortBy: true,
+        Cell: RevenueRatesPropertyAddressCell,
+      },
     ],
     []
   );
@@ -2768,12 +2814,18 @@ export default function RevenueRates() {
           ? parsedRate.toLocaleString()
           : "";
       const fiscalRaw = row.fiscal ?? row.Fiscal ?? "";
+      const propertyAddressFull = isPropertyDash
+        ? ""
+        : String(row.location ?? row.Location ?? getPropertyAddressFull(prop)).trim();
+      const { display: propertyAddressDisplay } = truncatePropertyAddress(propertyAddressFull);
 
       return {
         ...row,
         id: normalizedId,
         propertyId,
         propertyName,
+        propertyAddress: propertyAddressDisplay,
+        propertyAddressFull,
         rate: rateRaw,
         rateDisplay,
         applicableDate: applicableDateRaw,

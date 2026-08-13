@@ -669,12 +669,12 @@ function FiscalKpiGrid({
           minBarHeight: 34,
           fontSize: 12,
           fontWeight: 700,
-          color: KPI_BAR_INSIDE_LABEL_COLOR,
+          color: chartColors.insideLabelColor,
           showValue: true,
           valueFontSize: 11,
           valueMinBarHeight: 38,
           valueTopInset: 4,
-          valueColor: KPI_BAR_INSIDE_LABEL_COLOR,
+          valueColor: chartColors.insideLabelColor,
         },
         tooltip: {
           mode: "index",
@@ -726,6 +726,7 @@ function FiscalKpiGrid({
     };
   }, [
     chartZoomEnabled,
+    chartColors,
     darkMode,
     fiscalChartContext.mode,
     fiscalTableChartData,
@@ -744,6 +745,8 @@ function FiscalKpiGrid({
       tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
       fontSize: isOverview ? 13 : 13,
       labelPlacement: isOverview ? "end" : "inside",
+      insideLabelColor: chartColors.insideLabelColor,
+      insideTextShadowColor: chartColors.insideLabelShadow,
     });
 
     return {
@@ -764,7 +767,13 @@ function FiscalKpiGrid({
         },
       },
     };
-  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue, fiscalChartContext.mode]);
+  }, [
+    fiscalTableChartOptions,
+    darkMode,
+    fiscalCrosshairFormatValue,
+    fiscalChartContext.mode,
+    chartColors,
+  ]);
 
   const fiscalZoomedChartOptions = useMemo(() => {
     const isOverview = fiscalChartContext.mode === "overview";
@@ -792,6 +801,8 @@ function FiscalKpiGrid({
         tooltipCallbacks: fiscalTableChartOptions.plugins.tooltip.callbacks,
         fontSize: 15,
         labelPlacement: isOverview ? "end" : "inside",
+        insideLabelColor: chartColors.insideLabelColor,
+        insideTextShadowColor: chartColors.insideLabelShadow,
       }
     );
 
@@ -816,7 +827,13 @@ function FiscalKpiGrid({
           : { enabled: false },
       },
     };
-  }, [fiscalTableChartOptions, darkMode, fiscalCrosshairFormatValue, fiscalChartContext.mode]);
+  }, [
+    fiscalTableChartOptions,
+    darkMode,
+    fiscalCrosshairFormatValue,
+    fiscalChartContext.mode,
+    chartColors,
+  ]);
 
   useLayoutEffect(() => {
     const card = cardRef.current;

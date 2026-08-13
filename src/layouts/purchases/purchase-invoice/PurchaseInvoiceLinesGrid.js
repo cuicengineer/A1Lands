@@ -43,11 +43,10 @@ const TABLE_COLUMNS = [
 ];
 
 const DATA_GRID_COLUMNS =
-  "minmax(30px, 0.25fr) minmax(160px, 1.8fr) minmax(280px, 2.3fr) minmax(160px, 1.4fr) minmax(64px, 0.55fr) minmax(140px, 1.15fr) 58px minmax(120px, 0.95fr)";
+  "minmax(28px, 0.2fr) minmax(120px, 1.5fr) minmax(180px, 2fr) minmax(120px, 1.2fr) minmax(56px, 0.5fr) minmax(100px, 1fr) 52px minmax(100px, 0.9fr)";
 
-const GRID_COLUMNS = `${DATA_GRID_COLUMNS} 96px`;
+const GRID_COLUMNS = `${DATA_GRID_COLUMNS} 88px`;
 const GRID_COLUMNS_READONLY = DATA_GRID_COLUMNS;
-const GRID_MIN_WIDTH = 1180;
 
 function normalizeAccHeadKey(value) {
   return String(value || "")
@@ -499,7 +498,6 @@ export default function PurchaseInvoiceLinesGrid({
     display: "grid",
     gridTemplateColumns: readOnly ? GRID_COLUMNS_READONLY : GRID_COLUMNS,
     width: "100%",
-    minWidth: GRID_MIN_WIDTH,
     alignItems: "center",
     columnGap: 0,
   };
@@ -581,8 +579,15 @@ export default function PurchaseInvoiceLinesGrid({
           overflow: "hidden",
         }}
       >
-        <MDBox sx={{ maxHeight: 360, overflowX: "auto", overflowY: "auto", minWidth: 0 }}>
-          <MDBox sx={{ width: "100%", minWidth: GRID_MIN_WIDTH }}>
+        <MDBox
+          sx={{
+            maxHeight: "calc(88vh - 280px)",
+            overflowX: "hidden",
+            overflowY: "auto",
+            minWidth: 0,
+          }}
+        >
+          <MDBox sx={{ width: "100%" }}>
             <MDBox sx={gridRowSx}>
               {TABLE_COLUMNS.map((col) => (
                 <MDBox

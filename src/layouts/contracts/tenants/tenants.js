@@ -27,7 +27,6 @@ import api, {
   canEditCurrentMenu,
   isSuperuserUser,
 } from "services/api.service";
-import contractApi from "services/api.contract.service";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import EnterpriseWorkspace from "examples/LayoutContainers/EnterpriseWorkspace";
@@ -166,25 +165,9 @@ function normalizeTenantNoForSave(value) {
   return digits ? `T${digits.padStart(4, "0")}` : "";
 }
 
-function isTruthyRecordFlag(value) {
-  return (
-    value === true ||
-    value === 1 ||
-    value === "1" ||
-    String(value || "")
-      .trim()
-      .toLowerCase() === "true"
-  );
-}
-
-function isActiveNotDeletedContract(contract) {
-  const status = contract?.status ?? contract?.Status;
-  const isDeleted = contract?.isDeleted ?? contract?.IsDeleted;
-  const normalizedStatus = String(status || "")
-    .trim()
-    .toLowerCase();
-  const isActive = isTruthyRecordFlag(status) || normalizedStatus === "active";
-  return isActive && !isTruthyRecordFlag(isDeleted);
+function toCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) ? count : 0;
 }
 
 function findTenantsMainHorizontalScrollEl(root) {
@@ -1483,69 +1466,24 @@ export default function Tenants() {
   const fetchTenants = async () => {
     setLoading(true);
     try {
-      const [tenantResponse, contractResponse, invoiceResponse] = await Promise.all([
-        api.list("tenant"),
-        contractApi.getAllRecords(),
-        contractApi.getAllInvoiceScheduleRecords({ isFinalized: true }),
-      ]);
-
+      // Contract and finalized-invoice totals come back with the tenant row, so the grid no
+      // longer pulls the whole contract catalog and invoice schedule just to count them.
+      const tenantResponse = await api.list("tenant");
       const tenantRows = Array.isArray(tenantResponse) ? tenantResponse : [];
-      const contractRows = Array.isArray(contractResponse?.data)
-        ? contractResponse.data
-        : Array.isArray(contractResponse)
-        ? contractResponse
-        : [];
-      const invoiceRows = Array.isArray(invoiceResponse?.data)
-        ? invoiceResponse.data
-        : Array.isArray(invoiceResponse)
-        ? invoiceResponse
-        : [];
-
-      const contractTenantByNo = new Map();
-      const contractCountsByTenant = new Map();
-      const activeContractCountsByTenant = new Map();
-      contractRows.forEach((contract) => {
-        const contractNo = String(contract?.contractNo ?? contract?.ContractNo ?? "").trim();
-        const tenantNo = String(contract?.tenantNo ?? contract?.TenantNo ?? "").trim();
-        if (contractNo && tenantNo) contractTenantByNo.set(contractNo, tenantNo);
-        if (tenantNo) {
-          contractCountsByTenant.set(tenantNo, (contractCountsByTenant.get(tenantNo) || 0) + 1);
-          if (isActiveNotDeletedContract(contract)) {
-            activeContractCountsByTenant.set(
-              tenantNo,
-              (activeContractCountsByTenant.get(tenantNo) || 0) + 1
-            );
-          }
-        }
-      });
-
-      const invoiceSetsByTenant = new Map();
-      invoiceRows.forEach((invoice) => {
-        const contractNo = String(invoice?.contractNo ?? invoice?.ContractNo ?? "").trim();
-        const invoiceNo = String(invoice?.invoiceNo ?? invoice?.InvoiceNo ?? "").trim();
-        const tenantNoDirect = String(invoice?.tenantNo ?? invoice?.TenantNo ?? "").trim();
-        const tenantNo = tenantNoDirect || contractTenantByNo.get(contractNo) || "";
-        if (!tenantNo || !invoiceNo) return;
-        const key = contractNo ? `${contractNo}|${invoiceNo}` : invoiceNo;
-        if (!invoiceSetsByTenant.has(tenantNo)) invoiceSetsByTenant.set(tenantNo, new Set());
-        invoiceSetsByTenant.get(tenantNo).add(key);
-      });
 
       const enrichedTenantRows = tenantRows.map((tenant) => {
-        const tenantNo = String(tenant?.tenantNo ?? tenant?.TenantNo ?? "").trim();
-        const totalInvoices = invoiceSetsByTenant.get(tenantNo)?.size ?? 0;
-        const fallbackContractCount = contractCountsByTenant.get(tenantNo) || 0;
-        const activeContractCount = activeContractCountsByTenant.get(tenantNo) || 0;
-        const currentTotalContracts = Number(tenant?.totalContracts ?? tenant?.TotalContracts);
+        const totalInvoices = toCount(tenant?.totalInvoices ?? tenant?.TotalInvoices);
+        const totalContracts = toCount(tenant?.totalContracts ?? tenant?.TotalContracts);
+        const activeContractCount = toCount(
+          tenant?.activeContractCount ?? tenant?.ActiveContractCount
+        );
         return {
           ...tenant,
           totalInvoices,
           TotalInvoices: totalInvoices,
           activeContractCount,
           ActiveContractCount: activeContractCount,
-          totalContracts: Number.isFinite(currentTotalContracts)
-            ? currentTotalContracts
-            : fallbackContractCount,
+          totalContracts,
         };
       });
 
@@ -2053,9 +1991,9 @@ export default function Tenants() {
               setPageNumber(newPage + 1);
             }}
             onEntriesPerPageChange={(value) => {
+              // Paging is client-side over rows already in state; no refetch needed.
               setPageSize(value);
               setPageNumber(1);
-              fetchTenants();
             }}
             showTotalEntries={true}
             noEndBorder

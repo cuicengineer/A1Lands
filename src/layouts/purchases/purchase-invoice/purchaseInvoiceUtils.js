@@ -1,5 +1,6 @@
 import incomeStatementApi from "services/api.incomestatement.service";
 import chartOfAccountsApi, { COA_SECTION_TYPE } from "services/api.chartofaccounts.service";
+import supplierApi from "services/api.supplier.service";
 import { productServiceApi } from "services/api.product.service";
 import {
   formatCoaLabel,
@@ -9,6 +10,12 @@ import {
   formatProductUomLabel,
 } from "layouts/products/shared/productUtils";
 import { formatAmount } from "layouts/accounts/receipts/receiptUtils";
+import {
+  getPartyCoaDropdownLabel,
+  isSupplierPayableCoaOption,
+  mergePartyCoaOption,
+  normalizePartyCoaOption,
+} from "utils/partyCoaUtils";
 
 export { formatAmount };
 
@@ -101,6 +108,7 @@ export function buildPurchaseInvoiceFormState(overrides = {}) {
   return {
     date: today,
     piNo: "",
+    controlAccountCoaId: "",
     description: "",
     lines: [],
     ...overrides,
@@ -411,11 +419,94 @@ export function findPurchaseInvoiceProductByAccHead(options, accHead, preferredI
   return matches[0];
 }
 
-export async function loadPurchaseInvoiceFormCatalogs() {
-  const [servicesResponse, uomRows, accHeadOptions] = await Promise.all([
+function buildSuppliersByPayableCoaId(suppliers) {
+  const map = new Map();
+  (suppliers || []).forEach((row) => {
+    const coaId = row?.coaId ?? row?.CoaId;
+    if (coaId == null || coaId === "") return;
+    const key = Number(coaId);
+    if (!Number.isFinite(key)) return;
+    const code = pickField(row, "code", "Code", "supplierCode", "SupplierCode");
+    const name = pickField(row, "name", "Name");
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push({ code, name });
+  });
+  return map;
+}
+
+function formatPurchaseInvoiceSupplierDropdownLabel(coaOption, suppliersForCoa = []) {
+  const controlAccountLabel = getPartyCoaDropdownLabel(coaOption);
+  const controlPart = controlAccountLabel ? `Control Account: ${controlAccountLabel}` : "";
+  const supplier = suppliersForCoa[0];
+  if (supplier) {
+    const supplierPart = [supplier.code, supplier.name].filter(Boolean).join(" - ");
+    if (supplierPart && controlPart) return `${supplierPart} — ${controlPart}`;
+    return supplierPart || controlPart;
+  }
+  return controlPart || controlAccountLabel;
+}
+
+function formatPurchaseInvoiceSupplierDisplayValue(coaOption, suppliersForCoa = []) {
+  const supplier = suppliersForCoa[0];
+  if (supplier) {
+    return [supplier.code, supplier.name].filter(Boolean).join(" - ");
+  }
+  return getPartyCoaDropdownLabel(coaOption);
+}
+
+export async function fetchPurchaseInvoiceControlAccountOptions(savedCoaId = null) {
+  const [coaResponse, supplierResponse] = await Promise.all([
+    chartOfAccountsApi.getAll(COA_SECTION_TYPE).catch(() => []),
+    supplierApi.listSuppliers().catch(() => []),
+  ]);
+  const rows = chartOfAccountsApi.unwrapList(coaResponse) || [];
+  const suppliers = supplierApi.unwrapList(supplierResponse) || [];
+  const suppliersByCoaId = buildSuppliersByPayableCoaId(suppliers);
+  let options = rows
+    .map(normalizePartyCoaOption)
+    .filter((row) => row.id != null && isSupplierPayableCoaOption(row));
+
+  const coaId = savedCoaId === "" || savedCoaId == null ? null : Number(savedCoaId);
+  if (Number.isFinite(coaId) && !options.some((opt) => Number(opt.id) === coaId)) {
+    const savedRow = rows.find((row) => Number(row?.id ?? row?.Id) === coaId);
+    if (savedRow) {
+      const savedOption = normalizePartyCoaOption(savedRow);
+      if (savedOption.id != null) {
+        options = mergePartyCoaOption(options, savedOption);
+      }
+    }
+  }
+
+  return options
+    .map((row) => {
+      const linkedSuppliers = suppliersByCoaId.get(Number(row.id)) || [];
+      const label = formatPurchaseInvoiceSupplierDropdownLabel(row, linkedSuppliers);
+      const displayValue = formatPurchaseInvoiceSupplierDisplayValue(row, linkedSuppliers);
+      const searchLabel = [
+        ...linkedSuppliers.flatMap((supplier) => [supplier.code, supplier.name]),
+        getPartyCoaDropdownLabel(row),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return {
+        id: row.id,
+        label,
+        displayValue,
+        searchLabel: searchLabel || label,
+      };
+    })
+    .filter((row) => row.label)
+    .sort((a, b) =>
+      String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" })
+    );
+}
+
+export async function loadPurchaseInvoiceFormCatalogs(savedControlAccountCoaId = null) {
+  const [servicesResponse, uomRows, accHeadOptions, controlAccountOptions] = await Promise.all([
     productServiceApi.getAll(1, 10000).catch(() => []),
     fetchProductUomOptions().catch(() => []),
     fetchPurchaseInvoiceAccHeadOptions(),
+    fetchPurchaseInvoiceControlAccountOptions(savedControlAccountCoaId),
   ]);
   const uomLookup = buildProductUomLookup(Array.isArray(uomRows) ? uomRows : []);
   return {
@@ -424,6 +515,7 @@ export async function loadPurchaseInvoiceFormCatalogs() {
       uomLookup
     ),
     accHeadOptions,
+    controlAccountOptions,
   };
 }
 

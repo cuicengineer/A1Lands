@@ -37,8 +37,10 @@ function getAll(pageNumber = 1, pageSize = 1000) {
 
 /** Load the full contracts catalog in one round trip when possible. */
 async function getAllRecords() {
+  // Probe names are tried in order and a miss costs a full 404 round trip, so only list
+  // routes that exist: the controller is ContractsController (there is no /api/contract).
   return fetchAllPaginatedRecords(getAll, {
-    listEntities: ["contract", "contracts", "Contracts"],
+    listEntities: ["contracts"],
   });
 }
 
@@ -300,12 +302,11 @@ function getShareDistributionByAsOfDate(asOfDateYyyyMmDd) {
   return requestWithPagination("GET", `/api/Contracts/ShareDistribution?${params}`);
 }
 
-function createShareDistributionWorkbook(contractIds = []) {
-  // Only the caller-supplied contract IDs are assigned — never expand to other grid rows.
+function createShareDistributionWorkbook({ collectionEntryIds = [] } = {}) {
   const payload = {
-    contractIds: [
+    collectionEntryIds: [
       ...new Set(
-        (Array.isArray(contractIds) ? contractIds : [])
+        (Array.isArray(collectionEntryIds) ? collectionEntryIds : [])
           .map((id) => Number(id))
           .filter((id) => Number.isFinite(id) && id > 0)
       ),
